@@ -1,0 +1,40 @@
+```
+# Gradle
+.gradle/
+build/
+.libs/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Dependencies
+node_modules/
+vendor/
+
+# Compiled files
+*.class
+*.jar
+*.war
+*.ear
+*.so
+*.dll
+*.dylib
+
+# Kotlin/Multiplatform
+.kotlin/
+*.kotlin_metadata
+*.kotlin_built
+```
