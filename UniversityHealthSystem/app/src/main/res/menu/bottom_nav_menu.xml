@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 
+    bottom_nav_menu.xml - Bottom navigation menu items
+    Navigation varies based on user role (configured at runtime)
+-->
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    
+    <!-- Student/Staff Module Items -->
+    <item
+        android:id="@+id/nav_health_profile"
+        android:icon="@android:drawable/ic_menu_myplaces"
+        android:title="@string/health_profile_title" />
+    
+    <item
+        android:id="@+id/nav_qr_pass"
+        android:icon="@android:drawable/ic_menu_gallery"
+        android:title="@string/qr_health_pass" />
+    
+    <item
+        android:id="@+id/nav_appointments"
+        android:icon="@android:drawable/ic_menu_my_calendar"
+        android:title="@string/appointment_schedule" />
+    
+    <item
+        android:id="@+id/nav_sos"
+        android:icon="@android:drawable/ic_dialog_alert"
+        android:title="@string/sos_button" />
+    
+    <item
+        android:id="@+id/nav_documents"
+        android:icon="@android:drawable/ic_menu_save"
+        android:title="@string/prescriptions" />
+    
+    <!-- Clinic Module Items (for nurses/doctors) -->
+    <item
+        android:id="@+id/nav_emr"
+        android:icon="@android:drawable/ic_menu_agenda"
+        android:title="@string/emr_title" />
+    
+    <item
+        android:id="@+id/nav_queue"
+        android:icon="@android:drawable/ic_menu_sort_by_size"
+        android:title="@string/queue_dashboard" />
+    
+    <item
+        android:id="@+id/nav_inventory"
+        android:icon="@android:drawable/ic_menu_manage"
+        android:title="@string/medicine_inventory" />
+    
+    <item
+        android:id="@+id/nav_analytics"
+        android:icon="@android:drawable/ic_menu_stats"
+        android:title="@string/health_analytics" />
+    
+    <!-- Admin Module Items -->
+    <item
+        android:id="@+id/nav_users"
+        android:icon="@android:drawable/ic_menu_search"
+        android:title="@string/user_management" />
+    
+    <item
+        android:id="@+id/nav_rbac"
+        android:icon="@android:drawable/ic_menu_add"
+        android:title="@string/role_access_control" />
+    
+    <item
+        android:id="@+id/nav_privacy"
+        android:icon="@android:drawable/ic_lock_lock"
+        android:title="@string/data_privacy" />
+    
+    <item
+        android:id="@+id/nav_settings"
+        android:icon="@android:drawable/ic_menu_preferences"
+        android:title="@string/system_settings" />
+    
+</menu>

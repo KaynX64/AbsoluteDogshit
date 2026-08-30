@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 
+    colors.xml - Material You (Material Design 3) Color Palette
+    Uses dynamic color scheme that adapts to user's wallpaper on Android 12+
+    Provides fallback colors for older Android versions
+-->
+<resources>
+    <!-- ==================== PRIMARY COLORS (Brand Colors) ==================== -->
+    <!-- Main brand color for the university health system -->
+    <color name="primary">#1976D2</color>              <!-- Blue -->
+    <color name="primary_variant">#1565C0</color>       <!-- Darker Blue -->
+    <color name="on_primary">#FFFFFF</color>            <!-- White text on primary -->
+    
+    <!-- Secondary accent color -->
+    <color name="secondary">#26A69A</color>             <!-- Teal -->
+    <color name="secondary_variant">#00897B</color>     <!-- Darker Teal -->
+    <color name="on_secondary">#FFFFFF</color>          <!-- White text on secondary -->
+    
+    <!-- ==================== MATERIAL YOU DYNAMIC COLORS ==================== -->
+    <!-- These colors are overridden on Android 12+ with dynamic colors from wallpaper -->
+    <!-- Default fallback values below -->
+    
+    <!-- Primary Container - Light background for primary elements -->
+    <color name="primary_container">#E3F2FD</color>     <!-- Light Blue -->
+    <color name="on_primary_container">#0D47A1</color>  <!-- Dark Blue text -->
+    
+    <!-- Secondary Container - Light background for secondary elements -->
+    <color name="secondary_container">#E0F2F1</color>   <!-- Light Teal -->
+    <color name="on_secondary_container">#004D40</color><!-- Dark Teal text -->
+    
+    <!-- Tertiary - Additional accent color -->
+    <color name="tertiary">#FFA726</color>              <!-- Orange -->
+    <color name="tertiary_container">#FFF3E0</color>    <!-- Light Orange -->
+    <color name="on_tertiary">#FFFFFF</color>
+    <color name="on_tertiary_container">#E65100</color>
+    
+    <!-- ==================== ERROR COLORS ==================== -->
+    <!-- Used for error states, alerts, and destructive actions -->
+    <color name="error">#B00020</color>                 <!-- Red -->
+    <color name="error_variant">#8E001A</color>
+    <color name="on_error">#FFFFFF</color>
+    <color name="error_container">#FFDAD6</color>       <!-- Light Red -->
+    <color name="on_error_container">#410002</color>
+    
+    <!-- ==================== BACKGROUND COLORS ==================== -->
+    <!-- Main app backgrounds -->
+    <color name="background">#FAFAFA</color>            <!-- Very Light Gray -->
+    <color name="on_background">#1C1B1F</color>         <!-- Dark Gray text -->
+    
+    <!-- Surface - Cards, dialogs, sheets -->
+    <color name="surface">#FFFFFF</color>               <!-- White -->
+    <color name="on_surface">#1C1B1F</color>            <!-- Dark Gray text -->
+    <color name="surface_variant">#F5F5F5</color>       <!-- Light Gray -->
+    
+    <!-- ==================== OUTLINE & BORDERS ==================== -->
+    <color name="outline">#79747E</color>               <!-- Medium Gray -->
+    <color name="outline_variant">#CAC4D0</color>       <!-- Light Gray -->
+    
+    <!-- ==================== SHADOWS & ELEVATION ==================== -->
+    <color name="shadow">#000000</color>                <!-- Black for shadows -->
+    <color name="scrim">#000000</color>                 <!-- Black for overlays -->
+    
+    <!-- ==================== INVERSE COLORS (Dark Mode) ==================== -->
+    <!-- Used when dark theme is enabled -->
+    <color name="inverse_on_surface">#F4F4F5</color>
+    <color name="inverse_surface">#313033</color>
+    <color name="inverse_primary">#1976D2</color>
+    
+    <!-- ==================== SEMANTIC COLORS ==================== -->
+    <!-- Colors with specific meanings -->
+    <color name="success">#4CAF50</color>               <!-- Green for success states -->
+    <color name="warning">#FF9800</color>               <!-- Orange for warnings -->
+    <color name="info">#2196F3</color>                  <!-- Blue for info -->
+    
+    <!-- ==================== EMERGENCY SOS COLORS ==================== -->
+    <!-- High visibility colors for emergency features -->
+    <color name="sos_red">#D32F2F</color>               <!-- Bright Red -->
+    <color name="sos_red_dark">#B71C1C</color>
+    <color name="sos_yellow">#FFEB3B</color>            <!-- Warning Yellow -->
+    
+    <!-- ==================== TEXT COLORS ==================== -->
+    <color name="text_primary">#1C1B1F</color>          <!-- Primary text -->
+    <color name="text_secondary">#6B6872</color>        <!-- Secondary/disabled text -->
+    <color name="text_hint">#9E9BA3</color>             <!-- Hint text -->
+    <color name="text_link">#1976D2</color>             <!-- Link color -->
+    
+    <!-- ==================== DIVIDER COLORS ==================== -->
+    <color name="divider">#E0E0E0</color>               <!-- Light gray for dividers -->
+    
+    <!-- ==================== STATUS BAR ==================== -->
+    <color name="status_bar">@android:color/transparent</color>
+    <color name="navigation_bar">@android:color/transparent</color>
+</resources>

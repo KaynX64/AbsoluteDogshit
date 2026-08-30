@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 
+    backup_rules.xml - Backup configuration for Android Auto Backup
+    Defines which data should be backed up to Google Drive
+    COMPLIANCE: Health data should NOT be backed up per Data Privacy Act
+-->
+<full-backup-content>
+    <!-- Exclude sensitive health data from backup -->
+    <exclude domain="database" path="university_health_system.db"/>
+    <exclude domain="sharedpref" path="health_data_prefs.xml"/>
+    <exclude domain="file" path="medical_records/"/>
+    <exclude domain="file" path="prescriptions/"/>
+    
+    <!-- Include only non-sensitive app settings -->
+    <include domain="sharedpref" path="app_settings.xml"/>
+    <include domain="file" path="cache/"/>
+</full-backup-content>

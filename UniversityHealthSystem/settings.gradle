@@ -1,0 +1,22 @@
+// Root settings file for the University Health System project
+// This defines the project structure and includes all modules
+
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+// Include the main application module
+rootProject.name = "UniversityHealthSystem"
+include ':app'

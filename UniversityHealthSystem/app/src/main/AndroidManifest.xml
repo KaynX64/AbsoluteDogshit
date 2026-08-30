@@ -1,0 +1,174 @@
+// AndroidManifest.xml - Main configuration file for the University Health System Android application
+// This file declares all components (activities, services, receivers), permissions, and app metadata
+
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- ==================== PERMISSIONS ==================== -->
+    
+    <!-- Camera permission: Required for QR code scanning and generation features -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    
+    <!-- Location permissions: Required for SOS Panic Button to send user location during emergencies -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    
+    <!-- Internet permission: Required for API communication, syncing health records, and telemedicine -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    
+    <!-- Storage permissions: Required for downloading prescriptions and medical clearances -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"
+        tools:ignore="ScopedStorage" />
+    
+    <!-- Biometric permission: Required for secure authentication to access sensitive health data -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    
+    <!-- Vibration permission: Required for haptic feedback on SOS button and notifications -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    
+    <!-- Foreground service permission: Required for background location tracking during emergencies -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    
+    <!-- Notification permission for Android 13+ -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- ==================== APPLICATION CONFIGURATION ==================== -->
+    
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.UniversityHealthSystem"
+        android:usesCleartextTraffic="false"
+        tools:targetApi="34">
+
+        <!-- ==================== ACTIVITIES ==================== -->
+        
+        <!-- MainActivity: Main entry point of the application -->
+        <!-- Handles navigation between different modules (Student, Staff, Clinic, Admin) -->
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.UniversityHealthSystem"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- StudentModuleActivity: Hosts all student-facing features -->
+        <!-- Features: Digital Health Profile, QR Code Health Pass, Consultation Scheduler, SOS Panic Button, Prescription Viewer -->
+        <activity
+            android:name=".ui.student.StudentModuleActivity"
+            android:exported="false"
+            android:theme="@style/Theme.UniversityHealthSystem"
+            android:parentActivityName=".ui.MainActivity" />
+
+        <!-- StaffModuleActivity: Hosts all staff/faculty-facing features -->
+        <!-- Similar to student module but with department-specific features -->
+        <activity
+            android:name=".ui.staff.StaffModuleActivity"
+            android:exported="false"
+            android:theme="@style/Theme.UniversityHealthSystem"
+            android:parentActivityName=".ui.MainActivity" />
+
+        <!-- ClinicModuleActivity: Hosts all clinic staff features (Nurse & Doctor Side) -->
+        <!-- Features: EMR, Live Queue Dashboard, Digital Issuance, Medicine Inventory, Health Analytics -->
+        <activity
+            android:name=".ui.clinic.ClinicModuleActivity"
+            android:exported="false"
+            android:theme="@style/Theme.UniversityHealthSystem"
+            android:parentActivityName=".ui.MainActivity" />
+
+        <!-- AdminModuleActivity: Hosts all admin features -->
+        <!-- Features: Role-Based Access Control, Data Privacy Compliance, User Management -->
+        <activity
+            android:name=".ui.admin.AdminModuleActivity"
+            android:exported="false"
+            android:theme="@style/Theme.UniversityHealthSystem"
+            android:parentActivityName=".ui.MainActivity" />
+
+        <!-- QRCodeScannerActivity: Dedicated activity for scanning QR codes -->
+        <!-- Used for touchless check-ins at the clinic -->
+        <activity
+            android:name=".ui.QRCodeScannerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.UniversityHealthSystem" />
+
+        <!-- LoginActivity: Handles user authentication -->
+        <!-- Supports biometric authentication for secure access -->
+        <activity
+            android:name=".ui.LoginActivity"
+            android:exported="false"
+            android:theme="@style/Theme.UniversityHealthSystem" />
+
+        <!-- ==================== SERVICES ==================== -->
+        
+        <!-- SOSEmergencyService: Background service for handling SOS emergencies -->
+        <!-- Tracks user location and sends alerts to clinic response team -->
+        <service
+            android:name=".util.SOSEmergencyService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+
+        <!-- DataSyncService: Background service for syncing health records with server -->
+        <!-- Ensures data consistency between local storage and cloud backend -->
+        <service
+            android:name=".util.DataSyncService"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!-- ==================== RECEIVERS ==================== -->
+        
+        <!-- EmergencyAlertReceiver: Broadcast receiver for emergency alerts -->
+        <!-- Triggers when SOS button is pressed or emergency is detected -->
+        <receiver
+            android:name=".util.EmergencyAlertReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.healthsys.university.SOS_ALERT" />
+            </intent-filter>
+        </receiver>
+
+        <!-- MedicineExpirationReceiver: Broadcast receiver for medicine expiration alerts -->
+        <!-- Notifies clinic staff about即将 expiring medicines -->
+        <receiver
+            android:name=".util.MedicineExpirationReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.healthsys.university.MEDICINE_EXPIRATION_ALERT" />
+            </intent-filter>
+        </receiver>
+
+        <!-- ==================== PROVIDERS ==================== -->
+        
+        <!-- FileProvider: Securely shares files (prescriptions, clearances) with other apps -->
+        <!-- Required for Android 7.0+ to share files outside the app sandbox -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+    </application>
+
+</manifest>

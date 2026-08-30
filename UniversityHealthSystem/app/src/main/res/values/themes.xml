@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 
+    themes.xml - Application themes using Material Design 3 (Material You)
+    Supports both light and dark themes with dynamic color on Android 12+
+-->
+<resources xmlns:tools="http://schemas.android.com/tools">
+    
+    <!-- ==================== BASE THEME ==================== -->
+    <!-- Main application theme inherited by all activities -->
+    <style name="Theme.UniversityHealthSystem" parent="Theme.Material3.DayNight.NoActionBar">
+        
+        <!-- Primary brand color attributes -->
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorPrimaryVariant">@color/primary_variant</item>
+        <item name="colorOnPrimary">@color/on_primary</item>
+        
+        <!-- Secondary accent color attributes -->
+        <item name="colorSecondary">@color/secondary</item>
+        <item name="colorSecondaryVariant">@color/secondary_variant</item>
+        <item name="colorOnSecondary">@color/on_secondary</item>
+        
+        <!-- Error colors -->
+        <item name="colorError">@color/error</item>
+        <item name="colorOnError">@color/on_error</item>
+        
+        <!-- Background and surface colors -->
+        <item name="android:colorBackground">@color/background</item>
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorOnSurface">@color/on_surface</item>
+        
+        <!-- Status bar color (Android 6.0+) -->
+        <item name="android:statusBarColor">@color/status_bar</item>
+        
+        <!-- Navigation bar color (Android 8.0+) -->
+        <item name="android:navigationBarColor">@color/navigation_bar</item>
+        
+        <!-- Window background -->
+        <item name="android:windowBackground">@color/background</item>
+        
+        <!-- Enable status bar content protection (prevents screenshots in secure areas) -->
+        <item name="android:windowAllowEnterTransitionOverlap">true</item>
+        <item name="android:windowAllowReturnTransitionOverlap">true</item>
+    </style>
+    
+    <!-- ==================== MATERIAL YOU DYNAMIC THEME (Android 12+) ==================== -->
+    <!-- This theme uses dynamic colors from user's wallpaper on Android 12+ -->
+    <style name="Theme.UniversityHealthSystem.Dynamic" parent="Theme.Material3.DynamicColors.DayNight.NoActionBar">
+        <!-- Inherits all dynamic colors from system -->
+        <!-- Override specific colors if needed -->
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorSecondary">@color/secondary</item>
+    </style>
+    
+    <!-- ==================== SPLASH SCREEN THEME ==================== -->
+    <!-- Used for the app launch splash screen -->
+    <style name="Theme.UniversityHealthSystem.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/primary</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="postSplashScreenTheme">@style/Theme.UniversityHealthSystem</item>
+    </style>
+    
+    <!-- ==================== DIALOG THEME ==================== -->
+    <!-- Custom dialog theme for consistent styling -->
+    <style name="Theme.UniversityHealthSystem.Dialog" parent="Theme.Material3.Light.Dialog.Alert">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorPrimaryVariant">@color/primary_variant</item>
+        <item name="android:background">@color/surface</item>
+    </style>
+    
+    <!-- ==================== BOTTOM SHEET THEME ==================== -->
+    <!-- Theme for bottom sheet dialogs -->
+    <style name="Theme.UniversityHealthSystem.BottomSheet" parent="Widget.Material3.BottomSheet.Modal">
+        <item name="backgroundTint">@color/surface</item>
+    </style>
+    
+    <!-- ==================== BUTTON STYLES ==================== -->
+    
+    <!-- Primary filled button -->
+    <style name="Widget.UniversityHealthSystem.Button.Primary" parent="Widget.Material3.Button">
+        <item name="backgroundTint">@color/primary</item>
+        <item name="android:textColor">@color/on_primary</item>
+        <item name="cornerRadius">20dp</item>
+    </style>
+    
+    <!-- Secondary outlined button -->
+    <style name="Widget.UniversityHealthSystem.Button.Outlined" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="strokeColor">@color/primary</item>
+        <item name="android:textColor">@color/primary</item>
+        <item name="cornerRadius">20dp</item>
+    </style>
+    
+    <!-- Text button -->
+    <style name="Widget.UniversityHealthSystem.Button.Text" parent="Widget.Material3.Button.TextButton">
+        <item name="android:textColor">@color/primary</item>
+    </style>
+    
+    <!-- Emergency SOS Button - Special styling for emergency features -->
+    <style name="Widget.UniversityHealthSystem.Button.Emergency" parent="Widget.Material3.Button">
+        <item name="backgroundTint">@color/sos_red</item>
+        <item name="android:textColor">@color/on_primary</item>
+        <item name="cornerRadius">50dp</item>
+        <item name="android:minHeight">120dp</item>
+        <item name="android:minWidth">120dp</item>
+    </style>
+    
+    <!-- ==================== TEXT FIELD STYLES ==================== -->
+    <style name="Widget.UniversityHealthSystem.TextInputLayout" parent="Widget.Material3.TextInputLayout.OutlinedBox">
+        <item name="boxStrokeColor">@color/outline</item>
+        <item name="boxStrokeColorFocused">@color/primary</item>
+        <item name="hintTextColor">@color/text_hint</item>
+    </style>
+    
+    <!-- ==================== CARD STYLES ==================== -->
+    <style name="Widget.UniversityHealthSystem.Card" parent="Widget.Material3.CardView.Filled">
+        <item name="cardBackgroundColor">@color/surface</item>
+        <item name="cardElevation">4dp</item>
+        <item name="cardCornerRadius">12dp</item>
+    </style>
+    
+    <!-- ==================== TOOLBAR STYLE ==================== -->
+    <style name="Widget.UniversityHealthSystem.Toolbar" parent="Widget.Material3.Toolbar">
+        <item name="android:background">@color/primary</item>
+        <item name="titleTextColor">@color/on_primary</item>
+        <item name="subtitleTextColor">@color/on_primary</item>
+        <item name="navigationIconTint">@color/on_primary</item>
+    </style>
+    
+    <!-- ==================== PROGRESS BAR STYLE ==================== -->
+    <style name="Widget.UniversityHealthSystem.ProgressBar" parent="Widget.Material3.LinearProgressIndicator">
+        <item name="indicatorColor">@color/primary</item>
+        <item name="trackColor">@color/primary_container</item>
+    </style>
+    
+    <!-- ==================== FLOATING ACTION BUTTON ==================== -->
+    <style name="Widget.UniversityHealthSystem.FAB" parent="Widget.Material3.FloatingActionButton.Primary">
+        <item name="backgroundTint">@color/primary</item>
+        <item name="tint">@color/on_primary</item>
+    </style>
+    
+    <!-- Extended FAB for primary actions -->
+    <style name="Widget.UniversityHealthSystem.FAB.Extended" parent="Widget.Material3.ExtendedFloatingActionButton.Primary">
+        <item name="backgroundTint">@color/primary</item>
+        <item name="iconTint">@color/on_primary</item>
+        <item name="android:textColor">@color/on_primary</item>
+    </style>
+    
+</resources>

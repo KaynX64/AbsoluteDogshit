@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 
+    data_extraction_rules.xml - Data extraction rules for Android 12+
+    Controls what data can be extracted when user transfers to new device
+    COMPLIANCE: Health data excluded per Philippine Data Privacy Act 2012
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- Exclude all sensitive health and medical data -->
+        <exclude domain="database" path="university_health_system.db"/>
+        <exclude domain="sharedpref" path="health_data_prefs.xml"/>
+        <exclude domain="file" path="medical_records/"/>
+        <exclude domain="file" path="prescriptions/"/>
+        <exclude domain="file" path="clearances/"/>
+        
+        <!-- Include only app configuration -->
+        <include domain="sharedpref" path="app_settings.xml"/>
+        <include domain="sharedpref" path="theme_prefs.xml"/>
+    </cloud-backup>
+    
+    <!-- Device-to-device transfer rules -->
+    <device-transfer>
+        <!-- Same exclusions as cloud-backup -->
+        <exclude domain="database" path="university_health_system.db"/>
+        <exclude domain="sharedpref" path="health_data_prefs.xml"/>
+        <exclude domain="file" path="medical_records/"/>
+        <exclude domain="file" path="prescriptions/"/>
+        
+        <include domain="sharedpref" path="app_settings.xml"/>
+    </device-transfer>
+</data-extraction-rules>

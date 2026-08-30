@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 
+    file_paths.xml - FileProvider paths configuration
+    Defines which directories can be shared with other apps
+    Used for sharing prescriptions and medical clearances as PDFs
+-->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- External files directory for exported documents -->
+    <external-path
+        name="external_files"
+        path="." />
+    
+    <!-- Cache directory for temporary files -->
+    <cache-path
+        name="cache"
+        path="." />
+    
+    <!-- Files directory for app-specific storage -->
+    <files-path
+        name="internal_files"
+        path="." />
+    
+    <!-- Specific directories for different document types -->
+    <external-files-path
+        name="prescriptions"
+        path="prescriptions/" />
+    
+    <external-files-path
+        name="clearances"
+        path="clearances/" />
+    
+    <external-files-path
+        name="medical_records"
+        path="medical_records/" />
+    
+    <!-- Downloads directory (Android 10+) -->
+    <external-path
+        name="downloads"
+        path="Download/UniversityHealthSystem/" />
+</paths>

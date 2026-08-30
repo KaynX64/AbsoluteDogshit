@@ -1,0 +1,31 @@
+// Top-level build file for University Health System
+// This file defines dependencies shared across all modules in the project
+
+buildscript {
+    ext.kotlin_version = '1.9.0'
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        // Android Gradle Plugin - Required for building Android applications
+        classpath 'com.android.tools.build:gradle:8.1.0'
+        // Kotlin Gradle Plugin - Enables Kotlin support in the project
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+        // SafeArgs plugin for navigation between fragments with type safety
+        classpath 'androidx.navigation:navigation-safe-args-gradle-plugin:2.7.0'
+    }
+}
+
+plugins {
+    // Apply the Android application and library plugins
+    id 'com.android.application' version '8.1.0' apply false
+    id 'com.android.library' version '8.1.0' apply false
+    // Apply the Kotlin JVM plugin for Kotlin support
+    id 'org.jetbrains.kotlin.android' version '1.9.0' apply false
+}
+
+tasks.register('clean', Delete) {
+    // Clean task to remove the build directory when running ./gradlew clean
+    delete rootProject.buildDir
+}
