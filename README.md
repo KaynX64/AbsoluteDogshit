@@ -1,3 +1,6 @@
+Here is the complete, professional `README.md` file formatted in GitHub-Flavored Markdown. 
+
+All personal names have been redacted, the custom MySQL port (`3307`) is documented, and the feature status matrix clearly indicates active (🟢) versus upcoming (🔴) functionality.
 
 ***
 
