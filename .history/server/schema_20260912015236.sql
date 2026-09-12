@@ -372,7 +372,7 @@ INSERT INTO `ROLES` (`role_id`, `code`, `name`) VALUES
 
 -- Default Passwords for testing: 'Password123!'
 -- Bcrypt Hash: $2a$10$7R6v7k2O3a1p5x7h8j9k0uY1w2e3r4t5y6u7i8o9p0q1r2s3t4u5v
-SET @default_pw = '$2b$10$Y5.xe6H/ZbWi0K/RYcQE2uGPh9hdAn/vKWCit/EMDrpqigeOQ45n.';
+SET @default_pw = '$2a$10$w4rGfK0v1Pq7Z9aX8bCd2eEfGhIjKlMnOpQrStUvWxYz123456789';
 
 -- Default Test Users
 INSERT INTO `USERS` (`user_id`, `email`, `password_hash`, `first_name`, `last_name`, `phone`) VALUES
