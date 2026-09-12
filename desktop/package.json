@@ -1,0 +1,11 @@
+{
+  "name": "valetudo-desktop",
+  "private": true,
+  "version": "1.0.0",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  }
+}
