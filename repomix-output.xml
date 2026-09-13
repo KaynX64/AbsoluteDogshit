@@ -54,6 +54,7 @@ desktop/
       vite.svg
     components/
       .gitkeep
+      EmergencyAlertBanner.tsx
       PrescriptionGenerator.tsx
       QrIntakeScanner.tsx
     pages/
@@ -292,6 +293,7 @@ server/
       rbac.js
     routes/
       appointments.js
+      emergency.js
       healthPass.js
       profile.js
     auth.js
@@ -309,6 +311,372 @@ README.md
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="desktop/src/components/EmergencyAlertBanner.tsx">
+// desktop/src/components/EmergencyAlertBanner.tsx
+import React, { useEffect, useState } from 'react';
+import { io, Socket } from 'socket.io-client';
+
+interface EmergencyAlert {
+  alertId: number;
+  userId: number;
+  patientName: string;
+  phone: string;
+  studentNo: string;
+  course: string;
+  bloodType: string;
+  allergies: string;
+  chronicConditions: string;
+  emergencyContact: string;
+  latitude: number;
+  longitude: number;
+  googleMapsUrl: string;
+  status: string;
+  createdAt: string;
+}
+
+export default function EmergencyAlertBanner() {
+  const [alerts, setAlerts] = useState<EmergencyAlert[]>([]);
+
+  // Synthesize an audible emergency alert beep using Web Audio API (no MP3 asset required)
+  const playEmergencyAlarm = () => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(850, audioCtx.currentTime); // 850 Hz alarm tone
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.6); // 600ms chime
+    } catch (_) {}
+  };
+
+  useEffect(() => {
+    // 1. Fetch initial active alerts from DB
+    const fetchActiveAlerts = async () => {
+      const token = localStorage.getItem('valetudo_token');
+      if (!token) return;
+      try {
+        const res = await fetch('http://localhost:5000/api/emergency/active', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          const mapped: EmergencyAlert[] = data.map((a: any) => ({
+            alertId: a.alert_id,
+            userId: a.user_id,
+            patientName: `${a.first_name} ${a.last_name}`,
+            phone: a.phone,
+            studentNo: 'Verified',
+            course: 'PSU Student',
+            bloodType: a.blood_type || 'Unknown',
+            allergies: a.allergies || 'None',
+            chronicConditions: 'N/A',
+            emergencyContact: 'Check Profile',
+            latitude: Number(a.latitude),
+            longitude: Number(a.longitude),
+            googleMapsUrl: `https://www.google.com/maps?q=${a.latitude},${a.longitude}`,
+            status: a.status,
+            createdAt: a.created_at,
+          }));
+          setAlerts(mapped);
+        }
+      } catch (_) {}
+    };
+
+    fetchActiveAlerts();
+
+    // 2. Connect Socket.IO
+    const socket: Socket = io('http://localhost:5000');
+
+    socket.on('emergency:new_alert', (newAlert: EmergencyAlert) => {
+      playEmergencyAlarm();
+      setAlerts((prev) => [newAlert, ...prev.filter((a) => a.alertId !== newAlert.alertId)]);
+    });
+
+    socket.on('emergency:status_change', ({ alertId, status }: { alertId: number; status: string }) => {
+      setAlerts((prev) =>
+        prev
+          .map((a) => (a.alertId === alertId ? { ...a, status } : a))
+          .filter((a) => a.status !== 'resolved' && a.status !== 'false_alarm')
+      );
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
+
+  const updateStatus = async (alertId: number, status: string) => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      await fetch(`http://localhost:5000/api/emergency/${alertId}/status`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status }),
+      });
+    } catch (err: any) {
+      alert('Failed to update status: ' + err.message);
+    }
+  };
+
+  if (alerts.length === 0) return null;
+
+  return (
+    <div style={{ marginBottom: 24 }}>
+      {alerts.map((alert) => (
+        <div
+          key={alert.alertId}
+          style={{
+            background: '#fee2e2',
+            border: '2px solid #ef4444',
+            borderRadius: 8,
+            padding: 16,
+            marginBottom: 12,
+            boxShadow: '0 4px 6px -1px rgba(239, 68, 68, 0.2)',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 24 }}>🚨</span>
+              <h3 style={{ margin: 0, color: '#b91c1c' }}>
+                ACTIVE SOS ALERT: {alert.patientName} ({alert.studentNo || 'Student'})
+              </h3>
+            </div>
+            <span
+              style={{
+                background: '#ef4444',
+                color: '#fff',
+                padding: '4px 10px',
+                borderRadius: 4,
+                fontSize: 12,
+                fontWeight: 'bold',
+                textTransform: 'uppercase',
+              }}
+            >
+              Status: {alert.status}
+            </span>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(4, 1fr)',
+              gap: 12,
+              marginTop: 12,
+              fontSize: 13,
+              background: '#fff',
+              padding: 12,
+              borderRadius: 6,
+            }}
+          >
+            <div>
+              <b>Contact:</b> {alert.phone || 'N/A'}<br />
+              <b>Blood Type:</b> {alert.bloodType}
+            </div>
+            <div>
+              <b>Allergies:</b> <span style={{ color: 'red' }}>{alert.allergies}</span><br />
+              <b>Conditions:</b> {alert.chronicConditions}
+            </div>
+            <div>
+              <b>Emergency Contact:</b><br />
+              {alert.emergencyContact}
+            </div>
+            <div>
+              <b>GPS Coordinates:</b><br />
+              <code>{alert.latitude.toFixed(6)}, {alert.longitude.toFixed(6)}</code>
+              <div style={{ marginTop: 4 }}>
+                <a
+                  href={alert.googleMapsUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: '#2563eb', fontWeight: 'bold', textDecoration: 'underline' }}
+                >
+                  📍 Open in Google Maps
+                </a>
+              </div>
+            </div>
+          </div>
+
+          {/* Action dispatch buttons */}
+          <div style={{ display: 'flex', gap: 10, marginTop: 12, justifyContent: 'flex-end' }}>
+            {alert.status === 'triggered' && (
+              <button
+                onClick={() => updateStatus(alert.alertId, 'acknowledged')}
+                style={{ background: '#f59e0b', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Acknowledge Alert
+              </button>
+            )}
+            {alert.status !== 'dispatched' && (
+              <button
+                onClick={() => updateStatus(alert.alertId, 'dispatched')}
+                style={{ background: '#0284c7', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Dispatch Response Team
+              </button>
+            )}
+            <button
+              onClick={() => updateStatus(alert.alertId, 'resolved')}
+              style={{ background: '#10b981', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
+            >
+              Mark Resolved
+            </button>
+            <button
+              onClick={() => updateStatus(alert.alertId, 'false_alarm')}
+              style={{ background: '#6b7280', color: '#fff', border: 'none', padding: '6px 10px', borderRadius: 4, cursor: 'pointer' }}
+            >
+              False Alarm
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+</file>
+
+<file path="server/src/routes/emergency.js">
+// server/src/routes/emergency.js
+import express from 'express';
+import { pool } from '../db.js';
+import { authenticateToken } from '../auth.js';
+import { requireRoles } from '../middleware/rbac.js';
+
+export default function emergencyRouter(io) {
+  const router = express.Router();
+
+  // 1. POST /api/emergency/sos - Triggered by Mobile Student
+  router.post('/sos', authenticateToken, async (req, res) => {
+    try {
+      const userId = req.user.user_id;
+      const { latitude, longitude, notes } = req.body;
+
+      if (!latitude || !longitude) {
+        return res.status(400).json({ error: 'Latitude and Longitude are required coordinates.' });
+      }
+
+      // MySQL 8 SRID 4326: POINT(latitude, longitude)
+      const [insertResult] = await pool.query(
+        `INSERT INTO EMERGENCY_ALERTS (user_id, location, status, notes)
+         VALUES (?, ST_SRID(POINT(?, ?), 4326), 'triggered', ?)`,
+        [userId, Number(longitude), Number(latitude), notes || 'Emergency SOS pressed']
+      );
+
+      const alertId = insertResult.insertId;
+
+      // Fetch student info & medical profile for the emergency dispatch payload
+      const [details] = await pool.query(
+        `SELECT u.user_id, u.first_name, u.last_name, u.phone, u.email,
+                sp.student_no, sp.course,
+                hp.blood_type, hp.allergies, hp.chronic_conditions,
+                hp.emergency_contact_name, hp.emergency_contact_phone
+         FROM USERS u
+         LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+         WHERE u.user_id = ?`,
+        [userId]
+      );
+
+      const patientInfo = details[0] || {};
+
+      const alertPayload = {
+        alertId,
+        userId,
+        patientName: `${patientInfo.first_name} ${patientInfo.last_name}`,
+        phone: patientInfo.phone,
+        studentNo: patientInfo.student_no,
+        course: patientInfo.course,
+        bloodType: patientInfo.blood_type || 'Unknown',
+        allergies: patientInfo.allergies || 'None listed',
+        chronicConditions: patientInfo.chronic_conditions || 'None listed',
+        emergencyContact: `${patientInfo.emergency_contact_name || 'N/A'} (${patientInfo.emergency_contact_phone || 'N/A'})`,
+        latitude: Number(latitude),
+        longitude: Number(longitude),
+        googleMapsUrl: `https://www.google.com/maps?q=${latitude},${longitude}`,
+        status: 'triggered',
+        createdAt: new Date().toISOString(),
+      };
+
+      // Broadcast immediately across all connected clinic desktops & responders
+      io.emit('emergency:new_alert', alertPayload);
+
+      res.status(201).json({
+        message: 'Emergency alert dispatched to PSU Clinic and Quick-Response team.',
+        alertId,
+      });
+    } catch (error) {
+      console.error('SOS Trigger Error:', error);
+      res.status(500).json({ error: 'Failed to process SOS alert.' });
+    }
+  });
+
+  // 2. GET /api/emergency/active - List all currently active/unresolved alerts
+  router.get('/active', authenticateToken, async (req, res) => {
+    try {
+      const [alerts] = await pool.query(
+        `SELECT a.alert_id, a.user_id, a.latitude, a.longitude, a.status, a.created_at, a.notes,
+                u.first_name, u.last_name, u.phone,
+                hp.blood_type, hp.allergies
+         FROM EMERGENCY_ALERTS a
+         JOIN USERS u ON a.user_id = u.user_id
+         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+         WHERE a.status IN ('triggered', 'acknowledged', 'dispatched')
+         ORDER BY a.created_at DESC`
+      );
+      res.json(alerts);
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch active alerts.' });
+    }
+  });
+
+  // 3. PATCH /api/emergency/:alertId/status - Update response status (Nurse/Doctor/Responder)
+  router.patch('/:alertId/status', authenticateToken, async (req, res) => {
+    try {
+      const { alertId } = req.params;
+      const { status } = req.body; // 'acknowledged' | 'dispatched' | 'resolved' | 'false_alarm'
+      const responderId = req.user.user_id;
+
+      if (!['acknowledged', 'dispatched', 'resolved', 'false_alarm'].includes(status)) {
+        return res.status(400).json({ error: 'Invalid status update.' });
+      }
+
+      let extraUpdate = '';
+      const params = [status, responderId];
+
+      if (status === 'acknowledged') {
+        extraUpdate = ', acknowledged_at = CURRENT_TIMESTAMP';
+      } else if (status === 'resolved' || status === 'false_alarm') {
+        extraUpdate = `, resolved_at = CURRENT_TIMESTAMP, 
+                       response_time_seconds = TIMESTAMPDIFF(SECOND, created_at, CURRENT_TIMESTAMP)`;
+      }
+
+      params.push(alertId);
+
+      await pool.query(
+        `UPDATE EMERGENCY_ALERTS 
+         SET status = ?, assigned_responder_id = ? ${extraUpdate}
+         WHERE alert_id = ?`,
+        params
+      );
+
+      // Notify everyone about status update
+      io.emit('emergency:status_change', { alertId: Number(alertId), status, responderId });
+
+      res.json({ message: `Alert #${alertId} updated to ${status}.` });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to update alert status.' });
+    }
+  });
+
+  return router;
+}
+</file>
 
 <file path="desktop/electron/preload.cjs">
 // desktop/electron/preload.cjs
@@ -965,10 +1333,30 @@ export default defineConfig([
   "private": true,
   "version": "1.0.0",
   "main": "electron/main.cjs",
-  "scripts": {
-    "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+"scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:127.0.0.1:5173 && electron .\"",
     "build": "tsc && vite build",
     "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "electron": "^33.2.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "wait-on": "^8.0.1"
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "esbuild@0.25.12": true
   }
 }
 </file>
@@ -1218,6 +1606,8 @@ class MainActivity : FlutterActivity()
 
 <file path="mobile/android/app/src/main/AndroidManifest.xml">
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <application
         android:label="mobile"
         android:name="${applicationName}"
@@ -1376,10 +1766,16 @@ subprojects {
 tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
 }
+// Silence obsolete Java 8 option warnings from third-party plugins
+subprojects {
+    tasks.withType<JavaCompile>().configureEach {
+        options.compilerArgs.add("-Xlint:-options")
+    }
+}
 </file>
 
 <file path="mobile/android/gradle.properties">
-org.gradle.jvmargs=-Xmx8G -XX:MaxMetaspaceSize=4G -XX:ReservedCodeCacheSize=512m -XX:+HeapDumpOnOutOfMemoryError
+org.gradle.jvmargs=-Xmx8G -XX:MaxMetaspaceSize=4G -XX:ReservedCodeCacheSize=512m -XX:+HeapDumpOnOutOfMemoryError --enable-native-access=ALL-UNNAMED
 android.useAndroidX=true
 # This newDsl flag was added by the Flutter template
 android.newDsl=false
@@ -1760,13 +2156,15 @@ import UIKit
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
+	<key>UISupportedInterfaceOrientations~ipad</key>	
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Valetudo HealthLink needs location access to dispatch campus responders during an SOS emergency.</string>
 </dict>
 </plist>
 </file>
@@ -2678,7 +3076,7 @@ import 'dart:io';
 class ApiConfig {
   static String get baseUrl {
     // 10.0.2.2 for Android emulator; localhost for iOS/macOS/web
-    return Platform.isAndroid ? 'http://10.0.2.2:5000' : 'http://localhost:5000';
+    return Platform.isAndroid ? 'http://192.168.18.116:5000' : 'http://localhost:5000';
   }
 }
 </file>
@@ -2777,11 +3175,14 @@ class _LoginScreenState extends State<LoginScreen> {
 </file>
 
 <file path="mobile/lib/screens/patient_portal_screen.dart">
+// mobile/lib/screens/patient_portal_screen.dart
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:geolocator/geolocator.dart';
 import '../config/api_config.dart';
 import 'login_screen.dart';
 
@@ -2797,11 +3198,20 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   int _currentIndex = 0;
   final _storage = const FlutterSecureStorage();
 
+  // QR Pass state
   String _qrToken = '';
   bool _loadingQR = false;
 
+  // Profile state
   Map<String, dynamic>? _profileData;
   bool _loadingProfile = false;
+
+  // SOS state
+  bool _isHolding = false;
+  double _holdProgress = 0.0;
+  Timer? _holdTimer;
+  bool _isDispatchingSOS = false;
+  String _sosStatusMessage = '';
 
   @override
   void initState() {
@@ -2840,10 +3250,127 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     setState(() => _loadingProfile = false);
   }
 
+  // --- SOS Logic ---
+  void _startHold() {
+    setState(() {
+      _isHolding = true;
+      _holdProgress = 0.0;
+      _sosStatusMessage = 'Hold button to broadcast SOS...';
+    });
+
+    const step = 50; // ms
+    const totalDuration = 2500; // 2.5 seconds hold
+    _holdTimer = Timer.periodic(const Duration(milliseconds: step), (timer) {
+      setState(() {
+        _holdProgress += step / totalDuration;
+        if (_holdProgress >= 1.0) {
+          _holdTimer?.cancel();
+          _isHolding = false;
+          _triggerEmergencySOS();
+        }
+      });
+    });
+  }
+
+  void _cancelHold() {
+    if (_holdProgress < 1.0) {
+      _holdTimer?.cancel();
+      setState(() {
+        _isHolding = false;
+        _holdProgress = 0.0;
+        _sosStatusMessage = 'SOS cancelled.';
+      });
+    }
+  }
+
+  Future<void> _triggerEmergencySOS() async {
+    setState(() {
+      _isDispatchingSOS = true;
+      _sosStatusMessage = 'Acquiring GPS location...';
+    });
+
+    try {
+      // 1. Verify and request GPS permission
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          setState(() {
+            _isDispatchingSOS = false;
+            _sosStatusMessage = 'Location permission denied. Cannot send GPS SOS.';
+          });
+          return;
+        }
+      }
+
+      // 2. Fetch coordinates (falls back to campus approximate if emulator)
+      Position position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+
+      setState(() => _sosStatusMessage = 'Broadcasting alert to clinic...');
+
+      // 3. Transmit to backend
+      final token = await _storage.read(key: 'jwt_token');
+      final res = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/api/emergency/sos'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'latitude': position.latitude,
+          'longitude': position.longitude,
+          'notes': 'Urgent campus incident triggered via Mobile Panic Button',
+        }),
+      );
+
+      final data = jsonDecode(res.body);
+
+      if (res.statusCode == 201) {
+        setState(() {
+          _sosStatusMessage = 'EMERGENCY DISPATCHED!\nClinic and Quick Response alerted.';
+        });
+        if (mounted) {
+          _showEmergencyDialog();
+        }
+      } else {
+        setState(() => _sosStatusMessage = 'Failed: ${data['error'] ?? 'Server error'}');
+      }
+    } catch (e) {
+      setState(() => _sosStatusMessage = 'SOS Network Error: $e');
+    } finally {
+      setState(() => _isDispatchingSOS = false);
+    }
+  }
+
+  void _showEmergencyDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 60),
+        title: const Text('SOS Alert Active', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+        content: const Text(
+          'Your GPS coordinates and medical profile have been broadcasted to the PSU Infirmary and Response team. Stay where you are if safe.',
+          textAlign: TextAlign.center,
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('I Understand'),
+          )
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final tabs = [
       _buildQRPassTab(),
+      _buildSOSTab(),
       _buildProfileTab(),
     ];
 
@@ -2857,7 +3384,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
               await _storage.delete(key: 'jwt_token');
               if (!context.mounted) return;
               Navigator.pushReplacement(
-                context, 
+                context,
                 MaterialPageRoute(builder: (_) => const LoginScreen()),
               );
             },
@@ -2870,12 +3397,14 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         onDestinationSelected: (idx) => setState(() => _currentIndex = idx),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.qr_code_2), label: 'Health Pass'),
+          NavigationDestination(icon: Icon(Icons.emergency_share, color: Colors.red), label: 'SOS Panic'),
           NavigationDestination(icon: Icon(Icons.person), label: 'Profile'),
         ],
       ),
     );
   }
 
+  // --- TAB 1: QR HEALTH PASS ---
   Widget _buildQRPassTab() {
     return Center(
       child: Padding(
@@ -2908,6 +3437,88 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     );
   }
 
+  // --- TAB 2: SOS PANIC BUTTON ---
+  Widget _buildSOSTab() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text('CAMPUS EMERGENCY', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.red)),
+            const SizedBox(height: 8),
+            const Text(
+              'Press and HOLD for 2.5 seconds to broadcast your live GPS location & medical profile to the clinic response team.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.black54),
+            ),
+            const SizedBox(height: 36),
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  width: 190,
+                  height: 190,
+                  child: CircularProgressIndicator(
+                    value: _holdProgress,
+                    strokeWidth: 8,
+                    valueColor: const AlwaysStoppedAnimation<Color>(Colors.red),
+                    backgroundColor: Colors.red.shade100,
+                  ),
+                ),
+                GestureDetector(
+                  onTapDown: (_) => _startHold(),
+                  onTapUp: (_) => _cancelHold(),
+                  onTapCancel: () => _cancelHold(),
+                  child: Container(
+                    width: 160,
+                    height: 160,
+                    decoration: BoxDecoration(
+                      color: _isHolding ? Colors.red.shade800 : Colors.red,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.red.withValues(alpha: 0.4),
+                          blurRadius: 20,
+                          spreadRadius: 4,
+                        ),
+                      ],
+                    ),
+                    child: Center(
+                      child: _isDispatchingSOS
+                          ? const CircularProgressIndicator(color: Colors.white)
+                          : const Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.warning_rounded, color: Colors.white, size: 50),
+                                SizedBox(height: 4),
+                                Text(
+                                  'HOLD SOS',
+                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                                ),
+                              ],
+                            ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 36),
+            Text(
+              _sosStatusMessage,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: _sosStatusMessage.contains('DISPATCHED') ? Colors.green : Colors.red.shade700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- TAB 3: HEALTH PROFILE ---
   Widget _buildProfileTab() {
     if (_loadingProfile) return const Center(child: CircularProgressIndicator());
     if (_profileData == null) return const Center(child: Text('Unable to load profile.'));
@@ -3469,9 +4080,11 @@ import FlutterMacOS
 import Foundation
 
 import flutter_secure_storage_darwin
+import geolocator_apple
 
 func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
   FlutterSecureStorageDarwinPlugin.register(with: registry.registrar(forPlugin: "FlutterSecureStorageDarwinPlugin"))
+  GeolocatorPlugin.register(with: registry.registrar(forPlugin: "GeolocatorPlugin"))
 }
 </file>
 
@@ -5148,10 +5761,13 @@ add_custom_target(flutter_assemble DEPENDS
 #include "generated_plugin_registrant.h"
 
 #include <flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h>
+#include <geolocator_windows/geolocator_windows.h>
 
 void RegisterPlugins(flutter::PluginRegistry* registry) {
   FlutterSecureStorageWindowsPluginRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("FlutterSecureStorageWindowsPlugin"));
+  GeolocatorWindowsRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("GeolocatorWindows"));
 }
 </file>
 
@@ -5180,6 +5796,7 @@ void RegisterPlugins(flutter::PluginRegistry* registry);
 
 list(APPEND FLUTTER_PLUGIN_LIST
   flutter_secure_storage_windows
+  geolocator_windows
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST
@@ -6780,7 +7397,8 @@ JWT_SECRET=psu_lingayen_super_secret_jwt_key_2026
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
-    "mysql2": "^3.24.4"
+    "mysql2": "^3.24.4",
+    "socket.io": "^4.8.3"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"
@@ -7349,6 +7967,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.1.2"
+  fixnum:
+    dependency: transitive
+    description:
+      name: fixnum
+      sha256: b6dc7065e46c974bc7c5f143080a6764ec7a4be6da1285ececdc37be96de53be
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.1"
   flutter:
     dependency: "direct main"
     description: flutter
@@ -7420,6 +8046,54 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  geolocator:
+    dependency: "direct main"
+    description:
+      name: geolocator
+      sha256: f62bcd90459e63210bbf9c35deb6a51c521f992a78de19a1fe5c11704f9530e2
+      url: "https://pub.dev"
+    source: hosted
+    version: "13.0.4"
+  geolocator_android:
+    dependency: transitive
+    description:
+      name: geolocator_android
+      sha256: fcb1760a50d7500deca37c9a666785c047139b5f9ee15aa5469fae7dbbe3170d
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.6.2"
+  geolocator_apple:
+    dependency: transitive
+    description:
+      name: geolocator_apple
+      sha256: "853803d6bb1713c094e935b4a5ae5f19c0308acf81da13fa9ff84fb4c70c0b73"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.3.14"
+  geolocator_platform_interface:
+    dependency: transitive
+    description:
+      name: geolocator_platform_interface
+      sha256: "94db8255dc183d268765df682580440617ca35877fc82cacb5420ad03b86198d"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.3.0"
+  geolocator_web:
+    dependency: transitive
+    description:
+      name: geolocator_web
+      sha256: "19e485a0f8d6a88abcf9c53cba3a4105e14b7435ed8ac1c108c067b938fe8429"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.1.4"
+  geolocator_windows:
+    dependency: transitive
+    description:
+      name: geolocator_windows
+      sha256: "175435404d20278ffd220de83c2ca293b73db95eafbdc8131fe8609be1421eb6"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.5"
   hooks:
     dependency: transitive
     description:
@@ -7713,6 +8387,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.4.0"
+  uuid:
+    dependency: transitive
+    description:
+      name: uuid
+      sha256: "9b129329f58692f6e6578329498a8fe9fbe98f090beb764ffbb8ee2eadd01dcd"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.6.0"
   vector_math:
     dependency: transitive
     description:
@@ -7806,6 +8488,7 @@ dependencies:
   http: ^1.6.0
   flutter_secure_storage: ^11.1.0
   qr_flutter: ^4.1.0
+  geolocator: ^13.0.1
 
 dev_dependencies:
   flutter_test:
@@ -7864,6 +8547,8 @@ flutter:
 <file path="server/src/index.js">
 // server/src/index.js
 import express from 'express';
+import http from 'http';
+import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { loginUser, authenticateToken } from './auth.js';
@@ -7872,6 +8557,7 @@ import { loginUser, authenticateToken } from './auth.js';
 import profileRoutes from './routes/profile.js';
 import healthPassRoutes from './routes/healthPass.js';
 import appointmentRoutes from './routes/appointments.js';
+import emergencyRouter from './routes/emergency.js'; // <-- Emergency router
 
 dotenv.config();
 
@@ -7879,13 +8565,30 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Public Auth Routes
+// 1. Create HTTP Server & Mount Socket.IO
+const server = http.createServer(app);
+export const io = new Server(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST', 'PATCH'],
+  },
+});
+
+io.on('connection', (socket) => {
+  console.log(`[Socket.IO] Client connected: ${socket.id}`);
+  socket.on('disconnect', () => {
+    console.log(`[Socket.IO] Client disconnected: ${socket.id}`);
+  });
+});
+
+// 2. Public Auth Routes
 app.post('/api/auth/login', loginUser);
 
-// Protected Core Modules
+// 3. Protected Core Modules
 app.use('/api/profile', profileRoutes);
 app.use('/api/health-pass', healthPassRoutes);
 app.use('/api/appointments', appointmentRoutes);
+app.use('/api/emergency', emergencyRouter(io)); // <-- Passes Socket.IO instance to emergency routes
 
 // Auth verification check
 app.get('/api/users/me', authenticateToken, (req, res) => {
@@ -7893,8 +8596,10 @@ app.get('/api/users/me', authenticateToken, (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Valetudo HealthLink API running on port ${PORT}`);
+
+// MUST listen on 'server', NOT 'app'
+server.listen(PORT, () => {
+  console.log(`Valetudo HealthLink API & WebSockets running on port ${PORT}`);
 });
 </file>
 
@@ -8349,9 +9054,11 @@ mobile/build/
 </file>
 
 <file path="desktop/src/App.tsx">
+// desktop/src/App.tsx
 import React, { useState } from 'react';
 import QrIntakeScanner from './components/QrIntakeScanner';
 import PrescriptionGenerator from './components/PrescriptionGenerator';
+import EmergencyAlertBanner from './components/EmergencyAlertBanner'; // <-- Import component
 
 export default function App() {
   const [email, setEmail] = useState('nurse@psu.edu.ph');
@@ -8408,7 +9115,7 @@ export default function App() {
   }
 
   return (
-    <div style={{ padding: 30, fontFamily: 'sans-serif', maxWidth: 1000, margin: '0 auto' }}>
+    <div style={{ padding: 30, fontFamily: 'sans-serif', maxWidth: 1050, margin: '0 auto' }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #eee', paddingBottom: 16 }}>
         <div>
           <h2 style={{ margin: 0, color: '#0f766e' }}>PSU Lingayen Clinic Console</h2>
@@ -8417,7 +9124,12 @@ export default function App() {
         <button onClick={() => setUser(null)} style={{ padding: '6px 14px', cursor: 'pointer' }}>Sign Out</button>
       </header>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginTop: 24 }}>
+      {/* Real-time WebSockets Emergency Alert Monitor */}
+      <div style={{ marginTop: 20 }}>
+        <EmergencyAlertBanner />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginTop: 10 }}>
         <QrIntakeScanner 
           onPatientVerified={(patient, token) => {
             setVerifiedPatient(patient);
