@@ -1,9 +1,8 @@
-// desktop/src/App.tsx
 import React, { useState } from 'react';
 import QrIntakeScanner from './components/QrIntakeScanner';
 import PrescriptionGenerator from './components/PrescriptionGenerator';
-import EmergencyAlertBanner from './components/EmergencyAlertBanner'; // Feature 4
-import InventoryManager from './components/InventoryManager';         // Feature 9
+import EmergencyAlertBanner from './components/EmergencyAlertBanner';
+import InventoryManager from './components/InventoryManager';
 
 export default function App() {
   const [email, setEmail] = useState('nurse@psu.edu.ph');
