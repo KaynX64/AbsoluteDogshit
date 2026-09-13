@@ -1,6 +1,8 @@
+// desktop/src/App.tsx
 import React, { useState } from 'react';
 import QrIntakeScanner from './components/QrIntakeScanner';
 import PrescriptionGenerator from './components/PrescriptionGenerator';
+import EmergencyAlertBanner from './components/EmergencyAlertBanner'; // <-- Import component
 
 export default function App() {
   const [email, setEmail] = useState('nurse@psu.edu.ph');
@@ -57,7 +59,7 @@ export default function App() {
   }
 
   return (
-    <div style={{ padding: 30, fontFamily: 'sans-serif', maxWidth: 1000, margin: '0 auto' }}>
+    <div style={{ padding: 30, fontFamily: 'sans-serif', maxWidth: 1050, margin: '0 auto' }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #eee', paddingBottom: 16 }}>
         <div>
           <h2 style={{ margin: 0, color: '#0f766e' }}>PSU Lingayen Clinic Console</h2>
@@ -66,7 +68,12 @@ export default function App() {
         <button onClick={() => setUser(null)} style={{ padding: '6px 14px', cursor: 'pointer' }}>Sign Out</button>
       </header>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginTop: 24 }}>
+      {/* Real-time WebSockets Emergency Alert Monitor */}
+      <div style={{ marginTop: 20 }}>
+        <EmergencyAlertBanner />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginTop: 10 }}>
         <QrIntakeScanner 
           onPatientVerified={(patient, token) => {
             setVerifiedPatient(patient);
