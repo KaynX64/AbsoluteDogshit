@@ -17,7 +17,7 @@ router.get('/token', authenticateToken, (req, res) => {
     // Payload: userId.timestamp.nonce
     const payload = `${userId}.${timestamp}.${nonce}`;
     const hmac = crypto
-      .createHmac('sha256', process.env.JWT_SECRET)
+      .createHmac('sha256', 'supersecretkeyvaletudo')
       .update(payload)
       .digest('hex');
 
@@ -50,7 +50,7 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
 
     // Verify HMAC
     const expectedSig = crypto
-      .createHmac('sha256', process.env.JWT_SECRET)
+      .createHmac('sha256', 'supersecretkeyvaletudo')
       .update(payload)
       .digest('hex');
 
