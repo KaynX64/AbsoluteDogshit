@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import QrIntakeScanner from './components/QrIntakeScanner';
 import PrescriptionGenerator from './components/PrescriptionGenerator';
+import InventoryManager from './components/InventoryManager';
 
 export default function App() {
   const [email, setEmail] = useState('nurse@psu.edu.ph');
@@ -78,6 +79,9 @@ export default function App() {
           scannedToken={scannedToken} 
         />
       </div>
+
+      {/* Add Inventory Management below the grid */}
+      <InventoryManager />
     </div>
   );
 }

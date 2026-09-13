@@ -8,6 +8,7 @@ import { loginUser, authenticateToken } from './auth.js';
 import profileRoutes from './routes/profile.js';
 import healthPassRoutes from './routes/healthPass.js';
 import appointmentRoutes from './routes/appointments.js';
+import inventoryRoutes from './routes/inventory.js';
 
 dotenv.config();
 
@@ -22,6 +23,7 @@ app.post('/api/auth/login', loginUser);
 app.use('/api/profile', profileRoutes);
 app.use('/api/health-pass', healthPassRoutes);
 app.use('/api/appointments', appointmentRoutes);
+app.use('/api/inventory', inventoryRoutes);
 
 // Auth verification check
 app.get('/api/users/me', authenticateToken, (req, res) => {
