@@ -1,8 +1,8 @@
-// desktop/src/App.tsx
 import React, { useState } from 'react';
 import QrIntakeScanner from './components/QrIntakeScanner';
 import PrescriptionGenerator from './components/PrescriptionGenerator';
-import EmergencyAlertBanner from './components/EmergencyAlertBanner'; // <-- Import component
+import EmergencyAlertBanner from './components/EmergencyAlertBanner';
+import InventoryManager from './components/InventoryManager';
 
 export default function App() {
   const [email, setEmail] = useState('nurse@psu.edu.ph');
@@ -68,11 +68,12 @@ export default function App() {
         <button onClick={() => setUser(null)} style={{ padding: '6px 14px', cursor: 'pointer' }}>Sign Out</button>
       </header>
 
-      {/* Real-time WebSockets Emergency Alert Monitor */}
+      {/* Feature 4: Real-time Emergency SOS Alert Banner */}
       <div style={{ marginTop: 20 }}>
         <EmergencyAlertBanner />
       </div>
 
+      {/* Features 2 & 8: Clinic Triage & Prescription Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginTop: 10 }}>
         <QrIntakeScanner 
           onPatientVerified={(patient, token) => {
@@ -84,6 +85,11 @@ export default function App() {
           verifiedPatient={verifiedPatient} 
           scannedToken={scannedToken} 
         />
+      </div>
+
+      {/* Feature 9: Medicine Inventory & Stock Deduction */}
+      <div style={{ marginTop: 20 }}>
+        <InventoryManager />
       </div>
     </div>
   );

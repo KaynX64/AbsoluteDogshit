@@ -1,8 +1,18 @@
-import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:io' show Platform;
 
 class ApiConfig {
   static String get baseUrl {
-    // 10.0.2.2 for Android emulator; localhost for iOS/macOS/web
-    return Platform.isAndroid ? 'http://192.168.18.116:5000' : 'http://localhost:5000';
+    if (kIsWeb) {
+      return 'http://localhost:5000';
+    }
+
+    try {
+      if (Platform.isAndroid) {
+        return 'http://10.0.2.2:5000'; // Default Android emulator
+      }
+    } catch (_) {}
+
+    return 'http://localhost:5000'; // iOS / macOS / Windows
   }
 }

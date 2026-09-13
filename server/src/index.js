@@ -1,4 +1,3 @@
-// server/src/index.js
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
@@ -10,7 +9,8 @@ import { loginUser, authenticateToken } from './auth.js';
 import profileRoutes from './routes/profile.js';
 import healthPassRoutes from './routes/healthPass.js';
 import appointmentRoutes from './routes/appointments.js';
-import emergencyRouter from './routes/emergency.js'; // <-- Emergency router
+import emergencyRouter from './routes/emergency.js'; // Feature 4
+import inventoryRoutes from './routes/inventory.js'; // Feature 9
 
 dotenv.config();
 
@@ -41,7 +41,8 @@ app.post('/api/auth/login', loginUser);
 app.use('/api/profile', profileRoutes);
 app.use('/api/health-pass', healthPassRoutes);
 app.use('/api/appointments', appointmentRoutes);
-app.use('/api/emergency', emergencyRouter(io)); // <-- Passes Socket.IO instance to emergency routes
+app.use('/api/emergency', emergencyRouter(io)); // Feature 4 SOS WebSockets
+app.use('/api/inventory', inventoryRoutes);       // Feature 9 Inventory
 
 // Auth verification check
 app.get('/api/users/me', authenticateToken, (req, res) => {
@@ -50,7 +51,6 @@ app.get('/api/users/me', authenticateToken, (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
-// MUST listen on 'server', NOT 'app'
 server.listen(PORT, () => {
   console.log(`Valetudo HealthLink API & WebSockets running on port ${PORT}`);
 });

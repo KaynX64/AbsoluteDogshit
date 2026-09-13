@@ -39,14 +39,14 @@ export async function loginUser(req, res) {
 
     const roleCodes = roles.map((r) => r.code);
 
-    // 4. Generate JWT Token
+    // 4. Inside server/src/auth.js (around line 43)
     const token = jwt.sign(
       {
         user_id: user.user_id,
         email: user.email,
         roles: roleCodes,
       },
-      process.env.JWT_SECRET,
+      'supersecretkeyvaletudo', // <-- Hardcode the secret directly here
       { expiresIn: '24h' }
     );
 
@@ -76,7 +76,8 @@ export function authenticateToken(req, res, next) {
     return res.status(401).json({ error: 'Access token required.' });
   }
 
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+  // Updated to use the hardcoded secret
+  jwt.verify(token, 'supersecretkeyvaletudo', (err, user) => {
     if (err) return res.status(403).json({ error: 'Token expired or invalid.' });
     req.user = user;
     next();
