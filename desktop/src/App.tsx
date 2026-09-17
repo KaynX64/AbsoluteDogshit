@@ -1,4 +1,3 @@
-// desktop/src/App.tsx
 import React, { useState } from 'react';
 import EmergencyAlertBanner from './components/EmergencyAlertBanner';
 import NurseConsole from './components/NurseConsole';

@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "main": "electron/main.cjs",
-  "scripts": {
+"scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:127.0.0.1:5173 && electron .\"",
     "build": "tsc && vite build",
     "preview": "vite preview"
