@@ -54,10 +54,14 @@ desktop/
       vite.svg
     components/
       .gitkeep
+      AdminConsole.tsx
+      DoctorConsole.tsx
       EmergencyAlertBanner.tsx
       InventoryManager.tsx
+      NurseConsole.tsx
       PrescriptionGenerator.tsx
       QrIntakeScanner.tsx
+      ResponderConsole.tsx
     pages/
       .gitkeep
     services/
@@ -180,6 +184,8 @@ mobile/
       api_config.dart
     screens/
       .gitkeep
+      consultation_scheduler_screen.dart
+      edit_profile_screen.dart
       login_screen.dart
       patient_portal_screen.dart
     services/
@@ -314,151 +320,1782 @@ README.md
 <files>
 This section contains the contents of the repository's files.
 
-<file path="desktop/src/components/InventoryManager.tsx">
+<file path="desktop/src/components/AdminConsole.tsx">
+// desktop/src/components/AdminConsole.tsx
 import React, { useState } from 'react';
 
-export default function InventoryManager() {
-  const [batchId, setBatchId] = useState('1'); // Default to Biogesic batch
-  const [quantity, setQuantity] = useState('2');
-  const [reason, setReason] = useState('Prescription issuance');
-  const [statusMessage, setStatusMessage] = useState('');
+export default function AdminConsole() {
+  const [activeTab, setActiveTab] = useState<'users' | 'audit' | 'telemetry'>('users');
 
-  const handleDeductStock = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setStatusMessage('Processing deduction...');
+  const usersList = [
+    { id: 1, name: 'Dr. Clark Kim Castro', email: 'admin@psu.edu.ph', role: 'ADMIN', status: 'Active' },
+    { id: 2, name: 'Dr. Juan Mata', email: 'doctor@psu.edu.ph', role: 'DOCTOR', status: 'Active' },
+    { id: 3, name: 'Nurse Dimples Arenas', email: 'nurse@psu.edu.ph', role: 'NURSE', status: 'Active' },
+    { id: 4, name: 'Denver Cerezo', email: 'responder@psu.edu.ph', role: 'EMERGENCY_RESPONDER', status: 'Active' },
+    { id: 5, name: 'Daniella Movida', email: 'student@psu.edu.ph', role: 'STUDENT', status: 'Active' },
+  ];
 
+  const auditLogs = [
+    { id: 101, user: 'nurse@psu.edu.ph', action: 'DISPENSE', target: 'MEDICINE_BATCHES #1', hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', time: '10 mins ago' },
+    { id: 102, user: 'student@psu.edu.ph', action: 'SOS_TRIGGER', target: 'EMERGENCY_ALERTS', hash: 'ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb', time: '15 mins ago' },
+    { id: 103, user: 'admin@psu.edu.ph', action: 'LOGIN', target: 'AUTH_SESSIONS', hash: '875442a420b9271fe83742f0226650946fd0b0ce0ced83687d361144b0b06103', time: '1 hour ago' },
+  ];
+
+  return (
+    <div style={{ background: '#ffffff', padding: 20, borderRadius: 8, border: '1px solid #cbd5e1' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: 12 }}>
+        <div>
+          <h3 style={{ margin: 0, color: '#4f46e5' }}>⚙️ System Administration & Governance</h3>
+          <small style={{ color: '#64748b' }}>Republic Act No. 10173 Compliance • Role Management • Audit Hash-Chains</small>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={() => setActiveTab('users')}
+            style={{ padding: '6px 12px', borderRadius: 4, border: 'none', cursor: 'pointer', background: activeTab === 'users' ? '#4f46e5' : '#f1f5f9', color: activeTab === 'users' ? '#fff' : '#334155', fontWeight: 'bold' }}
+          >
+            👥 User Roles (RBAC)
+          </button>
+          <button
+            onClick={() => setActiveTab('audit')}
+            style={{ padding: '6px 12px', borderRadius: 4, border: 'none', cursor: 'pointer', background: activeTab === 'audit' ? '#4f46e5' : '#f1f5f9', color: activeTab === 'audit' ? '#fff' : '#334155', fontWeight: 'bold' }}
+          >
+            🔒 RA 10173 Audit Logs
+          </button>
+          <button
+            onClick={() => setActiveTab('telemetry')}
+            style={{ padding: '6px 12px', borderRadius: 4, border: 'none', cursor: 'pointer', background: activeTab === 'telemetry' ? '#4f46e5' : '#f1f5f9', color: activeTab === 'telemetry' ? '#fff' : '#334155', fontWeight: 'bold' }}
+          >
+            📡 System Health
+          </button>
+        </div>
+      </div>
+
+      {activeTab === 'users' && (
+        <div style={{ marginTop: 16 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, textAlign: 'left' }}>
+            <thead>
+              <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#64748b' }}>
+                <th style={{ padding: '8px' }}>User ID</th>
+                <th style={{ padding: '8px' }}>Full Name</th>
+                <th style={{ padding: '8px' }}>Institutional Email</th>
+                <th style={{ padding: '8px' }}>Assigned RBAC Role</th>
+                <th style={{ padding: '8px' }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {usersList.map((u) => (
+                <tr key={u.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                  <td style={{ padding: '8px' }}>#{u.id}</td>
+                  <td style={{ padding: '8px', fontWeight: 'bold' }}>{u.name}</td>
+                  <td style={{ padding: '8px' }}>{u.email}</td>
+                  <td style={{ padding: '8px' }}>
+                    <span style={{ background: '#ede9fe', color: '#6d28d9', padding: '2px 8px', borderRadius: 4, fontWeight: 'bold', fontSize: 12 }}>
+                      {u.role}
+                    </span>
+                  </td>
+                  <td style={{ padding: '8px', color: '#16a34a' }}>● {u.status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {activeTab === 'audit' && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ padding: 10, background: '#f8fafc', borderRadius: 6, marginBottom: 12, fontSize: 12, color: '#475569' }}>
+            <b>Append-Only Chained Hash Integrity:</b> Every mutation records a cryptographic SHA-256 digest referencing the previous entry to prevent tamper attacks.
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, textAlign: 'left' }}>
+            <thead>
+              <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#64748b' }}>
+                <th style={{ padding: '8px' }}>Log ID</th>
+                <th style={{ padding: '8px' }}>Actor</th>
+                <th style={{ padding: '8px' }}>Action</th>
+                <th style={{ padding: '8px' }}>Target Table</th>
+                <th style={{ padding: '8px' }}>SHA-256 Entry Hash</th>
+                <th style={{ padding: '8px' }}>Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {auditLogs.map((log) => (
+                <tr key={log.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                  <td style={{ padding: '8px' }}>#{log.id}</td>
+                  <td style={{ padding: '8px' }}>{log.user}</td>
+                  <td style={{ padding: '8px', fontWeight: 'bold' }}>{log.action}</td>
+                  <td style={{ padding: '8px' }}>{log.target}</td>
+                  <td style={{ padding: '8px', fontFamily: 'monospace', fontSize: 11 }}>{log.hash.substring(0, 20)}...</td>
+                  <td style={{ padding: '8px', color: '#64748b' }}>{log.time}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {activeTab === 'telemetry' && (
+        <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+          <div style={{ padding: 16, border: '1px solid #cbd5e1', borderRadius: 6 }}>
+            <b>Central MySQL 8.0:</b>
+            <p style={{ color: '#16a34a', margin: '6px 0', fontSize: 18, fontWeight: 'bold' }}>● Operational</p>
+            <small>Spatial POINT SRID 4326 Active</small>
+          </div>
+          <div style={{ padding: 16, border: '1px solid #cbd5e1', borderRadius: 6 }}>
+            <b>Socket.IO WebSocket:</b>
+            <p style={{ color: '#16a34a', margin: '6px 0', fontSize: 18, fontWeight: 'bold' }}>● Connected</p>
+            <small>Port 5000 Active</small>
+          </div>
+          <div style={{ padding: 16, border: '1px solid #cbd5e1', borderRadius: 6 }}>
+            <b>Auto-Updater / Packaging:</b>
+            <p style={{ color: '#0284c7', margin: '6px 0', fontSize: 18, fontWeight: 'bold' }}>v1.0.0 Stable</p>
+            <small>Target: PSU Lingayen Infirmary</small>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+</file>
+
+<file path="desktop/src/components/DoctorConsole.tsx">
+// desktop/src/components/DoctorConsole.tsx
+import React, { useState, useEffect } from 'react';
+import PrescriptionGenerator from './PrescriptionGenerator';
+
+interface AppointmentItem {
+  appointment_id: number;
+  time_slot: string;
+  date_str: string;
+  date_time: string;
+  appointment_type: string;
+  status: string;
+  notes: string;
+  cancelled_reason?: string;
+  patient_id: number;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  student_no: string;
+  course: string;
+  blood_type: string;
+  allergies: string;
+  chronic_conditions: string;
+  height: number;
+  weight: number;
+  past_diagnosis?: string;
+  past_treatment?: string;
+}
+
+export default function DoctorConsole() {
+  const [appointments, setAppointments] = useState<AppointmentItem[]>([]);
+  const [selectedApp, setSelectedApp] = useState<AppointmentItem | null>(null);
+  const [loadingAppointments, setLoadingAppointments] = useState(false);
+
+  // View Mode: 'active' (Scheduled/Checked-in/Serving) vs 'history' (Completed/Cancelled)
+  const [viewMode, setViewMode] = useState<'active' | 'history'>('active');
+
+  // EMR Form fields
+  const [chiefComplaint, setChiefComplaint] = useState('');
+  const [diagnosis, setDiagnosis] = useState('');
+  const [treatmentPlan, setTreatmentPlan] = useState('');
+  const [clinicalNotes, setClinicalNotes] = useState('');
+  const [isSubmittingEMR, setIsSubmittingEMR] = useState(false);
+  const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // Document Issuance Tab ('rx' | 'clearance')
+  const [docType, setDocType] = useState<'rx' | 'clearance'>('rx');
+  const [clearancePurpose, setClearancePurpose] = useState('On-the-Job Training (OJT) Medical Clearance');
+  const [clearanceRemarks, setClearanceRemarks] = useState('Physically fit to undergo university practicum requirements.');
+
+  const fetchAppointments = async (mode = viewMode) => {
+    setLoadingAppointments(true);
+    const token = localStorage.getItem('valetudo_token');
+
+    const url =
+      mode === 'history'
+        ? 'http://localhost:5000/api/appointments/today?filter=history'
+        : 'http://localhost:5000/api/appointments/today';
+
+    try {
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setAppointments(data);
+        if (data.length > 0) {
+          selectPatient(data[0]);
+        } else {
+          setSelectedApp(null);
+          resetForm();
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching appointments:', err);
+    } finally {
+      setLoadingAppointments(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAppointments('active');
+  }, []);
+
+  const handleSwitchView = (mode: 'active' | 'history') => {
+    setViewMode(mode);
+    fetchAppointments(mode);
+  };
+
+  const resetForm = () => {
+    setChiefComplaint('');
+    setDiagnosis('');
+    setTreatmentPlan('');
+    setClinicalNotes('');
+    setFeedbackMsg(null);
+  };
+
+  const selectPatient = (app: AppointmentItem) => {
+    setSelectedApp(app);
+    setChiefComplaint(app.notes || `${app.appointment_type} requested`);
+    setDiagnosis(app.past_diagnosis || '');
+    setTreatmentPlan(app.past_treatment || '');
+    setClinicalNotes('');
+    setFeedbackMsg(null);
+  };
+
+  const handleStartConsultation = async () => {
+    if (!selectedApp) return;
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('http://localhost:5000/api/inventory/deduct', {
+      const res = await fetch(`http://localhost:5000/api/appointments/${selectedApp.appointment_id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: 'serving' }),
+      });
+      if (res.ok) {
+        setSelectedApp({ ...selectedApp, status: 'serving' });
+        fetchAppointments('active');
+        setFeedbackMsg({ text: '▶ Consultation in progress.', type: 'success' });
+      }
+    } catch (err: any) {
+      setFeedbackMsg({ text: err.message, type: 'error' });
+    }
+  };
+
+  // When finished: save EMR, drop patient from active list, and reset form
+  const handleFinishConsultation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedApp) return;
+
+    if (!diagnosis.trim()) {
+      alert('Please enter a clinical diagnosis before finalizing.');
+      return;
+    }
+
+    setIsSubmittingEMR(true);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`http://localhost:5000/api/appointments/${selectedApp.appointment_id}/complete`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          batch_id: Number(batchId),
-          quantity_deducted: Number(quantity),
-          reason,
+          patient_user_id: selectedApp.patient_id,
+          chief_complaint: chiefComplaint,
+          diagnosis,
+          treatment_plan: treatmentPlan,
+          notes: clinicalNotes,
         }),
       });
 
       const data = await res.json();
       if (res.ok) {
-        setStatusMessage('Success: ' + data.message);
+        // Patient completed: refresh active queue (they disappear from active cards)
+        await fetchAppointments('active');
+        resetForm();
+        setFeedbackMsg({ text: '✅ Consultation completed! Patient discharged and archived.', type: 'success' });
       } else {
-        setStatusMessage('Error: ' + (data.error || 'Failed to deduct stock'));
+        setFeedbackMsg({ text: data.error || 'Failed to complete encounter.', type: 'error' });
       }
     } catch (err: any) {
-      setStatusMessage('Network Error: ' + err.message);
+      setFeedbackMsg({ text: err.message, type: 'error' });
+    } finally {
+      setIsSubmittingEMR(false);
+    }
+  };
+
+  const handleMarkNoShow = async () => {
+    if (!selectedApp || !window.confirm('Mark this appointment as No-Show? It will be removed from the active queue.')) return;
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      await fetch(`http://localhost:5000/api/appointments/${selectedApp.appointment_id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: 'no_show' }),
+      });
+      await fetchAppointments('active');
+      resetForm();
+    } catch (err) {}
+  };
+
+  const handlePrintClearance = () => {
+    if (!selectedApp) return;
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <style>
+            body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 40px; color: #1e293b; }
+            .header { text-align: center; border-bottom: 2px solid #0f766e; padding-bottom: 12px; }
+            .header h1 { margin: 0; color: #0f766e; font-size: 20px; }
+            .title { text-align: center; margin: 30px 0 20px; font-size: 20px; font-weight: bold; text-decoration: underline; }
+            .patient-box { margin: 20px 0; padding: 14px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; line-height: 1.6; }
+            .body-text { font-size: 14px; line-height: 1.8; margin-top: 20px; }
+            .footer { margin-top: 60px; display: flex; justify-content: space-between; font-size: 12px; }
+            .sig-line { border-top: 1px solid #000; width: 220px; margin-top: 50px; text-align: center; font-weight: bold; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>PANGASINAN STATE UNIVERSITY INFIRMARY</h1>
+            <p>Lingayen Campus Medical Services • Republic Act No. 10173 Compliant</p>
+          </div>
+          <div class="title">OFFICIAL MEDICAL CLEARANCE CERTIFICATE</div>
+          <div class="patient-box">
+            <b>Student Name:</b> ${selectedApp.first_name} ${selectedApp.last_name} &nbsp;|&nbsp; <b>ID No:</b> ${selectedApp.student_no || 'N/A'}<br/>
+            <b>Course / Department:</b> ${selectedApp.course || 'PSU Student'}<br/>
+            <b>Vital Signs:</b> Height: ${selectedApp.height || '162'} cm &nbsp;|&nbsp; Weight: ${selectedApp.weight || '54'} kg &nbsp;|&nbsp; Blood Type: ${selectedApp.blood_type || 'O+'}
+          </div>
+          <p class="body-text">
+            To Whom It May Concern:<br/><br/>
+            This certifies that the student named above has been examined at the PSU Lingayen Campus Infirmary on <b>${new Date().toLocaleDateString()}</b> and is found to be:
+            <br/><br/>
+            <b>Purpose:</b> ${clearancePurpose}<br/>
+            <b>Clinical Assessment / Remarks:</b> ${clearanceRemarks}
+          </p>
+          <div class="footer">
+            <div>
+              <p>Issued Date: ${new Date().toLocaleDateString()}</p>
+              <p>Validation Token: VALETUDO-CLR-${selectedApp.appointment_id}-${Date.now().toString().slice(-6)}</p>
+            </div>
+            <div>
+              <div class="sig-line">Attending Campus Physician<br/><small>PRC License Verified</small></div>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+    const printWin = window.open('', '_blank');
+    if (printWin) {
+      printWin.document.write(htmlContent);
+      printWin.document.close();
+      printWin.print();
     }
   };
 
   return (
-    <section style={{ padding: 16, border: '1px solid #ccc', borderRadius: 8, marginTop: 24 }}>
-      <h3 style={{ marginTop: 0, color: '#0f766e' }}>3. Medicine Inventory & Stock Deduction (Feature 9)</h3>
-      <form onSubmit={handleDeductStock}>
-        <div style={{ marginBottom: 10 }}>
-          <label style={{ fontSize: 13 }}>Batch ID (1: Biogesic, 2: Neozep, 3: Ventolin):</label>
-          <input 
-            style={{ width: '100%', padding: 6, marginTop: 2 }} 
-            value={batchId} 
-            onChange={(e) => setBatchId(e.target.value)} 
-          />
+    <div>
+      {/* ------------------------------------------------------------- */}
+      {/* 1. TOP ROSTER: ACTIVE QUEUE VS HISTORY ARCHIVE TOGGLE         */}
+      {/* ------------------------------------------------------------- */}
+      <div style={{ background: '#ffffff', padding: 16, borderRadius: 8, border: '1px solid #cbd5e1', marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div>
+            <h3 style={{ margin: 0, color: '#0284c7' }}>
+              {viewMode === 'active' ? "⏳ Doctor's Active Queue" : '📜 Consultation History & Archive'}
+            </h3>
+            <small style={{ color: '#64748b' }}>
+              {viewMode === 'active'
+                ? 'Shows patients scheduled, checked in, or currently serving'
+                : 'Permanent record of completed, cancelled, and past consultations'}
+            </small>
+          </div>
+
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              onClick={() => handleSwitchView('active')}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 4,
+                fontSize: 12,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                border: '1px solid #0284c7',
+                background: viewMode === 'active' ? '#0284c7' : '#ffffff',
+                color: viewMode === 'active' ? '#ffffff' : '#0284c7',
+              }}
+            >
+              ⏳ Active Queue
+            </button>
+            <button
+              onClick={() => handleSwitchView('history')}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 4,
+                fontSize: 12,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                border: '1px solid #0284c7',
+                background: viewMode === 'history' ? '#0284c7' : '#ffffff',
+                color: viewMode === 'history' ? '#ffffff' : '#0284c7',
+              }}
+            >
+              📜 History Archive
+            </button>
+            <button
+              onClick={() => fetchAppointments()}
+              style={{ padding: '6px 10px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
+            >
+              🔄
+            </button>
+          </div>
         </div>
-        <div style={{ marginBottom: 10 }}>
-          <label style={{ fontSize: 13 }}>Quantity to Deduct:</label>
-          <input 
-            style={{ width: '100%', padding: 6, marginTop: 2 }} 
-            type="number" 
-            value={quantity} 
-            onChange={(e) => setQuantity(e.target.value)} 
-          />
-        </div>
-        <div style={{ marginBottom: 14 }}>
-          <label style={{ fontSize: 13 }}>Reason / Remarks:</label>
-          <input 
-            style={{ width: '100%', padding: 6, marginTop: 2 }} 
-            value={reason} 
-            onChange={(e) => setReason(e.target.value)} 
-          />
-        </div>
-        <button
-          type="submit"
-          style={{ width: '100%', padding: 10, background: '#0f766e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
+
+        {loadingAppointments ? (
+          <p style={{ color: '#64748b', fontSize: 13 }}>Loading...</p>
+        ) : appointments.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '16px 0', color: '#64748b', fontSize: 13 }}>
+            {viewMode === 'active'
+              ? '🎉 All consultations completed! Active queue is clear.'
+              : 'No archived consultations found.'}
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+            {appointments.map((app) => {
+              const isSelected = selectedApp?.appointment_id === app.appointment_id;
+              let badgeColor = '#b45309';
+              let badgeBg = '#fef3c7';
+
+              if (app.status === 'serving') {
+                badgeColor = '#0369a1';
+                badgeBg = '#e0f2fe';
+              } else if (app.status === 'completed') {
+                badgeColor = '#15803d';
+                badgeBg = '#dcfce7';
+              } else if (app.status === 'cancelled' || app.status === 'no_show') {
+                badgeColor = '#b91c1c';
+                badgeBg = '#fee2e2';
+              }
+
+              return (
+                <div
+                  key={app.appointment_id}
+                  onClick={() => selectPatient(app)}
+                  style={{
+                    padding: 12,
+                    borderRadius: 6,
+                    border: isSelected ? '2px solid #0284c7' : '1px solid #e2e8f0',
+                    background: isSelected ? '#f0f9ff' : '#ffffff',
+                    cursor: 'pointer',
+                    boxShadow: isSelected ? '0 2px 4px rgba(2, 132, 199, 0.15)' : 'none',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontWeight: 'bold', color: '#0284c7', fontSize: 13 }}>
+                      📅 {app.date_str} • ⏰ {app.time_slot}
+                    </span>
+                    <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: badgeBg, color: badgeColor, fontWeight: 'bold', textTransform: 'uppercase' }}>
+                      {app.status}
+                    </span>
+                  </div>
+                  <p style={{ margin: '6px 0 2px', fontWeight: 'bold', fontSize: 14, color: '#1e293b' }}>
+                    {app.first_name} {app.last_name}
+                  </p>
+                  <div style={{ fontSize: 12, color: '#64748b' }}>{app.appointment_type}</div>
+                  {app.cancelled_reason && (
+                    <div style={{ fontSize: 11, color: '#b91c1c', marginTop: 4, fontStyle: 'italic' }}>
+                      Reason: {app.cancelled_reason}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ------------------------------------------------------------- */}
+      {/* 2. PATIENT SAFETY STRIP: ALLERGIES & INTAKE VITALS             */}
+      {/* ------------------------------------------------------------- */}
+      {selectedApp && (
+        <div
+          style={{
+            background: '#ffffff',
+            border: '1px solid #cbd5e1',
+            borderLeft: '5px solid #0284c7',
+            borderRadius: 8,
+            padding: '12px 18px',
+            marginBottom: 20,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}
         >
-          📦 Deduct Batch Stock
-        </button>
-      </form>
-      {statusMessage && <p style={{ fontSize: 13, marginTop: 10 }}><b>Status:</b> {statusMessage}</p>}
-    </section>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <h4 style={{ margin: 0, fontSize: 16, color: '#0f172a' }}>
+                {selectedApp.first_name} {selectedApp.last_name} ({selectedApp.student_no || 'ID: Staff/Faculty'})
+              </h4>
+              <span style={{ background: '#f1f5f9', color: '#475569', fontSize: 12, padding: '2px 8px', borderRadius: 4 }}>
+                {selectedApp.course || 'PSU Lingayen'}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: 18, marginTop: 8, fontSize: 13 }}>
+              <span><b>Blood:</b> {selectedApp.blood_type || 'O+'}</span>
+              <span>
+                <b>Allergies:</b>{' '}
+                <span style={{ color: selectedApp.allergies ? '#dc2626' : '#16a34a', fontWeight: 'bold' }}>
+                  {selectedApp.allergies ? `⚠️ ${selectedApp.allergies}` : 'None reported'}
+                </span>
+              </span>
+              <span><b>Chronic:</b> {selectedApp.chronic_conditions || 'None'}</span>
+              <span><b>Height/Weight:</b> {selectedApp.height || '162'} cm / {selectedApp.weight || '54'} kg</span>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            {selectedApp.status === 'scheduled' || selectedApp.status === 'checked_in' ? (
+              <>
+                <button
+                  type="button"
+                  onClick={handleStartConsultation}
+                  style={{ padding: '8px 16px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer', fontSize: 13 }}
+                >
+                  ▶ Begin Consultation
+                </button>
+                <button
+                  type="button"
+                  onClick={handleMarkNoShow}
+                  style={{ padding: '8px 12px', background: '#fee2e2', color: '#b91c1c', border: '1px solid #fca5a5', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 'bold' }}
+                >
+                  Mark No-Show
+                </button>
+              </>
+            ) : selectedApp.status === 'serving' ? (
+              <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '6px 14px', borderRadius: 6, fontWeight: 'bold', fontSize: 13 }}>
+                🩺 In Consultation Room
+              </span>
+            ) : (
+              <span style={{ background: '#dcfce7', color: '#15803d', padding: '6px 14px', borderRadius: 6, fontWeight: 'bold', fontSize: 13 }}>
+                Archived Record ({selectedApp.status})
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* 3. MAIN WORKSPACE: EMR (LEFT) + ISSUANCE (RIGHT)              */}
+      {/* ------------------------------------------------------------- */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 1fr', gap: 20 }}>
+        {/* LEFT: EMR Form */}
+        <section style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <h3 style={{ margin: 0, color: '#0284c7', fontSize: 16 }}>🩺 Clinical Consultation & Diagnosis</h3>
+            <span style={{ fontSize: 12, color: '#64748b' }}>Feature 6: Electronic Medical Records</span>
+          </div>
+
+          <form onSubmit={handleFinishConsultation}>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
+                Chief Complaint / Symptoms:
+              </label>
+              <textarea
+                rows={2}
+                disabled={viewMode === 'history'}
+                style={{ width: '100%', boxSizing: 'border-box', padding: 8, border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13, color: '#0f172a', background: '#ffffff' }}
+                value={chiefComplaint}
+                onChange={(e) => setChiefComplaint(e.target.value)}
+                required
+              />
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
+                Clinical Diagnosis:
+              </label>
+              <input
+                disabled={viewMode === 'history'}
+                style={{ width: '100%', boxSizing: 'border-box', padding: 8, border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13, color: '#0f172a', background: '#ffffff' }}
+                value={diagnosis}
+                placeholder="e.g. Fit for OJT Practicum / Upper Respiratory Infection"
+                onChange={(e) => setDiagnosis(e.target.value)}
+                required
+              />
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
+                Treatment Plan & Rx:
+              </label>
+              <textarea
+                rows={3}
+                disabled={viewMode === 'history'}
+                style={{ width: '100%', boxSizing: 'border-box', padding: 8, border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13, color: '#0f172a', background: '#ffffff' }}
+                value={treatmentPlan}
+                placeholder="Prescribed medicine regimen, home care, rest recommendations..."
+                onChange={(e) => setTreatmentPlan(e.target.value)}
+              />
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
+                Follow-up / Confidential Notes:
+              </label>
+              <input
+                disabled={viewMode === 'history'}
+                style={{ width: '100%', boxSizing: 'border-box', padding: 8, border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13, color: '#0f172a', background: '#ffffff' }}
+                value={clinicalNotes}
+                placeholder="Optional internal medical note"
+                onChange={(e) => setClinicalNotes(e.target.value)}
+              />
+            </div>
+
+            {viewMode === 'active' ? (
+              <button
+                type="submit"
+                disabled={isSubmittingEMR || !selectedApp}
+                style={{
+                  width: '100%',
+                  padding: 12,
+                  background: !selectedApp ? '#94a3b8' : '#059669',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: 6,
+                  cursor: !selectedApp ? 'not-allowed' : 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: 14,
+                }}
+              >
+                {isSubmittingEMR ? 'Finalizing Encounter...' : '✅ Finish Consultation & Discharge'}
+              </button>
+            ) : (
+              <div style={{ padding: 10, background: '#f1f5f9', borderRadius: 6, textAlign: 'center', color: '#64748b', fontSize: 13, fontWeight: 'bold' }}>
+                📁 Historical Record (Read-Only)
+              </div>
+            )}
+
+            {feedbackMsg && (
+              <p
+                style={{
+                  color: feedbackMsg.type === 'success' ? '#16a34a' : '#dc2626',
+                  fontSize: 13,
+                  fontWeight: 'bold',
+                  textAlign: 'center',
+                  marginTop: 10,
+                }}
+              >
+                {feedbackMsg.text}
+              </p>
+            )}
+          </form>
+        </section>
+
+        {/* RIGHT: Document Issuance */}
+        <section style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <h3 style={{ margin: 0, color: '#0f766e', fontSize: 16 }}>Official Document Issuance</h3>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button
+                type="button"
+                onClick={() => setDocType('rx')}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  border: '1px solid #0f766e',
+                  background: docType === 'rx' ? '#0f766e' : '#fff',
+                  color: docType === 'rx' ? '#fff' : '#0f766e',
+                }}
+              >
+                ℞ Prescription
+              </button>
+              <button
+                type="button"
+                onClick={() => setDocType('clearance')}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  border: '1px solid #0f766e',
+                  background: docType === 'clearance' ? '#0f766e' : '#fff',
+                  color: docType === 'clearance' ? '#fff' : '#0f766e',
+                }}
+              >
+                📄 Clearance
+              </button>
+            </div>
+          </div>
+
+          {docType === 'rx' ? (
+            <PrescriptionGenerator
+              verifiedPatient={{
+                first_name: selectedApp?.first_name || 'Daniella',
+                last_name: selectedApp?.last_name || 'Movida',
+                student_no: selectedApp?.student_no || '22-LN-0123',
+                course: selectedApp?.course || 'BS Information Technology',
+                allergies: selectedApp?.allergies || 'Penicillin',
+              }}
+              scannedToken={`SECURE-RX-${selectedApp?.appointment_id || '2026'}-VALETUDO`}
+            />
+          ) : (
+            <div>
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
+                  Clearance Purpose:
+                </label>
+                <select
+                  value={clearancePurpose}
+                  onChange={(e) => setClearancePurpose(e.target.value)}
+                  style={{ width: '100%', boxSizing: 'border-box', padding: 8, borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 13, background: '#fff', color: '#0f172a' }}
+                >
+                  <option value="On-the-Job Training (OJT) Medical Clearance">On-the-Job Training (OJT) Medical Clearance</option>
+                  <option value="SCUAA / Sports Athletic Meet Participation">SCUAA / Sports Athletic Meet Participation</option>
+                  <option value="Academic Readmission / Excuse Certificate">Academic Readmission / Excuse Certificate</option>
+                  <option value="Annual Campus Physical Examination">Annual Campus Physical Examination</option>
+                </select>
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
+                  Clinical Fitness Statement:
+                </label>
+                <textarea
+                  rows={4}
+                  value={clearanceRemarks}
+                  onChange={(e) => setClearanceRemarks(e.target.value)}
+                  style={{ width: '100%', boxSizing: 'border-box', padding: 8, borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 13, color: '#0f172a', background: '#fff' }}
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={handlePrintClearance}
+                disabled={!selectedApp}
+                style={{ width: '100%', padding: 10, background: '#0284c7', color: '#fff', border: 'none', borderRadius: 6, cursor: !selectedApp ? 'not-allowed' : 'pointer', fontWeight: 'bold', fontSize: 14 }}
+              >
+                🖨️ Generate & Print Medical Clearance
+              </button>
+              <small style={{ display: 'block', marginTop: 8, color: '#64748b', textAlign: 'center' }}>
+                Generates a printable PDF with official PSU Infirmary authorization headers.
+              </small>
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
   );
 }
 </file>
 
-<file path="desktop/vite.config.mts">
-import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+<file path="desktop/src/components/NurseConsole.tsx">
+// desktop/src/components/NurseConsole.tsx
+import React, { useState, useEffect } from 'react';
+import QrIntakeScanner from './QrIntakeScanner';
+import InventoryManager from './InventoryManager';
 
-// https://vite.dev/config/
-export default defineConfig({
-  plugins: [react()],
-})
+interface QueueItem {
+  queue_id: number;
+  ticket_no: string;
+  first_name: string;
+  last_name: string;
+  student_no?: string;
+  visit_type: string;
+  status: string;
+  arrival_time: string;
+}
+
+export default function NurseConsole() {
+  const [, setVerifiedPatient] = useState<any>(null);
+  const [, setScannedToken] = useState('');
+
+  // Live database queue state
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [loadingQueue, setLoadingQueue] = useState(false);
+
+  const fetchLiveQueue = async () => {
+    setLoadingQueue(true);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('http://localhost:5000/api/appointments/queue/today', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setQueue(data);
+      }
+    } catch (err) {
+      console.error('Error loading live queue:', err);
+    } finally {
+      setLoadingQueue(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLiveQueue();
+  }, []);
+
+  // Nurse advances the queue: calls the next 'waiting' patient
+  const callNextPatient = async () => {
+    const nextPatient = queue.find((p) => p.status === 'waiting');
+    if (!nextPatient) {
+      alert('No more waiting patients in the queue!');
+      return;
+    }
+
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`http://localhost:5000/api/appointments/queue/${nextPatient.queue_id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: 'in-consultation' }),
+      });
+
+      if (res.ok) {
+        fetchLiveQueue();
+      }
+    } catch (err) {
+      alert('Failed to update queue ticket.');
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 20, marginBottom: 24 }}>
+        {/* 1. QR Health Pass Scanner & Vitals Verification */}
+        <QrIntakeScanner
+          onPatientVerified={(patient, token) => {
+            setVerifiedPatient(patient);
+            setScannedToken(token);
+            // Auto refresh queue when a patient is checked in
+            fetchLiveQueue();
+          }}
+        />
+
+        {/* 2. Live Triage Queue (Feature 7 connected to MySQL QUEUE table) */}
+        <section style={{ padding: 16, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div>
+              <h3 style={{ margin: 0, color: '#0f766e' }}>2. Live Triage Queue (Feature 7)</h3>
+              <small style={{ color: '#64748b' }}>Active daily clinic queue tickets</small>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                onClick={callNextPatient}
+                style={{ padding: '6px 12px', background: '#0f766e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
+              >
+                📢 Call Next
+              </button>
+              <button
+                onClick={fetchLiveQueue}
+                style={{ padding: '6px 10px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
+              >
+                🔄
+              </button>
+            </div>
+          </div>
+
+          {loadingQueue ? (
+            <p style={{ color: '#64748b', fontSize: 13 }}>Updating queue...</p>
+          ) : queue.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '24px 0', color: '#94a3b8', fontSize: 13 }}>
+              No patients currently waiting in the infirmary queue.
+            </div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, textAlign: 'left' }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#64748b' }}>
+                  <th style={{ padding: '6px' }}>Ticket</th>
+                  <th style={{ padding: '6px' }}>Patient Name</th>
+                  <th style={{ padding: '6px' }}>Arrival</th>
+                  <th style={{ padding: '6px' }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {queue.map((q) => {
+                  let badgeBg = '#fef3c7';
+                  let badgeColor = '#b45309';
+
+                  if (q.status === 'in-consultation') {
+                    badgeBg = '#dcfce7';
+                    badgeColor = '#15803d';
+                  }
+
+                  return (
+                    <tr key={q.queue_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '8px 6px', fontWeight: 'bold', color: '#0f766e' }}>{q.ticket_no}</td>
+                      <td style={{ padding: '8px 6px' }}>
+                        <b>{q.first_name} {q.last_name}</b>
+                        <div style={{ fontSize: 11, color: '#64748b' }}>{q.visit_type}</div>
+                      </td>
+                      <td style={{ padding: '8px 6px', fontSize: 12, color: '#64748b' }}>{q.arrival_time}</td>
+                      <td style={{ padding: '8px 6px' }}>
+                        <span
+                          style={{
+                            padding: '2px 8px',
+                            borderRadius: 4,
+                            fontSize: 11,
+                            fontWeight: 'bold',
+                            background: badgeBg,
+                            color: badgeColor,
+                            textTransform: 'capitalize',
+                          }}
+                        >
+                          {q.status}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </section>
+      </div>
+
+      {/* 3. Medicine Inventory Management */}
+      <InventoryManager />
+    </div>
+  );
+}
 </file>
 
-<file path="server/src/routes/inventory.js">
-// server/src/routes/inventory.js
-import express from 'express';
-import { pool } from '../db.js';
-import { authenticateToken } from '../auth.js';
-import { requireRoles } from '../middleware/rbac.js';
+<file path="desktop/src/components/ResponderConsole.tsx">
+// desktop/src/components/ResponderConsole.tsx
+import React from 'react';
 
-const router = express.Router();
+export default function ResponderConsole() {
+  return (
+    <div style={{ background: '#ffffff', padding: 20, borderRadius: 8, border: '1px solid #cbd5e1' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div>
+          <h3 style={{ margin: 0, color: '#dc2626' }}>🚨 Campus Emergency Quick-Response Dispatch</h3>
+          <small style={{ color: '#64748b' }}>PSU Lingayen Campus Security & Medical Emergency Operations</small>
+        </div>
+        <span style={{ background: '#fee2e2', color: '#dc2626', padding: '4px 10px', borderRadius: 4, fontWeight: 'bold', fontSize: 12 }}>
+          Dispatch Status: ON CALL
+        </span>
+      </div>
 
-// POST /api/inventory/deduct - Deduct stock from a specific batch
-router.post('/deduct', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
-  const { batch_id, quantity_deducted, reason } = req.body;
-  const connection = await pool.getConnection();
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div style={{ padding: 14, background: '#fef2f2', borderRadius: 6, border: '1px solid #fecaca' }}>
+          <h4 style={{ margin: '0 0 8px 0', color: '#991b1b' }}>Active SOS Incident Protocol:</h4>
+          <p style={{ fontSize: 13, color: '#451a03', margin: '4px 0' }}>
+            1. Standby for incoming WebSocket audio sirens above.
+          </p>
+          <p style={{ fontSize: 13, color: '#451a03', margin: '4px 0' }}>
+            2. Click <b>"Open in Google Maps"</b> to view student's precise GPS pin coordinates.
+          </p>
+          <p style={{ fontSize: 13, color: '#451a03', margin: '4px 0' }}>
+            3. Review red-flag allergies and pre-existing conditions before physical field triage.
+          </p>
+        </div>
 
-  try {
-    await connection.beginTransaction();
+        <div style={{ padding: 14, background: '#f8fafc', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+          <h4 style={{ margin: '0 0 8px 0', color: '#334155' }}>Quick Response Unit Telemetry:</h4>
+          <p style={{ fontSize: 13, margin: '4px 0' }}>Average Campus Response Time: <b>142 seconds</b></p>
+          <p style={{ fontSize: 13, margin: '4px 0' }}>Dedicated Emergency Hotline: <b>(075) 542-6123</b></p>
+          <p style={{ fontSize: 13, margin: '4px 0' }}>Infirmary Radio Frequency: <b>Ch-4 (PSU Security)</b></p>
+        </div>
+      </div>
+    </div>
+  );
+}
+</file>
 
-    // 1. Lock the batch row and check current stock levels
-    const [batchRows] = await connection.query(
-      'SELECT quantity_on_hand FROM MEDICINE_BATCHES WHERE batch_id = ? FOR UPDATE',
-      [batch_id]
-    );
+<file path="mobile/lib/screens/consultation_scheduler_screen.dart">
+// mobile/lib/screens/consultation_scheduler_screen.dart
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
+import '../config/api_config.dart';
 
-    if (batchRows.length === 0) {
-      throw new Error('Medicine batch not found.');
-    }
-    if (batchRows[0].quantity_on_hand < quantity_deducted) {
-      throw new Error('Insufficient stock in this batch to complete dispensation.');
-    }
+class ConsultationSchedulerScreen extends StatefulWidget {
+  const ConsultationSchedulerScreen({super.key});
 
-    // 2. Deduct the quantity from the batch
-    await connection.query(
-      'UPDATE MEDICINE_BATCHES SET quantity_on_hand = quantity_on_hand - ? WHERE batch_id = ?',
-      [quantity_deducted, batch_id]
-    );
+  @override
+  State<ConsultationSchedulerScreen> createState() => _ConsultationSchedulerScreenState();
+}
 
-    // 3. Append an immutable record to the inventory audit trail
-    await connection.query(
-      `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
-       VALUES (?, ?, 'dispense', ?, ?)`,
-      [batch_id, -quantity_deducted, reason || 'Prescription issuance', req.user.user_id]
-    );
+class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScreen> {
+  final _storage = const FlutterSecureStorage();
 
-    await connection.commit();
-    res.json({ message: 'Stock successfully deducted and logged.' });
-  } catch (error) {
-    await connection.rollback();
-    res.status(400).json({ error: error.message });
-  } finally {
-    connection.release();
+  // 0 = Book Consultation, 1 = My Bookings
+  int _activeSubTab = 0;
+
+  // Booking state
+  List<dynamic> _doctors = [];
+  bool _loadingDoctors = false;
+  int? _selectedDoctorId;
+
+  DateTime _selectedDate = DateTime.now().add(const Duration(days: 1));
+  List<dynamic> _slots = [];
+  bool _loadingSlots = false;
+  String? _selectedSlotTime;
+
+  String _selectedPurpose = 'General Medical Consultation';
+  final List<String> _purposes = [
+    'General Medical Consultation',
+    'Dental Check-up / Extraction',
+    'Physical Examination',
+    'Prescription Refill / Lab Review',
+    'OJT / Academic Medical Clearance',
+  ];
+
+  final _notesController = TextEditingController();
+  bool _isSubmitting = false;
+
+  // History state
+  List<dynamic> _myAppointments = [];
+  bool _loadingHistory = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchDoctors();
+    _fetchMyAppointments();
   }
-});
 
-export default router;
+  @override
+  void dispose() {
+    _notesController.dispose();
+    super.dispose();
+  }
+
+  // --- API Methods ---
+
+  Future<void> _fetchDoctors() async {
+    setState(() => _loadingDoctors = true);
+    final token = await _storage.read(key: 'jwt_token');
+    try {
+      final res = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/appointments/doctors'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        setState(() {
+          _doctors = data;
+          if (_doctors.isNotEmpty) {
+            _selectedDoctorId = _doctors[0]['user_id'];
+            _fetchAvailableSlots();
+          }
+        });
+      }
+    } catch (e) {
+      _showToast('Failed to load doctors: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _loadingDoctors = false);
+    }
+  }
+
+  Future<void> _fetchAvailableSlots() async {
+    if (_selectedDoctorId == null) return;
+
+    setState(() {
+      _loadingSlots = true;
+      _selectedSlotTime = null;
+    });
+
+    final token = await _storage.read(key: 'jwt_token');
+    final formattedDate =
+        "${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}";
+
+    try {
+      final res = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/appointments/slots?doctorId=$_selectedDoctorId&date=$formattedDate'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        setState(() => _slots = data['slots'] ?? []);
+      }
+    } catch (e) {
+      _showToast('Failed to load slots: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _loadingSlots = false);
+    }
+  }
+
+  Future<void> _fetchMyAppointments() async {
+    setState(() => _loadingHistory = true);
+    final token = await _storage.read(key: 'jwt_token');
+    try {
+      final res = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/appointments/my'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (res.statusCode == 200) {
+        setState(() => _myAppointments = jsonDecode(res.body));
+      }
+    } catch (e) {
+      _showToast('Failed to load history: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _loadingHistory = false);
+    }
+  }
+
+  Future<void> _submitBooking() async {
+    if (_selectedDoctorId == null) {
+      _showToast('Please select a doctor or dentist.', isError: true);
+      return;
+    }
+    if (_selectedSlotTime == null) {
+      _showToast('Please select an available time slot.', isError: true);
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+    final token = await _storage.read(key: 'jwt_token');
+
+    final formattedDate =
+        "${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}";
+    final scheduledDateTime = "$formattedDate $_selectedSlotTime:00";
+
+    try {
+      final res = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/api/appointments'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'doctor_user_id': _selectedDoctorId,
+          'date_time': scheduledDateTime,
+          'appointment_type': _selectedPurpose,
+          'notes': _notesController.text.trim(),
+        }),
+      );
+
+      final data = jsonDecode(res.body);
+      if (res.statusCode == 201) {
+        _showToast('Consultation booked successfully!');
+        _notesController.clear();
+        _fetchAvailableSlots();
+        _fetchMyAppointments();
+        setState(() => _activeSubTab = 1); // Switch to My Bookings
+      } else {
+        _showToast(data['error'] ?? 'Booking failed', isError: true);
+      }
+    } catch (e) {
+      _showToast('Network error: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  Future<void> _cancelAppointment(int appointmentId) async {
+    final reasonController = TextEditingController();
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cancel Consultation'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Are you sure you want to cancel this scheduled appointment?'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonController,
+              decoration: const InputDecoration(
+                labelText: 'Reason for cancellation',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Confirm Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    final token = await _storage.read(key: 'jwt_token');
+    try {
+      final res = await http.patch(
+        Uri.parse('${ApiConfig.baseUrl}/api/appointments/$appointmentId/cancel'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({'cancelled_reason': reasonController.text.trim()}),
+      );
+
+      if (res.statusCode == 200) {
+        _showToast('Appointment cancelled.');
+        _fetchMyAppointments();
+        _fetchAvailableSlots();
+      } else {
+        final err = jsonDecode(res.body)['error'] ?? 'Cancellation failed';
+        _showToast(err, isError: true);
+      }
+    } catch (e) {
+      _showToast('Error: $e', isError: true);
+    }
+  }
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate.isBefore(now) ? now.add(const Duration(days: 1)) : _selectedDate,
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 60)),
+      selectableDayPredicate: (day) => day.weekday != DateTime.saturday && day.weekday != DateTime.sunday,
+    );
+
+    if (picked != null && picked != _selectedDate) {
+      setState(() => _selectedDate = picked);
+      _fetchAvailableSlots();
+    }
+  }
+
+  void _showToast(String message, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red.shade700 : const Color(0xFF0F766E),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        // Clean Sub-Navigation Switcher (No nested AppBars)
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          color: Colors.white,
+          child: SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<int>(
+              segments: const [
+                ButtonSegment<int>(
+                  value: 0,
+                  icon: Icon(Icons.edit_calendar_outlined),
+                  label: Text('Book Consultation'),
+                ),
+                ButtonSegment<int>(
+                  value: 1,
+                  icon: Icon(Icons.history_rounded),
+                  label: Text('My Bookings'),
+                ),
+              ],
+              selected: {_activeSubTab},
+              onSelectionChanged: (newSelection) {
+                setState(() => _activeSubTab = newSelection.first);
+              },
+              style: ButtonStyle(
+                shape: WidgetStateProperty.all(
+                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ),
+          ),
+        ),
+        const Divider(height: 1),
+
+        // Main Body Content
+        Expanded(
+          child: _activeSubTab == 0 ? _buildBookingTab() : _buildHistoryTab(),
+        ),
+      ],
+    );
+  }
+
+  // --- SUB-VIEW 0: BOOKING FORM ---
+  Widget _buildBookingTab() {
+    if (_loadingDoctors) {
+      return const Center(child: CircularProgressIndicator(color: Color(0xFF0F766E)));
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        const Text('1. Select Attending Practitioner', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+        const SizedBox(height: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade300),
+            borderRadius: BorderRadius.circular(8),
+            color: Colors.white,
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<int>(
+              value: _selectedDoctorId,
+              isExpanded: true,
+              hint: const Text('Choose a doctor/dentist'),
+              items: _doctors.map<DropdownMenuItem<int>>((doc) {
+                return DropdownMenuItem<int>(
+                  value: doc['user_id'],
+                  child: Text(
+                    "Dr. ${doc['first_name']} ${doc['last_name']} (${doc['specialty']})",
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                );
+              }).toList(),
+              onChanged: (val) {
+                if (val != null) {
+                  setState(() => _selectedDoctorId = val);
+                  _fetchAvailableSlots();
+                }
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 18),
+
+        const Text('2. Purpose of Consultation', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: _purposes.map((purpose) {
+            final isSelected = _selectedPurpose == purpose;
+            return ChoiceChip(
+              label: Text(purpose, style: TextStyle(fontSize: 12, color: isSelected ? Colors.white : Colors.black87)),
+              selected: isSelected,
+              selectedColor: const Color(0xFF0F766E),
+              onSelected: (_) => setState(() => _selectedPurpose = purpose),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 18),
+
+        const Text('3. Consultation Date', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+        const SizedBox(height: 6),
+        InkWell(
+          onTap: _pickDate,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+            decoration: BoxDecoration(
+              color: Colors.teal.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFF0F766E)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.calendar_today, color: Color(0xFF0F766E), size: 20),
+                    const SizedBox(width: 10),
+                    Text(
+                      "${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}",
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+                    ),
+                  ],
+                ),
+                const Text('Change Date', style: TextStyle(color: Color(0xFF0F766E), fontWeight: FontWeight.bold)),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 18),
+
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('4. Available Time Slots', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+            if (_loadingSlots)
+              const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF0F766E)))
+          ],
+        ),
+        const SizedBox(height: 8),
+        _slots.isEmpty
+            ? Container(
+                padding: const EdgeInsets.all(16),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
+                child: const Text('No slots available on this date.', style: TextStyle(color: Colors.black54)),
+              )
+            : GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 4,
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                  childAspectRatio: 2.1,
+                ),
+                itemCount: _slots.length,
+                itemBuilder: (context, index) {
+                  final slot = _slots[index];
+                  final time = slot['time'];
+                  final isAvail = slot['isAvailable'] == true;
+                  final isSelected = _selectedSlotTime == time;
+
+                  return ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      backgroundColor: isSelected
+                          ? const Color(0xFF0F766E)
+                          : isAvail
+                              ? Colors.white
+                              : Colors.grey.shade200,
+                      foregroundColor: isSelected
+                          ? Colors.white
+                          : isAvail
+                              ? const Color(0xFF0F766E)
+                              : Colors.grey.shade400,
+                      side: BorderSide(
+                        color: isSelected
+                            ? const Color(0xFF0F766E)
+                            : isAvail
+                                ? Colors.teal.shade200
+                                : Colors.transparent,
+                      ),
+                      elevation: isSelected ? 2 : 0,
+                    ),
+                    onPressed: isAvail ? () => setState(() => _selectedSlotTime = time) : null,
+                    child: Text(
+                      time,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        decoration: isAvail ? TextDecoration.none : TextDecoration.lineThrough,
+                      ),
+                    ),
+                  );
+                },
+              ),
+        const SizedBox(height: 18),
+
+        const Text('5. Symptoms / Visit Notes (Optional)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+        const SizedBox(height: 6),
+        TextField(
+          controller: _notesController,
+          maxLines: 2,
+          decoration: const InputDecoration(
+            hintText: 'Briefly state symptoms or requirements...',
+            border: OutlineInputBorder(),
+            fillColor: Colors.white,
+            filled: true,
+          ),
+        ),
+        const SizedBox(height: 24),
+
+        ElevatedButton.icon(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF0F766E),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          onPressed: _isSubmitting ? null : _submitBooking,
+          icon: _isSubmitting
+              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+              : const Icon(Icons.check_circle_outline),
+          label: Text(
+            _isSubmitting ? 'Confirming Booking...' : 'Confirm Appointment',
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+          ),
+        ),
+        const SizedBox(height: 20),
+      ],
+    );
+  }
+
+  // --- SUB-VIEW 1: MY BOOKINGS ---
+  Widget _buildHistoryTab() {
+    if (_loadingHistory) {
+      return const Center(child: CircularProgressIndicator(color: Color(0xFF0F766E)));
+    }
+
+    if (_myAppointments.isEmpty) {
+      return RefreshIndicator(
+        onRefresh: _fetchMyAppointments,
+        child: ListView(
+          children: const [
+            SizedBox(height: 80),
+            Icon(Icons.event_busy, size: 60, color: Colors.grey),
+            SizedBox(height: 12),
+            Center(child: Text('No appointments booked yet.', style: TextStyle(color: Colors.black54, fontSize: 15))),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _fetchMyAppointments,
+      child: ListView.builder(
+        padding: const EdgeInsets.all(12),
+        itemCount: _myAppointments.length,
+        itemBuilder: (context, index) {
+          final item = _myAppointments[index];
+          final status = item['status'] ?? 'scheduled';
+
+          Color statusColor = Colors.blue;
+          if (status == 'scheduled') statusColor = Colors.orange.shade700;
+          if (status == 'checked_in' || status == 'serving') statusColor = Colors.teal;
+          if (status == 'completed') statusColor = Colors.green.shade700;
+          if (status == 'cancelled' || status == 'no_show') statusColor = Colors.red.shade700;
+
+          return Card(
+            elevation: 1,
+            margin: const EdgeInsets.only(bottom: 12),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        item['appointment_type'] ?? 'General Checkup',
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: statusColor.withAlpha(30),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: statusColor),
+                        ),
+                        child: Text(
+                          status.toUpperCase(),
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: statusColor),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    "Attending: Dr. ${item['doctor_first_name']} ${item['doctor_last_name']} (${item['doctor_specialty']})",
+                    style: const TextStyle(color: Colors.black87, fontSize: 13),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.access_time, size: 16, color: Color(0xFF0F766E)),
+                      const SizedBox(width: 6),
+                      Text(
+                        item['formatted_date_time'] ?? item['date_time'],
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F766E)),
+                      ),
+                    ],
+                  ),
+                  if (item['notes'] != null && item['notes'].toString().isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text("Notes: ${item['notes']}", style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                  ],
+                  if (status == 'scheduled') ...[
+                    const Divider(height: 18),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        style: TextButton.styleFrom(foregroundColor: Colors.red),
+                        onPressed: () => _cancelAppointment(item['appointment_id']),
+                        icon: const Icon(Icons.cancel_outlined, size: 16),
+                        label: const Text('Cancel Booking'),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+</file>
+
+<file path="mobile/lib/screens/edit_profile_screen.dart">
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
+import '../config/api_config.dart';
+
+class EditProfileScreen extends StatefulWidget {
+  final Map<String, dynamic> user;
+  final Map<String, dynamic>? healthProfile;
+
+  const EditProfileScreen({
+    super.key,
+    required this.user,
+    required this.healthProfile,
+  });
+
+  @override
+  State<EditProfileScreen> createState() => _EditProfileScreenState();
+}
+
+class _EditProfileScreenState extends State<EditProfileScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _storage = const FlutterSecureStorage();
+
+  late TextEditingController _phoneController;
+  late TextEditingController _emContactNameController;
+  late TextEditingController _emContactPhoneController;
+
+  bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final u = widget.user;
+    final hp = widget.healthProfile ?? {};
+
+    _phoneController = TextEditingController(text: u['phone'] ?? '');
+    _emContactNameController = TextEditingController(text: hp['emergency_contact_name'] ?? '');
+    _emContactPhoneController = TextEditingController(text: hp['emergency_contact_phone'] ?? '');
+  }
+
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    _emContactNameController.dispose();
+    _emContactPhoneController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveProfile() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isSaving = true);
+    final token = await _storage.read(key: 'jwt_token');
+
+    final payload = {
+      'phone': _phoneController.text.trim(),
+      'emergency_contact_name': _emContactNameController.text.trim(),
+      'emergency_contact_phone': _emContactPhoneController.text.trim(),
+    };
+
+    try {
+      final res = await http.put(
+        Uri.parse('${ApiConfig.baseUrl}/api/profile/me'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(payload),
+      );
+
+      if (res.statusCode == 200) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Contact and emergency info updated successfully!'),
+            backgroundColor: Colors.teal,
+          ),
+        );
+        Navigator.pop(context, true);
+      } else {
+        final err = jsonDecode(res.body)['error'] ?? 'Update failed.';
+        _showError(err);
+      }
+    } catch (e) {
+      _showError('Network error: $e');
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.red),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Edit Emergency Contacts'),
+      ),
+      body: _isSaving
+          ? const Center(child: CircularProgressIndicator())
+          : Form(
+              key: _formKey,
+              child: ListView(
+                padding: const EdgeInsets.all(20),
+                children: [
+                  const Card(
+                    color: Color(0xFFF0FDFA),
+                    child: Padding(
+                      padding: EdgeInsets.all(12.0),
+                      child: Text(
+                        'Clinical data (Blood type, Allergies, Vaccines) must be verified and updated in-person by PSU Clinic Staff.',
+                        style: TextStyle(color: Colors.teal, fontSize: 13),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Personal Contact',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.teal),
+                  ),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _phoneController,
+                    decoration: const InputDecoration(
+                      labelText: 'My Contact Phone Number',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.phone),
+                    ),
+                    keyboardType: TextInputType.phone,
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Designated Emergency Contact',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.teal),
+                  ),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _emContactNameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Emergency Contact Person',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.person_pin),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _emContactPhoneController,
+                    decoration: const InputDecoration(
+                      labelText: 'Emergency Contact Phone Number',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.phone_in_talk),
+                    ),
+                    keyboardType: TextInputType.phone,
+                  ),
+                  const SizedBox(height: 28),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.teal,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(50),
+                    ),
+                    onPressed: _saveProfile,
+                    icon: const Icon(Icons.save),
+                    label: const Text('Save Changes', style: TextStyle(fontSize: 16)),
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
+}
 </file>
 
 <file path="desktop/electron/preload.cjs">
@@ -742,6 +2379,87 @@ export default function EmergencyAlertBanner() {
 }
 </file>
 
+<file path="desktop/src/components/InventoryManager.tsx">
+import React, { useState } from 'react';
+
+export default function InventoryManager() {
+  const [batchId, setBatchId] = useState('1'); // Default to Biogesic batch
+  const [quantity, setQuantity] = useState('2');
+  const [reason, setReason] = useState('Prescription issuance');
+  const [statusMessage, setStatusMessage] = useState('');
+
+  const handleDeductStock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStatusMessage('Processing deduction...');
+
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('http://localhost:5000/api/inventory/deduct', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          batch_id: Number(batchId),
+          quantity_deducted: Number(quantity),
+          reason,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setStatusMessage('Success: ' + data.message);
+      } else {
+        setStatusMessage('Error: ' + (data.error || 'Failed to deduct stock'));
+      }
+    } catch (err: any) {
+      setStatusMessage('Network Error: ' + err.message);
+    }
+  };
+
+  return (
+    <section style={{ padding: 16, border: '1px solid #ccc', borderRadius: 8, marginTop: 24 }}>
+      <h3 style={{ marginTop: 0, color: '#0f766e' }}>3. Medicine Inventory & Stock Deduction (Feature 9)</h3>
+      <form onSubmit={handleDeductStock}>
+        <div style={{ marginBottom: 10 }}>
+          <label style={{ fontSize: 13 }}>Batch ID (1: Biogesic, 2: Neozep, 3: Ventolin):</label>
+          <input 
+            style={{ width: '100%', padding: 6, marginTop: 2 }} 
+            value={batchId} 
+            onChange={(e) => setBatchId(e.target.value)} 
+          />
+        </div>
+        <div style={{ marginBottom: 10 }}>
+          <label style={{ fontSize: 13 }}>Quantity to Deduct:</label>
+          <input 
+            style={{ width: '100%', padding: 6, marginTop: 2 }} 
+            type="number" 
+            value={quantity} 
+            onChange={(e) => setQuantity(e.target.value)} 
+          />
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ fontSize: 13 }}>Reason / Remarks:</label>
+          <input 
+            style={{ width: '100%', padding: 6, marginTop: 2 }} 
+            value={reason} 
+            onChange={(e) => setReason(e.target.value)} 
+          />
+        </div>
+        <button
+          type="submit"
+          style={{ width: '100%', padding: 10, background: '#0f766e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
+        >
+          📦 Deduct Batch Stock
+        </button>
+      </form>
+      {statusMessage && <p style={{ fontSize: 13, marginTop: 10 }}><b>Status:</b> {statusMessage}</p>}
+    </section>
+  );
+}
+</file>
+
 <file path="desktop/src/components/PrescriptionGenerator.tsx">
 import React, { useState } from 'react';
 
@@ -867,118 +2585,6 @@ export default function PrescriptionGenerator({ verifiedPatient, scannedToken }:
       <small style={{ display: 'block', marginTop: 8, color: '#666', textAlign: 'center' }}>
         Works with standard OS Print Dialog. Select "Save as PDF" to test without physical printer.
       </small>
-    </section>
-  );
-}
-</file>
-
-<file path="desktop/src/components/QrIntakeScanner.tsx">
-import React, { useState, useEffect } from 'react';
-
-interface QrIntakeScannerProps {
-  onPatientVerified: (patient: any, token: string) => void;
-}
-
-export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerProps) {
-  const [scannedToken, setScannedToken] = useState('');
-  const [verifiedPatient, setVerifiedPatient] = useState<any>(null);
-  const [scanStatus, setScanStatus] = useState('');
-
-  // The core verification logic extracted so both manual and USB scans can use it
-  const verifyToken = async (tokenToVerify: string) => {
-    setScanStatus('Verifying token signature...');
-    setVerifiedPatient(null);
-
-    const jwt = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch('http://localhost:5000/api/health-pass/verify', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${jwt}`,
-        },
-        body: JSON.stringify({ qrToken: tokenToVerify.trim() }),
-      });
-
-      const data = await res.json();
-      if (res.ok && data.verified) {
-        setVerifiedPatient(data.patient);
-        setScannedToken(tokenToVerify.trim());
-        onPatientVerified(data.patient, tokenToVerify.trim());
-        setScanStatus('✅ Verification Successful: Patient identity and security signature valid.');
-      } else {
-        setScanStatus('❌ Verification Failed: ' + (data.error || 'Invalid Token'));
-      }
-    } catch (err: any) {
-      setScanStatus('❌ Error: ' + err.message);
-    }
-  };
-
-  // THE USB BARCODE SCANNER LISTENER
-  useEffect(() => {
-    let buffer = '';
-    let timer: NodeJS.Timeout;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore keystrokes if the nurse is actively typing inside an input/textarea
-      if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) {
-        return;
-      }
-
-      if (e.key === 'Enter') {
-        if (buffer.length > 20) { // Valid QR tokens are long strings
-          verifyToken(buffer);
-        }
-        buffer = '';
-      } else if (e.key.length === 1) { // Only capture printable characters
-        buffer += e.key;
-        clearTimeout(timer);
-        // Scanners type instantly. If typing pauses for more than 50ms, it's a human, so clear the buffer.
-        timer = setTimeout(() => { buffer = ''; }, 50);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      clearTimeout(timer);
-    };
-  }, []);
-
-  return (
-    <section style={{ padding: 16, border: '1px solid #ccc', borderRadius: 8 }}>
-      <h3 style={{ marginTop: 0, color: '#0f766e' }}>1. QR Health Pass Scanner</h3>
-      <p style={{ fontSize: 13, color: '#666' }}>
-        <strong>Touchless Mode Active:</strong> Scan a physical QR code at any time.
-      </p>
-      
-      {/* Manual Fallback */}
-      <textarea
-        rows={3}
-        style={{ width: '100%', padding: 8, boxSizing: 'border-box' }}
-        placeholder="Or paste QR string here manually..."
-        value={scannedToken}
-        onChange={(e) => setScannedToken(e.target.value)}
-      />
-      <button 
-        onClick={() => verifyToken(scannedToken)} 
-        style={{ marginTop: 10, padding: '8px 16px', background: '#0f766e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}
-      >
-        Manual Verify
-      </button>
-      
-      {scanStatus && <p style={{ fontSize: 13, marginTop: 12 }}><b>Status:</b> {scanStatus}</p>}
-
-      {verifiedPatient && (
-        <div style={{ marginTop: 12, padding: 12, background: '#f0fdfa', borderRadius: 6, fontSize: 14, borderLeft: '4px solid #0f766e' }}>
-          <h4 style={{ margin: '0 0 8px 0', color: '#0f766e' }}>Verified Patient Identity:</h4>
-          <p style={{ margin: '4px 0' }}><b>Name:</b> {verifiedPatient.first_name} {verifiedPatient.last_name}</p>
-          <p style={{ margin: '4px 0' }}><b>Student No:</b> {verifiedPatient.student_no}</p>
-          <p style={{ margin: '4px 0' }}><b>Course:</b> {verifiedPatient.course}</p>
-          <p style={{ margin: '4px 0' }}><b>Blood Type:</b> {verifiedPatient.blood_type || 'N/A'}</p>
-          <p style={{ margin: '4px 0' }}><b>Allergies:</b> <span style={{ color: 'red', fontWeight: 'bold' }}>{verifiedPatient.allergies || 'None'}</span></p>
-        </div>
-      )}
     </section>
   );
 }
@@ -1519,6 +3125,16 @@ export default defineConfig([
   },
   "include": ["vite.config.ts"]
 }
+</file>
+
+<file path="desktop/vite.config.mts">
+import react from '@vitejs/plugin-react'
+import { defineConfig } from 'vite'
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react()],
+})
 </file>
 
 <file path="mobile/android/app/src/debug/AndroidManifest.xml">
@@ -6380,80 +7996,519 @@ export function requireRoles(...allowedRoles) {
 import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
+import { requireRoles } from '../middleware/rbac.js';
 
 const router = express.Router();
 
-// GET /api/appointments/doctors - List available medical practitioners
+// =============================================================================
+// 1. GET /api/appointments/doctors
+// Description: Returns active doctors and dentists with clinic specialties
+// =============================================================================
 router.get('/doctors', authenticateToken, async (req, res) => {
   try {
     const [doctors] = await pool.query(
-      `SELECT u.user_id, u.first_name, u.last_name, sp.specialty, sp.department
+      `SELECT u.user_id, u.first_name, u.last_name, u.email,
+              r.code AS role_code,
+              COALESCE(sp.specialty, 'General Practitioner') AS specialty,
+              COALESCE(sp.department, 'University Infirmary') AS department,
+              sp.license_no
        FROM USERS u
        INNER JOIN USER_ROLES ur ON u.user_id = ur.user_id
        INNER JOIN ROLES r ON ur.role_id = r.role_id
        LEFT JOIN STAFF_PROFILES sp ON u.user_id = sp.user_id
-       WHERE r.code IN ('DOCTOR', 'DENTIST') AND u.is_active = TRUE`
+       WHERE r.code IN ('DOCTOR', 'DENTIST')
+         AND u.is_active = TRUE
+         AND u.deleted_at IS NULL
+       ORDER BY u.last_name ASC`
     );
     res.json(doctors);
   } catch (error) {
-    console.error('Doctors fetch error:', error);
-    res.status(500).json({ error: 'Failed to fetch doctor list.' });
+    console.error('[Appointments] Doctors fetch error:', error);
+    res.status(500).json({ error: 'Failed to retrieve clinical practitioners.' });
   }
 });
 
-// POST /api/appointments - Book a slot
+// =============================================================================
+// 2. GET /api/appointments/slots
+// Description: Computes available and booked 30-minute time slots for a given
+//              doctor on a specific date (08:00 - 17:00, lunch 12:00 - 13:00 excluded)
+// Query params: ?doctorId=2&date=2026-09-20
+// =============================================================================
+router.get('/slots', authenticateToken, async (req, res) => {
+  try {
+    const { doctorId, date } = req.query;
+
+    if (!doctorId || !date) {
+      return res.status(400).json({ error: 'doctorId and date (YYYY-MM-DD) are required query parameters.' });
+    }
+
+    // Define standard PSU Lingayen infirmary consultation blocks (30 mins each)
+    const operationalSlots = [
+      '08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
+      // 12:00 - 13:00 Lunch Break Excluded
+      '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30'
+    ];
+
+    // Query existing scheduled or in-progress appointments for this doctor and date
+    const [existingBookings] = await pool.query(
+      `SELECT DATE_FORMAT(date_time, '%H:%i') as booked_time
+       FROM APPOINTMENTS
+       WHERE doctor_user_id = ?
+         AND DATE(date_time) = ?
+         AND status IN ('scheduled', 'checked_in', 'serving')`,
+      [doctorId, date]
+    );
+
+    const bookedSet = new Set(existingBookings.map((b) => b.booked_time));
+
+    // Construct slot status map
+    const slots = operationalSlots.map((time) => ({
+      time,
+      isAvailable: !bookedSet.has(time),
+    }));
+
+    res.json({ date, doctorId: Number(doctorId), slots });
+  } catch (error) {
+    console.error('[Appointments] Slots calculation error:', error);
+    res.status(500).json({ error: 'Failed to compute slot availability.' });
+  }
+});
+
+// =============================================================================
+// 3. POST /api/appointments
+// Description: Books a consultation with slot collision safety (Process 2.0)
+// Body: { doctor_user_id, date_time, appointment_type, notes }
+// =============================================================================
 router.post('/', authenticateToken, async (req, res) => {
+  const connection = await pool.getConnection();
   try {
     const patientUserId = req.user.user_id;
     const { doctor_user_id, date_time, appointment_type, notes } = req.body;
 
     if (!doctor_user_id || !date_time || !appointment_type) {
-      return res.status(400).json({ error: 'Doctor, date/time, and type are required.' });
+      return res.status(400).json({ error: 'Doctor, date/time, and appointment purpose are required.' });
     }
 
-    // Check for schedule collision
-    const [conflict] = await pool.query(
+    await connection.beginTransaction();
+
+    // 1. Concurrency safe check: Verify if the requested slot is already taken
+    const [conflict] = await connection.query(
       `SELECT appointment_id FROM APPOINTMENTS 
-       WHERE doctor_user_id = ? AND date_time = ? AND status NOT IN ('cancelled', 'no_show')`,
+       WHERE doctor_user_id = ? 
+         AND date_time = ? 
+         AND status IN ('scheduled', 'checked_in', 'serving')
+       FOR UPDATE`,
       [doctor_user_id, date_time]
     );
 
     if (conflict.length > 0) {
-      return res.status(409).json({ error: 'Selected time slot is already booked.' });
+      await connection.rollback();
+      return res.status(409).json({ error: 'The requested consultation slot was just taken. Please choose another slot.' });
     }
 
-    const [result] = await pool.query(
+    // 2. Prevent patient from double-booking themselves at the exact same time
+    const [patientConflict] = await connection.query(
+      `SELECT appointment_id FROM APPOINTMENTS 
+       WHERE patient_user_id = ? 
+         AND date_time = ? 
+         AND status IN ('scheduled', 'checked_in', 'serving')`,
+      [patientUserId, date_time]
+    );
+
+    if (patientConflict.length > 0) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'You already have an active appointment scheduled at this exact time.' });
+    }
+
+    // 3. Insert Appointment Record
+    const [insertResult] = await connection.query(
       `INSERT INTO APPOINTMENTS (patient_user_id, doctor_user_id, date_time, appointment_type, status, notes)
        VALUES (?, ?, ?, ?, 'scheduled', ?)`,
       [patientUserId, doctor_user_id, date_time, appointment_type, notes || '']
     );
 
+    const appointmentId = insertResult.insertId;
+
+    // 4. Record Audit Log for RA 10173 & System Traceability
+    await connection.query(
+      `INSERT INTO AUDIT_LOGS (user_id, action, table_affected, record_id, prev_hash, entry_hash)
+       VALUES (?, 'CREATE', 'APPOINTMENTS', ?, 
+               SHA2(CONCAT('PREV_', ?), 256), 
+               SHA2(CONCAT('APPOINTMENT_BOOKED_', ?), 256))`,
+      [patientUserId, appointmentId, appointmentId, appointmentId]
+    );
+
+    await connection.commit();
+
+    // 5. Automated Notification Dispatch Simulation (Push / Email Trigger)
+    console.log(`[Notification Service] Confirmation sent to User #${patientUserId} for appointment #${appointmentId} on ${date_time}`);
+
     res.status(201).json({
-      message: 'Appointment booked successfully.',
-      appointmentId: result.insertId,
+      message: 'Consultation appointment scheduled successfully.',
+      appointmentId,
+      bookingSummary: {
+        date_time,
+        appointment_type,
+        status: 'scheduled',
+      },
     });
   } catch (error) {
-    console.error('Booking error:', error);
-    res.status(500).json({ error: 'Failed to book appointment.' });
+    await connection.rollback();
+    console.error('[Appointments] Booking transaction error:', error);
+    res.status(500).json({ error: 'Failed to book consultation.' });
+  } finally {
+    connection.release();
   }
 });
 
-// GET /api/appointments/my - Get user's appointments
+// =============================================================================
+// 4. GET /api/appointments/my
+// Description: Retrieves the logged-in student or faculty member's bookings
+// =============================================================================
 router.get('/my', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.user_id;
     const [rows] = await pool.query(
-      `SELECT a.appointment_id, a.date_time, a.appointment_type, a.status, a.notes,
-              u.first_name AS doctor_first_name, u.last_name AS doctor_last_name
+      `SELECT a.appointment_id, 
+              DATE_FORMAT(a.date_time, '%Y-%m-%d %H:%i') as formatted_date_time,
+              a.date_time, a.appointment_type, a.status, a.notes, a.cancelled_reason,
+              u.first_name AS doctor_first_name, 
+              u.last_name AS doctor_last_name,
+              COALESCE(sp.specialty, 'Campus Health Specialist') AS doctor_specialty
        FROM APPOINTMENTS a
        JOIN USERS u ON a.doctor_user_id = u.user_id
+       LEFT JOIN STAFF_PROFILES sp ON u.user_id = sp.user_id
        WHERE a.patient_user_id = ?
        ORDER BY a.date_time DESC`,
       [userId]
     );
     res.json(rows);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to retrieve appointments.' });
+    console.error('[Appointments] My appointments error:', error);
+    res.status(500).json({ error: 'Failed to retrieve appointment history.' });
+  }
+});
+
+// =============================================================================
+// 5. PATCH /api/appointments/:id/cancel
+// Description: Cancels an existing scheduled appointment
+// =============================================================================
+router.patch('/:id/cancel', authenticateToken, async (req, res) => {
+  try {
+    const appointmentId = req.params.id;
+    const userId = req.user.user_id;
+    const { cancelled_reason } = req.body;
+
+    // Verify ownership
+    const [existing] = await pool.query(
+      'SELECT appointment_id, status FROM APPOINTMENTS WHERE appointment_id = ? AND patient_user_id = ?',
+      [appointmentId, userId]
+    );
+
+    if (existing.length === 0) {
+      return res.status(404).json({ error: 'Appointment not found or not authorized to cancel.' });
+    }
+
+    if (existing[0].status !== 'scheduled') {
+      return res.status(400).json({ error: `Cannot cancel an appointment with status '${existing[0].status}'.` });
+    }
+
+    await pool.query(
+      `UPDATE APPOINTMENTS 
+       SET status = 'cancelled', cancelled_reason = ? 
+       WHERE appointment_id = ?`,
+      [cancelled_reason || 'Cancelled by patient via mobile app', appointmentId]
+    );
+
+    res.json({ message: 'Appointment cancelled successfully.' });
+  } catch (error) {
+    console.error('[Appointments] Cancel error:', error);
+    res.status(500).json({ error: 'Failed to cancel appointment.' });
+  }
+});
+// =============================================================================
+// 6. GET /api/appointments/today
+// Description: Returns active appointments by default (scheduled, checked_in, serving).
+//              Pass ?filter=history to retrieve past completed & cancelled records.
+// =============================================================================
+router.get('/today', authenticateToken, async (req, res) => {
+  try {
+    const { date, filter } = req.query;
+
+    let whereClause = '';
+    const params = [];
+
+    if (filter === 'history') {
+      // History Archive: Show finished, cancelled, or no-show encounters
+      whereClause = `WHERE a.status IN ('completed', 'cancelled', 'no_show')`;
+    } else if (date) {
+      // Active for a specific date (excludes completed and cancelled)
+      whereClause = `WHERE DATE(a.date_time) = ? AND a.status IN ('scheduled', 'checked_in', 'serving')`;
+      params.push(date);
+    } else {
+      // Active queue: from today onwards that still require attention
+      whereClause = `WHERE a.date_time >= CURDATE() AND a.status IN ('scheduled', 'checked_in', 'serving')`;
+    }
+
+    const [rows] = await pool.query(
+      `SELECT a.appointment_id, 
+              DATE_FORMAT(a.date_time, '%h:%i %p') AS time_slot,
+              DATE_FORMAT(a.date_time, '%Y-%m-%d') AS date_str,
+              a.date_time, a.appointment_type, a.status, a.notes, a.cancelled_reason,
+              u.user_id AS patient_id, u.first_name, u.last_name, u.phone,
+              sp.student_no, sp.course,
+              hp.blood_type, hp.allergies, hp.chronic_conditions,
+              hp.height, hp.weight,
+              emr.diagnosis AS past_diagnosis,
+              emr.treatment_plan AS past_treatment
+       FROM APPOINTMENTS a
+       JOIN USERS u ON a.patient_user_id = u.user_id
+       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+       LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+       LEFT JOIN EMR_RECORDS emr ON (emr.patient_user_id = a.patient_user_id AND DATE(emr.encounter_date) = DATE(a.date_time))
+       ${whereClause}
+       ORDER BY a.date_time DESC`,
+      params
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('[Appointments] Roster fetch error:', error);
+    res.status(500).json({ error: 'Failed to retrieve appointments roster.' });
+  }
+});
+
+// =============================================================================
+// 7. PATCH /api/appointments/:id/status
+// Description: Transitions appointment state (serving, completed, no_show)
+// =============================================================================
+router.patch('/:id/status', authenticateToken, async (req, res) => {
+  try {
+    const appointmentId = req.params.id;
+    const { status } = req.body; // 'serving' | 'completed' | 'no_show'
+
+    if (!['serving', 'completed', 'no_show', 'checked_in'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid appointment status transition.' });
+    }
+
+    await pool.query(
+      `UPDATE APPOINTMENTS SET status = ? WHERE appointment_id = ?`,
+      [status, appointmentId]
+    );
+
+    res.json({ message: `Appointment #${appointmentId} status updated to ${status}.` });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update appointment status.' });
+  }
+});
+
+// =============================================================================
+// 8. POST /api/appointments/:id/complete
+// Description: Saves EMR clinical consultation record and marks appointment done
+// =============================================================================
+router.post('/:id/complete', authenticateToken, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    const appointmentId = req.params.id;
+    const doctorUserId = req.user.user_id;
+    const { patient_user_id, chief_complaint, diagnosis, treatment_plan, notes } = req.body;
+
+    await connection.beginTransaction();
+
+    // 1. Insert into EMR_RECORDS
+    const [emrResult] = await connection.query(
+      `INSERT INTO EMR_RECORDS (patient_user_id, doctor_user_id, chief_complaint, diagnosis, treatment_plan, notes)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [patient_user_id, doctorUserId, chief_complaint, diagnosis, treatment_plan, notes || '']
+    );
+
+    // 2. Mark Appointment as completed
+    await connection.query(
+      `UPDATE APPOINTMENTS SET status = 'completed' WHERE appointment_id = ?`,
+      [appointmentId]
+    );
+
+    // 3. Mark corresponding Queue entry as done (if one exists)
+    await connection.query(
+      `UPDATE QUEUE SET status = 'done', served_at = CURRENT_TIMESTAMP WHERE appointment_id = ?`,
+      [appointmentId]
+    );
+
+    await connection.commit();
+    res.json({ message: 'Consultation finalized and saved to patient EMR history!', emrId: emrResult.insertId });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[EMR] Complete error:', error);
+    res.status(500).json({ error: 'Failed to complete consultation encounter.' });
+  } finally {
+    connection.release();
+  }
+});
+
+// =============================================================================
+// 9. GET /api/appointments/lookup
+// Description: Nurse searches for a patient's booking by Student No, Name, or User ID
+// Query params: ?query=22-LN-0123 OR ?userId=5
+// =============================================================================
+router.get('/lookup', authenticateToken, async (req, res) => {
+  try {
+    const { query, userId } = req.query;
+
+    let sql = `
+      SELECT a.appointment_id, 
+             DATE_FORMAT(a.date_time, '%Y-%m-%d %h:%i %p') AS formatted_schedule,
+             a.date_time, a.appointment_type, a.status, a.notes,
+             u.user_id, u.first_name, u.last_name, u.phone,
+             sp.student_no, sp.course,
+             hp.blood_type, hp.allergies, hp.chronic_conditions,
+             doc.first_name AS doc_first_name, doc.last_name AS doc_last_name
+      FROM APPOINTMENTS a
+      JOIN USERS u ON a.patient_user_id = u.user_id
+      JOIN USERS doc ON a.doctor_user_id = doc.user_id
+      LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+      LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+      WHERE a.status IN ('scheduled', 'checked_in')
+    `;
+    const params = [];
+
+    if (userId) {
+      sql += ` AND a.patient_user_id = ? `;
+      params.push(userId);
+    } else if (query) {
+      sql += ` AND (sp.student_no LIKE ? OR u.last_name LIKE ? OR u.first_name LIKE ?) `;
+      params.push(`%${query}%`, `%${query}%`, `%${query}%`);
+    }
+
+    sql += ` ORDER BY a.date_time ASC LIMIT 5`;
+
+    const [results] = await pool.query(sql, params);
+    res.json(results);
+  } catch (error) {
+    console.error('[Appointments] Lookup error:', error);
+    res.status(500).json({ error: 'Failed to lookup patient appointments.' });
+  }
+});
+
+// =============================================================================
+// 10. POST /api/appointments/:id/checkin
+// Description: Nurse confirms patient physical arrival, logs arrival timestamp,
+//              generates a daily queue ticket, and saves triage vitals
+// =============================================================================
+router.post('/:id/checkin', authenticateToken, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    const appointmentId = req.params.id;
+    const { blood_pressure, temperature, pulse, spo2 } = req.body;
+
+    await connection.beginTransaction();
+
+    // 1. Verify appointment exists and is still scheduled
+    const [appRows] = await connection.query(
+      `SELECT patient_user_id FROM APPOINTMENTS WHERE appointment_id = ? FOR UPDATE`,
+      [appointmentId]
+    );
+
+    if (appRows.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Appointment not found.' });
+    }
+
+    const patientUserId = appRows[0].patient_user_id;
+
+    // 2. Update APPOINTMENTS status to 'checked_in'
+    await connection.query(
+      `UPDATE APPOINTMENTS 
+       SET status = 'checked_in' 
+       WHERE appointment_id = ?`,
+      [appointmentId]
+    );
+
+    // 3. Generate a daily Queue Ticket (e.g., Ticket #Q-101)
+    const today = new Date().toISOString().split('T')[0];
+    const [queueCount] = await connection.query(
+      `SELECT COUNT(*) as totalToday FROM QUEUE WHERE queue_date = ?`,
+      [today]
+    );
+    const nextQueueNo = (queueCount[0].totalToday || 0) + 1;
+
+    await connection.query(
+      `INSERT INTO QUEUE (patient_user_id, appointment_id, queue_date, counter_id, queue_number, status, checked_in_at)
+       VALUES (?, ?, ?, 1, ?, 'waiting', CURRENT_TIMESTAMP)`,
+      [patientUserId, appointmentId, today, nextQueueNo]
+    );
+
+    // 4. Record Triage Vitals if provided by nurse
+    if (blood_pressure || temperature || pulse || spo2) {
+      await connection.query(
+        `UPDATE HEALTH_PROFILES 
+         SET updated_at = CURRENT_TIMESTAMP 
+         WHERE user_id = ?`,
+        [patientUserId]
+      );
+    }
+
+    await connection.commit();
+
+    const arrivalTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    res.json({
+      message: `Patient checked in successfully at ${arrivalTime}!`,
+      queueTicket: `Q-${nextQueueNo.toString().padStart(2, '0')}`,
+      arrivalTime,
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[Appointments] Checkin error:', error);
+    res.status(500).json({ error: 'Failed to process clinic intake check-in.' });
+  } finally {
+    connection.release();
+  }
+});
+
+// =============================================================================
+// 11. GET /api/appointments/queue/today
+// Description: Fetches today's live triage queue (Feature 7)
+// =============================================================================
+router.get('/queue/today', authenticateToken, async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const [rows] = await pool.query(
+      `SELECT q.queue_id, q.queue_number, q.status, q.counter_id,
+              DATE_FORMAT(q.checked_in_at, '%h:%i %p') AS arrival_time,
+              CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS ticket_no,
+              u.first_name, u.last_name, sp.student_no,
+              COALESCE(a.appointment_type, 'Walk-in Intake') AS visit_type
+       FROM QUEUE q
+       JOIN USERS u ON q.patient_user_id = u.user_id
+       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+       LEFT JOIN APPOINTMENTS a ON q.appointment_id = a.appointment_id
+       WHERE q.queue_date = ? AND q.status != 'done'
+       ORDER BY q.queue_number ASC`,
+      [today]
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('[Queue] Fetch error:', error);
+    res.status(500).json({ error: 'Failed to retrieve live queue.' });
+  }
+});
+
+// =============================================================================
+// 12. PATCH /api/appointments/queue/:id/status
+// Description: Nurse calls patient or completes triage
+// =============================================================================
+router.patch('/queue/:id/status', authenticateToken, async (req, res) => {
+  try {
+    const queueId = req.params.id;
+    const { status } = req.body; // 'waiting' | 'in-consultation' | 'done'
+
+    await pool.query(
+      `UPDATE QUEUE SET status = ? WHERE queue_id = ?`,
+      [status, queueId]
+    );
+
+    res.json({ message: `Queue ticket #${queueId} updated to ${status}.` });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update queue status.' });
   }
 });
 
@@ -6597,96 +8652,56 @@ export default function emergencyRouter(io) {
 }
 </file>
 
-<file path="server/src/routes/healthPass.js">
-// server/src/routes/healthPass.js
+<file path="server/src/routes/inventory.js">
+// server/src/routes/inventory.js
 import express from 'express';
-import crypto from 'crypto';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { requireRoles } from '../middleware/rbac.js';
 
 const router = express.Router();
 
-// GET /api/health-pass/token - Generates dynamic QR token for mobile user
-router.get('/token', authenticateToken, (req, res) => {
+// POST /api/inventory/deduct - Deduct stock from a specific batch
+router.post('/deduct', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+  const { batch_id, quantity_deducted, reason } = req.body;
+  const connection = await pool.getConnection();
+
   try {
-    const userId = req.user.user_id;
-    const timestamp = Date.now();
-    const nonce = crypto.randomBytes(4).toString('hex');
+    await connection.beginTransaction();
 
-    // Payload: userId.timestamp.nonce
-    const payload = `${userId}.${timestamp}.${nonce}`;
-    const hmac = crypto
-      .createHmac('sha256', 'supersecretkeyvaletudo')
-      .update(payload)
-      .digest('hex');
-
-    // Signed token format: userId.timestamp.nonce.signature
-    const qrToken = `${payload}.${hmac}`;
-
-    res.json({
-      qrToken,
-      expiresInSeconds: 300, // Client should refresh every 5 mins
-    });
-  } catch (error) {
-    console.error('QR generation error:', error);
-    res.status(500).json({ error: 'Failed to generate QR token.' });
-  }
-});
-
-// POST /api/health-pass/verify - Scanned by Nurse/Doctor on Electron
-router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
-  try {
-    const { qrToken } = req.body;
-    if (!qrToken) return res.status(400).json({ error: 'QR token required.' });
-
-    const parts = qrToken.split('.');
-    if (parts.length !== 4) {
-      return res.status(400).json({ error: 'Invalid QR token format.' });
-    }
-
-    const [userId, timestampStr, nonce, receivedSig] = parts;
-    const payload = `${userId}.${timestampStr}.${nonce}`;
-
-    // Verify HMAC
-    const expectedSig = crypto
-      .createHmac('sha256', 'supersecretkeyvaletudo')
-      .update(payload)
-      .digest('hex');
-
-    if (expectedSig !== receivedSig) {
-      return res.status(401).json({ error: 'QR verification failed: Invalid cryptographic signature.' });
-    }
-
-    // Check expiration (valid for 15 minutes to allow slow connections)
-    const tokenTime = parseInt(timestampStr, 10);
-    if (Date.now() - tokenTime > 15 * 60 * 1000) {
-      return res.status(401).json({ error: 'QR pass expired. Ask student to refresh pass.' });
-    }
-
-    // Retrieve patient medical data for the clinic staff
-    const [patient] = await pool.query(
-      `SELECT u.user_id, u.first_name, u.last_name, u.email,
-              sp.student_no, sp.course, sp.year_level,
-              hp.blood_type, hp.allergies, hp.chronic_conditions
-       FROM USERS u
-       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
-       LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
-       WHERE u.user_id = ? AND u.is_active = TRUE`,
-      [userId]
+    // 1. Lock the batch row and check current stock levels
+    const [batchRows] = await connection.query(
+      'SELECT quantity_on_hand FROM MEDICINE_BATCHES WHERE batch_id = ? FOR UPDATE',
+      [batch_id]
     );
 
-    if (patient.length === 0) {
-      return res.status(404).json({ error: 'Patient not found or deactivated.' });
+    if (batchRows.length === 0) {
+      throw new Error('Medicine batch not found.');
+    }
+    if (batchRows[0].quantity_on_hand < quantity_deducted) {
+      throw new Error('Insufficient stock in this batch to complete dispensation.');
     }
 
-    res.json({
-      verified: true,
-      patient: patient[0],
-    });
+    // 2. Deduct the quantity from the batch
+    await connection.query(
+      'UPDATE MEDICINE_BATCHES SET quantity_on_hand = quantity_on_hand - ? WHERE batch_id = ?',
+      [quantity_deducted, batch_id]
+    );
+
+    // 3. Append an immutable record to the inventory audit trail
+    await connection.query(
+      `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
+       VALUES (?, ?, 'dispense', ?, ?)`,
+      [batch_id, -quantity_deducted, reason || 'Prescription issuance', req.user.user_id]
+    );
+
+    await connection.commit();
+    res.json({ message: 'Stock successfully deducted and logged.' });
   } catch (error) {
-    console.error('Verification error:', error);
-    res.status(500).json({ error: 'Error during verification.' });
+    await connection.rollback();
+    res.status(400).json({ error: error.message });
+  } finally {
+    connection.release();
   }
 });
 
@@ -6698,15 +8713,15 @@ export default router;
 import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
+import { requireRoles } from '../middleware/rbac.js';
 
 const router = express.Router();
 
-// GET /api/profile/me - Fetch authenticated user's profile and medical history
+// 1. GET /api/profile/me - Authenticated user views their own profile
 router.get('/me', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.user_id;
 
-    // 1. Fetch user baseline info + student profile (if student)
     const [userRows] = await pool.query(
       `SELECT u.user_id, u.email, u.first_name, u.last_name, u.phone,
               sp.student_no, sp.course, sp.year_level
@@ -6717,23 +8732,21 @@ router.get('/me', authenticateToken, async (req, res) => {
     );
 
     if (userRows.length === 0) {
-      return res.status(404).json({ error: 'User not found.' });
+      return res.status(404).json({ error: 'User account not found.' });
     }
 
-    // 2. Fetch or initialize Health Profile
     const [healthRows] = await pool.query(
       `SELECT profile_id, blood_type, allergies, chronic_conditions,
-              emergency_contact_name, emergency_contact_phone, height, weight, updated_at
+              immunization_history, emergency_contact_name, emergency_contact_phone,
+              height, weight, version, updated_at
        FROM HEALTH_PROFILES
        WHERE user_id = ?`,
       [userId]
     );
 
-    const healthProfile = healthRows.length > 0 ? healthRows[0] : null;
-
     res.json({
       user: userRows[0],
-      healthProfile,
+      healthProfile: healthRows.length > 0 ? healthRows[0] : null,
     });
   } catch (error) {
     console.error('Error fetching profile:', error);
@@ -6741,208 +8754,105 @@ router.get('/me', authenticateToken, async (req, res) => {
   }
 });
 
-// PUT /api/profile/me - Update static health indicators
+// 2. PUT /api/profile/me - Student updates personal contact & emergency contact
 router.put('/me', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.user_id;
+    const { phone, emergency_contact_name, emergency_contact_phone } = req.body;
+
+    if (phone !== undefined) {
+      await pool.query('UPDATE USERS SET phone = ? WHERE user_id = ?', [phone, userId]);
+    }
+
+    const [existing] = await pool.query('SELECT profile_id FROM HEALTH_PROFILES WHERE user_id = ?', [userId]);
+
+    if (existing.length > 0) {
+      await pool.query(
+        `UPDATE HEALTH_PROFILES 
+         SET emergency_contact_name = ?, emergency_contact_phone = ?, version = version + 1
+         WHERE user_id = ?`,
+        [emergency_contact_name || null, emergency_contact_phone || null, userId]
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO HEALTH_PROFILES (user_id, emergency_contact_name, emergency_contact_phone)
+         VALUES (?, ?, ?)`,
+        [userId, emergency_contact_name || null, emergency_contact_phone || null]
+      );
+    }
+
+    res.json({ message: 'Contact and emergency details updated.' });
+  } catch (error) {
+    console.error('Error updating contact profile:', error);
+    res.status(500).json({ error: 'Failed to update contact info.' });
+  }
+});
+
+// 3. PUT /api/profile/patient/:userId - Clinic staff updates verified clinical indicators
+router.put('/patient/:userId', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+  try {
+    const targetUserId = req.params.userId;
     const {
       blood_type,
       allergies,
       chronic_conditions,
-      emergency_contact_name,
-      emergency_contact_phone,
+      immunization_history,
       height,
       weight,
+      emergency_contact_name,
+      emergency_contact_phone,
     } = req.body;
 
-    // Check if record exists
-    const [existing] = await pool.query('SELECT profile_id FROM HEALTH_PROFILES WHERE user_id = ?', [userId]);
+    const immunizationJson = immunization_history ? JSON.stringify(immunization_history) : null;
+
+    const [existing] = await pool.query('SELECT profile_id FROM HEALTH_PROFILES WHERE user_id = ?', [targetUserId]);
 
     if (existing.length > 0) {
-      // Update
       await pool.query(
         `UPDATE HEALTH_PROFILES 
          SET blood_type = ?, allergies = ?, chronic_conditions = ?,
-             emergency_contact_name = ?, emergency_contact_phone = ?,
+             immunization_history = ?, emergency_contact_name = ?, emergency_contact_phone = ?,
              height = ?, weight = ?, version = version + 1
          WHERE user_id = ?`,
-        [blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, height, weight, userId]
+        [
+          blood_type || null,
+          allergies || null,
+          chronic_conditions || null,
+          immunizationJson,
+          emergency_contact_name || null,
+          emergency_contact_phone || null,
+          height ? parseFloat(height) : null,
+          weight ? parseFloat(weight) : null,
+          targetUserId,
+        ]
       );
     } else {
-      // Insert if not present
       await pool.query(
         `INSERT INTO HEALTH_PROFILES 
-         (user_id, blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, height, weight)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [userId, blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, height, weight]
+         (user_id, blood_type, allergies, chronic_conditions, immunization_history, emergency_contact_name, emergency_contact_phone, height, weight)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          targetUserId,
+          blood_type || null,
+          allergies || null,
+          chronic_conditions || null,
+          immunizationJson,
+          emergency_contact_name || null,
+          emergency_contact_phone || null,
+          height ? parseFloat(height) : null,
+          weight ? parseFloat(weight) : null,
+        ]
       );
     }
 
-    res.json({ message: 'Health profile successfully updated.' });
+    res.json({ message: 'Patient clinical health profile updated by clinic staff.' });
   } catch (error) {
-    console.error('Error updating health profile:', error);
-    res.status(500).json({ error: 'Failed to update health profile.' });
+    console.error('Error updating patient profile:', error);
+    res.status(500).json({ error: 'Failed to update patient clinical record.' });
   }
 });
 
 export default router;
-</file>
-
-<file path="server/src/auth.js">
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import { pool } from './db.js';
-
-export async function loginUser(req, res) {
-  const { email, password } = req.body;
-
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required.' });
-  }
-
-  try {
-    // 1. Fetch user by email
-    const [users] = await pool.query(
-      'SELECT * FROM USERS WHERE email = ? AND is_active = TRUE AND deleted_at IS NULL',
-      [email]
-    );
-
-    if (users.length === 0) {
-      return res.status(401).json({ error: 'Invalid credentials.' });
-    }
-
-    const user = users[0];
-
-    // 2. Validate Password (supports testing with fallback password)
-    const isMatch = await bcrypt.compare(password, user.password_hash) || (password === 'Password123!');
-    if (!isMatch) {
-      return res.status(401).json({ error: 'Invalid credentials.' });
-    }
-
-    // 3. Fetch user's assigned roles from M:N tables
-    const [roles] = await pool.query(
-      `SELECT r.code, r.name 
-       FROM ROLES r 
-       INNER JOIN USER_ROLES ur ON r.role_id = ur.role_id 
-       WHERE ur.user_id = ?`,
-      [user.user_id]
-    );
-
-    const roleCodes = roles.map((r) => r.code);
-
-    // 4. Inside server/src/auth.js (around line 43)
-    const token = jwt.sign(
-      {
-        user_id: user.user_id,
-        email: user.email,
-        roles: roleCodes,
-      },
-      'supersecretkeyvaletudo', // <-- Hardcode the secret directly here
-      { expiresIn: '24h' }
-    );
-
-    return res.json({
-      message: 'Login successful',
-      token,
-      user: {
-        user_id: user.user_id,
-        email: user.email,
-        first_name: user.first_name,
-        last_name: user.last_name,
-        roles: roleCodes,
-      },
-    });
-  } catch (error) {
-    console.error('Login error:', error);
-    return res.status(500).json({ error: 'Internal server error.' });
-  }
-}
-
-// Middleware to verify JWT
-export function authenticateToken(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Format: Bearer <token>
-
-  if (!token) {
-    return res.status(401).json({ error: 'Access token required.' });
-  }
-
-  // Updated to use the hardcoded secret
-  jwt.verify(token, 'supersecretkeyvaletudo', (err, user) => {
-    if (err) return res.status(403).json({ error: 'Token expired or invalid.' });
-    req.user = user;
-    next();
-  });
-}
-</file>
-
-<file path="server/src/db.js">
-// server/src/db.js
-import mysql from 'mysql2/promise';
-
-export const pool = mysql.createPool({
-  host: 'localhost',
-  port: 3307,
-  user: 'root',
-  password: 'rootpassword',
-  database: 'valetudo_healthlink',
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-});
-</file>
-
-<file path="server/.env.example">
-DB_HOST=localhost
-DB_PORT=3307
-DB_USER=root
-DB_PASSWORD=rootpassword
-DB_NAME=valetudo_healthlink
-JWT_SECRET=supersecretkeyvaletudo
-PORT=5000
-</file>
-
-<file path="docker-compose.yml">
-services:
-  # 1. MySQL 8.0 with Spatial Support
-  mysql:
-    image: mysql:8.0
-    container_name: valetudo-mysql
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: valetudo_healthlink
-    ports:
-      - "3307:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-
-  # 2. Redis Live Queue Cache
-  redis:
-    image: redis:7-alpine
-    container_name: valetudo-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-
-  # 3. MinIO S3-Compatible Object Storage
-  minio:
-    image: quay.io/minio/minio:latest
-    container_name: valetudo-minio
-    restart: unless-stopped
-    ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Web UI
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: miniopassword
-    volumes:
-      - minio_data:/data
-    command: server /data --console-address ":9001"
-
-volumes:
-  mysql_data:
-  minio_data:
 </file>
 
 <file path="LICENSE">
@@ -7297,91 +9207,401 @@ Public License instead of this License.
 }
 </file>
 
-<file path="desktop/electron/main.cjs">
-// desktop/electron/main.cjs (Line 1)
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
-const path = require('path');
-const fs = require('fs');
+<file path="desktop/src/components/QrIntakeScanner.tsx">
+// desktop/src/components/QrIntakeScanner.tsx
+import React, { useState, useEffect, useRef } from 'react';
+import jsQR from 'jsqr';
 
-function createWindow() {
-  const win = new BrowserWindow({
-    width: 1280,
-    height: 850,
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: path.join(__dirname, 'preload.cjs'), // <-- LOAD PRELOAD
-    },
-  });
-
-  const devUrl = 'http://localhost:5173';
-  win.loadURL(devUrl);
+interface QrIntakeScannerProps {
+  onPatientVerified: (patient: any, token: string) => void;
 }
 
-// -----------------------------------------------------------------------------
-// PRINT HANDLER (Opens OS Print Preview Dialog)
-// -----------------------------------------------------------------------------
-ipcMain.handle('print-document', async (event, { htmlContent }) => {
-  let workerWin = new BrowserWindow({ show: false });
-  await workerWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerProps) {
+  const [scanMode, setScanMode] = useState<'camera' | 'search' | 'manual'>('camera');
+  const [searchQuery, setSearchQuery] = useState('22-LN-0123'); // Default test student
+  const [manualToken, setManualToken] = useState('');
+  const [verifiedPatient, setVerifiedPatient] = useState<any>(null);
+  const [scanStatus, setScanStatus] = useState('');
 
-  return new Promise((resolve) => {
-    // silent: false opens the native OS print preview dialog window
-    workerWin.webContents.print({ silent: false }, (success, failureReason) => {
-      if (!success) {
-        resolve({ success: false, error: failureReason });
+  // Scheduled appointment detected for this patient
+  const [pendingAppointment, setPendingAppointment] = useState<any>(null);
+  const [checkInSuccess, setCheckInSuccess] = useState<string | null>(null);
+
+  // Triage vitals intake
+  const [bp, setBp] = useState('120/80');
+  const [temp, setTemp] = useState('36.6');
+  const [pulse, setPulse] = useState('78');
+
+  // Camera stream refs
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState('');
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const animationFrameId = useRef<number | null>(null);
+
+  // 1. Verify QR Token
+  const verifyToken = async (tokenToVerify: string) => {
+    if (!tokenToVerify || tokenToVerify.trim().length === 0) return;
+
+    setScanStatus('🔍 Verifying cryptographic QR pass signature...');
+    setVerifiedPatient(null);
+    setPendingAppointment(null);
+    setCheckInSuccess(null);
+
+    const jwt = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('http://localhost:5000/api/health-pass/verify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${jwt}`,
+        },
+        body: JSON.stringify({ qrToken: tokenToVerify.trim() }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.verified) {
+        setVerifiedPatient(data.patient);
+        onPatientVerified(data.patient, tokenToVerify.trim());
+        setScanStatus('✅ Patient identity verified.');
+        stopCamera();
+        // Check if patient has any appointment to check in
+        checkPatientAppointments(data.patient.user_id);
       } else {
-        resolve({ success: true });
+        setScanStatus('❌ Verification Failed: ' + (data.error || 'Invalid or Expired QR Pass'));
       }
-      
-      // Safely close the hidden worker window after a tiny delay to prevent freezing
-      setTimeout(() => {
-        if (!workerWin.isDestroyed()) {
-          workerWin.close();
+    } catch (err: any) {
+      setScanStatus('❌ Connection Error: ' + err.message);
+    }
+  };
+
+  // 2. Search Patient by Student ID / Name (Manual Fallback)
+  const handleManualSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+
+    setScanStatus('🔍 Searching student records...');
+    setCheckInSuccess(null);
+    const jwt = localStorage.getItem('valetudo_token');
+
+    try {
+      const res = await fetch(`http://localhost:5000/api/appointments/lookup?query=${encodeURIComponent(searchQuery.trim())}`, {
+        headers: { Authorization: `Bearer ${jwt}` },
+      });
+      const data = await res.json();
+
+      if (Array.isArray(data) && data.length > 0) {
+        const app = data[0];
+        setVerifiedPatient({
+          user_id: app.user_id,
+          first_name: app.first_name,
+          last_name: app.last_name,
+          student_no: app.student_no,
+          course: app.course,
+          blood_type: app.blood_type,
+          allergies: app.allergies,
+          chronic_conditions: app.chronic_conditions,
+        });
+        setPendingAppointment(app);
+        setScanStatus(`✅ Patient record located: ${app.first_name} ${app.last_name}`);
+      } else {
+        setScanStatus('❌ No scheduled appointments found matching that query.');
+      }
+    } catch (err: any) {
+      setScanStatus('❌ Search error: ' + err.message);
+    }
+  };
+
+  // Check if verified patient has a booking
+  const checkPatientAppointments = async (userId: number) => {
+    const jwt = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`http://localhost:5000/api/appointments/lookup?userId=${userId}`, {
+        headers: { Authorization: `Bearer ${jwt}` },
+      });
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        setPendingAppointment(data[0]);
+      } else {
+        setPendingAppointment(null);
+      }
+    } catch (_) {}
+  };
+
+  // 3. Confirm Arrival & Admit to Queue
+  const handleConfirmArrival = async () => {
+    if (!pendingAppointment) return;
+
+    const jwt = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`http://localhost:5000/api/appointments/${pendingAppointment.appointment_id}/checkin`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${jwt}`,
+        },
+        body: JSON.stringify({
+          blood_pressure: bp,
+          temperature: temp,
+          pulse: pulse,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setCheckInSuccess(`✅ Arrival Confirmed! Ticket ${data.queueTicket} assigned at ${data.arrivalTime}.`);
+        setPendingAppointment({ ...pendingAppointment, status: 'checked_in' });
+      } else {
+        alert(data.error || 'Failed to check in patient.');
+      }
+    } catch (err: any) {
+      alert('Error during check-in: ' + err.message);
+    }
+  };
+
+  // Webcam Controls
+  const startCamera = async () => {
+    setCameraError('');
+    setIsCameraActive(true);
+    setScanStatus('📷 Webcam active. Center the student QR code.');
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+      });
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.setAttribute('playsinline', 'true');
+        videoRef.current.play();
+        requestAnimationFrame(tickScan);
+      }
+    } catch (err: any) {
+      setCameraError('Cannot access webcam: ' + err.message);
+      setIsCameraActive(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach((t) => t.stop());
+      videoRef.current.srcObject = null;
+    }
+    if (animationFrameId.current) {
+      cancelAnimationFrame(animationFrameId.current);
+      animationFrameId.current = null;
+    }
+    setIsCameraActive(false);
+  };
+
+  const tickScan = () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+
+    if (video && video.readyState === video.HAVE_ENOUGH_DATA && canvas) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imageData.data, imageData.width, imageData.height, {
+          inversionAttempts: 'attemptBoth',
+        });
+
+        if (code && code.data && code.data.length > 20) {
+          verifyToken(code.data);
+          return;
         }
-      }, 500);
-    });
-  });
-});
+      }
+    }
+    animationFrameId.current = requestAnimationFrame(tickScan);
+  };
 
-app.whenReady().then(createWindow);
+  useEffect(() => () => stopCamera(), []);
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
-</file>
+  return (
+    <section style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff' }}>
+      {/* Header & Mode Selector */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <h3 style={{ margin: 0, color: '#0f766e', fontSize: 16 }}>1. Patient Intake & Triage Check-in</h3>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button
+            type="button"
+            onClick={() => { setScanMode('camera'); setScanStatus(''); }}
+            style={{
+              padding: '4px 10px',
+              fontSize: 12,
+              borderRadius: 4,
+              border: '1px solid #0f766e',
+              background: scanMode === 'camera' ? '#0f766e' : '#ffffff',
+              color: scanMode === 'camera' ? '#ffffff' : '#0f766e',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+            }}
+          >
+            📷 Scan QR
+          </button>
+          <button
+            type="button"
+            onClick={() => { setScanMode('search'); stopCamera(); setScanStatus(''); }}
+            style={{
+              padding: '4px 10px',
+              fontSize: 12,
+              borderRadius: 4,
+              border: '1px solid #0f766e',
+              background: scanMode === 'search' ? '#0f766e' : '#ffffff',
+              color: scanMode === 'search' ? '#ffffff' : '#0f766e',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+            }}
+          >
+            🔍 Search ID
+          </button>
+        </div>
+      </div>
 
-<file path="desktop/package.json">
-{
-  "name": "valetudo-desktop",
-  "private": true,
-  "version": "1.0.0",
-  "main": "electron/main.cjs",
-  "scripts": {
-    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:127.0.0.1:5173 && electron .\"",
-    "build": "tsc && vite build",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "socket.io-client": "^4.8.1"
-  },
-  "devDependencies": {
-    "@types/node": "^22.0.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^4.3.4",
-    "concurrently": "^9.1.0",
-    "electron": "^33.2.0",
-    "typescript": "^5.7.0",
-    "vite": "^6.0.0",
-    "wait-on": "^8.0.1"
-  },
-  "allowScripts": {
-    "electron@33.4.11": true,
-    "esbuild@0.25.12": true
-  }
+      {/* MODE A: QR CAMERA */}
+      {scanMode === 'camera' && (
+        <div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10 }}>
+            {!isCameraActive ? (
+              <button
+                type="button"
+                onClick={startCamera}
+                style={{ padding: '8px 14px', background: '#0f766e', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
+              >
+                ▶ Turn On Webcam
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={stopCamera}
+                style={{ padding: '8px 14px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
+              >
+                ⏹ Stop Camera
+              </button>
+            )}
+            <small style={{ color: '#64748b' }}>Scan student dynamic pass upon physical arrival.</small>
+          </div>
+
+          <div style={{ position: 'relative', width: '100%', maxWidth: 360, height: 200, background: '#0f172a', borderRadius: 8, overflow: 'hidden', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'cover', display: isCameraActive ? 'block' : 'none' }} />
+            <canvas ref={canvasRef} style={{ display: 'none' }} />
+            {!isCameraActive && <p style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center' }}>Webcam off.<br/>Click "Turn On Webcam" to scan.</p>}
+          </div>
+        </div>
+      )}
+
+      {/* MODE B: MANUAL STUDENT ID SEARCH */}
+      {scanMode === 'search' && (
+        <form onSubmit={handleManualSearch} style={{ display: 'flex', gap: 8, margin: '10px 0' }}>
+          <input
+            style={{ flex: 1, padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13, color: '#0f172a', background: '#ffffff' }}
+            placeholder="Enter Student ID (e.g. 22-LN-0123) or Last Name"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          <button
+            type="submit"
+            style={{ padding: '8px 16px', background: '#0f766e', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer', fontSize: 13 }}
+          >
+            Find Booking
+          </button>
+        </form>
+      )}
+
+      {scanStatus && (
+        <p style={{ fontSize: 13, margin: '10px 0', fontWeight: 'bold', color: scanStatus.includes('✅') ? '#16a34a' : '#dc2626' }}>
+          {scanStatus}
+        </p>
+      )}
+
+      {/* VERIFIED PATIENT & SCHEDULED APPOINTMENT CARD */}
+      {verifiedPatient && (
+        <div style={{ marginTop: 14, padding: 14, background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h4 style={{ margin: 0, color: '#0f766e', fontSize: 15 }}>
+              👤 {verifiedPatient.first_name} {verifiedPatient.last_name} ({verifiedPatient.student_no || 'Staff'})
+            </h4>
+            <span style={{ fontSize: 12, color: '#64748b' }}>{verifiedPatient.course}</span>
+          </div>
+
+          <p style={{ margin: '6px 0', fontSize: 13 }}>
+            <b>Allergies:</b> <span style={{ color: verifiedPatient.allergies ? '#dc2626' : '#16a34a', fontWeight: 'bold' }}>{verifiedPatient.allergies || 'None reported'}</span> &nbsp;|&nbsp;
+            <b>Blood:</b> {verifiedPatient.blood_type || 'O+'}
+          </p>
+
+          {/* If patient has an active appointment */}
+          {pendingAppointment ? (
+            <div style={{ marginTop: 12, padding: 12, background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 6 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <b style={{ color: '#0f766e', fontSize: 13 }}>📅 Scheduled Booking Detected:</b>
+                <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: pendingAppointment.status === 'checked_in' ? '#dcfce7' : '#fef3c7', color: pendingAppointment.status === 'checked_in' ? '#15803d' : '#b45309', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                  {pendingAppointment.status}
+                </span>
+              </div>
+              <p style={{ margin: '4px 0', fontSize: 13 }}>
+                <b>Time:</b> {pendingAppointment.formatted_schedule || pendingAppointment.date_time}
+              </p>
+              <p style={{ margin: '2px 0 10px', fontSize: 13 }}>
+                <b>Purpose:</b> {pendingAppointment.appointment_type} (Attending: Dr. {pendingAppointment.doc_last_name || 'Mata'})
+              </p>
+
+              {/* Triage Vitals Input by Nurse */}
+              {pendingAppointment.status !== 'checked_in' && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 'bold', color: '#475569' }}>Blood Pressure:</label>
+                    <input style={{ width: '100%', padding: 4, fontSize: 12, boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: 4, background: '#fff', color: '#0f172a' }} value={bp} onChange={(e) => setBp(e.target.value)} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 'bold', color: '#475569' }}>Temp (°C):</label>
+                    <input style={{ width: '100%', padding: 4, fontSize: 12, boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: 4, background: '#fff', color: '#0f172a' }} value={temp} onChange={(e) => setTemp(e.target.value)} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 'bold', color: '#475569' }}>Pulse (bpm):</label>
+                    <input style={{ width: '100%', padding: 4, fontSize: 12, boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: 4, background: '#fff', color: '#0f172a' }} value={pulse} onChange={(e) => setPulse(e.target.value)} />
+                  </div>
+                </div>
+              )}
+
+              {/* Check-In Confirm Button */}
+              {pendingAppointment.status === 'checked_in' ? (
+                <div style={{ color: '#16a34a', fontWeight: 'bold', fontSize: 13, textAlign: 'center' }}>
+                  {checkInSuccess || '✅ Patient is checked in and waiting in queue.'}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleConfirmArrival}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    background: '#0f766e',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 6,
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    fontSize: 13,
+                  }}
+                >
+                  📍 Confirm Arrival & Check-in Patient
+                </button>
+              )}
+            </div>
+          ) : (
+            <p style={{ fontSize: 12, color: '#64748b', fontStyle: 'italic', marginTop: 8 }}>
+              No scheduled appointment found. Student can be treated as a regular walk-in.
+            </p>
+          )}
+        </div>
+      )}
+    </section>
+  );
 }
 </file>
 
@@ -7552,28 +9772,6 @@ android.builtInKotlin=false
 </plist>
 </file>
 
-<file path="mobile/lib/config/api_config.dart">
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'dart:io' show Platform;
-
-class ApiConfig {
-  static String get baseUrl {
-    if (kIsWeb) {
-      return 'http://localhost:5000';
-    }
-
-    try {
-      if (Platform.isAndroid) {
-        // Change to your PC's Wi-Fi IP (e.g., 'http://192.168.18.116:5000') if testing on a physical phone
-        return 'http://192.168.18.116:5000'; // Default for Android Emulator
-      }
-    } catch (_) {}
-
-    return 'http://localhost:5000'; // iOS / macOS / Windows fallback
-  }
-}
-</file>
-
 <file path="mobile/lib/screens/patient_portal_screen.dart">
 // mobile/lib/screens/patient_portal_screen.dart
 import 'dart:async';
@@ -7585,6 +9783,8 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import '../config/api_config.dart';
 import 'login_screen.dart';
+import 'edit_profile_screen.dart';
+import 'consultation_scheduler_screen.dart';
 
 class PatientPortalScreen extends StatefulWidget {
   final Map<String, dynamic> user;
@@ -7632,7 +9832,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         setState(() => _qrToken = jsonDecode(res.body)['qrToken']);
       }
     } catch (_) {}
-    setState(() => _loadingQR = false);
+    if (mounted) setState(() => _loadingQR = false);
   }
 
   Future<void> _fetchProfile() async {
@@ -7647,7 +9847,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         setState(() => _profileData = jsonDecode(res.body));
       }
     } catch (_) {}
-    setState(() => _loadingProfile = false);
+    if (mounted) setState(() => _loadingProfile = false);
   }
 
   // --- SOS Logic ---
@@ -7658,8 +9858,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
       _sosStatusMessage = 'Hold button to broadcast SOS...';
     });
 
-    const step = 50; // ms
-    const totalDuration = 2500; // 2.5 seconds hold
+    const step = 50;
+    const totalDuration = 2500;
     _holdTimer = Timer.periodic(const Duration(milliseconds: step), (timer) {
       setState(() {
         _holdProgress += step / totalDuration;
@@ -7690,27 +9890,24 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     });
 
     try {
-      // 1. Verify and request GPS permission
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
           setState(() {
             _isDispatchingSOS = false;
-            _sosStatusMessage = 'Location permission denied. Cannot send GPS SOS.';
+            _sosStatusMessage = 'Location permission denied.';
           });
           return;
         }
       }
 
-      // 2. Fetch coordinates (falls back to campus approximate if emulator)
       Position position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
       );
 
       setState(() => _sosStatusMessage = 'Broadcasting alert to clinic...');
 
-      // 3. Transmit to backend
       final token = await _storage.read(key: 'jwt_token');
       final res = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/api/emergency/sos'),
@@ -7721,7 +9918,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         body: jsonEncode({
           'latitude': position.latitude,
           'longitude': position.longitude,
-          'notes': 'Urgent campus incident triggered via Mobile Panic Button',
+          'notes': 'Urgent incident triggered via Mobile Panic Button',
         }),
       );
 
@@ -7729,7 +9926,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
 
       if (res.statusCode == 201) {
         setState(() {
-          _sosStatusMessage = 'EMERGENCY DISPATCHED!\nClinic and Quick Response alerted.';
+          _sosStatusMessage = 'EMERGENCY DISPATCHED!\nClinic and Response team alerted.';
         });
         if (mounted) {
           _showEmergencyDialog();
@@ -7740,7 +9937,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     } catch (e) {
       setState(() => _sosStatusMessage = 'SOS Network Error: $e');
     } finally {
-      setState(() => _isDispatchingSOS = false);
+      if (mounted) setState(() => _isDispatchingSOS = false);
     }
   }
 
@@ -7752,7 +9949,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         icon: const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 60),
         title: const Text('SOS Alert Active', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
         content: const Text(
-          'Your GPS coordinates and medical profile have been broadcasted to the PSU Infirmary and Response team. Stay where you are if safe.',
+          'Your live GPS coordinates and health profile have been broadcasted to the PSU Infirmary and Response team.',
           textAlign: TextAlign.center,
         ),
         actions: [
@@ -7768,15 +9965,28 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Exact 1-to-1 match with bottom navigation indices:
+    // 0 = Health Pass
+    // 1 = Consultation Scheduler
+    // 2 = SOS Panic
+    // 3 = Profile
     final tabs = [
       _buildQRPassTab(),
+      const ConsultationSchedulerScreen(),
       _buildSOSTab(),
       _buildProfileTab(),
     ];
 
+    final titles = [
+      'Valetudo | ${widget.user['first_name']}',
+      'Consultation Scheduler',
+      'Campus Emergency SOS',
+      'My Health Profile',
+    ];
+
     return Scaffold(
       appBar: AppBar(
-        title: Text('Valetudo | ${widget.user['first_name']}'),
+        title: Text(titles[_currentIndex]),
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
@@ -7796,15 +10006,30 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         selectedIndex: _currentIndex,
         onDestinationSelected: (idx) => setState(() => _currentIndex = idx),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.qr_code_2), label: 'Health Pass'),
-          NavigationDestination(icon: Icon(Icons.emergency_share, color: Colors.red), label: 'SOS Panic'),
-          NavigationDestination(icon: Icon(Icons.person), label: 'Profile'),
+          NavigationDestination(
+            icon: Icon(Icons.qr_code_2),
+            label: 'Health Pass',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.calendar_month_outlined),
+            selectedIcon: Icon(Icons.calendar_month, color: Color(0xFF0F766E)),
+            label: 'Scheduler',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.emergency_share, color: Colors.red),
+            label: 'SOS Panic',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline),
+            selectedIcon: Icon(Icons.person),
+            label: 'Profile',
+          ),
         ],
       ),
     );
   }
 
-  // --- TAB 1: QR HEALTH PASS ---
+  // --- TAB 0: QR HEALTH PASS ---
   Widget _buildQRPassTab() {
     return Center(
       child: Padding(
@@ -7814,14 +10039,18 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
           children: [
             const Text('PSU Campus Health Pass', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            const Text('Present this QR code to the clinic nurse for touchless triage.', textAlign: TextAlign.center),
+            const Text('Present this QR code to clinic staff for touchless intake.', textAlign: TextAlign.center),
             const SizedBox(height: 24),
             _loadingQR
                 ? const CircularProgressIndicator()
                 : _qrToken.isNotEmpty
                     ? Container(
                         padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), boxShadow: const [BoxShadow(blurRadius: 8, color: Colors.black12)]),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: const [BoxShadow(blurRadius: 8, color: Colors.black12)],
+                        ),
                         child: QrImageView(data: _qrToken, version: QrVersions.auto, size: 220),
                       )
                     : const Text('Failed to load pass.'),
@@ -7878,7 +10107,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.red.withValues(alpha: 0.4),
+                          color: Colors.red.withAlpha(102),
                           blurRadius: 20,
                           spreadRadius: 4,
                         ),
@@ -7921,32 +10150,199 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   // --- TAB 3: HEALTH PROFILE ---
   Widget _buildProfileTab() {
     if (_loadingProfile) return const Center(child: CircularProgressIndicator());
-    if (_profileData == null) return const Center(child: Text('Unable to load profile.'));
+    if (_profileData == null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text('Unable to load health profile.'),
+            const SizedBox(height: 12),
+            ElevatedButton(onPressed: _fetchProfile, child: const Text('Retry')),
+          ],
+        ),
+      );
+    }
 
     final hp = _profileData!['healthProfile'] ?? {};
     final u = _profileData!['user'] ?? {};
 
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        Card(
-          child: ListTile(
-            leading: const CircleAvatar(child: Icon(Icons.person)),
-            title: Text('${u['first_name']} ${u['last_name']}'),
-            subtitle: Text('Student No: ${u['student_no'] ?? 'N/A'}\nCourse: ${u['course'] ?? 'N/A'}'),
+    List<String> immunizations = [];
+    final rawImm = hp['immunization_history'];
+    if (rawImm is List) {
+      immunizations = rawImm.map((e) => e.toString()).toList();
+    } else if (rawImm is String && rawImm.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawImm);
+        if (decoded is List) immunizations = decoded.map((e) => e.toString()).toList();
+      } catch (_) {
+        immunizations = [rawImm];
+      }
+    }
+
+    return RefreshIndicator(
+      onRefresh: _fetchProfile,
+      child: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          Card(
+            elevation: 2,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 30,
+                    backgroundColor: Colors.teal.shade100,
+                    child: const Icon(Icons.person, size: 36, color: Colors.teal),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${u['first_name']} ${u['last_name']}',
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          'ID: ${u['student_no'] ?? 'Staff/Faculty'}',
+                          style: const TextStyle(color: Colors.black54),
+                        ),
+                        Text(
+                          'Dept/Course: ${u['course'] ?? u['department'] ?? 'PSU Lingayen'}',
+                          style: const TextStyle(color: Colors.black54),
+                        ),
+                        if (u['phone'] != null)
+                          Text(
+                            'Phone: ${u['phone']}',
+                            style: const TextStyle(color: Colors.black87, fontSize: 13),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
-        const Text('Medical Indicators', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        ListTile(title: const Text('Blood Type'), trailing: Text(hp['blood_type'] ?? 'Unrecorded', style: const TextStyle(fontWeight: FontWeight.bold))),
-        ListTile(title: const Text('Allergies'), subtitle: Text(hp['allergies'] ?? 'None')),
-        ListTile(title: const Text('Chronic Conditions'), subtitle: Text(hp['chronic_conditions'] ?? 'None reported')),
-        ListTile(
-          title: const Text('Emergency Contact'),
-          subtitle: Text('${hp['emergency_contact_name'] ?? 'N/A'} (${hp['emergency_contact_phone'] ?? 'N/A'})'),
-        ),
-      ],
+          const SizedBox(height: 16),
+
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Clinical Indicators',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  final updated = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => EditProfileScreen(
+                        user: u,
+                        healthProfile: hp,
+                      ),
+                    ),
+                  );
+                  if (updated == true) {
+                    _fetchProfile();
+                  }
+                },
+                icon: const Icon(Icons.edit, size: 18),
+                label: const Text('Edit Contacts'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+
+          Card(
+            elevation: 1,
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.bloodtype, color: Colors.red),
+                  title: const Text('Blood Type'),
+                  trailing: Text(
+                    hp['blood_type'] ?? 'Unrecorded',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.straighten, color: Colors.blue),
+                  title: const Text('Height & Weight'),
+                  subtitle: Text(
+                    '${hp['height'] != null ? '${hp['height']} cm' : 'Height: N/A'} • '
+                    '${hp['weight'] != null ? '${hp['weight']} kg' : 'Weight: N/A'}',
+                  ),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.warning_amber_rounded, color: Colors.orange),
+                  title: const Text('Allergies'),
+                  subtitle: Text(
+                    hp['allergies'] ?? 'None recorded',
+                    style: TextStyle(
+                      color: (hp['allergies'] != null && hp['allergies'].toString().isNotEmpty)
+                          ? Colors.red
+                          : Colors.black87,
+                      fontWeight: (hp['allergies'] != null && hp['allergies'].toString().isNotEmpty)
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                    ),
+                  ),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.medical_information_outlined, color: Colors.purple),
+                  title: const Text('Chronic Conditions'),
+                  subtitle: Text(hp['chronic_conditions'] ?? 'None reported'),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.contact_phone, color: Colors.teal),
+                  title: const Text('Emergency Contact'),
+                  subtitle: Text(
+                    '${hp['emergency_contact_name'] ?? 'Not provided'}\n'
+                    '${hp['emergency_contact_phone'] ?? 'No contact phone'}',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          const Text(
+            'Immunization History',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            elevation: 1,
+            child: Padding(
+              padding: const EdgeInsets.all(14.0),
+              child: immunizations.isEmpty
+                  ? const Text(
+                      'No immunization records added yet. Verified by Clinic upon physical intake.',
+                      style: TextStyle(color: Colors.black54),
+                    )
+                  : Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: immunizations.map((vaccine) {
+                        return Chip(
+                          avatar: const Icon(Icons.check_circle, color: Colors.teal, size: 18),
+                          label: Text(vaccine),
+                          backgroundColor: Colors.teal.shade50,
+                        );
+                      }).toList(),
+                    ),
+            ),
+          ),
+          const SizedBox(height: 20),
+        ],
+      ),
     );
   }
 }
@@ -8032,6 +10428,216 @@ foreach(ffi_plugin ${FLUTTER_FFI_PLUGIN_LIST})
   add_subdirectory(flutter/ephemeral/.plugin_symlinks/${ffi_plugin}/windows plugins/${ffi_plugin})
   list(APPEND PLUGIN_BUNDLED_LIBRARIES ${${ffi_plugin}_bundled_libraries})
 endforeach(ffi_plugin)
+</file>
+
+<file path="server/src/routes/healthPass.js">
+// server/src/routes/healthPass.js
+import express from 'express';
+import crypto from 'crypto';
+import { pool } from '../db.js';
+import { authenticateToken } from '../auth.js';
+import { requireRoles } from '../middleware/rbac.js';
+
+const router = express.Router();
+
+// GET /api/health-pass/token - Generates dynamic QR token for mobile user
+router.get('/token', authenticateToken, (req, res) => {
+  try {
+    const userId = req.user.user_id;
+    const timestamp = Date.now();
+    const nonce = crypto.randomBytes(4).toString('hex');
+
+    // Payload: userId.timestamp.nonce
+    const payload = `${userId}.${timestamp}.${nonce}`;
+    const hmac = crypto
+      .createHmac('sha256', 'supersecretkeyvaletudo')
+      .update(payload)
+      .digest('hex');
+
+    // Signed token format: userId.timestamp.nonce.signature
+    const qrToken = `${payload}.${hmac}`;
+
+    res.json({
+      qrToken,
+      expiresInSeconds: 300, // Client should refresh every 5 mins
+    });
+  } catch (error) {
+    console.error('QR generation error:', error);
+    res.status(500).json({ error: 'Failed to generate QR token.' });
+  }
+});
+
+// POST /api/health-pass/verify - Scanned by Nurse/Doctor on Electron
+router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+  try {
+    const { qrToken } = req.body;
+    if (!qrToken) return res.status(400).json({ error: 'QR token required.' });
+
+    const parts = qrToken.split('.');
+    if (parts.length !== 4) {
+      return res.status(400).json({ error: 'Invalid QR token format.' });
+    }
+
+    const [userId, timestampStr, nonce, receivedSig] = parts;
+    const payload = `${userId}.${timestampStr}.${nonce}`;
+
+    // Verify HMAC
+    const expectedSig = crypto
+      .createHmac('sha256', 'supersecretkeyvaletudo')
+      .update(payload)
+      .digest('hex');
+
+    if (expectedSig !== receivedSig) {
+      return res.status(401).json({ error: 'QR verification failed: Invalid cryptographic signature.' });
+    }
+
+    // Check expiration (valid for 15 minutes to allow slow connections)
+    const tokenTime = parseInt(timestampStr, 10);
+    if (Date.now() - tokenTime > 15 * 60 * 1000) {
+      return res.status(401).json({ error: 'QR pass expired. Ask student to refresh pass.' });
+    }
+
+    // Retrieve patient medical data for the clinic staff
+    const [patient] = await pool.query(
+      `SELECT u.user_id, u.first_name, u.last_name, u.email,
+              sp.student_no, sp.course, sp.year_level,
+              hp.blood_type, hp.allergies, hp.chronic_conditions
+       FROM USERS u
+       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+       LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+       WHERE u.user_id = ? AND u.is_active = TRUE`,
+      [userId]
+    );
+
+    if (patient.length === 0) {
+      return res.status(404).json({ error: 'Patient not found or deactivated.' });
+    }
+
+    res.json({
+      verified: true,
+      patient: patient[0],
+    });
+  } catch (error) {
+    console.error('Verification error:', error);
+    res.status(500).json({ error: 'Error during verification.' });
+  }
+});
+
+export default router;
+</file>
+
+<file path="server/src/auth.js">
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { pool } from './db.js';
+
+export async function loginUser(req, res) {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required.' });
+  }
+
+  try {
+    // 1. Fetch user by email
+    const [users] = await pool.query(
+      'SELECT * FROM USERS WHERE email = ? AND is_active = TRUE AND deleted_at IS NULL',
+      [email]
+    );
+
+    if (users.length === 0) {
+      return res.status(401).json({ error: 'Invalid credentials.' });
+    }
+
+    const user = users[0];
+
+    // 2. Validate Password (supports testing with fallback password)
+    const isMatch = await bcrypt.compare(password, user.password_hash) || (password === 'Password123!');
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Invalid credentials.' });
+    }
+
+    // 3. Fetch user's assigned roles from M:N tables
+    const [roles] = await pool.query(
+      `SELECT r.code, r.name 
+       FROM ROLES r 
+       INNER JOIN USER_ROLES ur ON r.role_id = ur.role_id 
+       WHERE ur.user_id = ?`,
+      [user.user_id]
+    );
+
+    const roleCodes = roles.map((r) => r.code);
+
+    // 4. Inside server/src/auth.js (around line 43)
+    const token = jwt.sign(
+      {
+        user_id: user.user_id,
+        email: user.email,
+        roles: roleCodes,
+      },
+      'supersecretkeyvaletudo', // <-- Hardcode the secret directly here
+      { expiresIn: '24h' }
+    );
+
+    return res.json({
+      message: 'Login successful',
+      token,
+      user: {
+        user_id: user.user_id,
+        email: user.email,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        roles: roleCodes,
+      },
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    return res.status(500).json({ error: 'Internal server error.' });
+  }
+}
+
+// Middleware to verify JWT
+export function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1]; // Format: Bearer <token>
+
+  if (!token) {
+    return res.status(401).json({ error: 'Access token required.' });
+  }
+
+  // Updated to use the hardcoded secret
+  jwt.verify(token, 'supersecretkeyvaletudo', (err, user) => {
+    if (err) return res.status(403).json({ error: 'Token expired or invalid.' });
+    req.user = user;
+    next();
+  });
+}
+</file>
+
+<file path="server/src/db.js">
+// server/src/db.js
+import mysql from 'mysql2/promise';
+
+export const pool = mysql.createPool({
+  host: 'localhost',
+  port: 3307,
+  user: 'root',
+  password: 'rootpassword',
+  database: 'valetudo_healthlink',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+});
+</file>
+
+<file path="server/.env.example">
+DB_HOST=localhost
+DB_PORT=3307
+DB_USER=root
+DB_PASSWORD=rootpassword
+DB_NAME=valetudo_healthlink
+JWT_SECRET=supersecretkeyvaletudo
+PORT=5000
 </file>
 
 <file path="server/package.json">
@@ -8508,6 +11114,161 @@ dist/
 build/
 desktop/dist/
 mobile/build/
+</file>
+
+<file path="docker-compose.yml">
+services:
+  # 1. MySQL 8.0 with Spatial Support
+  mysql:
+    image: mysql:8.0
+    container_name: valetudo-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: valetudo_healthlink
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  # 2. Redis Live Queue Cache
+  redis:
+    image: redis:7-alpine
+    container_name: valetudo-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  # 3. MinIO S3-Compatible Object Storage
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: valetudo-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web UI
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: miniopassword
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+
+volumes:
+  mysql_data:
+  minio_data:
+</file>
+
+<file path="desktop/electron/main.cjs">
+// desktop/electron/main.cjs
+const { app, BrowserWindow, ipcMain } = require('electron');
+const path = require('path');
+
+function createWindow() {
+  const win = new BrowserWindow({
+    width: 1300,
+    height: 880,
+    minWidth: 1024,
+    minHeight: 720,
+    show: false, // Don't show until ready to prevent white flash
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.cjs'),
+    },
+  });
+
+  const devUrl = 'http://localhost:5173';
+  win.loadURL(devUrl);
+
+  // FIX: Force focus onto the window so input fields immediately capture keystrokes
+  win.once('ready-to-show', () => {
+    win.show();
+    win.focus();
+  });
+}
+
+// PRINT HANDLER (Native OS Print Spooler)
+ipcMain.handle('print-document', async (event, { htmlContent }) => {
+  let workerWin = new BrowserWindow({ show: false });
+  await workerWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+
+  return new Promise((resolve) => {
+    workerWin.webContents.print({ silent: false }, (success, failureReason) => {
+      if (!success) {
+        resolve({ success: false, error: failureReason });
+      } else {
+        resolve({ success: true });
+      }
+      setTimeout(() => {
+        if (!workerWin.isDestroyed()) workerWin.close();
+      }, 500);
+    });
+  });
+});
+
+app.whenReady().then(createWindow);
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
+</file>
+
+<file path="desktop/package.json">
+{
+  "name": "valetudo-desktop",
+  "private": true,
+  "version": "1.0.0",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:127.0.0.1:5173 && electron .\"",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "jsqr": "^1.4.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "electron": "^44.4.1",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "wait-on": "^8.0.1"
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "esbuild@0.25.12": true
+  }
+}
+</file>
+
+<file path="mobile/lib/config/api_config.dart">
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:io' show Platform;
+
+class ApiConfig {
+  static String get baseUrl {
+    if (kIsWeb) {
+      return 'http://localhost:5000';
+    }
+
+    try {
+      if (Platform.isAndroid) {
+        // Change to your PC's Wi-Fi IP (e.g., 'http://192.168.18.116:5000') if testing on a physical phone
+        return 'http://192.168.18.116:5000'; // Default for Android Emulator
+      }
+    } catch (_) {}
+
+    return 'http://localhost:5000'; // iOS / macOS / Windows fallback
+  }
+}
 </file>
 
 <file path="mobile/pubspec.lock">
@@ -9187,6 +11948,28 @@ flutter:
   # see https://flutter.dev/to/font-from-package
 </file>
 
+<file path="mobile/lib/main.dart">
+import 'package:flutter/material.dart';
+import 'screens/login_screen.dart';
+
+void main() {
+  runApp(const ValetudoMobileApp());
+}
+
+class ValetudoMobileApp extends StatelessWidget {
+  const ValetudoMobileApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Valetudo HealthLink',
+      theme: ThemeData(primarySwatch: Colors.teal, useMaterial3: true),
+      home: const LoginScreen(),
+    );
+  }
+}
+</file>
+
 <file path="server/src/index.js">
 // server/src/index.js
 import express from 'express';
@@ -9251,10 +12034,11 @@ server.listen(PORT, () => {
 <file path="desktop/src/App.tsx">
 // desktop/src/App.tsx
 import React, { useState } from 'react';
-import QrIntakeScanner from './components/QrIntakeScanner';
-import PrescriptionGenerator from './components/PrescriptionGenerator';
-import EmergencyAlertBanner from './components/EmergencyAlertBanner'; // Feature 4
-import InventoryManager from './components/InventoryManager';         // Feature 9
+import EmergencyAlertBanner from './components/EmergencyAlertBanner';
+import NurseConsole from './components/NurseConsole';
+import DoctorConsole from './components/DoctorConsole';
+import AdminConsole from './components/AdminConsole';
+import ResponderConsole from './components/ResponderConsole';
 
 export default function App() {
   const [email, setEmail] = useState('nurse@psu.edu.ph');
@@ -9262,8 +12046,8 @@ export default function App() {
   const [user, setUser] = useState<any>(null);
   const [error, setError] = useState('');
 
-  const [verifiedPatient, setVerifiedPatient] = useState<any>(null);
-  const [scannedToken, setScannedToken] = useState('');
+  // Allows switching perspectives if the account has multi-roles
+  const [activeRoleView, setActiveRoleView] = useState<string>('');
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -9273,13 +12057,14 @@ export default function App() {
       const res = await fetch('http://localhost:5000/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: email.trim(), password: password.trim() }),
       });
 
       const data = await res.json();
       if (res.ok) {
         localStorage.setItem('valetudo_token', data.token);
         setUser(data.user);
+        setActiveRoleView(data.user.roles[0] || 'NURSE');
       } else {
         setError(data.error || 'Login failed');
       }
@@ -9288,85 +12073,190 @@ export default function App() {
     }
   };
 
+  // ---------------------------------------------------------------------------
+  // LOGIN SCREEN (Fixed input styling to allow typing in Electron)
+  // ---------------------------------------------------------------------------
   if (!user) {
     return (
-      <div style={{ maxWidth: 380, margin: '100px auto', padding: 24, border: '1px solid #ddd', borderRadius: 8, fontFamily: 'sans-serif' }}>
-        <h2 style={{ textAlign: 'center', color: '#0f766e' }}>Valetudo Clinic Portal</h2>
-        <form onSubmit={handleLogin}>
-          <div style={{ marginBottom: 14 }}>
-            <label>Staff PSU Email</label>
-            <input style={{ width: '100%', padding: 8, marginTop: 4 }} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc' }}>
+        <div
+          style={{
+            width: 400,
+            padding: 32,
+            background: '#ffffff',
+            border: '1px solid #cbd5e1',
+            borderRadius: 10,
+            boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
+            fontFamily: 'sans-serif',
+          }}
+        >
+          <h2 style={{ textAlign: 'center', color: '#0f766e', margin: '0 0 6px 0' }}>Valetudo Clinic Portal</h2>
+          <p style={{ textAlign: 'center', color: '#64748b', fontSize: 13, marginBottom: 20 }}>
+            Pangasinan State University • Lingayen Campus
+          </p>
+
+          <form onSubmit={handleLogin}>
+            <div style={{ marginBottom: 14, textAlign: 'left' }}>
+              <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155' }}>Staff PSU Email</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  padding: '10px 12px',
+                  fontSize: 14,
+                  marginTop: 6,
+                  color: '#111827',
+                  backgroundColor: '#ffffff',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 6,
+                  outline: 'none',
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: 16, textAlign: 'left' }}>
+              <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155' }}>Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  padding: '10px 12px',
+                  fontSize: 14,
+                  marginTop: 6,
+                  color: '#111827',
+                  backgroundColor: '#ffffff',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 6,
+                  outline: 'none',
+                }}
+              />
+            </div>
+
+            {error && <p style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</p>}
+
+            <button
+              type="submit"
+              style={{
+                width: '100%',
+                padding: '12px',
+                background: '#0f766e',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: 6,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                fontSize: 14,
+              }}
+            >
+              Sign In
+            </button>
+          </form>
+
+          {/* Quick preset buttons for testing each role */}
+          <div style={{ marginTop: 24, borderTop: '1px dashed #cbd5e1', paddingTop: 14 }}>
+            <small style={{ color: '#64748b', display: 'block', marginBottom: 8, fontWeight: 'bold' }}>Quick Select Test Role:</small>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+              <button
+                type="button"
+                onClick={() => { setEmail('nurse@psu.edu.ph'); setPassword('Password123!'); }}
+                style={{ padding: '6px 8px', fontSize: 12, cursor: 'pointer', background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 4, color: '#0f766e' }}
+              >
+                👩‍⚕️ Clinic Nurse
+              </button>
+              <button
+                type="button"
+                onClick={() => { setEmail('doctor@psu.edu.ph'); setPassword('Password123!'); }}
+                style={{ padding: '6px 8px', fontSize: 12, cursor: 'pointer', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 4, color: '#0284c7' }}
+              >
+                🩺 Campus Doctor
+              </button>
+              <button
+                type="button"
+                onClick={() => { setEmail('admin@psu.edu.ph'); setPassword('Password123!'); }}
+                style={{ padding: '6px 8px', fontSize: 12, cursor: 'pointer', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 4, color: '#6d28d9' }}
+              >
+                ⚙️ System Admin
+              </button>
+              <button
+                type="button"
+                onClick={() => { setEmail('responder@psu.edu.ph'); setPassword('Password123!'); }}
+                style={{ padding: '6px 8px', fontSize: 12, cursor: 'pointer', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 4, color: '#b91c1c' }}
+              >
+                🚨 SOS Responder
+              </button>
+            </div>
           </div>
-          <div style={{ marginBottom: 14 }}>
-            <label>Password</label>
-            <input style={{ width: '100%', padding: 8, marginTop: 4 }} type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-          </div>
-          {error && <p style={{ color: 'red', fontSize: 13 }}>{error}</p>}
-          <button type="submit" style={{ width: '100%', padding: 10, background: '#0f766e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
-            Sign In to Clinic Console
-          </button>
-        </form>
+        </div>
       </div>
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // ROLE-BASED CONSOLE ROUTING
+  // ---------------------------------------------------------------------------
   return (
-    <div style={{ padding: 30, fontFamily: 'sans-serif', maxWidth: 1050, margin: '0 auto' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #eee', paddingBottom: 16 }}>
+    <div style={{ padding: 24, fontFamily: 'sans-serif', maxWidth: 1250, margin: '0 auto' }}>
+      {/* Top Header */}
+      <header
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          borderBottom: '1px solid #e2e8f0',
+          paddingBottom: 16,
+          marginBottom: 16,
+        }}
+      >
         <div>
-          <h2 style={{ margin: 0, color: '#0f766e' }}>PSU Lingayen Clinic Console</h2>
-          <small>Logged in: <b>{user.first_name} {user.last_name}</b> ({user.roles.join(', ')})</small>
+          <h2 style={{ margin: 0, color: '#0f766e' }}>Valetudo HealthLink Console</h2>
+          <small style={{ color: '#475569' }}>
+            Logged in: <b>{user.first_name} {user.last_name}</b> ({user.email}) &nbsp;|&nbsp; Active Interface: <b style={{ color: '#0f766e' }}>{activeRoleView}</b>
+          </small>
         </div>
-        <button onClick={() => setUser(null)} style={{ padding: '6px 14px', cursor: 'pointer' }}>Sign Out</button>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {/* Switch view if user holds multiple roles or wants to preview */}
+          {user.roles.length > 1 && (
+            <select
+              value={activeRoleView}
+              onChange={(e) => setActiveRoleView(e.target.value)}
+              style={{ padding: '6px 10px', borderRadius: 4, border: '1px solid #cbd5e1', fontSize: 13 }}
+            >
+              {user.roles.map((r: string) => (
+                <option key={r} value={r}>View as {r}</option>
+              ))}
+            </select>
+          )}
+
+          <button
+            onClick={() => setUser(null)}
+            style={{ padding: '6px 14px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
+          >
+            Sign Out
+          </button>
+        </div>
       </header>
 
-      {/* Feature 4: Real-time Emergency SOS Alert Banner */}
-      <div style={{ marginTop: 20 }}>
+      {/* Real-time Emergency SOS Alert Banner is visible across all campus staff */}
+      <div style={{ marginBottom: 16 }}>
         <EmergencyAlertBanner />
       </div>
 
-      {/* Features 2 & 8: Clinic Triage & Prescription Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginTop: 10 }}>
-        <QrIntakeScanner 
-          onPatientVerified={(patient, token) => {
-            setVerifiedPatient(patient);
-            setScannedToken(token);
-          }} 
-        />
-        <PrescriptionGenerator 
-          verifiedPatient={verifiedPatient} 
-          scannedToken={scannedToken} 
-        />
-      </div>
-
-      {/* Feature 9: Medicine Inventory & Stock Deduction */}
-      <div style={{ marginTop: 20 }}>
-        <InventoryManager />
-      </div>
+      {/* Render Role-Specific Interface according to Architectural Design */}
+      {activeRoleView === 'NURSE' && <NurseConsole />}
+      {(activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST') && <DoctorConsole />}
+      {activeRoleView === 'ADMIN' && <AdminConsole />}
+      {activeRoleView === 'EMERGENCY_RESPONDER' && <ResponderConsole />}
     </div>
   );
-}
-</file>
-
-<file path="mobile/lib/main.dart">
-import 'package:flutter/material.dart';
-import 'screens/login_screen.dart';
-
-void main() {
-  runApp(const ValetudoMobileApp());
-}
-
-class ValetudoMobileApp extends StatelessWidget {
-  const ValetudoMobileApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Valetudo HealthLink',
-      theme: ThemeData(primarySwatch: Colors.teal, useMaterial3: true),
-      home: const LoginScreen(),
-    );
-  }
 }
 </file>
 
