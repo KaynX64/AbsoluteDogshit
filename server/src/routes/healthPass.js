@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { requireRoles } from '../middleware/rbac.js';
+import { logAudit } from '../utils/auditLogger.js';
 
 const router = express.Router();
 
@@ -36,36 +37,35 @@ router.get('/token', authenticateToken, (req, res) => {
 
 // POST /api/health-pass/verify - Scanned by Nurse/Doctor on Electron
 router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+  const { qrToken } = req.body;
+  if (!qrToken) return res.status(400).json({ error: 'QR token required.' });
+
+  const parts = qrToken.split('.');
+  if (parts.length !== 4) {
+    return res.status(400).json({ error: 'Invalid QR token format.' });
+  }
+
+  const [patientUserId, timestampStr, nonce, receivedSig] = parts;
+  const payload = `${patientUserId}.${timestampStr}.${nonce}`;
+
+  // Verify HMAC (Done outside the DB transaction to save resources)
+  const expectedSig = crypto.createHmac('sha256', 'supersecretkeyvaletudo').update(payload).digest('hex');
+  if (expectedSig !== receivedSig) {
+    return res.status(401).json({ error: 'QR verification failed: Invalid signature.' });
+  }
+
+  const tokenTime = parseInt(timestampStr, 10);
+  if (Date.now() - tokenTime > 15 * 60 * 1000) {
+    return res.status(401).json({ error: 'QR pass expired. Ask student to refresh pass.' });
+  }
+
+  const connection = await pool.getConnection();
+
   try {
-    const { qrToken } = req.body;
-    if (!qrToken) return res.status(400).json({ error: 'QR token required.' });
+    await connection.beginTransaction();
 
-    const parts = qrToken.split('.');
-    if (parts.length !== 4) {
-      return res.status(400).json({ error: 'Invalid QR token format.' });
-    }
-
-    const [userId, timestampStr, nonce, receivedSig] = parts;
-    const payload = `${userId}.${timestampStr}.${nonce}`;
-
-    // Verify HMAC
-    const expectedSig = crypto
-      .createHmac('sha256', 'supersecretkeyvaletudo')
-      .update(payload)
-      .digest('hex');
-
-    if (expectedSig !== receivedSig) {
-      return res.status(401).json({ error: 'QR verification failed: Invalid cryptographic signature.' });
-    }
-
-    // Check expiration (valid for 15 minutes to allow slow connections)
-    const tokenTime = parseInt(timestampStr, 10);
-    if (Date.now() - tokenTime > 15 * 60 * 1000) {
-      return res.status(401).json({ error: 'QR pass expired. Ask student to refresh pass.' });
-    }
-
-    // Retrieve patient medical data for the clinic staff
-    const [patient] = await pool.query(
+    // Retrieve patient medical data
+    const [patient] = await connection.query(
       `SELECT u.user_id, u.first_name, u.last_name, u.email,
               sp.student_no, sp.course, sp.year_level,
               hp.blood_type, hp.allergies, hp.chronic_conditions
@@ -73,20 +73,39 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
        LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
        LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
        WHERE u.user_id = ? AND u.is_active = TRUE`,
-      [userId]
+      [patientUserId]
     );
 
     if (patient.length === 0) {
-      return res.status(404).json({ error: 'Patient not found or deactivated.' });
+      throw new Error('Patient not found or deactivated.');
     }
 
+    // RA 10173 Audit: Log that the Nurse/Doctor viewed this specific student's PHI
+    await logAudit(connection, {
+      userId: req.user.user_id, // The staff member performing the scan
+      action: 'VIEW',
+      table: 'HEALTH_PROFILES',
+      recordId: patientUserId,  // The student whose data was exposed
+      oldValue: null,
+      newValue: null,
+      ipAddress: req.ip
+    });
+
+    await connection.commit();
+    
     res.json({
       verified: true,
       patient: patient[0],
     });
   } catch (error) {
+    await connection.rollback();
+    if (error.message === 'Patient not found or deactivated.') {
+      return res.status(404).json({ error: error.message });
+    }
     console.error('Verification error:', error);
     res.status(500).json({ error: 'Error during verification.' });
+  } finally {
+    connection.release();
   }
 });
 
