@@ -2,11 +2,8 @@
 import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
-<<<<<<< HEAD
 import { logAudit } from '../utils/auditLogger.js';
-=======
 import { requireRoles } from '../middleware/rbac.js';
->>>>>>> origin/main
 
 const router = express.Router();
 
@@ -38,18 +35,6 @@ router.get('/doctors', authenticateToken, async (req, res) => {
   }
 });
 
-<<<<<<< HEAD
-router.post('/', authenticateToken, async (req, res) => {
-  const { doctor_user_id, date_time, appointment_type, notes } = req.body;
-  const patientUserId = req.user.user_id;
-
-  if (!doctor_user_id || !date_time || !appointment_type) {
-    return res.status(400).json({ error: 'Doctor, date/time, and type are required.' });
-  }
-
-  const connection = await pool.getConnection();
-
-=======
 // =============================================================================
 // 2. GET /api/appointments/slots
 // Description: Computes available and booked 30-minute time slots for a given
@@ -102,50 +87,38 @@ router.get('/slots', authenticateToken, async (req, res) => {
 // Body: { doctor_user_id, date_time, appointment_type, notes }
 // =============================================================================
 router.post('/', authenticateToken, async (req, res) => {
+  const { doctor_user_id, date_time, appointment_type, notes } = req.body;
+  const patientUserId = req.user.user_id;
+
+  if (!doctor_user_id || !date_time || !appointment_type) {
+    return res.status(400).json({ error: 'Doctor, date/time, and appointment purpose are required.' });
+  }
+
   const connection = await pool.getConnection();
->>>>>>> origin/main
+
   try {
     await connection.beginTransaction();
 
-<<<<<<< HEAD
     // 1. Lock the Doctor's record to serialize booking attempts for this specific doctor
     await connection.query(
       `SELECT user_id FROM USERS WHERE user_id = ? FOR UPDATE`, 
       [doctor_user_id]
     );
 
-    // 2. Check for schedule collision safely (concurrent requests are now waiting in line)
-=======
-    if (!doctor_user_id || !date_time || !appointment_type) {
-      return res.status(400).json({ error: 'Doctor, date/time, and appointment purpose are required.' });
-    }
-
-    await connection.beginTransaction();
-
-    // 1. Concurrency safe check: Verify if the requested slot is already taken
->>>>>>> origin/main
+    // 2. Concurrency safe check: Verify if the requested slot is already taken
     const [conflict] = await connection.query(
       `SELECT appointment_id FROM APPOINTMENTS 
        WHERE doctor_user_id = ? 
          AND date_time = ? 
-         AND status IN ('scheduled', 'checked_in', 'serving')
-       FOR UPDATE`,
+         AND status IN ('scheduled', 'checked_in', 'serving')`,
       [doctor_user_id, date_time]
     );
 
     if (conflict.length > 0) {
-<<<<<<< HEAD
       throw new Error('Selected time slot is already booked.');
     }
 
-    // 3. Insert the appointment
-    const [result] = await connection.query(
-=======
-      await connection.rollback();
-      return res.status(409).json({ error: 'The requested consultation slot was just taken. Please choose another slot.' });
-    }
-
-    // 2. Prevent patient from double-booking themselves at the exact same time
+    // 3. Prevent patient from double-booking themselves at the exact same time
     const [patientConflict] = await connection.query(
       `SELECT appointment_id FROM APPOINTMENTS 
        WHERE patient_user_id = ? 
@@ -155,49 +128,34 @@ router.post('/', authenticateToken, async (req, res) => {
     );
 
     if (patientConflict.length > 0) {
-      await connection.rollback();
-      return res.status(400).json({ error: 'You already have an active appointment scheduled at this exact time.' });
+      throw new Error('You already have an active appointment scheduled at this exact time.');
     }
 
-    // 3. Insert Appointment Record
+    // 4. Insert Appointment Record
     const [insertResult] = await connection.query(
->>>>>>> origin/main
       `INSERT INTO APPOINTMENTS (patient_user_id, doctor_user_id, date_time, appointment_type, status, notes)
        VALUES (?, ?, ?, ?, 'scheduled', ?)`,
       [patientUserId, doctor_user_id, date_time, appointment_type, notes || '']
     );
 
-<<<<<<< HEAD
-    // 4. RA 10173 Audit: Log the creation of the appointment
+    const appointmentId = insertResult.insertId;
+
+    // 5. RA 10173 Audit: Log the creation of the appointment
     await logAudit(connection, {
-      userId: req.user.user_id, // Patient who booked it
+      userId: patientUserId,
       action: 'CREATE',
       table: 'APPOINTMENTS',
-      recordId: result.insertId,
+      recordId: appointmentId,
       oldValue: null,
       newValue: { doctor_user_id, date_time, appointment_type, notes },
       ipAddress: req.ip
     });
 
     await connection.commit();
-=======
-    const appointmentId = insertResult.insertId;
 
-    // 4. Record Audit Log for RA 10173 & System Traceability
-    await connection.query(
-      `INSERT INTO AUDIT_LOGS (user_id, action, table_affected, record_id, prev_hash, entry_hash)
-       VALUES (?, 'CREATE', 'APPOINTMENTS', ?, 
-               SHA2(CONCAT('PREV_', ?), 256), 
-               SHA2(CONCAT('APPOINTMENT_BOOKED_', ?), 256))`,
-      [patientUserId, appointmentId, appointmentId, appointmentId]
-    );
-
-    await connection.commit();
-
-    // 5. Automated Notification Dispatch Simulation (Push / Email Trigger)
+    // 6. Automated Notification Dispatch Simulation (Push / Email Trigger)
     console.log(`[Notification Service] Confirmation sent to User #${patientUserId} for appointment #${appointmentId} on ${date_time}`);
 
->>>>>>> origin/main
     res.status(201).json({
       message: 'Consultation appointment scheduled successfully.',
       appointmentId,
@@ -209,17 +167,11 @@ router.post('/', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     await connection.rollback();
-<<<<<<< HEAD
-    // Catch the specific error we threw, otherwise generic 500
-    if (error.message === 'Selected time slot is already booked.') {
+    if (error.message === 'Selected time slot is already booked.' || error.message === 'You already have an active appointment scheduled at this exact time.') {
       return res.status(409).json({ error: error.message });
     }
-    console.error('Booking error:', error);
-    res.status(500).json({ error: 'Failed to book appointment.' });
-=======
     console.error('[Appointments] Booking transaction error:', error);
     res.status(500).json({ error: 'Failed to book consultation.' });
->>>>>>> origin/main
   } finally {
     connection.release();
   }
@@ -290,6 +242,7 @@ router.patch('/:id/cancel', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Failed to cancel appointment.' });
   }
 });
+
 // =============================================================================
 // 6. GET /api/appointments/today
 // Description: Returns active appointments by default (scheduled, checked_in, serving).
