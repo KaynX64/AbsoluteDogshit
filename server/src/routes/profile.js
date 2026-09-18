@@ -2,15 +2,16 @@
 import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
-import { requireRoles } from '../middleware/rbac.js';
+import { logAudit } from '../utils/auditLogger.js';
 
 const router = express.Router();
 
-// 1. GET /api/profile/me - Authenticated user views their own profile
+// GET /api/profile/me - Fetch authenticated user's profile and medical history
 router.get('/me', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.user_id;
 
+    // 1. Fetch user baseline info + student profile (if student)
     const [userRows] = await pool.query(
       `SELECT u.user_id, u.email, u.first_name, u.last_name, u.phone,
               sp.student_no, sp.course, sp.year_level
@@ -21,21 +22,23 @@ router.get('/me', authenticateToken, async (req, res) => {
     );
 
     if (userRows.length === 0) {
-      return res.status(404).json({ error: 'User account not found.' });
+      return res.status(404).json({ error: 'User not found.' });
     }
 
+    // 2. Fetch or initialize Health Profile
     const [healthRows] = await pool.query(
       `SELECT profile_id, blood_type, allergies, chronic_conditions,
-              immunization_history, emergency_contact_name, emergency_contact_phone,
-              height, weight, version, updated_at
+              emergency_contact_name, emergency_contact_phone, height, weight, updated_at
        FROM HEALTH_PROFILES
        WHERE user_id = ?`,
       [userId]
     );
 
+    const healthProfile = healthRows.length > 0 ? healthRows[0] : null;
+
     res.json({
       user: userRows[0],
-      healthProfile: healthRows.length > 0 ? healthRows[0] : null,
+      healthProfile,
     });
   } catch (error) {
     console.error('Error fetching profile:', error);
@@ -43,101 +46,75 @@ router.get('/me', authenticateToken, async (req, res) => {
   }
 });
 
-// 2. PUT /api/profile/me - Student updates personal contact & emergency contact
+// PUT /api/profile/me - Update static health indicators with RA 10173 Audit Logging
 router.put('/me', authenticateToken, async (req, res) => {
+  const userId = req.user.user_id;
+  const {
+    blood_type, allergies, chronic_conditions,
+    emergency_contact_name, emergency_contact_phone, height, weight,
+  } = req.body;
+
+  const connection = await pool.getConnection();
+
   try {
-    const userId = req.user.user_id;
-    const { phone, emergency_contact_name, emergency_contact_phone } = req.body;
+    await connection.beginTransaction();
 
-    if (phone !== undefined) {
-      await pool.query('UPDATE USERS SET phone = ? WHERE user_id = ?', [phone, userId]);
-    }
+    // 1. Lock and fetch the old data before we change it
+    const [existing] = await connection.query(
+      'SELECT * FROM HEALTH_PROFILES WHERE user_id = ? FOR UPDATE',
+      [userId]
+    );
 
-    const [existing] = await pool.query('SELECT profile_id FROM HEALTH_PROFILES WHERE user_id = ?', [userId]);
+    let oldData = null;
+    let action = 'CREATE';
+    let recordId = null;
 
     if (existing.length > 0) {
-      await pool.query(
-        `UPDATE HEALTH_PROFILES 
-         SET emergency_contact_name = ?, emergency_contact_phone = ?, version = version + 1
-         WHERE user_id = ?`,
-        [emergency_contact_name || null, emergency_contact_phone || null, userId]
-      );
-    } else {
-      await pool.query(
-        `INSERT INTO HEALTH_PROFILES (user_id, emergency_contact_name, emergency_contact_phone)
-         VALUES (?, ?, ?)`,
-        [userId, emergency_contact_name || null, emergency_contact_phone || null]
-      );
-    }
+      oldData = existing[0];
+      action = 'UPDATE';
+      recordId = oldData.profile_id;
 
-    res.json({ message: 'Contact and emergency details updated.' });
-  } catch (error) {
-    console.error('Error updating contact profile:', error);
-    res.status(500).json({ error: 'Failed to update contact info.' });
-  }
-});
-
-// 3. PUT /api/profile/patient/:userId - Clinic staff updates verified clinical indicators
-router.put('/patient/:userId', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
-  try {
-    const targetUserId = req.params.userId;
-    const {
-      blood_type,
-      allergies,
-      chronic_conditions,
-      immunization_history,
-      height,
-      weight,
-      emergency_contact_name,
-      emergency_contact_phone,
-    } = req.body;
-
-    const immunizationJson = immunization_history ? JSON.stringify(immunization_history) : null;
-
-    const [existing] = await pool.query('SELECT profile_id FROM HEALTH_PROFILES WHERE user_id = ?', [targetUserId]);
-
-    if (existing.length > 0) {
-      await pool.query(
+      // Update existing record
+      await connection.query(
         `UPDATE HEALTH_PROFILES 
          SET blood_type = ?, allergies = ?, chronic_conditions = ?,
-             immunization_history = ?, emergency_contact_name = ?, emergency_contact_phone = ?,
+             emergency_contact_name = ?, emergency_contact_phone = ?,
              height = ?, weight = ?, version = version + 1
          WHERE user_id = ?`,
-        [
-          blood_type || null,
-          allergies || null,
-          chronic_conditions || null,
-          immunizationJson,
-          emergency_contact_name || null,
-          emergency_contact_phone || null,
-          height ? parseFloat(height) : null,
-          weight ? parseFloat(weight) : null,
-          targetUserId,
-        ]
+        [blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, height, weight, userId]
       );
     } else {
-      await pool.query(
+      // Insert new record if none exists
+      const [result] = await connection.query(
         `INSERT INTO HEALTH_PROFILES 
-         (user_id, blood_type, allergies, chronic_conditions, immunization_history, emergency_contact_name, emergency_contact_phone, height, weight)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          targetUserId,
-          blood_type || null,
-          allergies || null,
-          chronic_conditions || null,
-          immunizationJson,
-          emergency_contact_name || null,
-          emergency_contact_phone || null,
-          height ? parseFloat(height) : null,
-          weight ? parseFloat(weight) : null,
-        ]
+         (user_id, blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, height, weight)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [userId, blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, height, weight]
       );
+      recordId = result.insertId;
     }
 
-    res.json({ message: 'Patient clinical health profile updated by clinic staff.' });
+    const newData = { blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, height, weight };
+
+    // 2. Append to Global Cryptographic Audit Trail
+    await logAudit(connection, {
+      userId: req.user.user_id,
+      action: action,
+      table: 'HEALTH_PROFILES',
+      recordId: recordId,
+      oldValue: oldData,
+      newValue: newData,
+      ipAddress: req.ip
+    });
+
+    await connection.commit();
+    res.json({ message: 'Health profile successfully updated.' });
   } catch (error) {
-    console.error('Error updating patient profile:', error);
-    res.status(500).json({ error: 'Failed to update patient clinical record.' });
+    await connection.rollback();
+    console.error('Error updating health profile:', error);
+    res.status(500).json({ error: 'Failed to update health profile.' });
+  } finally {
+    connection.release();
   }
 });
 
