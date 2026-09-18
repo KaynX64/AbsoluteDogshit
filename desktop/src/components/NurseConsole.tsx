@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import QrIntakeScanner from './QrIntakeScanner';
 import InventoryManager from './InventoryManager';
+import { io } from 'socket.io-client';
 
 interface QueueItem {
   queue_id: number;
@@ -40,8 +41,17 @@ export default function NurseConsole() {
     }
   };
 
-  useEffect(() => {
+    useEffect(() => {
     fetchLiveQueue();
+
+    const socket = io('http://localhost:5000');
+    socket.on('queue:updated', () => {
+      fetchLiveQueue();
+    });
+
+    return () => {
+      socket.disconnect();
+    };
   }, []);
 
   // Nurse advances the queue: calls the next 'waiting' patient

@@ -23,7 +23,7 @@ interface EmergencyAlert {
 export default function EmergencyAlertBanner() {
   const [alerts, setAlerts] = useState<EmergencyAlert[]>([]);
 
-  // Synthesize an audible emergency alert beep using Web Audio API (no MP3 asset required)
+  // Synthesize an audible emergency alert beep using Web Audio API
   const playEmergencyAlarm = () => {
     try {
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -78,6 +78,15 @@ export default function EmergencyAlertBanner() {
 
     socket.on('emergency:new_alert', (newAlert: EmergencyAlert) => {
       playEmergencyAlarm();
+
+      // Trigger native OS system tray notification
+      if ((window as any).electronAPI?.showNotification) {
+        (window as any).electronAPI.showNotification({
+          title: `🚨 SOS EMERGENCY: ${newAlert.patientName}`,
+          body: `Location: ${newAlert.latitude.toFixed(5)}, ${newAlert.longitude.toFixed(5)}. Blood: ${newAlert.bloodType}. Allergies: ${newAlert.allergies}`,
+        });
+      }
+
       setAlerts((prev) => [newAlert, ...prev.filter((a) => a.alertId !== newAlert.alertId)]);
     });
 
@@ -110,10 +119,95 @@ export default function EmergencyAlertBanner() {
     }
   };
 
-  if (alerts.length === 0) return null;
+  // --- TEST BUTTON HANDLER 1: INSTANT NATIVE OS NOTIFICATION ---
+  const handleTestDirectNotification = () => {
+    playEmergencyAlarm();
+    if ((window as any).electronAPI?.showNotification) {
+      (window as any).electronAPI.showNotification({
+        title: '🚨 Valetudo HealthLink — SOS Alert Test',
+        body: 'Daniella Movida (BSIT) reported a medical emergency at PSU Lingayen Library. Allergies: Penicillin.',
+      });
+    } else {
+      alert('electronAPI.showNotification not detected. Ensure preload.cjs is configured.');
+    }
+  };
+
+  // --- TEST BUTTON HANDLER 2: FULL STACK REAL-TIME SOS TRIGGER ---
+  const handleTestFullStackSOS = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('http://localhost:5000/api/emergency/sos', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          latitude: 16.029851,
+          longitude: 120.228543,
+          notes: 'SIMULATED SOS: PSU Lingayen Administration Building',
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        alert('Server SOS error: ' + (data.error || 'Check server connection'));
+      }
+    } catch (err: any) {
+      alert('Could not trigger backend test SOS: ' + err.message);
+    }
+  };
 
   return (
-    <div style={{ marginBottom: 24 }}>
+    <div style={{ marginBottom: 20 }}>
+      {/* TEST TRIGGER TOOLBAR */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: alerts.length > 0 ? 12 : 0,
+        }}
+      >
+        <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 'bold' }}>TEST HARNESS:</span>
+        <button
+          type="button"
+          onClick={handleTestDirectNotification}
+          style={{
+            padding: '4px 10px',
+            fontSize: 12,
+            borderRadius: 4,
+            border: '1px solid #cbd5e1',
+            background: '#f8fafc',
+            color: '#334155',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+          }}
+          title="Directly test the OS banner without server"
+        >
+          🧪 Test OS Notification (Instant)
+        </button>
+
+        <button
+          type="button"
+          onClick={handleTestFullStackSOS}
+          style={{
+            padding: '4px 10px',
+            fontSize: 12,
+            borderRadius: 4,
+            border: '1px solid #fca5a5',
+            background: '#fef2f2',
+            color: '#dc2626',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+          }}
+          title="Sends real SOS request to backend and broadcasts over Socket.IO"
+        >
+          🚨 Trigger Live SOS (Full System Test)
+        </button>
+      </div>
+
+      {/* ACTIVE EMERGENCY ALERTS BANNER */}
       {alerts.map((alert) => (
         <div
           key={alert.alertId}

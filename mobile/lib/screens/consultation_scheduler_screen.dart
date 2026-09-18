@@ -164,11 +164,46 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
 
       final data = jsonDecode(res.body);
       if (res.statusCode == 201) {
-        _showToast('Consultation booked successfully!');
         _notesController.clear();
         _fetchAvailableSlots();
         _fetchMyAppointments();
-        setState(() => _activeSubTab = 1); // Switch to My Bookings
+
+        if (mounted) {
+          showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              icon: const Icon(Icons.check_circle, color: Color(0xFF0F766E), size: 48),
+              title: const Text('Consultation Scheduled', style: TextStyle(fontWeight: FontWeight.bold)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Scheduled for: $scheduledDateTime', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  Text('Purpose: $_selectedPurpose'),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Reminders:\n• Please arrive 10 minutes prior to your time block.\n• Present your QR Health Pass at the Infirmary reception for touchless check-in.',
+                    style: TextStyle(fontSize: 12, color: Colors.black87),
+                  ),
+                ],
+              ),
+              actions: [
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0F766E),
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    setState(() => _activeSubTab = 1); // Switch to My Bookings
+                  },
+                  child: const Text('View in My Bookings'),
+                ),
+              ],
+            ),
+          );
+        }
       } else {
         _showToast(data['error'] ?? 'Booking failed', isError: true);
       }
@@ -266,7 +301,6 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Clean Sub-Navigation Switcher (No nested AppBars)
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           color: Colors.white,
@@ -298,8 +332,6 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
           ),
         ),
         const Divider(height: 1),
-
-        // Main Body Content
         Expanded(
           child: _activeSubTab == 0 ? _buildBookingTab() : _buildHistoryTab(),
         ),

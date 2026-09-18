@@ -1,6 +1,7 @@
 // desktop/src/components/DoctorConsole.tsx
 import React, { useState, useEffect } from 'react';
 import PrescriptionGenerator from './PrescriptionGenerator';
+import { io } from 'socket.io-client';
 
 interface AppointmentItem {
   appointment_id: number;
@@ -79,7 +80,17 @@ export default function DoctorConsole() {
 
   useEffect(() => {
     fetchAppointments('active');
-  }, []);
+
+    // Connect to Socket.IO for live queue/appointment updates
+    const socket = io('http://localhost:5000');
+    socket.on('appointment:booked', () => fetchAppointments(viewMode));
+    socket.on('appointment:cancelled', () => fetchAppointments(viewMode));
+    socket.on('appointment:status_changed', () => fetchAppointments(viewMode));
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [viewMode]);
 
   const handleSwitchView = (mode: 'active' | 'history') => {
     setViewMode(mode);

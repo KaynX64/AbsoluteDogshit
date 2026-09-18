@@ -1,5 +1,5 @@
 // desktop/electron/main.cjs
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, Notification } = require('electron');
 const path = require('path');
 
 function createWindow() {
@@ -19,14 +19,14 @@ function createWindow() {
   const devUrl = 'http://localhost:5173';
   win.loadURL(devUrl);
 
-  // FIX: Force focus onto the window so input fields immediately capture keystrokes
+  // Force focus onto the window so input fields immediately capture keystrokes
   win.once('ready-to-show', () => {
     win.show();
     win.focus();
   });
 }
 
-// PRINT HANDLER (Native OS Print Spooler)
+// 1. PRINT HANDLER (Native OS Print Spooler)
 ipcMain.handle('print-document', async (event, { htmlContent }) => {
   let workerWin = new BrowserWindow({ show: false });
   await workerWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
@@ -43,6 +43,19 @@ ipcMain.handle('print-document', async (event, { htmlContent }) => {
       }, 500);
     });
   });
+});
+
+// 2. NATIVE OS NOTIFICATION HANDLER
+ipcMain.handle('show-notification', (event, { title, body }) => {
+  if (Notification.isSupported()) {
+    new Notification({
+      title: title || 'Valetudo Emergency Alert',
+      body: body || 'Emergency triggered on campus.',
+      urgency: 'critical',
+    }).show();
+    return { success: true };
+  }
+  return { success: false, error: 'Notifications not supported on this OS' };
 });
 
 app.whenReady().then(createWindow);

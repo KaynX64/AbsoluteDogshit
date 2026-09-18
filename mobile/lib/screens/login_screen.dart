@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../config/api_config.dart';
 import 'patient_portal_screen.dart';
+import 'responder_screen.dart'; // <-- IMPORTED HERE
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -38,19 +39,36 @@ class _LoginScreenState extends State<LoginScreen> {
       final data = jsonDecode(res.body);
 
       if (res.statusCode == 200) {
+        // Save BOTH token and user profile into secure storage
         await _storage.write(key: 'jwt_token', value: data['token']);
+        await _storage.write(key: 'user_data', value: jsonEncode(data['user']));
+
         if (!mounted) return;
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => PatientPortalScreen(user: data['user'])),
-        );
+
+        final List<dynamic> roles = data['user']['roles'] ?? [];
+
+        if (roles.contains('EMERGENCY_RESPONDER')) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => ResponderScreen(user: data['user'])),
+          );
+        } else {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => PatientPortalScreen(user: data['user'])),
+          );
+        }
       } else {
         setState(() => _errorMessage = data['error'] ?? 'Login failed');
       }
     } catch (e) {
-      setState(() => _errorMessage = 'Connection error: $e');
+      if (mounted) {
+        setState(() => _errorMessage = 'Unable to connect. Please try again.');
+      }
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -65,9 +83,16 @@ class _LoginScreenState extends State<LoginScreen> {
           children: [
             const Icon(Icons.local_hospital_rounded, size: 72, color: Colors.teal),
             const SizedBox(height: 16),
-            TextField(controller: _emailController, decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder())),
+            TextField(
+              controller: _emailController,
+              decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder()),
+            ),
             const SizedBox(height: 12),
-            TextField(controller: _passwordController, obscureText: true, decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder())),
+            TextField(
+              controller: _passwordController,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder()),
+            ),
             const SizedBox(height: 12),
             if (_errorMessage.isNotEmpty) Text(_errorMessage, style: const TextStyle(color: Colors.red)),
             const SizedBox(height: 12),
