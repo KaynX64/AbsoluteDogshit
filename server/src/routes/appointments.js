@@ -2,6 +2,7 @@
 import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
+import { logAudit } from '../utils/auditLogger.js';
 
 const router = express.Router();
 
@@ -23,40 +24,69 @@ router.get('/doctors', authenticateToken, async (req, res) => {
   }
 });
 
-// POST /api/appointments - Book a slot
 router.post('/', authenticateToken, async (req, res) => {
+  const { doctor_user_id, date_time, appointment_type, notes } = req.body;
+  const patientUserId = req.user.user_id;
+
+  if (!doctor_user_id || !date_time || !appointment_type) {
+    return res.status(400).json({ error: 'Doctor, date/time, and type are required.' });
+  }
+
+  const connection = await pool.getConnection();
+
   try {
-    const patientUserId = req.user.user_id;
-    const { doctor_user_id, date_time, appointment_type, notes } = req.body;
+    await connection.beginTransaction();
 
-    if (!doctor_user_id || !date_time || !appointment_type) {
-      return res.status(400).json({ error: 'Doctor, date/time, and type are required.' });
-    }
+    // 1. Lock the Doctor's record to serialize booking attempts for this specific doctor
+    await connection.query(
+      `SELECT user_id FROM USERS WHERE user_id = ? FOR UPDATE`, 
+      [doctor_user_id]
+    );
 
-    // Check for schedule collision
-    const [conflict] = await pool.query(
+    // 2. Check for schedule collision safely (concurrent requests are now waiting in line)
+    const [conflict] = await connection.query(
       `SELECT appointment_id FROM APPOINTMENTS 
        WHERE doctor_user_id = ? AND date_time = ? AND status NOT IN ('cancelled', 'no_show')`,
       [doctor_user_id, date_time]
     );
 
     if (conflict.length > 0) {
-      return res.status(409).json({ error: 'Selected time slot is already booked.' });
+      throw new Error('Selected time slot is already booked.');
     }
 
-    const [result] = await pool.query(
+    // 3. Insert the appointment
+    const [result] = await connection.query(
       `INSERT INTO APPOINTMENTS (patient_user_id, doctor_user_id, date_time, appointment_type, status, notes)
        VALUES (?, ?, ?, ?, 'scheduled', ?)`,
       [patientUserId, doctor_user_id, date_time, appointment_type, notes || '']
     );
 
+    // 4. RA 10173 Audit: Log the creation of the appointment
+    await logAudit(connection, {
+      userId: req.user.user_id, // Patient who booked it
+      action: 'CREATE',
+      table: 'APPOINTMENTS',
+      recordId: result.insertId,
+      oldValue: null,
+      newValue: { doctor_user_id, date_time, appointment_type, notes },
+      ipAddress: req.ip
+    });
+
+    await connection.commit();
     res.status(201).json({
       message: 'Appointment booked successfully.',
       appointmentId: result.insertId,
     });
   } catch (error) {
+    await connection.rollback();
+    // Catch the specific error we threw, otherwise generic 500
+    if (error.message === 'Selected time slot is already booked.') {
+      return res.status(409).json({ error: error.message });
+    }
     console.error('Booking error:', error);
     res.status(500).json({ error: 'Failed to book appointment.' });
+  } finally {
+    connection.release();
   }
 });
 

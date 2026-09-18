@@ -87,6 +87,8 @@ server/
       healthPass.js
       inventory.js
       profile.js
+    utils/
+      auditLogger.js
     auth.js
     db.js
     index.js
@@ -97,14 +99,85 @@ docker-compose.yml
 <files>
 This section contains the contents of the repository's files.
 
+<file path="server/src/utils/auditLogger.js">
+import crypto from 'crypto';
+
+export async function logAudit(connection, { userId, action, table, recordId, oldValue, newValue, ipAddress }) {
+  // 1. Lock and fetch the most recent hash to prevent branching in concurrent requests
+  const [lastLog] = await connection.query(
+    'SELECT entry_hash FROM AUDIT_LOGS ORDER BY audit_id DESC LIMIT 1 FOR SHARE'
+  );
+  
+  // Fallback to 64 zeros if the Genesis block is somehow missing
+  const prevHash = lastLog.length > 0 ? lastLog[0].entry_hash : '0'.repeat(64);
+
+  // 2. Prepare JSON representations of the data changes
+  const oldValStr = oldValue ? JSON.stringify(oldValue) : null;
+  const newValStr = newValue ? JSON.stringify(newValue) : null;
+
+  // 3. Generate the cryptographic signature for RA 10173 tamper-proofing
+  const payload = `${prevHash}${action}${table}${recordId}${oldValStr || ''}${newValStr || ''}`;
+  const entryHash = crypto.createHash('sha256').update(payload).digest('hex');
+
+  // 4. Insert the immutable log into the chain
+  await connection.query(
+    `INSERT INTO AUDIT_LOGS 
+     (user_id, action, table_affected, record_id, old_value, new_value, ip_address, prev_hash, entry_hash)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [userId, action, table, recordId, oldValStr, newValStr, ipAddress || 'Unknown', prevHash, entryHash]
+  );
+}
+</file>
+
+<file path="desktop/electron/preload.cjs">
+// desktop/electron/preload.cjs
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('electronAPI', {
+  printDocument: (options) => ipcRenderer.invoke('print-document', options),
+});
+</file>
+
+<file path="desktop/src/assets/react.svg">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" class="iconify iconify--logos" width="35.93" height="32" preserveAspectRatio="xMidYMid meet" viewBox="0 0 256 228"><path fill="#00D8FF" d="M210.483 73.824a171.49 171.49 0 0 0-8.24-2.597c.465-1.9.893-3.777 1.273-5.621c6.238-30.281 2.16-54.676-11.769-62.708c-13.355-7.7-35.196.329-57.254 19.526a171.23 171.23 0 0 0-6.375 5.848a155.866 155.866 0 0 0-4.241-3.917C100.759 3.829 77.587-4.822 63.673 3.233C50.33 10.957 46.379 33.89 51.995 62.588a170.974 170.974 0 0 0 1.892 8.48c-3.28.932-6.445 1.924-9.474 2.98C17.309 83.498 0 98.307 0 113.668c0 15.865 18.582 31.778 46.812 41.427a145.52 145.52 0 0 0 6.921 2.165a167.467 167.467 0 0 0-2.01 9.138c-5.354 28.2-1.173 50.591 12.134 58.266c13.744 7.926 36.812-.22 59.273-19.855a145.567 145.567 0 0 0 5.342-4.923a168.064 168.064 0 0 0 6.92 6.314c21.758 18.722 43.246 26.282 56.54 18.586c13.731-7.949 18.194-32.003 12.4-61.268a145.016 145.016 0 0 0-1.535-6.842c1.62-.48 3.21-.974 4.76-1.488c29.348-9.723 48.443-25.443 48.443-41.52c0-15.417-17.868-30.326-45.517-39.844Zm-6.365 70.984c-1.4.463-2.836.91-4.3 1.345c-3.24-10.257-7.612-21.163-12.963-32.432c5.106-11 9.31-21.767 12.459-31.957c2.619.758 5.16 1.557 7.61 2.4c23.69 8.156 38.14 20.213 38.14 29.504c0 9.896-15.606 22.743-40.946 31.14Zm-10.514 20.834c2.562 12.94 2.927 24.64 1.23 33.787c-1.524 8.219-4.59 13.698-8.382 15.893c-8.067 4.67-25.32-1.4-43.927-17.412a156.726 156.726 0 0 1-6.437-5.87c7.214-7.889 14.423-17.06 21.459-27.246c12.376-1.098 24.068-2.894 34.671-5.345a134.17 134.17 0 0 1 1.386 6.193ZM87.276 214.515c-7.882 2.783-14.16 2.863-17.955.675c-8.075-4.657-11.432-22.636-6.853-46.752a156.923 156.923 0 0 1 1.869-8.499c10.486 2.32 22.093 3.988 34.498 4.994c7.084 9.967 14.501 19.128 21.976 27.15a134.668 134.668 0 0 1-4.877 4.492c-9.933 8.682-19.886 14.842-28.658 17.94ZM50.35 144.747c-12.483-4.267-22.792-9.812-29.858-15.863c-6.35-5.437-9.555-10.836-9.555-15.216c0-9.322 13.897-21.212 37.076-29.293c2.813-.98 5.757-1.905 8.812-2.773c3.204 10.42 7.406 21.315 12.477 32.332c-5.137 11.18-9.399 22.249-12.634 32.792a134.718 134.718 0 0 1-6.318-1.979Zm12.378-84.26c-4.811-24.587-1.616-43.134 6.425-47.789c8.564-4.958 27.502 2.111 47.463 19.835a144.318 144.318 0 0 1 3.841 3.545c-7.438 7.987-14.787 17.08-21.808 26.988c-12.04 1.116-23.565 2.908-34.161 5.309a160.342 160.342 0 0 1-1.76-7.887Zm110.427 27.268a347.8 347.8 0 0 0-7.785-12.803c8.168 1.033 15.994 2.404 23.343 4.08c-2.206 7.072-4.956 14.465-8.193 22.045a381.151 381.151 0 0 0-7.365-13.322Zm-45.032-43.861c5.044 5.465 10.096 11.566 15.065 18.186a322.04 322.04 0 0 0-30.257-.006c4.974-6.559 10.069-12.652 15.192-18.18ZM82.802 87.83a323.167 323.167 0 0 0-7.227 13.238c-3.184-7.553-5.909-14.98-8.134-22.152c7.304-1.634 15.093-2.97 23.209-3.984a321.524 321.524 0 0 0-7.848 12.897Zm8.081 65.352c-8.385-.936-16.291-2.203-23.593-3.793c2.26-7.3 5.045-14.885 8.298-22.6a321.187 321.187 0 0 0 7.257 13.246c2.594 4.48 5.28 8.868 8.038 13.147Zm37.542 31.03c-5.184-5.592-10.354-11.779-15.403-18.433c4.902.192 9.899.29 14.978.29c5.218 0 10.376-.117 15.453-.343c-4.985 6.774-10.018 12.97-15.028 18.486Zm52.198-57.817c3.422 7.8 6.306 15.345 8.596 22.52c-7.422 1.694-15.436 3.058-23.88 4.071a382.417 382.417 0 0 0 7.859-13.026a347.403 347.403 0 0 0 7.425-13.565Zm-16.898 8.101a358.557 358.557 0 0 1-12.281 19.815a329.4 329.4 0 0 1-23.444.823c-7.967 0-15.716-.248-23.178-.732a310.202 310.202 0 0 1-12.513-19.846h.001a307.41 307.41 0 0 1-10.923-20.627a310.278 310.278 0 0 1 10.89-20.637l-.001.001a307.318 307.318 0 0 1 12.413-19.761c7.613-.576 15.42-.876 23.31-.876H128c7.926 0 15.743.303 23.354.883a329.357 329.357 0 0 1 12.335 19.695a358.489 358.489 0 0 1 11.036 20.54a329.472 329.472 0 0 1-11 20.722Zm22.56-122.124c8.572 4.944 11.906 24.881 6.52 51.026c-.344 1.668-.73 3.367-1.15 5.09c-10.622-2.452-22.155-4.275-34.23-5.408c-7.034-10.017-14.323-19.124-21.64-27.008a160.789 160.789 0 0 1 5.888-5.4c18.9-16.447 36.564-22.941 44.612-18.3ZM128 90.808c12.625 0 22.86 10.235 22.86 22.86s-10.235 22.86-22.86 22.86s-22.86-10.235-22.86-22.86s10.235-22.86 22.86-22.86Z"></path></svg>
+</file>
+
+<file path="desktop/src/assets/vite.svg">
+<svg xmlns="http://www.w3.org/2000/svg" width="77" height="47" fill="none" aria-labelledby="vite-logo-title" viewBox="0 0 77 47"><title id="vite-logo-title">Vite</title><style>.parenthesis{fill:#000}@media (prefers-color-scheme:dark){.parenthesis{fill:#fff}}</style><path fill="#9135ff" d="M40.151 45.71c-.663.844-2.02.374-2.02-.699V34.708a2.26 2.26 0 0 0-2.262-2.262H24.493c-.92 0-1.457-1.04-.92-1.788l7.479-10.471c1.07-1.498 0-3.578-1.842-3.578H15.443c-.92 0-1.456-1.04-.92-1.788l9.696-13.576c.213-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.472c-1.07 1.497 0 3.578 1.842 3.578h11.376c.944 0 1.474 1.087.89 1.83L40.153 45.712z"/><mask id="a" width="48" height="47" x="14" y="0" maskUnits="userSpaceOnUse" style="mask-type:alpha"><path fill="#000" d="M40.047 45.71c-.663.843-2.02.374-2.02-.699V34.708a2.26 2.26 0 0 0-2.262-2.262H24.389c-.92 0-1.457-1.04-.92-1.788l7.479-10.472c1.07-1.497 0-3.578-1.842-3.578H15.34c-.92 0-1.456-1.04-.92-1.788l9.696-13.575c.213-.297.556-.474.92-.474H53.93c.92 0 1.456 1.04.92 1.788L47.37 13.03c-1.07 1.498 0 3.578 1.842 3.578h11.376c.944 0 1.474 1.088.89 1.831L40.049 45.712z"/></mask><g mask="url(#a)"><g filter="url(#b)"><ellipse cx="5.508" cy="14.704" fill="#eee6ff" rx="5.508" ry="14.704" transform="rotate(269.814 20.96 11.29)scale(-1 1)"/></g><g filter="url(#c)"><ellipse cx="10.399" cy="29.851" fill="#eee6ff" rx="10.399" ry="29.851" transform="rotate(89.814 -16.902 -8.275)scale(1 -1)"/></g><g filter="url(#d)"><ellipse cx="5.508" cy="30.487" fill="#8900ff" rx="5.508" ry="30.487" transform="rotate(89.814 -19.197 -7.127)scale(1 -1)"/></g><g filter="url(#e)"><ellipse cx="5.508" cy="30.599" fill="#8900ff" rx="5.508" ry="30.599" transform="rotate(89.814 -25.928 4.177)scale(1 -1)"/></g><g filter="url(#f)"><ellipse cx="5.508" cy="30.599" fill="#8900ff" rx="5.508" ry="30.599" transform="rotate(89.814 -25.738 5.52)scale(1 -1)"/></g><g filter="url(#g)"><ellipse cx="14.072" cy="22.078" fill="#eee6ff" rx="14.072" ry="22.078" transform="rotate(93.35 31.245 55.578)scale(-1 1)"/></g><g filter="url(#h)"><ellipse cx="3.47" cy="21.501" fill="#8900ff" rx="3.47" ry="21.501" transform="rotate(89.009 35.419 55.202)scale(-1 1)"/></g><g filter="url(#i)"><ellipse cx="3.47" cy="21.501" fill="#8900ff" rx="3.47" ry="21.501" transform="rotate(89.009 35.419 55.202)scale(-1 1)"/></g><g filter="url(#j)"><ellipse cx="14.592" cy="9.743" fill="#8900ff" rx="4.407" ry="29.108" transform="rotate(39.51 14.592 9.743)"/></g><g filter="url(#k)"><ellipse cx="61.728" cy="-5.321" fill="#8900ff" rx="4.407" ry="29.108" transform="rotate(37.892 61.728 -5.32)"/></g><g filter="url(#l)"><ellipse cx="55.618" cy="7.104" fill="#00c2ff" rx="5.971" ry="9.665" transform="rotate(37.892 55.618 7.104)"/></g><g filter="url(#m)"><ellipse cx="12.326" cy="39.103" fill="#8900ff" rx="4.407" ry="29.108" transform="rotate(37.892 12.326 39.103)"/></g><g filter="url(#n)"><ellipse cx="12.326" cy="39.103" fill="#8900ff" rx="4.407" ry="29.108" transform="rotate(37.892 12.326 39.103)"/></g><g filter="url(#o)"><ellipse cx="49.857" cy="30.678" fill="#8900ff" rx="4.407" ry="29.108" transform="rotate(37.892 49.857 30.678)"/></g><g filter="url(#p)"><ellipse cx="52.623" cy="33.171" fill="#00c2ff" rx="5.971" ry="15.297" transform="rotate(37.892 52.623 33.17)"/></g></g><path d="M6.919 0c-9.198 13.166-9.252 33.575 0 46.789h6.215c-9.25-13.214-9.196-33.623 0-46.789zm62.424 0h-6.215c9.198 13.166 9.252 33.575 0 46.789h6.215c9.25-13.214 9.196-33.623 0-46.789" class="parenthesis"/><defs><filter id="b" width="60.045" height="41.654" x="-5.564" y="16.92" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="7.659"/></filter><filter id="c" width="90.34" height="51.437" x="-40.407" y="-6.762" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="7.659"/></filter><filter id="d" width="79.355" height="29.4" x="-35.435" y="2.801" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="e" width="79.579" height="29.4" x="-30.84" y="20.8" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="f" width="79.579" height="29.4" x="-29.307" y="21.949" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="g" width="74.749" height="58.852" x="29.961" y="-17.13" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="7.659"/></filter><filter id="h" width="61.377" height="25.362" x="37.754" y="3.055" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="i" width="61.377" height="25.362" x="37.754" y="3.055" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="j" width="56.045" height="63.649" x="-13.43" y="-22.082" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="k" width="54.814" height="64.646" x="34.321" y="-37.644" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="l" width="33.541" height="35.313" x="38.847" y="-10.552" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="m" width="54.814" height="64.646" x="-15.081" y="6.78" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="n" width="54.814" height="64.646" x="-15.081" y="6.78" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="o" width="54.814" height="64.646" x="22.45" y="-1.645" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="p" width="39.409" height="43.623" x="32.919" y="11.36" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter></defs></svg>
+</file>
+
+<file path="desktop/src/components/.gitkeep">
+
+</file>
+
 <file path="desktop/src/components/InventoryManager.tsx">
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 export default function InventoryManager() {
-  const [batchId, setBatchId] = useState('1'); // Default to Biogesic batch
-  const [quantity, setQuantity] = useState('2');
+  const [batchId, setBatchId] = useState('');
+  const [quantity, setQuantity] = useState('1');
   const [reason, setReason] = useState('Prescription issuance');
   const [statusMessage, setStatusMessage] = useState('');
+  const [batches, setBatches] = useState<any[]>([]);
+
+  // Fetch live catalog data on load and after deductions
+  const fetchBatches = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('http://localhost:5000/api/inventory/batches', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        setBatches(await res.json());
+      }
+    } catch (err) {
+      console.error("Failed to fetch catalog:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchBatches();
+  }, []);
 
   const handleDeductStock = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,132 +200,136 @@ export default function InventoryManager() {
 
       const data = await res.json();
       if (res.ok) {
-        setStatusMessage('Success: ' + data.message);
+        setStatusMessage('✅ Success: ' + data.message);
+        fetchBatches(); // Refresh stock immediately after deduction
+        setBatchId(''); // Clear selection
+        setQuantity('1');
       } else {
-        setStatusMessage('Error: ' + (data.error || 'Failed to deduct stock'));
+        setStatusMessage('❌ Error: ' + (data.error || 'Failed to deduct stock'));
       }
     } catch (err: any) {
-      setStatusMessage('Network Error: ' + err.message);
+      setStatusMessage('❌ Network Error: ' + err.message);
     }
   };
 
+  // Helper to dynamically color-code FEFO status
+  const getExpiryStatus = (expiryDate: string) => {
+    const daysUntil = (new Date(expiryDate).getTime() - new Date().getTime()) / (1000 * 3600 * 24);
+    if (daysUntil < 0) return { label: 'EXPIRED', color: 'red' };
+    if (daysUntil <= 90) return { label: 'EXPIRING SOON', color: '#b45309' }; // dark orange
+    return { label: 'GOOD', color: 'green' };
+  };
+
   return (
-    <section style={{ padding: 16, border: '1px solid #ccc', borderRadius: 8, marginTop: 24 }}>
-      <h3 style={{ marginTop: 0, color: '#0f766e' }}>3. Medicine Inventory & Stock Deduction (Feature 9)</h3>
-      <form onSubmit={handleDeductStock}>
-        <div style={{ marginBottom: 10 }}>
-          <label style={{ fontSize: 13 }}>Batch ID (1: Biogesic, 2: Neozep, 3: Ventolin):</label>
-          <input 
-            style={{ width: '100%', padding: 6, marginTop: 2 }} 
-            value={batchId} 
-            onChange={(e) => setBatchId(e.target.value)} 
-          />
+    <section style={{ padding: 16, border: '1px solid #ccc', borderRadius: 8, marginTop: 24, display: 'flex', gap: '20px' }}>
+      
+      {/* LEFT COLUMN: LIVE CATALOG VIEWER */}
+      <div style={{ flex: 2, borderRight: '1px solid #eee', paddingRight: '20px' }}>
+        <h3 style={{ marginTop: 0, color: '#0f766e' }}>📦 Live Pharmacy Catalog (FEFO)</h3>
+        <p style={{ fontSize: 13, color: '#666', marginTop: '-10px', marginBottom: '10px' }}>
+          Click a row to select it for deduction.
+        </p>
+        
+        <div style={{ maxHeight: '250px', overflowY: 'auto' }}>
+          <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: '2px solid #ddd' }}>
+                <th style={{ padding: 8 }}>ID</th>
+                <th style={{ padding: 8 }}>Medicine / Batch</th>
+                <th style={{ padding: 8 }}>Stock</th>
+                <th style={{ padding: 8 }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {batches.map((b) => {
+                const status = getExpiryStatus(b.expiry_date);
+                const isLowStock = b.quantity_on_hand < 20; 
+                const isSelected = batchId === b.batch_id.toString();
+
+                return (
+                  <tr 
+                    key={b.batch_id} 
+                    onClick={() => setBatchId(b.batch_id.toString())}
+                    style={{ 
+                      cursor: 'pointer', 
+                      borderBottom: '1px solid #eee',
+                      background: isSelected ? '#ccfbf1' : 'transparent',
+                      transition: 'background 0.2s'
+                    }}
+                  >
+                    <td style={{ padding: 8 }}><b>{b.batch_id}</b></td>
+                    <td style={{ padding: 8 }}>
+                      <span style={{ fontWeight: 600 }}>{b.name}</span><br/>
+                      <small style={{ color: '#666' }}>{b.batch_no}</small>
+                    </td>
+                    <td style={{ 
+                      padding: 8, 
+                      color: isLowStock ? 'red' : 'inherit', 
+                      fontWeight: isLowStock ? 'bold' : 'normal' 
+                    }}>
+                      {b.quantity_on_hand}
+                    </td>
+                    <td style={{ padding: 8, color: status.color, fontWeight: 'bold' }}>
+                      {status.label}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
-        <div style={{ marginBottom: 10 }}>
-          <label style={{ fontSize: 13 }}>Quantity to Deduct:</label>
-          <input 
-            style={{ width: '100%', padding: 6, marginTop: 2 }} 
-            type="number" 
-            value={quantity} 
-            onChange={(e) => setQuantity(e.target.value)} 
-          />
-        </div>
-        <div style={{ marginBottom: 14 }}>
-          <label style={{ fontSize: 13 }}>Reason / Remarks:</label>
-          <input 
-            style={{ width: '100%', padding: 6, marginTop: 2 }} 
-            value={reason} 
-            onChange={(e) => setReason(e.target.value)} 
-          />
-        </div>
-        <button
-          type="submit"
-          style={{ width: '100%', padding: 10, background: '#0f766e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
-        >
-          📦 Deduct Batch Stock
-        </button>
-      </form>
-      {statusMessage && <p style={{ fontSize: 13, marginTop: 10 }}><b>Status:</b> {statusMessage}</p>}
+      </div>
+
+      {/* RIGHT COLUMN: DEDUCTION FORM */}
+      <div style={{ flex: 1 }}>
+        <h3 style={{ marginTop: 0, color: '#0f766e' }}>Stock Deduction</h3>
+        <form onSubmit={handleDeductStock}>
+          <div style={{ marginBottom: 10 }}>
+              <label style={{ fontSize: 13 }}>Selected Batch ID:</label>
+              <input 
+               style={{ width: '100%', padding: 6, marginTop: 2, background: '#f1f5f9', color: '#000' }} 
+               value={batchId} 
+                readOnly
+              placeholder="Select from catalog..."
+               />
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ fontSize: 13 }}>Quantity to Dispense:</label>
+            <input 
+              style={{ width: '100%', padding: 6, marginTop: 2 }} 
+              type="number" 
+              min="1"
+              value={quantity} 
+              onChange={(e) => setQuantity(e.target.value)} 
+            />
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ fontSize: 13 }}>Reason / Remarks:</label>
+            <input 
+              style={{ width: '100%', padding: 6, marginTop: 2 }} 
+              value={reason} 
+              onChange={(e) => setReason(e.target.value)} 
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={!batchId}
+            style={{ 
+              width: '100%', padding: 10, border: 'none', borderRadius: 4, fontWeight: 'bold',
+              background: batchId ? '#0f766e' : '#ccc', 
+              color: '#fff', 
+              cursor: batchId ? 'pointer' : 'not-allowed' 
+            }}
+          >
+            ➖ Deduct Stock
+          </button>
+        </form>
+        {statusMessage && <p style={{ fontSize: 13, marginTop: 10 }}>{statusMessage}</p>}
+      </div>
+
     </section>
   );
 }
-</file>
-
-<file path="server/src/routes/inventory.js">
-// server/src/routes/inventory.js
-import express from 'express';
-import { pool } from '../db.js';
-import { authenticateToken } from '../auth.js';
-import { requireRoles } from '../middleware/rbac.js';
-
-const router = express.Router();
-
-// POST /api/inventory/deduct - Deduct stock from a specific batch
-router.post('/deduct', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
-  const { batch_id, quantity_deducted, reason } = req.body;
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    // 1. Lock the batch row and check current stock levels
-    const [batchRows] = await connection.query(
-      'SELECT quantity_on_hand FROM MEDICINE_BATCHES WHERE batch_id = ? FOR UPDATE',
-      [batch_id]
-    );
-
-    if (batchRows.length === 0) {
-      throw new Error('Medicine batch not found.');
-    }
-    if (batchRows[0].quantity_on_hand < quantity_deducted) {
-      throw new Error('Insufficient stock in this batch to complete dispensation.');
-    }
-
-    // 2. Deduct the quantity from the batch
-    await connection.query(
-      'UPDATE MEDICINE_BATCHES SET quantity_on_hand = quantity_on_hand - ? WHERE batch_id = ?',
-      [quantity_deducted, batch_id]
-    );
-
-    // 3. Append an immutable record to the inventory audit trail
-    await connection.query(
-      `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
-       VALUES (?, ?, 'dispense', ?, ?)`,
-      [batch_id, -quantity_deducted, reason || 'Prescription issuance', req.user.user_id]
-    );
-
-    await connection.commit();
-    res.json({ message: 'Stock successfully deducted and logged.' });
-  } catch (error) {
-    await connection.rollback();
-    res.status(400).json({ error: error.message });
-  } finally {
-    connection.release();
-  }
-});
-
-export default router;
-</file>
-
-<file path="desktop/electron/preload.cjs">
-// desktop/electron/preload.cjs
-const { contextBridge, ipcRenderer } = require('electron');
-
-contextBridge.exposeInMainWorld('electronAPI', {
-  printDocument: (options) => ipcRenderer.invoke('print-document', options),
-});
-</file>
-
-<file path="desktop/src/assets/react.svg">
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" class="iconify iconify--logos" width="35.93" height="32" preserveAspectRatio="xMidYMid meet" viewBox="0 0 256 228"><path fill="#00D8FF" d="M210.483 73.824a171.49 171.49 0 0 0-8.24-2.597c.465-1.9.893-3.777 1.273-5.621c6.238-30.281 2.16-54.676-11.769-62.708c-13.355-7.7-35.196.329-57.254 19.526a171.23 171.23 0 0 0-6.375 5.848a155.866 155.866 0 0 0-4.241-3.917C100.759 3.829 77.587-4.822 63.673 3.233C50.33 10.957 46.379 33.89 51.995 62.588a170.974 170.974 0 0 0 1.892 8.48c-3.28.932-6.445 1.924-9.474 2.98C17.309 83.498 0 98.307 0 113.668c0 15.865 18.582 31.778 46.812 41.427a145.52 145.52 0 0 0 6.921 2.165a167.467 167.467 0 0 0-2.01 9.138c-5.354 28.2-1.173 50.591 12.134 58.266c13.744 7.926 36.812-.22 59.273-19.855a145.567 145.567 0 0 0 5.342-4.923a168.064 168.064 0 0 0 6.92 6.314c21.758 18.722 43.246 26.282 56.54 18.586c13.731-7.949 18.194-32.003 12.4-61.268a145.016 145.016 0 0 0-1.535-6.842c1.62-.48 3.21-.974 4.76-1.488c29.348-9.723 48.443-25.443 48.443-41.52c0-15.417-17.868-30.326-45.517-39.844Zm-6.365 70.984c-1.4.463-2.836.91-4.3 1.345c-3.24-10.257-7.612-21.163-12.963-32.432c5.106-11 9.31-21.767 12.459-31.957c2.619.758 5.16 1.557 7.61 2.4c23.69 8.156 38.14 20.213 38.14 29.504c0 9.896-15.606 22.743-40.946 31.14Zm-10.514 20.834c2.562 12.94 2.927 24.64 1.23 33.787c-1.524 8.219-4.59 13.698-8.382 15.893c-8.067 4.67-25.32-1.4-43.927-17.412a156.726 156.726 0 0 1-6.437-5.87c7.214-7.889 14.423-17.06 21.459-27.246c12.376-1.098 24.068-2.894 34.671-5.345a134.17 134.17 0 0 1 1.386 6.193ZM87.276 214.515c-7.882 2.783-14.16 2.863-17.955.675c-8.075-4.657-11.432-22.636-6.853-46.752a156.923 156.923 0 0 1 1.869-8.499c10.486 2.32 22.093 3.988 34.498 4.994c7.084 9.967 14.501 19.128 21.976 27.15a134.668 134.668 0 0 1-4.877 4.492c-9.933 8.682-19.886 14.842-28.658 17.94ZM50.35 144.747c-12.483-4.267-22.792-9.812-29.858-15.863c-6.35-5.437-9.555-10.836-9.555-15.216c0-9.322 13.897-21.212 37.076-29.293c2.813-.98 5.757-1.905 8.812-2.773c3.204 10.42 7.406 21.315 12.477 32.332c-5.137 11.18-9.399 22.249-12.634 32.792a134.718 134.718 0 0 1-6.318-1.979Zm12.378-84.26c-4.811-24.587-1.616-43.134 6.425-47.789c8.564-4.958 27.502 2.111 47.463 19.835a144.318 144.318 0 0 1 3.841 3.545c-7.438 7.987-14.787 17.08-21.808 26.988c-12.04 1.116-23.565 2.908-34.161 5.309a160.342 160.342 0 0 1-1.76-7.887Zm110.427 27.268a347.8 347.8 0 0 0-7.785-12.803c8.168 1.033 15.994 2.404 23.343 4.08c-2.206 7.072-4.956 14.465-8.193 22.045a381.151 381.151 0 0 0-7.365-13.322Zm-45.032-43.861c5.044 5.465 10.096 11.566 15.065 18.186a322.04 322.04 0 0 0-30.257-.006c4.974-6.559 10.069-12.652 15.192-18.18ZM82.802 87.83a323.167 323.167 0 0 0-7.227 13.238c-3.184-7.553-5.909-14.98-8.134-22.152c7.304-1.634 15.093-2.97 23.209-3.984a321.524 321.524 0 0 0-7.848 12.897Zm8.081 65.352c-8.385-.936-16.291-2.203-23.593-3.793c2.26-7.3 5.045-14.885 8.298-22.6a321.187 321.187 0 0 0 7.257 13.246c2.594 4.48 5.28 8.868 8.038 13.147Zm37.542 31.03c-5.184-5.592-10.354-11.779-15.403-18.433c4.902.192 9.899.29 14.978.29c5.218 0 10.376-.117 15.453-.343c-4.985 6.774-10.018 12.97-15.028 18.486Zm52.198-57.817c3.422 7.8 6.306 15.345 8.596 22.52c-7.422 1.694-15.436 3.058-23.88 4.071a382.417 382.417 0 0 0 7.859-13.026a347.403 347.403 0 0 0 7.425-13.565Zm-16.898 8.101a358.557 358.557 0 0 1-12.281 19.815a329.4 329.4 0 0 1-23.444.823c-7.967 0-15.716-.248-23.178-.732a310.202 310.202 0 0 1-12.513-19.846h.001a307.41 307.41 0 0 1-10.923-20.627a310.278 310.278 0 0 1 10.89-20.637l-.001.001a307.318 307.318 0 0 1 12.413-19.761c7.613-.576 15.42-.876 23.31-.876H128c7.926 0 15.743.303 23.354.883a329.357 329.357 0 0 1 12.335 19.695a358.489 358.489 0 0 1 11.036 20.54a329.472 329.472 0 0 1-11 20.722Zm22.56-122.124c8.572 4.944 11.906 24.881 6.52 51.026c-.344 1.668-.73 3.367-1.15 5.09c-10.622-2.452-22.155-4.275-34.23-5.408c-7.034-10.017-14.323-19.124-21.64-27.008a160.789 160.789 0 0 1 5.888-5.4c18.9-16.447 36.564-22.941 44.612-18.3ZM128 90.808c12.625 0 22.86 10.235 22.86 22.86s-10.235 22.86-22.86 22.86s-22.86-10.235-22.86-22.86s10.235-22.86 22.86-22.86Z"></path></svg>
-</file>
-
-<file path="desktop/src/assets/vite.svg">
-<svg xmlns="http://www.w3.org/2000/svg" width="77" height="47" fill="none" aria-labelledby="vite-logo-title" viewBox="0 0 77 47"><title id="vite-logo-title">Vite</title><style>.parenthesis{fill:#000}@media (prefers-color-scheme:dark){.parenthesis{fill:#fff}}</style><path fill="#9135ff" d="M40.151 45.71c-.663.844-2.02.374-2.02-.699V34.708a2.26 2.26 0 0 0-2.262-2.262H24.493c-.92 0-1.457-1.04-.92-1.788l7.479-10.471c1.07-1.498 0-3.578-1.842-3.578H15.443c-.92 0-1.456-1.04-.92-1.788l9.696-13.576c.213-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.472c-1.07 1.497 0 3.578 1.842 3.578h11.376c.944 0 1.474 1.087.89 1.83L40.153 45.712z"/><mask id="a" width="48" height="47" x="14" y="0" maskUnits="userSpaceOnUse" style="mask-type:alpha"><path fill="#000" d="M40.047 45.71c-.663.843-2.02.374-2.02-.699V34.708a2.26 2.26 0 0 0-2.262-2.262H24.389c-.92 0-1.457-1.04-.92-1.788l7.479-10.472c1.07-1.497 0-3.578-1.842-3.578H15.34c-.92 0-1.456-1.04-.92-1.788l9.696-13.575c.213-.297.556-.474.92-.474H53.93c.92 0 1.456 1.04.92 1.788L47.37 13.03c-1.07 1.498 0 3.578 1.842 3.578h11.376c.944 0 1.474 1.088.89 1.831L40.049 45.712z"/></mask><g mask="url(#a)"><g filter="url(#b)"><ellipse cx="5.508" cy="14.704" fill="#eee6ff" rx="5.508" ry="14.704" transform="rotate(269.814 20.96 11.29)scale(-1 1)"/></g><g filter="url(#c)"><ellipse cx="10.399" cy="29.851" fill="#eee6ff" rx="10.399" ry="29.851" transform="rotate(89.814 -16.902 -8.275)scale(1 -1)"/></g><g filter="url(#d)"><ellipse cx="5.508" cy="30.487" fill="#8900ff" rx="5.508" ry="30.487" transform="rotate(89.814 -19.197 -7.127)scale(1 -1)"/></g><g filter="url(#e)"><ellipse cx="5.508" cy="30.599" fill="#8900ff" rx="5.508" ry="30.599" transform="rotate(89.814 -25.928 4.177)scale(1 -1)"/></g><g filter="url(#f)"><ellipse cx="5.508" cy="30.599" fill="#8900ff" rx="5.508" ry="30.599" transform="rotate(89.814 -25.738 5.52)scale(1 -1)"/></g><g filter="url(#g)"><ellipse cx="14.072" cy="22.078" fill="#eee6ff" rx="14.072" ry="22.078" transform="rotate(93.35 31.245 55.578)scale(-1 1)"/></g><g filter="url(#h)"><ellipse cx="3.47" cy="21.501" fill="#8900ff" rx="3.47" ry="21.501" transform="rotate(89.009 35.419 55.202)scale(-1 1)"/></g><g filter="url(#i)"><ellipse cx="3.47" cy="21.501" fill="#8900ff" rx="3.47" ry="21.501" transform="rotate(89.009 35.419 55.202)scale(-1 1)"/></g><g filter="url(#j)"><ellipse cx="14.592" cy="9.743" fill="#8900ff" rx="4.407" ry="29.108" transform="rotate(39.51 14.592 9.743)"/></g><g filter="url(#k)"><ellipse cx="61.728" cy="-5.321" fill="#8900ff" rx="4.407" ry="29.108" transform="rotate(37.892 61.728 -5.32)"/></g><g filter="url(#l)"><ellipse cx="55.618" cy="7.104" fill="#00c2ff" rx="5.971" ry="9.665" transform="rotate(37.892 55.618 7.104)"/></g><g filter="url(#m)"><ellipse cx="12.326" cy="39.103" fill="#8900ff" rx="4.407" ry="29.108" transform="rotate(37.892 12.326 39.103)"/></g><g filter="url(#n)"><ellipse cx="12.326" cy="39.103" fill="#8900ff" rx="4.407" ry="29.108" transform="rotate(37.892 12.326 39.103)"/></g><g filter="url(#o)"><ellipse cx="49.857" cy="30.678" fill="#8900ff" rx="4.407" ry="29.108" transform="rotate(37.892 49.857 30.678)"/></g><g filter="url(#p)"><ellipse cx="52.623" cy="33.171" fill="#00c2ff" rx="5.971" ry="15.297" transform="rotate(37.892 52.623 33.17)"/></g></g><path d="M6.919 0c-9.198 13.166-9.252 33.575 0 46.789h6.215c-9.25-13.214-9.196-33.623 0-46.789zm62.424 0h-6.215c9.198 13.166 9.252 33.575 0 46.789h6.215c9.25-13.214 9.196-33.623 0-46.789" class="parenthesis"/><defs><filter id="b" width="60.045" height="41.654" x="-5.564" y="16.92" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="7.659"/></filter><filter id="c" width="90.34" height="51.437" x="-40.407" y="-6.762" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="7.659"/></filter><filter id="d" width="79.355" height="29.4" x="-35.435" y="2.801" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="e" width="79.579" height="29.4" x="-30.84" y="20.8" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="f" width="79.579" height="29.4" x="-29.307" y="21.949" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="g" width="74.749" height="58.852" x="29.961" y="-17.13" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="7.659"/></filter><filter id="h" width="61.377" height="25.362" x="37.754" y="3.055" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="i" width="61.377" height="25.362" x="37.754" y="3.055" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="j" width="56.045" height="63.649" x="-13.43" y="-22.082" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="k" width="54.814" height="64.646" x="34.321" y="-37.644" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="l" width="33.541" height="35.313" x="38.847" y="-10.552" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="m" width="54.814" height="64.646" x="-15.081" y="6.78" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="n" width="54.814" height="64.646" x="-15.081" y="6.78" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="o" width="54.814" height="64.646" x="22.45" y="-1.645" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter><filter id="p" width="39.409" height="43.623" x="32.919" y="11.36" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_2002_17286" stdDeviation="4.596"/></filter></defs></svg>
-</file>
-
-<file path="desktop/src/components/.gitkeep">
-
 </file>
 
 <file path="desktop/src/components/PrescriptionGenerator.tsx">
@@ -380,118 +457,6 @@ export default function PrescriptionGenerator({ verifiedPatient, scannedToken }:
       <small style={{ display: 'block', marginTop: 8, color: '#666', textAlign: 'center' }}>
         Works with standard OS Print Dialog. Select "Save as PDF" to test without physical printer.
       </small>
-    </section>
-  );
-}
-</file>
-
-<file path="desktop/src/components/QrIntakeScanner.tsx">
-import React, { useState, useEffect } from 'react';
-
-interface QrIntakeScannerProps {
-  onPatientVerified: (patient: any, token: string) => void;
-}
-
-export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerProps) {
-  const [scannedToken, setScannedToken] = useState('');
-  const [verifiedPatient, setVerifiedPatient] = useState<any>(null);
-  const [scanStatus, setScanStatus] = useState('');
-
-  // The core verification logic extracted so both manual and USB scans can use it
-  const verifyToken = async (tokenToVerify: string) => {
-    setScanStatus('Verifying token signature...');
-    setVerifiedPatient(null);
-
-    const jwt = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch('http://localhost:5000/api/health-pass/verify', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${jwt}`,
-        },
-        body: JSON.stringify({ qrToken: tokenToVerify.trim() }),
-      });
-
-      const data = await res.json();
-      if (res.ok && data.verified) {
-        setVerifiedPatient(data.patient);
-        setScannedToken(tokenToVerify.trim());
-        onPatientVerified(data.patient, tokenToVerify.trim());
-        setScanStatus('✅ Verification Successful: Patient identity and security signature valid.');
-      } else {
-        setScanStatus('❌ Verification Failed: ' + (data.error || 'Invalid Token'));
-      }
-    } catch (err: any) {
-      setScanStatus('❌ Error: ' + err.message);
-    }
-  };
-
-  // THE USB BARCODE SCANNER LISTENER
-  useEffect(() => {
-    let buffer = '';
-    let timer: NodeJS.Timeout;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore keystrokes if the nurse is actively typing inside an input/textarea
-      if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) {
-        return;
-      }
-
-      if (e.key === 'Enter') {
-        if (buffer.length > 20) { // Valid QR tokens are long strings
-          verifyToken(buffer);
-        }
-        buffer = '';
-      } else if (e.key.length === 1) { // Only capture printable characters
-        buffer += e.key;
-        clearTimeout(timer);
-        // Scanners type instantly. If typing pauses for more than 50ms, it's a human, so clear the buffer.
-        timer = setTimeout(() => { buffer = ''; }, 50);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      clearTimeout(timer);
-    };
-  }, []);
-
-  return (
-    <section style={{ padding: 16, border: '1px solid #ccc', borderRadius: 8 }}>
-      <h3 style={{ marginTop: 0, color: '#0f766e' }}>1. QR Health Pass Scanner</h3>
-      <p style={{ fontSize: 13, color: '#666' }}>
-        <strong>Touchless Mode Active:</strong> Scan a physical QR code at any time.
-      </p>
-      
-      {/* Manual Fallback */}
-      <textarea
-        rows={3}
-        style={{ width: '100%', padding: 8, boxSizing: 'border-box' }}
-        placeholder="Or paste QR string here manually..."
-        value={scannedToken}
-        onChange={(e) => setScannedToken(e.target.value)}
-      />
-      <button 
-        onClick={() => verifyToken(scannedToken)} 
-        style={{ marginTop: 10, padding: '8px 16px', background: '#0f766e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}
-      >
-        Manual Verify
-      </button>
-      
-      {scanStatus && <p style={{ fontSize: 13, marginTop: 12 }}><b>Status:</b> {scanStatus}</p>}
-
-      {verifiedPatient && (
-        <div style={{ marginTop: 12, padding: 12, background: '#f0fdfa', borderRadius: 6, fontSize: 14, borderLeft: '4px solid #0f766e' }}>
-          <h4 style={{ margin: '0 0 8px 0', color: '#0f766e' }}>Verified Patient Identity:</h4>
-          <p style={{ margin: '4px 0' }}><b>Name:</b> {verifiedPatient.first_name} {verifiedPatient.last_name}</p>
-          <p style={{ margin: '4px 0' }}><b>Student No:</b> {verifiedPatient.student_no}</p>
-          <p style={{ margin: '4px 0' }}><b>Course:</b> {verifiedPatient.course}</p>
-          <p style={{ margin: '4px 0' }}><b>Blood Type:</b> {verifiedPatient.blood_type || 'N/A'}</p>
-          <p style={{ margin: '4px 0' }}><b>Allergies:</b> <span style={{ color: 'red', fontWeight: 'bold' }}>{verifiedPatient.allergies || 'None'}</span></p>
-        </div>
-      )}
     </section>
   );
 }
@@ -823,17 +788,6 @@ createRoot(document.getElementById('root')!).render(
 )
 </file>
 
-<file path="mobile/lib/config/api_config.dart">
-import 'dart:io';
-
-class ApiConfig {
-  static String get baseUrl {
-    // 10.0.2.2 for Android emulator; localhost for iOS/macOS/web
-    return Platform.isAndroid ? 'http://10.0.2.2:5000' : 'http://localhost:5000';
-  }
-}
-</file>
-
 <file path="mobile/lib/screens/.gitkeep">
 
 </file>
@@ -1120,6 +1074,7 @@ export function requireRoles(...allowedRoles) {
 import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
+import { logAudit } from '../utils/auditLogger.js';
 
 const router = express.Router();
 
@@ -1141,40 +1096,69 @@ router.get('/doctors', authenticateToken, async (req, res) => {
   }
 });
 
-// POST /api/appointments - Book a slot
 router.post('/', authenticateToken, async (req, res) => {
+  const { doctor_user_id, date_time, appointment_type, notes } = req.body;
+  const patientUserId = req.user.user_id;
+
+  if (!doctor_user_id || !date_time || !appointment_type) {
+    return res.status(400).json({ error: 'Doctor, date/time, and type are required.' });
+  }
+
+  const connection = await pool.getConnection();
+
   try {
-    const patientUserId = req.user.user_id;
-    const { doctor_user_id, date_time, appointment_type, notes } = req.body;
+    await connection.beginTransaction();
 
-    if (!doctor_user_id || !date_time || !appointment_type) {
-      return res.status(400).json({ error: 'Doctor, date/time, and type are required.' });
-    }
+    // 1. Lock the Doctor's record to serialize booking attempts for this specific doctor
+    await connection.query(
+      `SELECT user_id FROM USERS WHERE user_id = ? FOR UPDATE`, 
+      [doctor_user_id]
+    );
 
-    // Check for schedule collision
-    const [conflict] = await pool.query(
+    // 2. Check for schedule collision safely (concurrent requests are now waiting in line)
+    const [conflict] = await connection.query(
       `SELECT appointment_id FROM APPOINTMENTS 
        WHERE doctor_user_id = ? AND date_time = ? AND status NOT IN ('cancelled', 'no_show')`,
       [doctor_user_id, date_time]
     );
 
     if (conflict.length > 0) {
-      return res.status(409).json({ error: 'Selected time slot is already booked.' });
+      throw new Error('Selected time slot is already booked.');
     }
 
-    const [result] = await pool.query(
+    // 3. Insert the appointment
+    const [result] = await connection.query(
       `INSERT INTO APPOINTMENTS (patient_user_id, doctor_user_id, date_time, appointment_type, status, notes)
        VALUES (?, ?, ?, ?, 'scheduled', ?)`,
       [patientUserId, doctor_user_id, date_time, appointment_type, notes || '']
     );
 
+    // 4. RA 10173 Audit: Log the creation of the appointment
+    await logAudit(connection, {
+      userId: req.user.user_id, // Patient who booked it
+      action: 'CREATE',
+      table: 'APPOINTMENTS',
+      recordId: result.insertId,
+      oldValue: null,
+      newValue: { doctor_user_id, date_time, appointment_type, notes },
+      ipAddress: req.ip
+    });
+
+    await connection.commit();
     res.status(201).json({
       message: 'Appointment booked successfully.',
       appointmentId: result.insertId,
     });
   } catch (error) {
+    await connection.rollback();
+    // Catch the specific error we threw, otherwise generic 500
+    if (error.message === 'Selected time slot is already booked.') {
+      return res.status(409).json({ error: error.message });
+    }
     console.error('Booking error:', error);
     res.status(500).json({ error: 'Failed to book appointment.' });
+  } finally {
+    connection.release();
   }
 });
 
@@ -1200,96 +1184,91 @@ router.get('/my', authenticateToken, async (req, res) => {
 export default router;
 </file>
 
-<file path="server/src/routes/healthPass.js">
-// server/src/routes/healthPass.js
+<file path="server/src/routes/inventory.js">
+// server/src/routes/inventory.js
 import express from 'express';
-import crypto from 'crypto';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { requireRoles } from '../middleware/rbac.js';
+import { logAudit } from '../utils/auditLogger.js';
 
 const router = express.Router();
 
-// GET /api/health-pass/token - Generates dynamic QR token for mobile user
-router.get('/token', authenticateToken, (req, res) => {
+// GET /api/inventory/batches - Fetch catalog for the UI viewer
+router.get('/batches', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
   try {
-    const userId = req.user.user_id;
-    const timestamp = Date.now();
-    const nonce = crypto.randomBytes(4).toString('hex');
-
-    // Payload: userId.timestamp.nonce
-    const payload = `${userId}.${timestamp}.${nonce}`;
-    const hmac = crypto
-      .createHmac('sha256', 'supersecretkeyvaletudo')
-      .update(payload)
-      .digest('hex');
-
-    // Signed token format: userId.timestamp.nonce.signature
-    const qrToken = `${payload}.${hmac}`;
-
-    res.json({
-      qrToken,
-      expiresInSeconds: 300, // Client should refresh every 5 mins
-    });
+    const [rows] = await pool.query(
+      `SELECT b.batch_id, m.name, b.batch_no, b.quantity_on_hand, b.expiry_date 
+       FROM MEDICINE_BATCHES b 
+       JOIN MEDICINES m ON b.medicine_id = m.medicine_id 
+       WHERE b.deleted_at IS NULL 
+       ORDER BY b.expiry_date ASC`
+    );
+    res.json(rows);
   } catch (error) {
-    console.error('QR generation error:', error);
-    res.status(500).json({ error: 'Failed to generate QR token.' });
+    res.status(500).json({ error: 'Failed to fetch inventory batches.' });
   }
 });
 
-// POST /api/health-pass/verify - Scanned by Nurse/Doctor on Electron
-router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+// POST /api/inventory/deduct - Deduct stock from a specific batch
+router.post('/deduct', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+  const { batch_id, quantity_deducted, reason } = req.body;
+  
+  if (!Number.isInteger(quantity_deducted) || quantity_deducted <= 0) {
+    return res.status(400).json({ error: 'Quantity deducted must be a positive integer.' });
+  }
+  
+  const connection = await pool.getConnection();
+
   try {
-    const { qrToken } = req.body;
-    if (!qrToken) return res.status(400).json({ error: 'QR token required.' });
+    await connection.beginTransaction();
 
-    const parts = qrToken.split('.');
-    if (parts.length !== 4) {
-      return res.status(400).json({ error: 'Invalid QR token format.' });
-    }
-
-    const [userId, timestampStr, nonce, receivedSig] = parts;
-    const payload = `${userId}.${timestampStr}.${nonce}`;
-
-    // Verify HMAC
-    const expectedSig = crypto
-      .createHmac('sha256', 'supersecretkeyvaletudo')
-      .update(payload)
-      .digest('hex');
-
-    if (expectedSig !== receivedSig) {
-      return res.status(401).json({ error: 'QR verification failed: Invalid cryptographic signature.' });
-    }
-
-    // Check expiration (valid for 15 minutes to allow slow connections)
-    const tokenTime = parseInt(timestampStr, 10);
-    if (Date.now() - tokenTime > 15 * 60 * 1000) {
-      return res.status(401).json({ error: 'QR pass expired. Ask student to refresh pass.' });
-    }
-
-    // Retrieve patient medical data for the clinic staff
-    const [patient] = await pool.query(
-      `SELECT u.user_id, u.first_name, u.last_name, u.email,
-              sp.student_no, sp.course, sp.year_level,
-              hp.blood_type, hp.allergies, hp.chronic_conditions
-       FROM USERS u
-       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
-       LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
-       WHERE u.user_id = ? AND u.is_active = TRUE`,
-      [userId]
+    // 1. Lock the batch row and check current stock levels
+    const [batchRows] = await connection.query(
+      'SELECT quantity_on_hand FROM MEDICINE_BATCHES WHERE batch_id = ? FOR UPDATE',
+      [batch_id]
     );
 
-    if (patient.length === 0) {
-      return res.status(404).json({ error: 'Patient not found or deactivated.' });
+    if (batchRows.length === 0) throw new Error('Medicine batch not found.');
+    
+    const oldQuantity = batchRows[0].quantity_on_hand;
+    if (oldQuantity < quantity_deducted) {
+      throw new Error('Insufficient stock in this batch to complete dispensation.');
     }
 
-    res.json({
-      verified: true,
-      patient: patient[0],
+    const newQuantity = oldQuantity - quantity_deducted;
+
+    // 2. Deduct the quantity from the batch
+    await connection.query(
+      'UPDATE MEDICINE_BATCHES SET quantity_on_hand = ? WHERE batch_id = ?',
+      [newQuantity, batch_id]
+    );
+
+    // 3. Append to internal INVENTORY_LOGS
+    await connection.query(
+      `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
+       VALUES (?, ?, 'dispense', ?, ?)`,
+      [batch_id, -quantity_deducted, reason || 'Prescription issuance', req.user.user_id]
+    );
+
+    // 4. Append to Global Cryptographic Audit Trail (RA 10173 Compliance)
+    await logAudit(connection, {
+      userId: req.user.user_id,
+      action: 'UPDATE',
+      table: 'MEDICINE_BATCHES',
+      recordId: batch_id,
+      oldValue: { quantity_on_hand: oldQuantity },
+      newValue: { quantity_on_hand: newQuantity },
+      ipAddress: req.ip
     });
+
+    await connection.commit();
+    res.json({ message: 'Stock successfully deducted and logged.' });
   } catch (error) {
-    console.error('Verification error:', error);
-    res.status(500).json({ error: 'Error during verification.' });
+    await connection.rollback();
+    res.status(400).json({ error: error.message });
+  } finally {
+    connection.release();
   }
 });
 
@@ -1301,6 +1280,7 @@ export default router;
 import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
+import { logAudit } from '../utils/auditLogger.js';
 
 const router = express.Router();
 
@@ -1344,26 +1324,36 @@ router.get('/me', authenticateToken, async (req, res) => {
   }
 });
 
-// PUT /api/profile/me - Update static health indicators
+// PUT /api/profile/me - Update static health indicators with RA 10173 Audit Logging
 router.put('/me', authenticateToken, async (req, res) => {
-  try {
-    const userId = req.user.user_id;
-    const {
-      blood_type,
-      allergies,
-      chronic_conditions,
-      emergency_contact_name,
-      emergency_contact_phone,
-      height,
-      weight,
-    } = req.body;
+  const userId = req.user.user_id;
+  const {
+    blood_type, allergies, chronic_conditions,
+    emergency_contact_name, emergency_contact_phone, height, weight,
+  } = req.body;
 
-    // Check if record exists
-    const [existing] = await pool.query('SELECT profile_id FROM HEALTH_PROFILES WHERE user_id = ?', [userId]);
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    // 1. Lock and fetch the old data before we change it
+    const [existing] = await connection.query(
+      'SELECT * FROM HEALTH_PROFILES WHERE user_id = ? FOR UPDATE',
+      [userId]
+    );
+
+    let oldData = null;
+    let action = 'CREATE';
+    let recordId = null;
 
     if (existing.length > 0) {
-      // Update
-      await pool.query(
+      oldData = existing[0];
+      action = 'UPDATE';
+      recordId = oldData.profile_id;
+
+      // Update existing record
+      await connection.query(
         `UPDATE HEALTH_PROFILES 
          SET blood_type = ?, allergies = ?, chronic_conditions = ?,
              emergency_contact_name = ?, emergency_contact_phone = ?,
@@ -1372,19 +1362,287 @@ router.put('/me', authenticateToken, async (req, res) => {
         [blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, height, weight, userId]
       );
     } else {
-      // Insert if not present
-      await pool.query(
+      // Insert new record if none exists
+      const [result] = await connection.query(
         `INSERT INTO HEALTH_PROFILES 
          (user_id, blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, height, weight)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [userId, blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, height, weight]
       );
+      recordId = result.insertId;
     }
 
+    const newData = { blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, height, weight };
+
+    // 2. Append to Global Cryptographic Audit Trail
+    await logAudit(connection, {
+      userId: req.user.user_id,
+      action: action,
+      table: 'HEALTH_PROFILES',
+      recordId: recordId,
+      oldValue: oldData,
+      newValue: newData,
+      ipAddress: req.ip
+    });
+
+    await connection.commit();
     res.json({ message: 'Health profile successfully updated.' });
   } catch (error) {
+    await connection.rollback();
     console.error('Error updating health profile:', error);
     res.status(500).json({ error: 'Failed to update health profile.' });
+  } finally {
+    connection.release();
+  }
+});
+
+export default router;
+</file>
+
+<file path="desktop/src/components/QrIntakeScanner.tsx">
+import React, { useState, useEffect } from 'react';
+
+interface QrIntakeScannerProps {
+  onPatientVerified: (patient: any, token: string) => void;
+}
+
+export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerProps) {
+  const [scannedToken, setScannedToken] = useState('');
+  const [verifiedPatient, setVerifiedPatient] = useState<any>(null);
+  const [scanStatus, setScanStatus] = useState('');
+
+  // The core verification logic extracted so both manual and USB scans can use it
+  const verifyToken = async (tokenToVerify: string) => {
+    setScanStatus('Verifying token signature...');
+    setVerifiedPatient(null);
+
+    const jwt = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('http://localhost:5000/api/health-pass/verify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${jwt}`,
+        },
+        body: JSON.stringify({ qrToken: tokenToVerify.trim() }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.verified) {
+        setVerifiedPatient(data.patient);
+        setScannedToken(tokenToVerify.trim());
+        onPatientVerified(data.patient, tokenToVerify.trim());
+        setScanStatus('✅ Verification Successful: Patient identity and security signature valid.');
+      } else {
+        setScanStatus('❌ Verification Failed: ' + (data.error || 'Invalid Token'));
+      }
+    } catch (err: any) {
+      setScanStatus('❌ Error: ' + err.message);
+    }
+  };
+
+  // THE USB BARCODE SCANNER LISTENER
+  useEffect(() => {
+    let buffer = '';
+    let timer: NodeJS.Timeout;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore keystrokes if the nurse is actively typing inside an input/textarea
+      if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) {
+        return;
+      }
+
+      if (e.key === 'Enter') {
+        if (buffer.length > 20) { // Valid QR tokens are long strings
+          verifyToken(buffer);
+        }
+        buffer = '';
+      } else if (e.key.length === 1) { // Only capture printable characters
+        buffer += e.key;
+        clearTimeout(timer);
+        // Scanners type instantly. If typing pauses for more than 50ms, it's a human, so clear the buffer.
+        timer = setTimeout(() => { buffer = ''; }, 50);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      clearTimeout(timer);
+    };
+  }, []);
+
+  return (
+    <section style={{ padding: 16, border: '1px solid #ccc', borderRadius: 8 }}>
+      <h3 style={{ marginTop: 0, color: '#0f766e' }}>1. QR Health Pass Scanner</h3>
+      <p style={{ fontSize: 13, color: '#666' }}>
+        <strong>Touchless Mode Active:</strong> Scan a physical QR code at any time.
+      </p>
+      
+      {/* Manual Fallback */}
+      <textarea
+        rows={3}
+        style={{ width: '100%', padding: 8, boxSizing: 'border-box' }}
+        placeholder="Or paste QR string here manually..."
+        value={scannedToken}
+        onChange={(e) => setScannedToken(e.target.value)}
+      />
+      <button 
+        onClick={() => verifyToken(scannedToken)} 
+        style={{ marginTop: 10, padding: '8px 16px', background: '#0f766e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}
+      >
+        Manual Verify
+      </button>
+      
+      {scanStatus && <p style={{ fontSize: 13, marginTop: 12 }}><b>Status:</b> {scanStatus}</p>}
+
+      {verifiedPatient && (
+        <div style={{ marginTop: 12, padding: 12, background: '#f0fdfa', borderRadius: 6, fontSize: 14, borderLeft: '4px solid #0f766e' }}>
+          <h4 style={{ margin: '0 0 8px 0', color: '#0f766e' }}>Verified Patient Identity:</h4>
+          <p style={{ margin: '4px 0' }}><b>Name:</b> {verifiedPatient.first_name} {verifiedPatient.last_name}</p>
+          <p style={{ margin: '4px 0' }}><b>Student No:</b> {verifiedPatient.student_no}</p>
+          <p style={{ margin: '4px 0' }}><b>Course:</b> {verifiedPatient.course}</p>
+          <p style={{ margin: '4px 0' }}><b>Blood Type:</b> {verifiedPatient.blood_type || 'N/A'}</p>
+          <p style={{ margin: '4px 0' }}><b>Allergies:</b> <span style={{ color: 'red', fontWeight: 'bold' }}>{verifiedPatient.allergies || 'None'}</span></p>
+        </div>
+      )}
+    </section>
+  );
+}
+</file>
+
+<file path="mobile/lib/config/api_config.dart">
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:io' show Platform;
+
+class ApiConfig {
+  static String get baseUrl {
+    if (kIsWeb) {
+      return 'http://localhost:5000';
+    }
+    
+    try {
+      if (Platform.isAndroid) {
+        return 'http://10.0.2.2:5000'; // Android Emulator[cite: 1]
+      }
+    } catch (_) {
+      // Fallback if platform check fails
+    }
+    
+    return 'http://localhost:5000'; // iOS / macOS / Windows / Web fallback[cite: 1]
+  }
+}
+</file>
+
+<file path="server/src/routes/healthPass.js">
+// server/src/routes/healthPass.js
+import express from 'express';
+import crypto from 'crypto';
+import { pool } from '../db.js';
+import { authenticateToken } from '../auth.js';
+import { requireRoles } from '../middleware/rbac.js';
+import { logAudit } from '../utils/auditLogger.js';
+
+const router = express.Router();
+
+// GET /api/health-pass/token - Generates dynamic QR token for mobile user
+router.get('/token', authenticateToken, (req, res) => {
+  try {
+    const userId = req.user.user_id;
+    const timestamp = Date.now();
+    const nonce = crypto.randomBytes(4).toString('hex');
+
+    // Payload: userId.timestamp.nonce
+    const payload = `${userId}.${timestamp}.${nonce}`;
+    const hmac = crypto
+      .createHmac('sha256', 'supersecretkeyvaletudo')
+      .update(payload)
+      .digest('hex');
+
+    // Signed token format: userId.timestamp.nonce.signature
+    const qrToken = `${payload}.${hmac}`;
+
+    res.json({
+      qrToken,
+      expiresInSeconds: 300, // Client should refresh every 5 mins
+    });
+  } catch (error) {
+    console.error('QR generation error:', error);
+    res.status(500).json({ error: 'Failed to generate QR token.' });
+  }
+});
+
+// POST /api/health-pass/verify - Scanned by Nurse/Doctor on Electron
+router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+  const { qrToken } = req.body;
+  if (!qrToken) return res.status(400).json({ error: 'QR token required.' });
+
+  const parts = qrToken.split('.');
+  if (parts.length !== 4) {
+    return res.status(400).json({ error: 'Invalid QR token format.' });
+  }
+
+  const [patientUserId, timestampStr, nonce, receivedSig] = parts;
+  const payload = `${patientUserId}.${timestampStr}.${nonce}`;
+
+  // Verify HMAC (Done outside the DB transaction to save resources)
+  const expectedSig = crypto.createHmac('sha256', 'supersecretkeyvaletudo').update(payload).digest('hex');
+  if (expectedSig !== receivedSig) {
+    return res.status(401).json({ error: 'QR verification failed: Invalid signature.' });
+  }
+
+  const tokenTime = parseInt(timestampStr, 10);
+  if (Date.now() - tokenTime > 15 * 60 * 1000) {
+    return res.status(401).json({ error: 'QR pass expired. Ask student to refresh pass.' });
+  }
+
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    // Retrieve patient medical data
+    const [patient] = await connection.query(
+      `SELECT u.user_id, u.first_name, u.last_name, u.email,
+              sp.student_no, sp.course, sp.year_level,
+              hp.blood_type, hp.allergies, hp.chronic_conditions
+       FROM USERS u
+       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+       LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+       WHERE u.user_id = ? AND u.is_active = TRUE`,
+      [patientUserId]
+    );
+
+    if (patient.length === 0) {
+      throw new Error('Patient not found or deactivated.');
+    }
+
+    // RA 10173 Audit: Log that the Nurse/Doctor viewed this specific student's PHI
+    await logAudit(connection, {
+      userId: req.user.user_id, // The staff member performing the scan
+      action: 'VIEW',
+      table: 'HEALTH_PROFILES',
+      recordId: patientUserId,  // The student whose data was exposed
+      oldValue: null,
+      newValue: null,
+      ipAddress: req.ip
+    });
+
+    await connection.commit();
+    
+    res.json({
+      verified: true,
+      patient: patient[0],
+    });
+  } catch (error) {
+    await connection.rollback();
+    if (error.message === 'Patient not found or deactivated.') {
+      return res.status(404).json({ error: error.message });
+    }
+    console.error('Verification error:', error);
+    res.status(500).json({ error: 'Error during verification.' });
+  } finally {
+    connection.release();
   }
 });
 
@@ -1492,142 +1750,6 @@ export const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-});
-</file>
-
-<file path="docker-compose.yml">
-services:
-  # 1. MySQL 8.0 with Spatial Support
-  mysql:
-    image: mysql:8.0
-    container_name: valetudo-mysql
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: valetudo_healthlink
-    ports:
-      - "3307:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-
-  # 2. Redis Live Queue Cache
-  redis:
-    image: redis:7-alpine
-    container_name: valetudo-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-
-  # 3. MinIO S3-Compatible Object Storage
-  minio:
-    image: quay.io/minio/minio:latest
-    container_name: valetudo-minio
-    restart: unless-stopped
-    ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Web UI
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: miniopassword
-    volumes:
-      - minio_data:/data
-    command: server /data --console-address ":9001"
-
-volumes:
-  mysql_data:
-  minio_data:
-</file>
-
-<file path="desktop/electron/main.cjs">
-// desktop/electron/main.cjs (Line 1)
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
-const path = require('path');
-const fs = require('fs');
-
-function createWindow() {
-  const win = new BrowserWindow({
-    width: 1280,
-    height: 850,
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: path.join(__dirname, 'preload.cjs'), // <-- LOAD PRELOAD
-    },
-  });
-
-  const devUrl = 'http://localhost:5173';
-  win.loadURL(devUrl);
-}
-
-// -----------------------------------------------------------------------------
-// PRINT HANDLER (Opens OS Print Preview Dialog)
-// -----------------------------------------------------------------------------
-ipcMain.handle('print-document', async (event, { htmlContent }) => {
-  let workerWin = new BrowserWindow({ show: false });
-  await workerWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
-
-  return new Promise((resolve) => {
-    // silent: false opens the native OS print preview dialog window
-    workerWin.webContents.print({ silent: false }, (success, failureReason) => {
-      if (!success) {
-        resolve({ success: false, error: failureReason });
-      } else {
-        resolve({ success: true });
-      }
-      
-      // Safely close the hidden worker window after a tiny delay to prevent freezing
-      setTimeout(() => {
-        if (!workerWin.isDestroyed()) {
-          workerWin.close();
-        }
-      }, 500);
-    });
-  });
-});
-
-app.whenReady().then(createWindow);
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
-</file>
-
-<file path="server/src/index.js">
-// server/src/index.js
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import { loginUser, authenticateToken } from './auth.js';
-
-// Route imports
-import profileRoutes from './routes/profile.js';
-import healthPassRoutes from './routes/healthPass.js';
-import appointmentRoutes from './routes/appointments.js';
-import inventoryRoutes from './routes/inventory.js';
-
-dotenv.config();
-
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-// Public Auth Routes
-app.post('/api/auth/login', loginUser);
-
-// Protected Core Modules
-app.use('/api/profile', profileRoutes);
-app.use('/api/health-pass', healthPassRoutes);
-app.use('/api/appointments', appointmentRoutes);
-app.use('/api/inventory', inventoryRoutes);
-
-// Auth verification check
-app.get('/api/users/me', authenticateToken, (req, res) => {
-  res.json({ message: 'Authenticated', user: req.user });
-});
-
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Valetudo HealthLink API running on port ${PORT}`);
 });
 </file>
 
@@ -2054,6 +2176,142 @@ INSERT INTO `MEDICINE_BATCHES` (`batch_id`, `medicine_id`, `batch_no`, `manufact
 (1, 1, 'BATCH-PAR-2026A', '2026-01-10', '2028-01-10', 'Unilab Philippines', 200),
 (2, 2, 'BATCH-NZP-2026B', '2026-02-15', '2027-08-15', 'Unilab Philippines', 150),
 (3, 3, 'BATCH-SLB-2025X', '2025-06-01', '2027-06-01', 'GlaxoSmithKline', 15);
+</file>
+
+<file path="docker-compose.yml">
+services:
+  # 1. MySQL 8.0 with Spatial Support
+  mysql:
+    image: mysql:8.0
+    container_name: valetudo-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: valetudo_healthlink
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  # 2. Redis Live Queue Cache
+  redis:
+    image: redis:7-alpine
+    container_name: valetudo-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  # 3. MinIO S3-Compatible Object Storage
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: valetudo-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web UI
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: miniopassword
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+
+volumes:
+  mysql_data:
+  minio_data:
+</file>
+
+<file path="desktop/electron/main.cjs">
+// desktop/electron/main.cjs (Line 1)
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const path = require('path');
+const fs = require('fs');
+
+function createWindow() {
+  const win = new BrowserWindow({
+    width: 1280,
+    height: 850,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.cjs'), // <-- LOAD PRELOAD
+    },
+  });
+
+  const devUrl = 'http://localhost:5173';
+  win.loadURL(devUrl);
+}
+
+// -----------------------------------------------------------------------------
+// PRINT HANDLER (Opens OS Print Preview Dialog)
+// -----------------------------------------------------------------------------
+ipcMain.handle('print-document', async (event, { htmlContent }) => {
+  let workerWin = new BrowserWindow({ show: false });
+  await workerWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+
+  return new Promise((resolve) => {
+    // silent: false opens the native OS print preview dialog window
+    workerWin.webContents.print({ silent: false }, (success, failureReason) => {
+      if (!success) {
+        resolve({ success: false, error: failureReason });
+      } else {
+        resolve({ success: true });
+      }
+      
+      // Safely close the hidden worker window after a tiny delay to prevent freezing
+      setTimeout(() => {
+        if (!workerWin.isDestroyed()) {
+          workerWin.close();
+        }
+      }, 500);
+    });
+  });
+});
+
+app.whenReady().then(createWindow);
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
+</file>
+
+<file path="server/src/index.js">
+// server/src/index.js
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import { loginUser, authenticateToken } from './auth.js';
+
+// Route imports
+import profileRoutes from './routes/profile.js';
+import healthPassRoutes from './routes/healthPass.js';
+import appointmentRoutes from './routes/appointments.js';
+import inventoryRoutes from './routes/inventory.js';
+
+dotenv.config();
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Public Auth Routes
+app.post('/api/auth/login', loginUser);
+
+// Protected Core Modules
+app.use('/api/profile', profileRoutes);
+app.use('/api/health-pass', healthPassRoutes);
+app.use('/api/appointments', appointmentRoutes);
+app.use('/api/inventory', inventoryRoutes);
+
+// Auth verification check
+app.get('/api/users/me', authenticateToken, (req, res) => {
+  res.json({ message: 'Authenticated', user: req.user });
+});
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`Valetudo HealthLink API running on port ${PORT}`);
+});
 </file>
 
 <file path="desktop/src/App.tsx">
