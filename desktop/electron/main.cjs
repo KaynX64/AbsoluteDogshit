@@ -49,8 +49,8 @@ ipcMain.handle('print-document', async (event, { htmlContent }) => {
 ipcMain.handle('show-notification', (event, { title, body }) => {
   if (Notification.isSupported()) {
     new Notification({
-      title: title || 'Valetudo Emergency Alert',
-      body: body || 'Emergency triggered on campus.',
+      title: title || 'Valetudo Alert',
+      body: body || 'Notification from Valetudo HealthLink',
       urgency: 'critical',
     }).show();
     return { success: true };

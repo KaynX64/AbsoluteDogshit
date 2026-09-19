@@ -1,5 +1,5 @@
 // desktop/src/components/NurseConsole.tsx
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import QrIntakeScanner from './QrIntakeScanner';
 import InventoryManager from './InventoryManager';
 import { io } from 'socket.io-client';
@@ -47,6 +47,16 @@ export default function NurseConsole() {
     const socket = io('http://localhost:5000');
     socket.on('queue:updated', () => {
       fetchLiveQueue();
+    });
+
+    // 🔔 Notify Clinic Nurse of new bookings
+    socket.on('appointment:booked', (newBooking: any) => {
+      if (window.electronAPI?.showNotification) {
+        window.electronAPI.showNotification({
+          title: '📋 New Appointment in System',
+          body: `${newBooking.patientName || 'Student'} booked for ${newBooking.date_time}.`,
+        });
+      }
     });
 
     return () => {

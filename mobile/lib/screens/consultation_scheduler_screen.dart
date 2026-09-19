@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
+import '../services/emergency_alert_service.dart';
 
 class ConsultationSchedulerScreen extends StatefulWidget {
   const ConsultationSchedulerScreen({super.key});
@@ -167,6 +168,12 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
         _notesController.clear();
         _fetchAvailableSlots();
         _fetchMyAppointments();
+
+        // 🔔 Trigger local confirmation notification
+        EmergencyAlertService().showAppointmentConfirmedNotification(
+          '📅 Consultation Confirmed',
+          'Your appointment for $_selectedPurpose on $scheduledDateTime is set.',
+        );
 
         if (mounted) {
           showDialog(

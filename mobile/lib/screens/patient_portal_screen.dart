@@ -10,6 +10,7 @@ import '../config/api_config.dart';
 import 'login_screen.dart';
 import 'edit_profile_screen.dart';
 import 'consultation_scheduler_screen.dart';
+import 'documents_viewer_screen.dart';
 import '../services/emergency_alert_service.dart';
 
 class PatientPortalScreen extends StatefulWidget {
@@ -44,7 +45,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     super.initState();
     _fetchQRPass();
     _fetchProfile();
-    // (Removed EmergencyAlertService initialization)
   }
 
   Future<void> _fetchQRPass() async {
@@ -156,7 +156,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
           _sosStatusMessage = 'EMERGENCY DISPATCHED!\nClinic and Response team alerted.';
         });
 
-        // DROP DOWN NOTIFICATION: "Your SOS has been sent"
+        // Drop down local notification confirming alert transmission
         EmergencyAlertService().showStudentSosSentNotification();
 
         if (mounted) {
@@ -196,9 +196,11 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 5-Tab Architecture: Pass -> Scheduler -> Documents -> SOS -> Profile
     final tabs = [
       _buildQRPassTab(),
       const ConsultationSchedulerScreen(),
+      const DocumentsViewerScreen(),
       _buildSOSTab(),
       _buildProfileTab(),
     ];
@@ -206,6 +208,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     final titles = [
       'Valetudo | ${widget.user['first_name']}',
       'Consultation Scheduler',
+      'Prescriptions & Clearances',
       'Campus Emergency SOS',
       'My Health Profile',
     ];
@@ -218,7 +221,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
             icon: const Icon(Icons.logout),
             onPressed: () async {
               await _storage.delete(key: 'jwt_token');
-              await _storage.delete(key: 'user_data'); // <-- CLEAR THIS TOO
+              await _storage.delete(key: 'user_data');
               if (!context.mounted) return;
               Navigator.pushReplacement(
                 context,
@@ -243,12 +246,17 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
             label: 'Scheduler',
           ),
           NavigationDestination(
+            icon: Icon(Icons.description_outlined),
+            selectedIcon: Icon(Icons.description, color: Color(0xFF0F766E)),
+            label: 'Documents',
+          ),
+          NavigationDestination(
             icon: Icon(Icons.emergency_share, color: Colors.red),
             label: 'SOS Panic',
           ),
           NavigationDestination(
             icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
+            selectedIcon: Icon(Icons.person, color: Color(0xFF0F766E)),
             label: 'Profile',
           ),
         ],
@@ -293,7 +301,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     );
   }
 
-  // --- TAB 2: SOS PANIC BUTTON ---
+  // --- TAB 3: SOS PANIC BUTTON ---
   Widget _buildSOSTab() {
     return Center(
       child: Padding(
@@ -374,7 +382,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     );
   }
 
-  // --- TAB 3: HEALTH PROFILE ---
+  // --- TAB 4: HEALTH PROFILE ---
   Widget _buildProfileTab() {
     if (_loadingProfile) return const Center(child: CircularProgressIndicator());
     if (_profileData == null) {
