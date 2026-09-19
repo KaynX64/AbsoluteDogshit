@@ -38,10 +38,11 @@ io.on('connection', (socket) => {
 app.post('/api/auth/login', loginUser);
 
 // 3. Protected Core Modules
+// 3. Protected Core Modules
 app.use('/api/profile', profileRoutes);
 app.use('/api/health-pass', healthPassRoutes);
-app.use('/api/appointments', appointmentRoutes);
-app.use('/api/emergency', emergencyRouter(io)); // Feature 4 SOS WebSockets
+app.use('/api/appointments', appointmentRoutes(io)); // <-- Keep only this one
+app.use('/api/emergency', emergencyRouter(io));
 app.use('/api/inventory', inventoryRoutes);       // Feature 9 Inventory
 
 // Auth verification check

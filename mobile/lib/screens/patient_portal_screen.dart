@@ -10,6 +10,7 @@ import '../config/api_config.dart';
 import 'login_screen.dart';
 import 'edit_profile_screen.dart';
 import 'consultation_scheduler_screen.dart';
+import '../services/emergency_alert_service.dart';
 
 class PatientPortalScreen extends StatefulWidget {
   final Map<String, dynamic> user;
@@ -43,6 +44,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     super.initState();
     _fetchQRPass();
     _fetchProfile();
+    // (Removed EmergencyAlertService initialization)
   }
 
   Future<void> _fetchQRPass() async {
@@ -153,6 +155,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         setState(() {
           _sosStatusMessage = 'EMERGENCY DISPATCHED!\nClinic and Response team alerted.';
         });
+
+        // DROP DOWN NOTIFICATION: "Your SOS has been sent"
+        EmergencyAlertService().showStudentSosSentNotification();
+
         if (mounted) {
           _showEmergencyDialog();
         }
@@ -190,11 +196,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Exact 1-to-1 match with bottom navigation indices:
-    // 0 = Health Pass
-    // 1 = Consultation Scheduler
-    // 2 = SOS Panic
-    // 3 = Profile
     final tabs = [
       _buildQRPassTab(),
       const ConsultationSchedulerScreen(),
@@ -217,6 +218,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
             icon: const Icon(Icons.logout),
             onPressed: () async {
               await _storage.delete(key: 'jwt_token');
+              await _storage.delete(key: 'user_data'); // <-- CLEAR THIS TOO
               if (!context.mounted) return;
               Navigator.pushReplacement(
                 context,
