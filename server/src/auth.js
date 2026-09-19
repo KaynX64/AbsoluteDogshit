@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { pool } from './db.js';
+import { logAudit } from './utils/auditLogger.js';
 
 export async function loginUser(req, res) {
   const { email, password } = req.body;
@@ -50,6 +51,24 @@ export async function loginUser(req, res) {
       { expiresIn: '24h' }
     );
 
+    // RA 10173: Log authentication event to hash-chained audit trail
+    const connection = await pool.getConnection();
+    try {
+      await logAudit(connection, {
+        userId: user.user_id,
+        action: 'LOGIN',
+        table: 'AUTH_SESSIONS',
+        recordId: user.user_id,
+        oldValue: null,
+        newValue: { email: user.email, roles: roleCodes },
+        ipAddress: req.ip,
+      });
+    } catch (auditErr) {
+      console.error('Login audit failed:', auditErr.message);
+    } finally {
+      connection.release();
+    }
+
     return res.json({
       message: 'Login successful',
       token,
@@ -65,6 +84,9 @@ export async function loginUser(req, res) {
     console.error('Login error:', error);
     return res.status(500).json({ error: 'Internal server error.' });
   }
+
+
+
 }
 
 // Middleware to verify JWT

@@ -127,11 +127,13 @@ CREATE TABLE `APPOINTMENTS` (
   `date_time` DATETIME NOT NULL,
   `appointment_type` VARCHAR(50) NOT NULL COMMENT 'Medical, Dental, Physical Exam, Consultation',
   `status` ENUM('scheduled', 'checked_in', 'serving', 'completed', 'cancelled', 'no_show') NOT NULL DEFAULT 'scheduled',
+  `reminder_sent` BOOLEAN NOT NULL DEFAULT FALSE,
   `booked_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `cancelled_reason` TEXT NULL,
   `notes` TEXT NULL,
   INDEX `idx_app_doctor_datetime` (`doctor_user_id`, `date_time`),
   INDEX `idx_app_patient_datetime` (`patient_user_id`, `date_time`),
+  INDEX `idx_app_reminder` (`status`, `reminder_sent`, `date_time`),
   CONSTRAINT `fk_app_patient` FOREIGN KEY (`patient_user_id`) REFERENCES `USERS` (`user_id`),
   CONSTRAINT `fk_app_doctor` FOREIGN KEY (`doctor_user_id`) REFERENCES `USERS` (`user_id`)
 ) ENGINE=InnoDB;
@@ -371,24 +373,25 @@ INSERT INTO `ROLES` (`role_id`, `code`, `name`) VALUES
 (7, 'ADMIN', 'PSU IT System Administrator');
 
 -- Default Passwords for testing: 'Password123!'
--- Bcrypt Hash: $2a$10$7R6v7k2O3a1p5x7h8j9k0uY1w2e3r4t5y6u7i8o9p0q1r2s3t4u5v
 SET @default_pw = '$2b$10$Y5.xe6H/ZbWi0K/RYcQE2uGPh9hdAn/vKWCit/EMDrpqigeOQ45n.';
 
--- Default Test Users
+-- Default Test Users (Added User 6 as Campus Dentist)
 INSERT INTO `USERS` (`user_id`, `email`, `password_hash`, `first_name`, `last_name`, `phone`) VALUES
 (1, 'admin@psu.edu.ph', @default_pw, 'Clark', 'Castro', '09171234567'),
 (2, 'doctor@psu.edu.ph', @default_pw, 'Juan', 'Mata', '09181234568'),
 (3, 'nurse@psu.edu.ph', @default_pw, 'Dimples', 'Arenas', '09191234569'),
 (4, 'responder@psu.edu.ph', @default_pw, 'Denver', 'Cerezo', '09201234570'),
-(5, 'student@psu.edu.ph', @default_pw, 'Daniella', 'Movida', '09211234571');
+(5, 'student@psu.edu.ph', @default_pw, 'Daniella', 'Movida', '09211234571'),
+(6, 'dentist@psu.edu.ph', @default_pw, 'Carmela', 'Reyes', '09221234572');
 
--- Assign User Roles
+-- Assign User Roles (Added Dentist role for User 6)
 INSERT INTO `USER_ROLES` (`user_id`, `role_id`) VALUES
 (1, 7), -- Admin
 (2, 4), -- Doctor
 (3, 3), -- Nurse
 (4, 6), -- Emergency Responder
-(5, 1); -- Student
+(5, 1), -- Student
+(6, 5); -- Dentist
 
 -- Assign Role Profiles
 INSERT INTO `STUDENT_PROFILES` (`user_id`, `student_no`, `course`, `year_level`) VALUES
@@ -396,7 +399,8 @@ INSERT INTO `STUDENT_PROFILES` (`user_id`, `student_no`, `course`, `year_level`)
 
 INSERT INTO `STAFF_PROFILES` (`user_id`, `license_no`, `specialty`, `department`) VALUES
 (2, 'PRC-MD-098765', 'General Medicine', 'PSU Lingayen Clinic'),
-(3, 'PRC-RN-054321', 'Emergency & Triage Nursing', 'PSU Lingayen Clinic');
+(3, 'PRC-RN-054321', 'Emergency & Triage Nursing', 'PSU Lingayen Clinic'),
+(6, 'PRC-DDS-045678', 'Dentistry & Oral Health', 'PSU Lingayen Clinic');
 
 -- Default Baseline Health Profile for Daniella (Student)
 INSERT INTO `HEALTH_PROFILES` (`user_id`, `blood_type`, `allergies`, `chronic_conditions`, `emergency_contact_name`, `emergency_contact_phone`, `height`, `weight`) VALUES

@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import PrescriptionGenerator from './PrescriptionGenerator';
 import { io } from 'socket.io-client';
 
+
 interface AppointmentItem {
   appointment_id: number;
   time_slot: string;
@@ -83,7 +84,25 @@ export default function DoctorConsole() {
 
     // Connect to Socket.IO for live queue/appointment updates
     const socket = io('http://localhost:5000');
-    socket.on('appointment:booked', () => fetchAppointments(viewMode));
+
+    // 🔔 Real-time appointment notification handler
+    socket.on('appointment:booked', (newBooking: any) => {
+      // 1. Refresh the active appointments queue UI
+      fetchAppointments(viewMode);
+
+      // 2. Dispatch native OS system tray notification via Electron IPC
+      if (window.electronAPI?.showNotification) {
+        const patient = newBooking?.patientName || 'A student';
+        const purpose = newBooking?.appointment_type || 'Consultation';
+        const time = newBooking?.date_time || 'upcoming slot';
+
+        window.electronAPI.showNotification({
+          title: '📅 New Consultation Booked',
+          body: `${patient} scheduled a ${purpose} for ${time}.`,
+        });
+      }
+    });
+
     socket.on('appointment:cancelled', () => fetchAppointments(viewMode));
     socket.on('appointment:status_changed', () => fetchAppointments(viewMode));
 

@@ -8,7 +8,7 @@ class ApiConfig {
     try {
       if (Platform.isAndroid) {
         // When using `adb reverse tcp:5000 tcp:5000`, 127.0.0.1 routes straight to your PC
-        return 'http://127.0.0.1:5000';
+        return 'http://192.168.18.116:5000';
       }
     } catch (_) {}
     return 'http://localhost:5000';

@@ -3,6 +3,7 @@ import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { logAudit } from '../utils/auditLogger.js';
+import { sendAppointmentEmail } from '../utils/mailer.js';
 
 export default function appointmentRouter(io) {
   const router = express.Router();
@@ -57,10 +58,18 @@ export default function appointmentRouter(io) {
 
       const bookedSet = new Set(existingBookings.map((b) => b.booked_time));
 
-      const slots = operationalSlots.map((time) => ({
-        time,
-        isAvailable: !bookedSet.has(time),
-      }));
+      // Filter out past hours if selected date is today
+      const isToday = new Date().toISOString().split('T')[0] === date;
+      const nowTime = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+      const slots = operationalSlots.map((time) => {
+        const isPastTime = isToday && time <= nowTime;
+        const isBooked = bookedSet.has(time);
+        return {
+          time,
+          isAvailable: !isBooked && !isPastTime,
+        };
+      });
 
       res.json({ date, doctorId: Number(doctorId), slots });
     } catch (error) {
@@ -69,7 +78,7 @@ export default function appointmentRouter(io) {
     }
   });
 
-  // 3. POST /api/appointments (Book Consultation with Collision Safety & Real-Time Broadcast)
+  // 3. POST /api/appointments (Book Consultation)
   router.post('/', authenticateToken, async (req, res) => {
     const { doctor_user_id, date_time, appointment_type, notes } = req.body;
     const patientUserId = req.user.user_id;
@@ -129,12 +138,41 @@ export default function appointmentRouter(io) {
 
       await connection.commit();
 
-      // Real-time broadcast to clinic Electron desktops
+      // Fetch patient and doctor details for email & desktop notifications
+      const [patientRows] = await connection.query(
+        'SELECT first_name, last_name, email FROM USERS WHERE user_id = ?',
+        [patientUserId]
+      );
+      const [doctorRows] = await connection.query(
+        `SELECT u.first_name, u.last_name, COALESCE(sp.specialty, 'General Practitioner') AS specialty
+         FROM USERS u
+         LEFT JOIN STAFF_PROFILES sp ON u.user_id = sp.user_id
+         WHERE u.user_id = ?`,
+        [doctor_user_id]
+      );
+
+      const patient = patientRows[0];
+      const doctor = doctorRows[0];
+
+      if (patient && doctor && typeof sendAppointmentEmail === 'function') {
+        sendAppointmentEmail({
+          toEmail: patient.email,
+          patientName: `${patient.first_name} ${patient.last_name}`,
+          doctorName: `${doctor.first_name} ${doctor.last_name}`,
+          specialty: doctor.specialty,
+          dateTime: date_time,
+          purpose: appointment_type,
+          type: 'confirmation',
+        }).catch((err) => console.error('[Email Dispatch Error]:', err.message));
+      }
+
+      // Broadcast to clinic Electron desktops
       if (io) {
         io.emit('appointment:booked', {
           appointmentId,
           doctor_user_id,
           patientUserId,
+          patientName: patient ? `${patient.first_name} ${patient.last_name}` : 'Student Patient',
           date_time,
           appointment_type,
           status: 'scheduled',
@@ -215,6 +253,28 @@ export default function appointmentRouter(io) {
          WHERE appointment_id = ?`,
         [cancelled_reason || 'Cancelled by patient via mobile app', appointmentId]
       );
+
+      // Send cancellation email
+      const [appDetails] = await pool.query(
+        `SELECT a.date_time, u.email, u.first_name, u.last_name 
+         FROM APPOINTMENTS a 
+         JOIN USERS u ON a.patient_user_id = u.user_id 
+         WHERE a.appointment_id = ?`,
+        [appointmentId]
+      );
+
+      if (appDetails.length > 0 && typeof sendAppointmentEmail === 'function') {
+        const item = appDetails[0];
+        sendAppointmentEmail({
+          toEmail: item.email,
+          patientName: `${item.first_name} ${item.last_name}`,
+          doctorName: 'Attending Practitioner',
+          specialty: 'Infirmary',
+          dateTime: item.date_time,
+          purpose: 'Cancellation',
+          type: 'cancellation',
+        }).catch((err) => console.error('[Cancellation Email Error]:', err.message));
+      }
 
       if (io) {
         io.emit('appointment:cancelled', { appointmentId: Number(appointmentId) });

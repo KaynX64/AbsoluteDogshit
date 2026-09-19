@@ -94,7 +94,7 @@ class EmergencyAlertService {
       'student_sos_confirm_channel',
       'SOS Transmission Status',
       channelDescription: 'Confirms that your SOS emergency alert was sent',
-      importance: Importance.max, // Forces Android to DROP DOWN from top of screen
+      importance: Importance.max, // Forces Android to drop down from top of screen
       priority: Priority.high,
       ticker: 'SOS Sent',
       playSound: true,
@@ -111,7 +111,33 @@ class EmergencyAlertService {
     );
   }
 
-  // --- 2. RESPONDER SIREN & NOTIFICATION ENGINE ---
+  // --- 2. APPOINTMENT CONFIRMATION NOTIFICATION ---
+  Future<void> showAppointmentConfirmedNotification([
+    String? title,
+    String? body,
+  ]) async {
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'appointment_channel',
+      'Consultation Appointments',
+      channelDescription: 'Appointment booking confirmations and reminders',
+      importance: Importance.high,
+      priority: Priority.high,
+      ticker: 'Appointment Confirmed',
+      playSound: true,
+    );
+
+    const NotificationDetails platformDetails =
+        NotificationDetails(android: androidDetails);
+
+    await _localNotifications.show(
+      102,
+      title ?? '📅 Consultation Confirmed',
+      body ?? 'Your consultation appointment has been scheduled successfully.',
+      platformDetails,
+    );
+  }
+
+  // --- 3. RESPONDER SIREN & NOTIFICATION ENGINE ---
   Uint8List _generateEasSirenWav({double durationSeconds = 3.0, int sampleRate = 22050}) {
     if (_cachedWavBytes != null) return _cachedWavBytes!;
 
