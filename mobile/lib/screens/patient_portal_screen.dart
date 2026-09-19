@@ -1,8 +1,4 @@
 // mobile/lib/screens/patient_portal_screen.dart
-<<<<<<< HEAD
-import 'documents_viewer_screen.dart';
-=======
->>>>>>> origin/main
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -14,11 +10,8 @@ import '../config/api_config.dart';
 import 'login_screen.dart';
 import 'edit_profile_screen.dart';
 import 'consultation_scheduler_screen.dart';
-<<<<<<< HEAD
-import 'documents_viewer_screen.dart'; // <-- Imported Feature 5
-=======
+import 'documents_viewer_screen.dart';
 import '../services/emergency_alert_service.dart';
->>>>>>> origin/main
 
 class PatientPortalScreen extends StatefulWidget {
   final Map<String, dynamic> user;
@@ -52,10 +45,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     super.initState();
     _fetchQRPass();
     _fetchProfile();
-<<<<<<< HEAD
-=======
-    // (Removed EmergencyAlertService initialization)
->>>>>>> origin/main
   }
 
   Future<void> _fetchQRPass() async {
@@ -166,13 +155,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         setState(() {
           _sosStatusMessage = 'EMERGENCY DISPATCHED!\nClinic and Response team alerted.';
         });
-<<<<<<< HEAD
-=======
 
-        // DROP DOWN NOTIFICATION: "Your SOS has been sent"
+        // Drop down local notification confirming alert transmission
         EmergencyAlertService().showStudentSosSentNotification();
 
->>>>>>> origin/main
         if (mounted) {
           _showEmergencyDialog();
         }
@@ -210,13 +196,11 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 5-Tab Architecture: Pass -> Scheduler -> Documents -> SOS -> Profile
     final tabs = [
       _buildQRPassTab(),
       const ConsultationSchedulerScreen(),
-<<<<<<< HEAD
-      const DocumentsViewerScreen(), // <-- ADD THIS
-=======
->>>>>>> origin/main
+      const DocumentsViewerScreen(),
       _buildSOSTab(),
       _buildProfileTab(),
     ];
@@ -224,10 +208,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     final titles = [
       'Valetudo | ${widget.user['first_name']}',
       'Consultation Scheduler',
-<<<<<<< HEAD
-      'Prescriptions & Clearances', // <-- ADD THIS
-=======
->>>>>>> origin/main
+      'Prescriptions & Clearances',
       'Campus Emergency SOS',
       'My Health Profile',
     ];
@@ -240,11 +221,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
             icon: const Icon(Icons.logout),
             onPressed: () async {
               await _storage.delete(key: 'jwt_token');
-<<<<<<< HEAD
               await _storage.delete(key: 'user_data');
-=======
-              await _storage.delete(key: 'user_data'); // <-- CLEAR THIS TOO
->>>>>>> origin/main
               if (!context.mounted) return;
               Navigator.pushReplacement(
                 context,
@@ -268,27 +245,18 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
             selectedIcon: Icon(Icons.calendar_month, color: Color(0xFF0F766E)),
             label: 'Scheduler',
           ),
-<<<<<<< HEAD
-          // vvv ADD THIS DESTINATION vvv
           NavigationDestination(
             icon: Icon(Icons.description_outlined),
             selectedIcon: Icon(Icons.description, color: Color(0xFF0F766E)),
             label: 'Documents',
           ),
-          // ^^^ ADD THIS DESTINATION ^^^
-=======
->>>>>>> origin/main
           NavigationDestination(
             icon: Icon(Icons.emergency_share, color: Colors.red),
             label: 'SOS Panic',
           ),
           NavigationDestination(
             icon: Icon(Icons.person_outline),
-<<<<<<< HEAD
             selectedIcon: Icon(Icons.person, color: Color(0xFF0F766E)),
-=======
-            selectedIcon: Icon(Icons.person),
->>>>>>> origin/main
             label: 'Profile',
           ),
         ],
@@ -333,11 +301,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     );
   }
 
-<<<<<<< HEAD
   // --- TAB 3: SOS PANIC BUTTON ---
-=======
-  // --- TAB 2: SOS PANIC BUTTON ---
->>>>>>> origin/main
   Widget _buildSOSTab() {
     return Center(
       child: Padding(
@@ -418,11 +382,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     );
   }
 
-<<<<<<< HEAD
   // --- TAB 4: HEALTH PROFILE ---
-=======
-  // --- TAB 3: HEALTH PROFILE ---
->>>>>>> origin/main
   Widget _buildProfileTab() {
     if (_loadingProfile) return const Center(child: CircularProgressIndicator());
     if (_profileData == null) {

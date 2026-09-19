@@ -423,7 +423,6 @@ INSERT INTO `MEDICINES` (`medicine_id`, `name`, `generic_name`, `form`, `strengt
 INSERT INTO `MEDICINE_BATCHES` (`batch_id`, `medicine_id`, `batch_no`, `manufacture_date`, `expiry_date`, `supplier`, `quantity_on_hand`) VALUES
 (1, 1, 'BATCH-PAR-2026A', '2026-01-10', '2028-01-10', 'Unilab Philippines', 200),
 (2, 2, 'BATCH-NZP-2026B', '2026-02-15', '2027-08-15', 'Unilab Philippines', 150),
-<<<<<<< HEAD
 (3, 3, 'BATCH-SLB-2025X', '2025-06-01', '2027-06-01', 'GlaxoSmithKline', 15);
 
 -- =============================================================================
@@ -446,6 +445,3 @@ INSERT INTO `PRESCRIPTION_ITEMS` (`item_id`, `prescription_id`, `medicine_id`, `
 -- Sample Medical Clearance Certificate with verifiable expiry and digital seal
 INSERT INTO `MEDICAL_CLEARANCES` (`clearance_id`, `user_id`, `purpose`, `status`, `issued_by`, `expires_at`, `qr_token`, `signature_metadata`) VALUES
 (1, 5, 'On-the-Job Training (OJT) Medical Clearance', 'approved', 2, DATE_ADD(CURRENT_DATE, INTERVAL 6 MONTH), 'VALETUDO-CLR-2026-0001-E4D2B1', JSON_OBJECT('signer_id', 2, 'signer_name', 'Dr. Juan Mata', 'prc_license', 'PRC-MD-098765', 'algorithm', 'SHA-256', 'document_hash', '8f4e2c1a0b3d5e7f9a8b6c4d2e0f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f'));
-=======
-(3, 3, 'BATCH-SLB-2025X', '2025-06-01', '2027-06-01', 'GlaxoSmithKline', 15);
->>>>>>> origin/main
