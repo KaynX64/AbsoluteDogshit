@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+.pub-cache/
+.pub/
+
+# Environments (Never commit secrets or personal network configs)
+.env
+.env.*
+!.env.example
+
+# Local Editor History & IDEs
+.history/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Build Outputs
+dist/
+build/
+desktop/dist/
+mobile/build/

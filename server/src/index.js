@@ -11,7 +11,10 @@ import healthPassRoutes from './routes/healthPass.js';
 import appointmentRoutes from './routes/appointments.js';
 import emergencyRouter from './routes/emergency.js'; // Feature 4
 import inventoryRoutes from './routes/inventory.js'; // Feature 9
+<<<<<<< HEAD
 import documentRoutes from './routes/documents.js';   // Feature 5 (Prescriptions & Clearances)
+=======
+>>>>>>> origin/main
 
 dotenv.config();
 
@@ -39,12 +42,21 @@ io.on('connection', (socket) => {
 app.post('/api/auth/login', loginUser);
 
 // 3. Protected Core Modules
+<<<<<<< HEAD
 app.use('/api/profile', profileRoutes);
 app.use('/api/health-pass', healthPassRoutes);
 app.use('/api/appointments', appointmentRoutes(io));
 app.use('/api/emergency', emergencyRouter(io));
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/documents', documentRoutes); // <-- Mounted Feature 5
+=======
+// 3. Protected Core Modules
+app.use('/api/profile', profileRoutes);
+app.use('/api/health-pass', healthPassRoutes);
+app.use('/api/appointments', appointmentRoutes(io)); // <-- Keep only this one
+app.use('/api/emergency', emergencyRouter(io));
+app.use('/api/inventory', inventoryRoutes);       // Feature 9 Inventory
+>>>>>>> origin/main
 
 // Auth verification check
 app.get('/api/users/me', authenticateToken, (req, res) => {
