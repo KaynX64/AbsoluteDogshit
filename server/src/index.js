@@ -11,13 +11,13 @@ import healthPassRoutes from './routes/healthPass.js';
 import appointmentRoutes from './routes/appointments.js';
 import emergencyRouter from './routes/emergency.js'; // Feature 4
 import inventoryRoutes from './routes/inventory.js'; // Feature 9
-
+import analyticsRoutes from './routes/analytics.js'; // Feature 10
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-
+app.use('/api/analytics', analyticsRoutes);
 // 1. Create HTTP Server & Mount Socket.IO
 const server = http.createServer(app);
 export const io = new Server(server, {
