@@ -1,114 +1,127 @@
 import express from 'express';
-import { pool } from '../db.js';
-import { authenticateToken } from '../auth.js';
-import { requireRoles } from '../middleware/rbac.js';
+import pool from '../db.js';
+import { authenticateToken, requireRoles } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// =============================================================================
-// 1. GET /api/analytics/summary
-// =============================================================================
-router.get('/summary', authenticateToken, requireRoles('ADMIN', 'DOCTOR', 'NURSE'), async (req, res) => {
-  try {
-    const [consultationStats] = await pool.query(`
-      SELECT status, COUNT(*) as count 
-      FROM APPOINTMENTS 
-      GROUP BY status
-    `);
+// GET /api/analytics/summary
+// Pinapayagan ang Doctor, Admin, at University Admin
+router.get(
+  '/summary',
+  authenticateToken,
+  requireRoles(['Doctor', 'Admin', 'University Admin', 'System Admin']),
+  async (req, res) => {
+    try {
+      // 1. Top 5 Diagnoses / Common Illnesses
+      const [topDiagnoses] = await pool.query(`
+        SELECT diagnosis, COUNT(*) as count 
+        FROM CONSULTATIONS 
+        WHERE diagnosis IS NOT NULL AND diagnosis != ''
+        GROUP BY diagnosis 
+        ORDER BY count DESC 
+        LIMIT 5
+      `);
 
-    const [topDiagnoses] = await pool.query(`
-      SELECT diagnosis, COUNT(*) as count 
-      FROM EMR_RECORDS 
-      WHERE diagnosis IS NOT NULL AND diagnosis != '' 
-      GROUP BY diagnosis 
-      ORDER BY count DESC 
-      LIMIT 5
-    `);
+      // 2. Consultation Volume per Department / College
+      const [deptBreakdown] = await pool.query(`
+        SELECT COALESCE(u.department, 'Undeclared') as department, COUNT(c.consultation_id) as consultations_count
+        FROM CONSULTATIONS c
+        JOIN USERS u ON c.patient_id = u.user_id
+        GROUP BY u.department
+        ORDER BY consultations_count DESC
+      `);
 
-    const [emergencyStats] = await pool.query(`
-      SELECT status, COUNT(*) as count 
-      FROM EMERGENCY_ALERTS 
-      GROUP BY status
-    `);
+      // 3. Seasonal Flu / URTI Outbreak Spike Monitor (Last 14 days vs Previous 14 days)
+      const [fluStats] = await pool.query(`
+        SELECT 
+          COUNT(CASE WHEN created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 END) as cases_past_7_days,
+          COUNT(CASE WHEN created_at >= DATE_SUB(NOW(), INTERVAL 14 DAY) AND created_at < DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 END) as cases_prev_7_days
+        FROM CONSULTATIONS
+        WHERE LOWER(diagnosis) LIKE '%flu%' 
+           OR LOWER(diagnosis) LIKE '%influenza%'
+           OR LOWER(diagnosis) LIKE '%urti%'
+           OR LOWER(diagnosis) LIKE '%fever%'
+           OR LOWER(diagnosis) LIKE '%cough%'
+      `);
 
-    const [lowStockMeds] = await pool.query(`
-      SELECT 
-        b.batch_id,
-        m.name,
-        m.generic_name,
-        b.batch_no,
-        b.quantity_on_hand,
-        m.reorder_level,
-        DATE_FORMAT(b.expiry_date, '%Y-%m-%d') as expiry_date,
-        DATEDIFF(b.expiry_date, CURDATE()) as days_until_expiry
-      FROM MEDICINE_BATCHES b
-      JOIN MEDICINES m ON b.medicine_id = m.medicine_id
-      WHERE b.deleted_at IS NULL 
-        AND (b.quantity_on_hand <= m.reorder_level OR DATEDIFF(b.expiry_date, CURDATE()) <= 90)
-      ORDER BY b.quantity_on_hand ASC, b.expiry_date ASC
-    `);
+      // 4. High-Risk Student Groups (Pre-existing Chronic Conditions / Allergies)
+      const [highRiskGroups] = await pool.query(`
+        SELECT 
+          SUM(CASE WHEN LOWER(medical_history) LIKE '%hypertension%' OR LOWER(medical_history) LIKE '%bp%' THEN 1 ELSE 0 END) as hypertension_count,
+          SUM(CASE WHEN LOWER(medical_history) LIKE '%asthma%' THEN 1 ELSE 0 END) as asthma_count,
+          SUM(CASE WHEN LOWER(medical_history) LIKE '%diabetes%' THEN 1 ELSE 0 END) as diabetes_count,
+          SUM(CASE WHEN allergies IS NOT NULL AND allergies != 'None' AND allergies != '' THEN 1 ELSE 0 END) as severe_allergies_count,
+          COUNT(*) as total_students_monitored
+        FROM STUDENTS
+      `);
 
-    const [encountersCount] = await pool.query(`SELECT COUNT(*) as total FROM EMR_RECORDS WHERE deleted_at IS NULL`);
-    const [avgResponse] = await pool.query(`
-      SELECT COALESCE(AVG(response_time_seconds), 0) as avg_resp 
-      FROM EMERGENCY_ALERTS 
-      WHERE response_time_seconds IS NOT NULL
-    `);
+      // 5. Critical Inventory Watchlist (FEFO / Low Stocks)
+      const [lowStockMeds] = await pool.query(`
+        SELECT 
+          batch_id, 
+          name, 
+          generic_name, 
+          batch_no, 
+          quantity_on_hand, 
+          reorder_level,
+          expiry_date,
+          DATEDIFF(expiry_date, CURDATE()) as days_until_expiry
+        FROM MEDICINE_BATCHES 
+        WHERE quantity_on_hand <= reorder_level 
+           OR expiry_date <= DATE_ADD(CURDATE(), INTERVAL 60 DAY)
+        ORDER BY expiry_date ASC
+        LIMIT 10
+      `);
 
-    res.json({
-      consultations: consultationStats,
-      topDiagnoses,
-      emergencies: emergencyStats,
-      lowStockMeds,
-      totalEncounters: encountersCount[0]?.total || 0,
-      averageResponseTimeSeconds: Math.round(avgResponse[0]?.avg_resp || 0)
-    });
-  } catch (err) {
-    console.error('[Analytics] Aggregation error:', err);
-    res.status(500).json({ error: 'Failed to aggregate health analytics data.' });
+      res.json({
+        topDiagnoses: topDiagnoses || [],
+        deptBreakdown: deptBreakdown || [],
+        fluStats: fluStats[0] || { cases_past_7_days: 0, cases_prev_7_days: 0 },
+        highRiskGroups: highRiskGroups[0] || { hypertension_count: 0, asthma_count: 0, diabetes_count: 0, severe_allergies_count: 0, total_students_monitored: 0 },
+        lowStockMeds: lowStockMeds || []
+      });
+    } catch (err) {
+      console.error('Feature 10 Analytics Summary Error:', err);
+      res.status(500).json({ error: 'Failed to aggregate health analytics.' });
+    }
   }
-});
+);
 
-// =============================================================================
-// 2. GET /api/analytics/export/csv
-// =============================================================================
-router.get('/export/csv', authenticateToken, requireRoles('ADMIN', 'DOCTOR'), async (req, res) => {
-  try {
-    const [rows] = await pool.query(`
-      SELECT 
-        e.emr_id,
-        u.first_name,
-        u.last_name,
-        sp.student_no,
-        e.chief_complaint,
-        e.diagnosis,
-        e.treatment_plan,
-        DATE_FORMAT(e.encounter_date, '%Y-%m-%d %H:%i') as encounter_date
-      FROM EMR_RECORDS e
-      JOIN USERS u ON e.patient_user_id = u.user_id
-      LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
-      WHERE e.deleted_at IS NULL
-      ORDER BY e.encounter_date DESC
-    `);
+// GET /api/analytics/export/csv
+router.get(
+  '/export/csv',
+  authenticateToken,
+  requireRoles(['Doctor', 'Admin', 'University Admin', 'System Admin']),
+  async (req, res) => {
+    try {
+      const [consultations] = await pool.query(`
+        SELECT 
+          c.consultation_id,
+          c.created_at as visit_date,
+          u.full_name as patient_name,
+          COALESCE(u.department, 'N/A') as department,
+          u.role as patient_type,
+          c.diagnosis,
+          c.treatment_plan
+        FROM CONSULTATIONS c
+        JOIN USERS u ON c.patient_id = u.user_id
+        ORDER BY c.created_at DESC
+      `);
 
-    let csvContent = 'EMR ID,Student No,Patient Name,Chief Complaint,Diagnosis,Treatment Plan,Encounter Date\n';
-    rows.forEach(r => {
-      const name = `"${(r.first_name || '')} ${(r.last_name || '')}"`;
-      const studentNo = r.student_no || 'N/A';
-      const complaint = `"${(r.chief_complaint || '').replace(/"/g, '""')}"`;
-      const diag = `"${(r.diagnosis || '').replace(/"/g, '""')}"`;
-      const plan = `"${(r.treatment_plan || '').replace(/"/g, '""')}"`;
-      const date = r.encounter_date;
-      csvContent += `${r.emr_id},${studentNo},${name},${complaint},${diag},${plan},${date}\n`;
-    });
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="Campus_Health_Analytics_Report_${Date.now()}.csv"`);
 
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename=PSU_Infirmary_Health_Report_${Date.now()}.csv`);
-    res.status(200).send(csvContent);
-  } catch (err) {
-    console.error('[Analytics] CSV Export error:', err);
-    res.status(500).json({ error: 'CSV export generation failed.' });
+      let csv = 'Consultation ID,Visit Date,Patient Name,Department,Role,Diagnosis,Treatment Plan\n';
+      consultations.forEach((row) => {
+        csv += `"${row.consultation_id}","${new Date(row.visit_date).toLocaleDateString()}","${row.patient_name || ''}","${row.department || ''}","${row.patient_type || ''}","${(row.diagnosis || '').replace(/"/g, '""')}","${(row.treatment_plan || '').replace(/"/g, '""')}"\n`;
+      });
+
+      res.send(csv);
+    } catch (err) {
+      console.error('Feature 10 Export Error:', err);
+      res.status(500).send('Failed to export data');
+    }
   }
-});
+);
 
 export default router;
