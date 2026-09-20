@@ -1,12 +1,4 @@
-import React, { useState } from 'react';
-
-declare global {
-  interface Window {
-    electronAPI?: {
-      printDocument: (options: { htmlContent: string }) => Promise<{ success: boolean; error?: string }>;
-    };
-  }
-}
+import { useState } from 'react';
 
 interface PrescriptionGeneratorProps {
   verifiedPatient: any;

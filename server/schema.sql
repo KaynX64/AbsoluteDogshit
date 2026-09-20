@@ -127,11 +127,13 @@ CREATE TABLE `APPOINTMENTS` (
   `date_time` DATETIME NOT NULL,
   `appointment_type` VARCHAR(50) NOT NULL COMMENT 'Medical, Dental, Physical Exam, Consultation',
   `status` ENUM('scheduled', 'checked_in', 'serving', 'completed', 'cancelled', 'no_show') NOT NULL DEFAULT 'scheduled',
+  `reminder_sent` BOOLEAN NOT NULL DEFAULT FALSE,
   `booked_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `cancelled_reason` TEXT NULL,
   `notes` TEXT NULL,
   INDEX `idx_app_doctor_datetime` (`doctor_user_id`, `date_time`),
   INDEX `idx_app_patient_datetime` (`patient_user_id`, `date_time`),
+  INDEX `idx_app_reminder` (`status`, `reminder_sent`, `date_time`),
   CONSTRAINT `fk_app_patient` FOREIGN KEY (`patient_user_id`) REFERENCES `USERS` (`user_id`),
   CONSTRAINT `fk_app_doctor` FOREIGN KEY (`doctor_user_id`) REFERENCES `USERS` (`user_id`)
 ) ENGINE=InnoDB;
@@ -371,24 +373,25 @@ INSERT INTO `ROLES` (`role_id`, `code`, `name`) VALUES
 (7, 'ADMIN', 'PSU IT System Administrator');
 
 -- Default Passwords for testing: 'Password123!'
--- Bcrypt Hash: $2a$10$7R6v7k2O3a1p5x7h8j9k0uY1w2e3r4t5y6u7i8o9p0q1r2s3t4u5v
 SET @default_pw = '$2b$10$Y5.xe6H/ZbWi0K/RYcQE2uGPh9hdAn/vKWCit/EMDrpqigeOQ45n.';
 
--- Default Test Users
+-- Default Test Users (Added User 6 as Campus Dentist)
 INSERT INTO `USERS` (`user_id`, `email`, `password_hash`, `first_name`, `last_name`, `phone`) VALUES
 (1, 'admin@psu.edu.ph', @default_pw, 'Clark', 'Castro', '09171234567'),
 (2, 'doctor@psu.edu.ph', @default_pw, 'Juan', 'Mata', '09181234568'),
 (3, 'nurse@psu.edu.ph', @default_pw, 'Dimples', 'Arenas', '09191234569'),
 (4, 'responder@psu.edu.ph', @default_pw, 'Denver', 'Cerezo', '09201234570'),
-(5, 'student@psu.edu.ph', @default_pw, 'Daniella', 'Movida', '09211234571');
+(5, 'student@psu.edu.ph', @default_pw, 'Daniella', 'Movida', '09211234571'),
+(6, 'dentist@psu.edu.ph', @default_pw, 'Carmela', 'Reyes', '09221234572');
 
--- Assign User Roles
+-- Assign User Roles (Added Dentist role for User 6)
 INSERT INTO `USER_ROLES` (`user_id`, `role_id`) VALUES
 (1, 7), -- Admin
 (2, 4), -- Doctor
 (3, 3), -- Nurse
 (4, 6), -- Emergency Responder
-(5, 1); -- Student
+(5, 1), -- Student
+(6, 5); -- Dentist
 
 -- Assign Role Profiles
 INSERT INTO `STUDENT_PROFILES` (`user_id`, `student_no`, `course`, `year_level`) VALUES
@@ -396,7 +399,8 @@ INSERT INTO `STUDENT_PROFILES` (`user_id`, `student_no`, `course`, `year_level`)
 
 INSERT INTO `STAFF_PROFILES` (`user_id`, `license_no`, `specialty`, `department`) VALUES
 (2, 'PRC-MD-098765', 'General Medicine', 'PSU Lingayen Clinic'),
-(3, 'PRC-RN-054321', 'Emergency & Triage Nursing', 'PSU Lingayen Clinic');
+(3, 'PRC-RN-054321', 'Emergency & Triage Nursing', 'PSU Lingayen Clinic'),
+(6, 'PRC-DDS-045678', 'Dentistry & Oral Health', 'PSU Lingayen Clinic');
 
 -- Default Baseline Health Profile for Daniella (Student)
 INSERT INTO `HEALTH_PROFILES` (`user_id`, `blood_type`, `allergies`, `chronic_conditions`, `emergency_contact_name`, `emergency_contact_phone`, `height`, `weight`) VALUES
@@ -420,3 +424,24 @@ INSERT INTO `MEDICINE_BATCHES` (`batch_id`, `medicine_id`, `batch_no`, `manufact
 (1, 1, 'BATCH-PAR-2026A', '2026-01-10', '2028-01-10', 'Unilab Philippines', 200),
 (2, 2, 'BATCH-NZP-2026B', '2026-02-15', '2027-08-15', 'Unilab Philippines', 150),
 (3, 3, 'BATCH-SLB-2025X', '2025-06-01', '2027-06-01', 'GlaxoSmithKline', 15);
+
+-- =============================================================================
+-- SEED DATA: FEATURE 5 (PRESCRIPTIONS & CLEARANCES)
+-- =============================================================================
+
+-- Sample clinical encounter record
+INSERT INTO `EMR_RECORDS` (`emr_id`, `patient_user_id`, `doctor_user_id`, `chief_complaint`, `diagnosis`, `treatment_plan`, `notes`) VALUES
+(1, 5, 2, 'Fever and mild respiratory congestion', 'Upper Respiratory Tract Infection', 'Hydration, rest, oral antipyretics and decongestants as needed.', 'Re-evaluate in 3 days if fever persists.');
+
+-- Sample Prescription issued to student Daniella Movida
+INSERT INTO `PRESCRIPTIONS` (`prescription_id`, `emr_id`, `patient_user_id`, `doctor_user_id`, `status`, `notes`, `qr_token`) VALUES
+(1, 1, 5, 2, 'active', 'Take medication after meals. Complete the entire course of rest.', 'VALETUDO-RX-2026-0001-A9F8C7');
+
+-- Sample Prescription Items mapped to existing Medicines
+INSERT INTO `PRESCRIPTION_ITEMS` (`item_id`, `prescription_id`, `medicine_id`, `dosage`, `frequency`, `route`, `duration_days`, `quantity_dispensed`, `instructions`) VALUES
+(1, 1, 1, '500mg', 'Every 4-6 hours PRN for fever', 'Oral', 5, 10, 'Take 1 tablet after meals when temperature reaches 37.8°C or above.'),
+(2, 1, 2, '25mg/2mg/500mg', '1 tablet every 8 hours', 'Oral', 3, 6, 'For nasal congestion. Drink plenty of warm fluids.');
+
+-- Sample Medical Clearance Certificate with verifiable expiry and digital seal
+INSERT INTO `MEDICAL_CLEARANCES` (`clearance_id`, `user_id`, `purpose`, `status`, `issued_by`, `expires_at`, `qr_token`, `signature_metadata`) VALUES
+(1, 5, 'On-the-Job Training (OJT) Medical Clearance', 'approved', 2, DATE_ADD(CURRENT_DATE, INTERVAL 6 MONTH), 'VALETUDO-CLR-2026-0001-E4D2B1', JSON_OBJECT('signer_id', 2, 'signer_name', 'Dr. Juan Mata', 'prc_license', 'PRC-MD-098765', 'algorithm', 'SHA-256', 'document_hash', '8f4e2c1a0b3d5e7f9a8b6c4d2e0f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f'));

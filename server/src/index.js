@@ -11,7 +11,11 @@ import healthPassRoutes from './routes/healthPass.js';
 import appointmentRoutes from './routes/appointments.js';
 import emergencyRouter from './routes/emergency.js'; // Feature 4
 import inventoryRoutes from './routes/inventory.js'; // Feature 9
+import documentRoutes from './routes/documents.js';   // Feature 5 & 8
+import adminRoutes from './routes/admin.js';         // Feature 11 & 12
 import analyticsRoutes from './routes/analytics.js'; // Feature 10
+import { startReminderScheduler } from './utils/reminderWorker.js';
+
 dotenv.config();
 
 const app = express();
@@ -40,9 +44,12 @@ app.post('/api/auth/login', loginUser);
 // 3. Protected Core Modules
 app.use('/api/profile', profileRoutes);
 app.use('/api/health-pass', healthPassRoutes);
-app.use('/api/appointments', appointmentRoutes);
-app.use('/api/emergency', emergencyRouter(io)); // Feature 4 SOS WebSockets
-app.use('/api/inventory', inventoryRoutes);       // Feature 9 Inventory
+app.use('/api/appointments', appointmentRoutes(io));
+app.use('/api/emergency', emergencyRouter(io));
+app.use('/api/inventory', inventoryRoutes);
+app.use('/api/documents', documentRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 // Auth verification check
 app.get('/api/users/me', authenticateToken, (req, res) => {
@@ -53,4 +60,5 @@ const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, () => {
   console.log(`Valetudo HealthLink API & WebSockets running on port ${PORT}`);
+  startReminderScheduler(io);
 });
