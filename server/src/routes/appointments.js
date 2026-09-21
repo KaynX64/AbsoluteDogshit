@@ -350,22 +350,55 @@ export default function appointmentRouter(io) {
     }
   });
 
-  // 8. POST /api/appointments/:id/complete
+  // 8. POST /api/appointments/:id/complete - Persists EMR encounter and writes normalized VITAL_SIGNS
   router.post('/:id/complete', authenticateToken, async (req, res) => {
     const connection = await pool.getConnection();
     try {
       const appointmentId = req.params.id;
       const doctorUserId = req.user.user_id;
-      const { patient_user_id, chief_complaint, diagnosis, treatment_plan, notes } = req.body;
+      const { patient_user_id, chief_complaint, diagnosis, treatment_plan, notes, vitals } = req.body;
 
       await connection.beginTransaction();
 
+      // 1. Insert Encounter Record
       const [emrResult] = await connection.query(
         `INSERT INTO EMR_RECORDS (patient_user_id, doctor_user_id, chief_complaint, diagnosis, treatment_plan, notes)
          VALUES (?, ?, ?, ?, ?, ?)`,
         [patient_user_id, doctorUserId, chief_complaint, diagnosis, treatment_plan, notes || '']
       );
 
+      const emrId = emrResult.insertId;
+
+      // 2. Insert Normalized Vital Signs into VITAL_SIGNS table
+      if (vitals && typeof vitals === 'object') {
+        const vitalEntries = [];
+
+        if (vitals.systolic_bp && !isNaN(Number(vitals.systolic_bp))) {
+          vitalEntries.push([emrId, 'systolic_bp', Number(vitals.systolic_bp), 'mmHg', doctorUserId]);
+        }
+        if (vitals.diastolic_bp && !isNaN(Number(vitals.diastolic_bp))) {
+          vitalEntries.push([emrId, 'diastolic_bp', Number(vitals.diastolic_bp), 'mmHg', doctorUserId]);
+        }
+        if (vitals.temperature && !isNaN(Number(vitals.temperature))) {
+          vitalEntries.push([emrId, 'temperature', Number(vitals.temperature), '°C', doctorUserId]);
+        }
+        if (vitals.pulse && !isNaN(Number(vitals.pulse))) {
+          vitalEntries.push([emrId, 'pulse', Number(vitals.pulse), 'bpm', doctorUserId]);
+        }
+        if (vitals.spo2 && !isNaN(Number(vitals.spo2))) {
+          vitalEntries.push([emrId, 'spo2', Number(vitals.spo2), '%', doctorUserId]);
+        }
+
+        for (const entry of vitalEntries) {
+          await connection.query(
+            `INSERT INTO VITAL_SIGNS (emr_id, metric, value, unit, recorded_by)
+             VALUES (?, ?, ?, ?, ?)`,
+            entry
+          );
+        }
+      }
+
+      // 3. Mark appointment and queue as completed
       await connection.query(`UPDATE APPOINTMENTS SET status = 'completed' WHERE appointment_id = ?`, [appointmentId]);
       await connection.query(`UPDATE QUEUE SET status = 'done', served_at = CURRENT_TIMESTAMP WHERE appointment_id = ?`, [appointmentId]);
 
@@ -376,9 +409,10 @@ export default function appointmentRouter(io) {
         io.emit('queue:updated');
       }
 
-      res.json({ message: 'Consultation finalized and saved to patient EMR history!', emrId: emrResult.insertId });
+      res.json({ message: 'Consultation finalized and saved to patient EMR history!', emrId });
     } catch (error) {
       await connection.rollback();
+      console.error('Error completing consultation:', error);
       res.status(500).json({ error: 'Failed to complete consultation encounter.' });
     } finally {
       connection.release();
@@ -434,7 +468,7 @@ export default function appointmentRouter(io) {
       await connection.beginTransaction();
 
       const [appRows] = await connection.query(
-        `SELECT patient_user_id FROM APPOINTMENTS WHERE appointment_id = ? FOR UPDATE`,
+        `SELECT patient_user_id, notes FROM APPOINTMENTS WHERE appointment_id = ? FOR UPDATE`,
         [appointmentId]
       );
 
@@ -444,8 +478,16 @@ export default function appointmentRouter(io) {
       }
 
       const patientUserId = appRows[0].patient_user_id;
+      const existingNotes = appRows[0].notes || '';
 
-      await connection.query(`UPDATE APPOINTMENTS SET status = 'checked_in' WHERE appointment_id = ?`, [appointmentId]);
+      // Format intake vitals so the attending doctor can read them immediately
+      const vitalsSummary = `[TRIAGE VITALS] BP: ${blood_pressure || 'N/A'} | Temp: ${temperature || 'N/A'}°C | Pulse: ${pulse || 'N/A'} bpm${spo2 ? ` | SpO2: ${spo2}%` : ''}`;
+      const updatedNotes = existingNotes ? `${vitalsSummary}\n${existingNotes}` : vitalsSummary;
+
+      await connection.query(
+        `UPDATE APPOINTMENTS SET status = 'checked_in', notes = ? WHERE appointment_id = ?`,
+        [updatedNotes, appointmentId]
+      );
 
       const today = new Date().toISOString().split('T')[0];
       const [queueCount] = await connection.query(`SELECT COUNT(*) as totalToday FROM QUEUE WHERE queue_date = ?`, [today]);
@@ -456,10 +498,6 @@ export default function appointmentRouter(io) {
          VALUES (?, ?, ?, 1, ?, 'waiting', CURRENT_TIMESTAMP)`,
         [patientUserId, appointmentId, today, nextQueueNo]
       );
-
-      if (blood_pressure || temperature || pulse || spo2) {
-        await connection.query(`UPDATE HEALTH_PROFILES SET updated_at = CURRENT_TIMESTAMP WHERE user_id = ?`, [patientUserId]);
-      }
 
       await connection.commit();
 
@@ -525,6 +563,107 @@ export default function appointmentRouter(io) {
       res.status(500).json({ error: 'Failed to update queue status.' });
     }
   });
+
+// 13. GET /api/appointments/patient/:userId/history - Longitudinal EMR timeline
+  router.get('/patient/:userId/history', authenticateToken, async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      const [history] = await pool.query(
+        `SELECT e.emr_id, e.encounter_date, e.chief_complaint, e.diagnosis, e.treatment_plan, e.notes,
+                doc.first_name as doctor_first_name, doc.last_name as doctor_last_name,
+                sp.license_no as doctor_license,
+                JSON_ARRAYAGG(
+                  IF(v.vital_id IS NULL, NULL,
+                    JSON_OBJECT('metric', v.metric, 'value', v.value, 'unit', v.unit, 'recorded_at', v.recorded_at)
+                  )
+                ) as vitals
+         FROM EMR_RECORDS e
+         JOIN USERS doc ON e.doctor_user_id = doc.user_id
+         LEFT JOIN STAFF_PROFILES sp ON doc.user_id = sp.user_id
+         LEFT JOIN VITAL_SIGNS v ON e.emr_id = v.emr_id
+         WHERE e.patient_user_id = ?
+         GROUP BY e.emr_id
+         ORDER BY e.encounter_date DESC`,
+        [userId]
+      );
+
+      res.json(history);
+    } catch (error) {
+      console.error('Failed to retrieve patient EMR history:', error);
+      res.status(500).json({ error: 'Failed to retrieve patient medical history.' });
+    }
+  });
+
+// server/src/routes/appointments.js (Add right before `return router;`)
+
+  // 14. GET /api/appointments/queue/my - Active daily queue ticket for the logged-in student
+  router.get('/queue/my', authenticateToken, async (req, res) => {
+    try {
+      const userId = req.user.user_id;
+      const today = new Date().toISOString().split('T')[0];
+
+      // 1. Fetch any active ticket for this student today
+      const [tickets] = await pool.query(
+        `SELECT q.queue_id, q.queue_number, q.status, q.counter_id,
+                DATE_FORMAT(q.checked_in_at, '%h:%i %p') AS arrival_time,
+                CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS ticket_no,
+                COALESCE(a.appointment_type, 'Walk-in Intake') AS visit_type,
+                doc.first_name AS doc_first_name, doc.last_name AS doc_last_name,
+                COALESCE(sp.specialty, 'General Practitioner') AS doc_specialty
+         FROM QUEUE q
+         LEFT JOIN APPOINTMENTS a ON q.appointment_id = a.appointment_id
+         LEFT JOIN USERS doc ON a.doctor_user_id = doc.user_id
+         LEFT JOIN STAFF_PROFILES sp ON doc.user_id = sp.user_id
+         WHERE q.patient_user_id = ?
+           AND q.queue_date = ?
+           AND q.status IN ('waiting', 'in-consultation')
+         ORDER BY q.queue_id DESC
+         LIMIT 1`,
+        [userId, today]
+      );
+
+      if (tickets.length === 0) {
+        return res.json({ hasActiveTicket: false, ticket: null });
+      }
+
+      const currentTicket = tickets[0];
+
+      // 2. Count how many patients are waiting ahead of this student
+      let patientsAhead = 0;
+      let estimatedWaitMinutes = 0;
+
+      if (currentTicket.status === 'waiting') {
+        const [aheadRows] = await pool.query(
+          `SELECT COUNT(*) AS ahead_count
+           FROM QUEUE
+           WHERE queue_date = ?
+             AND status = 'waiting'
+             AND queue_number < ?`,
+          [today, currentTicket.queue_number]
+        );
+        patientsAhead = aheadRows[0].ahead_count || 0;
+        estimatedWaitMinutes = patientsAhead * 10; // ~10 mins per consultation
+      }
+
+      res.json({
+        hasActiveTicket: true,
+        ticket: {
+          ...currentTicket,
+          patients_ahead: patientsAhead,
+          estimated_wait_minutes: estimatedWaitMinutes,
+          doctor_name: currentTicket.doc_last_name
+            ? `Dr. ${currentTicket.doc_first_name} ${currentTicket.doc_last_name}`
+            : 'Attending Physician',
+        },
+      });
+    } catch (error) {
+      console.error('[Appointments] Error fetching student queue ticket:', error);
+      res.status(500).json({ error: 'Failed to retrieve active queue ticket.' });
+    }
+  });
+
+
 
   return router;
 }

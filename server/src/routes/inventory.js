@@ -23,6 +23,24 @@ router.get('/batches', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
   }
 });
 
+
+// GET /api/inventory/medicines - Master drug catalogue for doctor prescription dropdowns
+router.get('/medicines', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
+  try {
+    const [medicines] = await pool.query(
+      `SELECT medicine_id, name, generic_name, form, strength, unit, reorder_level 
+       FROM MEDICINES 
+       WHERE is_active = TRUE AND deleted_at IS NULL 
+       ORDER BY name ASC`
+    );
+    res.json(medicines);
+  } catch (error) {
+    console.error('Failed to fetch medicine master:', error);
+    res.status(500).json({ error: 'Failed to fetch medicines catalogue.' });
+  }
+});
+
+
 // POST /api/inventory/deduct - Deduct stock from a specific batch
 router.post('/deduct', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
   const { batch_id, quantity_deducted, reason } = req.body;

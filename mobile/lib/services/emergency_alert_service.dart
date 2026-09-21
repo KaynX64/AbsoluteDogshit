@@ -182,6 +182,33 @@ class EmergencyAlertService {
     return _cachedWavBytes!;
   }
 
+// --- 4. CLINIC QUEUE TURN NOTIFICATION DROP ---
+  Future<void> showQueueTurnNotification({
+    required String ticketNo,
+    required String doctorName,
+  }) async {
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'clinic_queue_turn_channel',
+      'Infirmary Queue Alerts',
+      channelDescription: 'Alerts when it is your turn for consultation',
+      importance: Importance.max,
+      priority: Priority.high,
+      ticker: 'Your Turn!',
+      playSound: true,
+      enableVibration: true,
+    );
+
+    const NotificationDetails platformDetails =
+        NotificationDetails(android: androidDetails);
+
+    await _localNotifications.show(
+      103,
+      '🔔 It\'s Your Turn! ($ticketNo)',
+      'Please proceed to the consultation room with $doctorName.',
+      platformDetails,
+    );
+  }
+
   void playAlarmSound() async {
     try {
       _isAlarmPlaying = true;

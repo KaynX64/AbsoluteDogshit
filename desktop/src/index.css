@@ -109,3 +109,36 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+
+/* desktop/src/index.css */
+
+/* Force form controls to use light theme regardless of Windows Dark Mode */
+:root {
+  color-scheme: light;
+}
+
+/* Ensure all inputs and textareas in Electron are always typable and visible */
+input,
+textarea,
+select {
+  color: #0f172a !important;
+  background-color: #ffffff !important;
+  caret-color: #0f766e !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: 2px solid #0284c7 !important;
+  outline-offset: 1px !important;
+  background-color: #ffffff !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #94a3b8 !important;
+}
