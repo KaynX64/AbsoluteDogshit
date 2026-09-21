@@ -1,8 +1,8 @@
-// desktop/src/components/AdminConsole.tsx
+import AnalyticsDashboard from './AnalyticsDashboard';// desktop/src/components/AdminConsole.tsx
 import React, { useState } from 'react';
 
 export default function AdminConsole() {
-  const [activeTab, setActiveTab] = useState<'users' | 'audit' | 'telemetry'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'audit' | 'telemetry' | 'analytics'>('users');
 
   const usersList = [
     { id: 1, name: 'Dr. Clark Kim Castro', email: 'admin@psu.edu.ph', role: 'ADMIN', status: 'Active' },
@@ -44,6 +44,20 @@ export default function AdminConsole() {
           >
             📡 System Health
           </button>
+          <button
+  onClick={() => setActiveTab('analytics')}
+  style={{
+    padding: '6px 12px',
+    borderRadius: 4,
+    border: 'none',
+    cursor: 'pointer',
+    background: activeTab === 'analytics' ? '#0f766e' : '#f1f5f9',
+    color: activeTab === 'analytics' ? '#fff' : '#334155',
+    fontWeight: 'bold'
+  }}
+>
+  📊 Health Analytics
+</button>
         </div>
       </div>
 
@@ -129,6 +143,7 @@ export default function AdminConsole() {
           </div>
         </div>
       )}
+      {activeTab === 'analytics' && <AnalyticsDashboard />}
     </div>
   );
 }
