@@ -40,7 +40,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
 
     const jwt = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('http://localhost:5000/api/health-pass/verify', {
+      const res = await fetch('https://localhost:5000/api/health-pass/verify', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -75,7 +75,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
     const jwt = localStorage.getItem('valetudo_token');
 
     try {
-      const res = await fetch(`http://localhost:5000/api/appointments/lookup?query=${encodeURIComponent(searchQuery.trim())}`, {
+      const res = await fetch(`https://localhost:5000/api/appointments/lookup?query=${encodeURIComponent(searchQuery.trim())}`, {
         headers: { Authorization: `Bearer ${jwt}` },
       });
       const data = await res.json();
@@ -106,7 +106,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
   const checkPatientAppointments = async (userId: number) => {
     const jwt = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`http://localhost:5000/api/appointments/lookup?userId=${userId}`, {
+      const res = await fetch(`https://localhost:5000/api/appointments/lookup?userId=${userId}`, {
         headers: { Authorization: `Bearer ${jwt}` },
       });
       const data = await res.json();
@@ -124,7 +124,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
 
     const jwt = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`http://localhost:5000/api/appointments/${pendingAppointment.appointment_id}/checkin`, {
+      const res = await fetch(`https://localhost:5000/api/appointments/${pendingAppointment.appointment_id}/checkin`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

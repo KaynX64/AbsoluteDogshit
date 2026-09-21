@@ -12,11 +12,14 @@ export default function AdminConsole() {
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Fetch live logs and users
+  // R.A. 10173 Retention & Governance State
+  const [retentionInfo, setRetentionInfo] = useState<any>(null);
+  const [sweeping, setSweeping] = useState(false);
+
   const fetchUsers = async () => {
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('http://localhost:5000/api/admin/users', {
+      const res = await fetch('https://localhost:5000/api/admin/users', {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setUsersList(await res.json());
@@ -27,7 +30,7 @@ export default function AdminConsole() {
     setLoadingLogs(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('http://localhost:5000/api/admin/audit-logs', {
+      const res = await fetch('https://localhost:5000/api/admin/audit-logs', {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setMutationLogs(await res.json());
@@ -39,7 +42,7 @@ export default function AdminConsole() {
     setLoadingLogs(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('http://localhost:5000/api/admin/phi-access-logs', {
+      const res = await fetch('https://localhost:5000/api/admin/phi-access-logs', {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setPhiLogs(await res.json());
@@ -47,10 +50,40 @@ export default function AdminConsole() {
     setLoadingLogs(false);
   };
 
+  const fetchRetention = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('https://localhost:5000/api/privacy/retention/status', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setRetentionInfo(await res.json());
+    } catch (_) {}
+  };
+
+  const handleExecuteSweep = async () => {
+    if (!confirm('Execute statutory 5-year data retention sweep under R.A. 10173? Expired records will be soft-deleted.')) return;
+    setSweeping(true);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('https://localhost:5000/api/privacy/retention/sweep', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      alert(data.message);
+      fetchRetention();
+    } catch (err: any) {
+      alert('Sweep failed: ' + err.message);
+    } finally {
+      setSweeping(false);
+    }
+  };
+
   useEffect(() => {
     fetchUsers();
     fetchMutationLogs();
     fetchPhiLogs();
+    fetchRetention();
   }, []);
 
   const filteredUsers = usersList.filter(
@@ -93,7 +126,6 @@ export default function AdminConsole() {
           </small>
         </div>
 
-        {/* Scalable Tab Switcher */}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <button
             onClick={() => setActiveTab('users')}
@@ -130,7 +162,10 @@ export default function AdminConsole() {
             🔒 Privacy & PHI Audit Logs
           </button>
           <button
-            onClick={() => setActiveTab('telemetry')}
+            onClick={() => {
+              setActiveTab('telemetry');
+              fetchRetention();
+            }}
             style={{
               padding: '8px 14px',
               borderRadius: 6,
@@ -142,7 +177,7 @@ export default function AdminConsole() {
               fontSize: 13,
             }}
           >
-            📡 System Health
+            📡 System Health & Retention
           </button>
           <button
             onClick={() => setActiveTab('analytics')}
@@ -230,7 +265,6 @@ export default function AdminConsole() {
       {/* 3. TAB: AUDIT LOGS & PHI SURVEILLANCE */}
       {activeTab === 'audit' && (
         <div style={{ marginTop: 16 }}>
-          {/* Sub-tab navigation */}
           <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
             <button
               onClick={() => setAuditSubTab('phi')}
@@ -264,7 +298,7 @@ export default function AdminConsole() {
             </button>
           </div>
 
-          {/* VIEW A: PHI READ ACCESS LOGS */}
+          {/* VIEW A: PHI ACCESS LOGS */}
           {auditSubTab === 'phi' && (
             <div>
               <div
@@ -280,15 +314,14 @@ export default function AdminConsole() {
                 }}
               >
                 <strong>👁️ Statutory PHI Surveillance (R.A. 10173):</strong> This record logs every instance a medical
-                practitioner views a patient’s confidential health profile, EMR history, or clinical records, ensuring
-                full traceability for healthcare accountability.
+                practitioner views a patient’s confidential health profile, EMR history, or clinical records.
               </div>
 
               {loadingLogs ? (
                 <p style={{ color: '#64748b', fontSize: 13 }}>Loading PHI access records...</p>
               ) : phiLogs.length === 0 ? (
                 <div style={{ padding: 24, textAlign: 'center', color: '#64748b', background: '#f8fafc', borderRadius: 8 }}>
-                  No PHI read access events recorded yet. Have a doctor or nurse review a patient record to populate.
+                  No PHI read access events recorded yet.
                 </div>
               ) : (
                 <div style={{ width: '100%', overflowX: 'auto', maxHeight: 'calc(100vh - 340px)', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 8 }}>
@@ -390,33 +423,96 @@ export default function AdminConsole() {
         </div>
       )}
 
-      {/* 4. TAB: TELEMETRY */}
+      {/* 4. TAB: TELEMETRY & DATA RETENTION */}
       {activeTab === 'telemetry' && (
-        <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 16 }}>
-          <div style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#f8fafc' }}>
-            <span style={{ fontSize: 12, fontWeight: 'bold', color: '#64748b' }}>PRIMARY DATABASE</span>
-            <h4 style={{ margin: '6px 0 4px', fontSize: 16, color: '#0f172a' }}>Central MySQL 8.0</h4>
-            <p style={{ color: '#16a34a', margin: '4px 0 10px', fontSize: 18, fontWeight: 'bold' }}>● Operational</p>
-            <div style={{ fontSize: 12, color: '#64748b', borderTop: '1px dashed #cbd5e1', paddingTop: 8 }}>
-              Spatial SRID 4326 • 21 Normalized Tables Active
+        <div style={{ marginTop: 16 }}>
+          {/* System Hardware & Gateway Status */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 16 }}>
+            <div style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#f8fafc' }}>
+              <span style={{ fontSize: 12, fontWeight: 'bold', color: '#64748b' }}>PRIMARY DATABASE</span>
+              <h4 style={{ margin: '6px 0 4px', fontSize: 16, color: '#0f172a' }}>Central MySQL 8.0</h4>
+              <p style={{ color: '#16a34a', margin: '4px 0 10px', fontSize: 18, fontWeight: 'bold' }}>● Operational</p>
+              <div style={{ fontSize: 12, color: '#64748b', borderTop: '1px dashed #cbd5e1', paddingTop: 8 }}>
+                Spatial SRID 4326 • 21 Normalized Tables
+              </div>
+            </div>
+
+            <div style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#f8fafc' }}>
+              <span style={{ fontSize: 12, fontWeight: 'bold', color: '#64748b' }}>REAL-TIME GATEWAY</span>
+              <h4 style={{ margin: '6px 0 4px', fontSize: 16, color: '#0f172a' }}>Socket.IO Engine</h4>
+              <p style={{ color: '#16a34a', margin: '4px 0 10px', fontSize: 18, fontWeight: 'bold' }}>● Connected</p>
+              <div style={{ fontSize: 12, color: '#64748b', borderTop: '1px dashed #cbd5e1', paddingTop: 8 }}>
+                Port 5000 Active • Queue & SOS Relays
+              </div>
+            </div>
+
+            <div style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#f8fafc' }}>
+              <span style={{ fontSize: 12, fontWeight: 'bold', color: '#64748b' }}>CRYPTOGRAPHIC LEDGER</span>
+              <h4 style={{ margin: '6px 0 4px', fontSize: 16, color: '#0f172a' }}>R.A. 10173 Audit Chain</h4>
+              <p style={{ color: '#16a34a', margin: '4px 0 10px', fontSize: 18, fontWeight: 'bold' }}>● Valid Hash-Chain</p>
+              <div style={{ fontSize: 12, color: '#64748b', borderTop: '1px dashed #cbd5e1', paddingTop: 8 }}>
+                Continuous SHA-256 Verification
+              </div>
             </div>
           </div>
 
-          <div style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#f8fafc' }}>
-            <span style={{ fontSize: 12, fontWeight: 'bold', color: '#64748b' }}>REAL-TIME GATEWAY</span>
-            <h4 style={{ margin: '6px 0 4px', fontSize: 16, color: '#0f172a' }}>Socket.IO Engine</h4>
-            <p style={{ color: '#16a34a', margin: '4px 0 10px', fontSize: 18, fontWeight: 'bold' }}>● Connected</p>
-            <div style={{ fontSize: 12, color: '#64748b', borderTop: '1px dashed #cbd5e1', paddingTop: 8 }}>
-              Port 5000 Active • Queue & SOS Realtime Relays
+          {/* R.A. 10173 Data Privacy & Retention Governance Panel */}
+          <div style={{ marginTop: 20, padding: 18, border: '1px solid #99f6e4', borderRadius: 8, background: '#f0fdfa' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h4 style={{ margin: 0, color: '#0f766e', fontSize: 16 }}>
+                  ⚖️ R.A. 10173 Data Privacy & Retention Governance
+                </h4>
+                <small style={{ color: '#475569' }}>
+                  Statutory 5-Year Clinical Retention • AES-256-GCM Encryption Active • SHA-256 Hash Chain
+                </small>
+              </div>
+              <button
+                onClick={handleExecuteSweep}
+                disabled={sweeping}
+                style={{
+                  padding: '8px 16px',
+                  background: sweeping ? '#94a3b8' : '#0f766e',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 6,
+                  fontWeight: 'bold',
+                  cursor: sweeping ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {sweeping ? 'Executing Sweep...' : '🧹 Enforce Retention Sweep'}
+              </button>
             </div>
-          </div>
 
-          <div style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#f8fafc' }}>
-            <span style={{ fontSize: 12, fontWeight: 'bold', color: '#64748b' }}>PRIVACY AUDIT VERIFIER</span>
-            <h4 style={{ margin: '6px 0 4px', fontSize: 16, color: '#0f172a' }}>RA 10173 Audit Trail</h4>
-            <p style={{ color: '#16a34a', margin: '4px 0 10px', fontSize: 18, fontWeight: 'bold' }}>● Valid Hash-Chain</p>
-            <div style={{ fontSize: 12, color: '#64748b', borderTop: '1px dashed #cbd5e1', paddingTop: 8 }}>
-              Continuous Integrity Check Across Logs
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginTop: 14 }}>
+              <div style={{ background: '#fff', padding: 12, borderRadius: 6, border: '1px solid #ccfbf1' }}>
+                <span style={{ fontSize: 11, color: '#64748b' }}>ENCRYPTION STANDARD</span>
+                <div style={{ fontSize: 16, fontWeight: 'bold', color: '#0f766e' }}>AES-256-GCM</div>
+              </div>
+              <div style={{ background: '#fff', padding: 12, borderRadius: 6, border: '1px solid #ccfbf1' }}>
+                <span style={{ fontSize: 11, color: '#64748b' }}>ACTIVE CONSENTS</span>
+                <div style={{ fontSize: 16, fontWeight: 'bold', color: '#0369a1' }}>
+                  {retentionInfo?.totalActiveConsents ?? 0} Users
+                </div>
+              </div>
+              <div style={{ background: '#fff', padding: 12, borderRadius: 6, border: '1px solid #ccfbf1' }}>
+                <span style={{ fontSize: 11, color: '#64748b' }}>ACTIVE MEDICAL RECORDS</span>
+                <div style={{ fontSize: 16, fontWeight: 'bold', color: '#15803d' }}>
+                  {retentionInfo?.activeMedicalRecords ?? 0} Encounters
+                </div>
+              </div>
+              <div style={{ background: '#fff', padding: 12, borderRadius: 6, border: '1px solid #ccfbf1' }}>
+                <span style={{ fontSize: 11, color: '#64748b' }}>ELIGIBLE FOR 5-YR PURGE</span>
+                <div
+                  style={{
+                    fontSize: 16,
+                    fontWeight: 'bold',
+                    color: retentionInfo?.recordsPastRetentionPeriod > 0 ? '#b91c1c' : '#64748b',
+                  }}
+                >
+                  {retentionInfo?.recordsPastRetentionPeriod ?? 0} Records
+                </div>
+              </div>
             </div>
           </div>
         </div>

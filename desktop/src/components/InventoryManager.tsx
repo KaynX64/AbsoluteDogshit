@@ -11,7 +11,7 @@ export default function InventoryManager() {
   const fetchBatches = async () => {
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('http://localhost:5000/api/inventory/batches', {
+      const res = await fetch('https://localhost:5000/api/inventory/batches', {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -32,7 +32,7 @@ export default function InventoryManager() {
 
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('http://localhost:5000/api/inventory/deduct', {
+      const res = await fetch('https://localhost:5000/api/inventory/deduct', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

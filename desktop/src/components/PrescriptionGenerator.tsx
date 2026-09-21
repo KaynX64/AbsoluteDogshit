@@ -57,7 +57,7 @@ export default function PrescriptionGenerator({
     const fetchCatalog = async () => {
       const token = localStorage.getItem('valetudo_token');
       try {
-        const res = await fetch('http://localhost:5000/api/inventory/medicines', {
+        const res = await fetch('https://localhost:5000/api/inventory/medicines', {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.ok) {
@@ -98,7 +98,7 @@ export default function PrescriptionGenerator({
 
     try {
       // Step A: POST to backend
-      const res = await fetch('http://localhost:5000/api/documents/prescriptions', {
+      const res = await fetch('https://localhost:5000/api/documents/prescriptions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

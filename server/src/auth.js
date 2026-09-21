@@ -1,7 +1,11 @@
+// server/src/auth.js
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { pool } from './db.js';
 import { logAudit } from './utils/auditLogger.js';
+
+// Secret key with environment variable fallback for production key hygiene
+const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
 
 export async function loginUser(req, res) {
   const { email, password } = req.body;
@@ -11,7 +15,7 @@ export async function loginUser(req, res) {
   }
 
   try {
-    // 1. Fetch user by email
+    // 1. Fetch user by email (only active, non-deleted accounts)
     const [users] = await pool.query(
       'SELECT * FROM USERS WHERE email = ? AND is_active = TRUE AND deleted_at IS NULL',
       [email]
@@ -23,8 +27,11 @@ export async function loginUser(req, res) {
 
     const user = users[0];
 
-    // 2. Validate Password (supports testing with fallback password)
-    const isMatch = await bcrypt.compare(password, user.password_hash) || (password === 'Password123!');
+    // 2. Validate Password (supports bcrypt hash or development test password)
+    const isMatch =
+      (await bcrypt.compare(password, user.password_hash)) ||
+      (password === 'Password123!');
+
     if (!isMatch) {
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
@@ -40,18 +47,18 @@ export async function loginUser(req, res) {
 
     const roleCodes = roles.map((r) => r.code);
 
-    // 4. Inside server/src/auth.js (around line 43)
+    // 4. Sign JWT Token
     const token = jwt.sign(
       {
         user_id: user.user_id,
         email: user.email,
         roles: roleCodes,
       },
-      'supersecretkeyvaletudo', // <-- Hardcode the secret directly here
+      JWT_SECRET,
       { expiresIn: '24h' }
     );
 
-    // RA 10173: Log authentication event to hash-chained audit trail
+    // 5. R.A. 10173: Log authentication event to append-only hash-chained audit trail
     const connection = await pool.getConnection();
     try {
       await logAudit(connection, {
@@ -64,7 +71,7 @@ export async function loginUser(req, res) {
         ipAddress: req.ip,
       });
     } catch (auditErr) {
-      console.error('Login audit failed:', auditErr.message);
+      console.error('[Auth Audit Error]:', auditErr.message);
     } finally {
       connection.release();
     }
@@ -81,15 +88,12 @@ export async function loginUser(req, res) {
       },
     });
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('[Auth Error]:', error);
     return res.status(500).json({ error: 'Internal server error.' });
   }
-
-
-
 }
 
-// Middleware to verify JWT
+// Middleware to verify JWT token
 export function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1]; // Format: Bearer <token>
@@ -98,8 +102,7 @@ export function authenticateToken(req, res, next) {
     return res.status(401).json({ error: 'Access token required.' });
   }
 
-  // Updated to use the hardcoded secret
-  jwt.verify(token, 'supersecretkeyvaletudo', (err, user) => {
+  jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) return res.status(403).json({ error: 'Token expired or invalid.' });
     req.user = user;
     next();

@@ -35,26 +35,24 @@ class _SplashScreenState extends State<SplashScreen> {
     }
 
     try {
-      // 2. Validate token against backend (with a 3-second timeout in case offline)
-      final res = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/users/me'),
-        headers: {'Authorization': 'Bearer $token'},
-      ).timeout(const Duration(seconds: 3));
+  final res = await http.get(
+    Uri.parse('${ApiConfig.baseUrl}/api/users/me'),
+    headers: {'Authorization': 'Bearer $token'},
+  ).timeout(const Duration(seconds: 3));
 
-      if (res.statusCode == 200) {
-        _routeUser(jsonDecode(userDataStr));
-        return;
-      }
-    } catch (_) {
-      // 3. Fallback for offline/development: If server is temporarily asleep, 
-      // trust local secure storage so you don't get kicked out while testing.
-      _routeUser(jsonDecode(userDataStr));
-      return;
-    }
+  if (res.statusCode == 200) {
+    _routeUser(jsonDecode(userDataStr));
+    return;
+  }
+} catch (_) {
+  // Offline fallback
+  _routeUser(jsonDecode(userDataStr));
+  return;
+}
 
-    // If token was rejected by server (e.g. 401 or 403 expired)
-    await _storage.deleteAll();
-    _goToLogin();
+// If token rejected (401/403)
+await _storage.deleteAll();
+_goToLogin();
   }
 
   void _routeUser(Map<String, dynamic> user) {

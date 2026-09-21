@@ -5,29 +5,28 @@ import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
+import { decrypt } from '../utils/cryptoVault.js';
 
 const router = express.Router();
 
-// GET /api/health-pass/token - Generates dynamic QR token for mobile user
+// GET /api/health-pass/token
 router.get('/token', authenticateToken, (req, res) => {
   try {
     const userId = req.user.user_id;
     const timestamp = Date.now();
     const nonce = crypto.randomBytes(4).toString('hex');
 
-    // Payload: userId.timestamp.nonce
     const payload = `${userId}.${timestamp}.${nonce}`;
     const hmac = crypto
       .createHmac('sha256', 'supersecretkeyvaletudo')
       .update(payload)
       .digest('hex');
 
-    // Signed token format: userId.timestamp.nonce.signature
     const qrToken = `${payload}.${hmac}`;
 
     res.json({
       qrToken,
-      expiresInSeconds: 300, // Client should refresh every 5 mins
+      expiresInSeconds: 300,
     });
   } catch (error) {
     console.error('QR generation error:', error);
@@ -35,7 +34,7 @@ router.get('/token', authenticateToken, (req, res) => {
   }
 });
 
-// POST /api/health-pass/verify - Scanned by Nurse/Doctor on Electron
+// POST /api/health-pass/verify
 router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
   const { qrToken } = req.body;
   if (!qrToken) return res.status(400).json({ error: 'QR token required.' });
@@ -48,7 +47,6 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
   const [patientUserId, timestampStr, nonce, receivedSig] = parts;
   const payload = `${patientUserId}.${timestampStr}.${nonce}`;
 
-  // Verify HMAC (Done outside the DB transaction to save resources)
   const expectedSig = crypto.createHmac('sha256', 'supersecretkeyvaletudo').update(payload).digest('hex');
   if (expectedSig !== receivedSig) {
     return res.status(401).json({ error: 'QR verification failed: Invalid signature.' });
@@ -64,7 +62,6 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
   try {
     await connection.beginTransaction();
 
-    // Retrieve patient medical data
     const [patient] = await connection.query(
       `SELECT u.user_id, u.first_name, u.last_name, u.email,
               sp.student_no, sp.course, sp.year_level,
@@ -80,7 +77,6 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
       throw new Error('Patient not found or deactivated.');
     }
 
-// Log specific Protected Health Information (PHI) exposure
     logPhiAccess({
       viewerUserId: req.user.user_id,
       patientUserId: patientUserId,
@@ -91,10 +87,16 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
     });
 
     await connection.commit();
-    
+
+    const patientData = {
+      ...patient[0],
+      allergies: decrypt(patient[0].allergies),
+      chronic_conditions: decrypt(patient[0].chronic_conditions),
+    };
+
     res.json({
       verified: true,
-      patient: patient[0],
+      patient: patientData,
     });
   } catch (error) {
     await connection.rollback();

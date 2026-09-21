@@ -58,8 +58,20 @@ ipcMain.handle('show-notification', (event, { title, body }) => {
   return { success: false, error: 'Notifications not supported on this OS' };
 });
 
+// Add before app.whenReady() in desktop/electron/main.cjs
+app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
+  // Allow self-signed certificate for local infirmary backend
+  if (url.startsWith('https://localhost:5000') || url.startsWith('https://127.0.0.1:5000')) {
+    event.preventDefault();
+    callback(true); // Trust self-signed cert for dev
+  } else {
+    callback(false);
+  }
+});
+
 app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
+

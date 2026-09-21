@@ -74,8 +74,8 @@ export default function DoctorConsole() {
 
     const url =
       mode === 'history'
-        ? 'http://localhost:5000/api/appointments/today?filter=history'
-        : 'http://localhost:5000/api/appointments/today';
+        ? 'https://localhost:5000/api/appointments/today?filter=history'
+        : 'https://localhost:5000/api/appointments/today';
 
     try {
       const res = await fetch(url, {
@@ -103,7 +103,7 @@ export default function DoctorConsole() {
   useEffect(() => {
     fetchAppointments('active', false);
 
-    const socket = io('http://localhost:5000');
+    const socket = io('https://localhost:5000');
     socket.on('appointment:booked', (newBooking: any) => {
       fetchAppointments(viewMode, true);
       if (window.electronAPI?.showNotification) {
@@ -162,7 +162,7 @@ export default function DoctorConsole() {
     if (!selectedApp) return;
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`http://localhost:5000/api/appointments/${selectedApp.appointment_id}/status`, {
+      const res = await fetch(`https://localhost:5000/api/appointments/${selectedApp.appointment_id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ status: 'serving' }),
@@ -189,7 +189,7 @@ export default function DoctorConsole() {
     setIsSubmittingEMR(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`http://localhost:5000/api/appointments/${selectedApp.appointment_id}/complete`, {
+      const res = await fetch(`https://localhost:5000/api/appointments/${selectedApp.appointment_id}/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -228,7 +228,7 @@ export default function DoctorConsole() {
     setLoadingHistory(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`http://localhost:5000/api/appointments/patient/${selectedApp.patient_id}/history`, {
+      const res = await fetch(`https://localhost:5000/api/appointments/patient/${selectedApp.patient_id}/history`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
@@ -249,7 +249,7 @@ export default function DoctorConsole() {
     const token = localStorage.getItem('valetudo_token');
     try {
       // Step A: Send custom expiration date to backend
-      const res = await fetch('http://localhost:5000/api/documents/clearances', {
+      const res = await fetch('https://localhost:5000/api/documents/clearances', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
