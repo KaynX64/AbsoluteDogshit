@@ -72,86 +72,104 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     }
   }
 
-  // --- Modal: Prescription QR Verification Details ---
+  // --- Modal: Prescription QR Verification Details (Fixed with Dialog) ---
   void _showPrescriptionQrModal(Map<String, dynamic> rx) {
     final qrToken = rx['qr_token'] ?? '';
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Row(
-          children: [
-            const Icon(Icons.qr_code_scanner, color: Color(0xFF0F766E)),
-            const SizedBox(width: 8),
-            const Text('Digital Rx Verification', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.teal.shade100),
-                  boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
-                ),
-                child: QrImageView(
-                  data: qrToken,
-                  version: QrVersions.auto,
-                  size: 190.0,
-                ),
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: SingleChildScrollView(
+            child: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.qr_code_scanner, color: Color(0xFF0F766E)),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Digital Rx Verification',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    width: 210,
+                    height: 210,
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.teal.shade100),
+                      boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
+                    ),
+                    child: QrImageView(
+                      data: qrToken,
+                      version: QrVersions.auto,
+                      size: 190.0,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    "Prescription #${rx['prescription_id']}",
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    "Attending: Dr. ${rx['doctor_first_name']} ${rx['doctor_last_name']} (${rx['doctor_license']})",
+                    style: const TextStyle(fontSize: 12, color: Colors.black54),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      "Verification Token:\n$qrToken",
+                      style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: Colors.black87),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Present this QR code to the university infirmary or accredited pharmacy to verify authenticity.',
+                    style: TextStyle(fontSize: 11, color: Colors.black54),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 18),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0F766E),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Close'),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 12),
-              Text(
-                "Prescription #${rx['prescription_id']}",
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                "Attending: Dr. ${rx['doctor_first_name']} ${rx['doctor_last_name']} (${rx['doctor_license']})",
-                style: const TextStyle(fontSize: 12, color: Colors.black54),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  "Verification Token:\n$qrToken",
-                  style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: Colors.black87),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Present this QR code to the university infirmary or accredited pharmacy to verify authenticity.',
-                style: TextStyle(fontSize: 11, color: Colors.black54),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF0F766E),
-              foregroundColor: Colors.white,
             ),
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
           ),
-        ],
+        ),
       ),
     );
   }
 
-  // --- Modal: Official Clearance Certificate & Digital Seal ---
+  // --- Modal: Official Clearance Certificate & Digital Seal (Fixed with Dialog) ---
   void _showClearanceCertificateModal(Map<String, dynamic> clearance) {
     final qrToken = clearance['qr_token'] ?? '';
     final rawExpiry = clearance['expires_at'];
@@ -166,114 +184,144 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        contentPadding: const EdgeInsets.all(18),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // PSU Infirmary Header
-              const Text(
-                'PANGASINAN STATE UNIVERSITY',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F766E), letterSpacing: 0.5),
-                textAlign: TextAlign.center,
-              ),
-              const Text(
-                'CAMPUS INFIRMARY MEDICAL SERVICES',
-                style: TextStyle(fontSize: 10, color: Colors.black54, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-              const Divider(height: 18),
-
-              const Text(
-                'OFFICIAL MEDICAL CLEARANCE',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, decoration: TextDecoration.underline),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 12),
-
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF0FDFA),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.teal.shade200),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text("Purpose: ${clearance['purpose']}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                    const SizedBox(height: 4),
-                    Text("Issued: ${_formatDate(clearance['issued_at'])}", style: const TextStyle(fontSize: 12)),
-                    Text("Valid Until: ${_formatDate(clearance['expires_at'])}", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isExpired ? Colors.red : Colors.green.shade800)),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 14),
-
-              // Cryptographic QR Seal
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey.shade300),
-                ),
-                child: QrImageView(
-                  data: qrToken,
-                  version: QrVersions.auto,
-                  size: 160.0,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                "Digital Seal Token: ${qrToken.substring(0, qrToken.length > 20 ? 20 : qrToken.length)}...",
-                style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: Colors.black54),
-              ),
-              const SizedBox(height: 12),
-
-              // Signer Metadata Block
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade50,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: Colors.grey.shade200),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Text(
-                      "Dr. ${clearance['doctor_first_name']} ${clearance['doctor_last_name']}",
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: SingleChildScrollView(
+            child: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // PSU Infirmary Header
+                  const Text(
+                    'PANGASINAN STATE UNIVERSITY',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      color: Color(0xFF0F766E),
+                      letterSpacing: 0.5,
                     ),
-                    Text(
-                      "Attending Physician • ${clearance['doctor_license']}",
-                      style: const TextStyle(fontSize: 11, color: Colors.black54),
+                    textAlign: TextAlign.center,
+                  ),
+                  const Text(
+                    'CAMPUS INFIRMARY MEDICAL SERVICES',
+                    style: TextStyle(fontSize: 10, color: Colors.black54, fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center,
+                  ),
+                  const Divider(height: 18),
+
+                  const Text(
+                    'OFFICIAL MEDICAL CLEARANCE',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, decoration: TextDecoration.underline),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 12),
+
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF0FDFA),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.teal.shade200),
                     ),
-                    const Text(
-                      "Republic Act No. 10173 Verified E-Signature",
-                      style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic, color: Color(0xFF0F766E)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Purpose: ${clearance['purpose']}",
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          "Issued: ${_formatDate(clearance['issued_at'])}",
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        Text(
+                          "Valid Until: ${_formatDate(clearance['expires_at'])}",
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: isExpired ? Colors.red : Colors.green.shade800,
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Cryptographic QR Seal
+                  Container(
+                    width: 180,
+                    height: 180,
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: QrImageView(
+                      data: qrToken,
+                      version: QrVersions.auto,
+                      size: 160.0,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    "Digital Seal Token: ${qrToken.substring(0, qrToken.length > 20 ? 20 : qrToken.length)}...",
+                    style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: Colors.black54),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Signer Metadata Block
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.grey.shade200),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Text(
+                          "Dr. ${clearance['doctor_first_name']} ${clearance['doctor_last_name']}",
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                        ),
+                        Text(
+                          "Attending Physician • ${clearance['doctor_license']}",
+                          style: const TextStyle(fontSize: 11, color: Colors.black54),
+                        ),
+                        const Text(
+                          "Republic Act No. 10173 Verified E-Signature",
+                          style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic, color: Color(0xFF0F766E)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0F766E),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Dismiss'),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
-        actions: [
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF0F766E),
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Dismiss'),
-          ),
-        ],
       ),
     );
   }
@@ -436,19 +484,20 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text(
-                                  "${item['medicine_name']} (${item['strength']})",
+                                  "${item['medicine_name']} (${item['strength'] ?? 'Standard'})",
                                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                                 ),
                                 Text(
-                                  "${item['form']}",
+                                  "${item['form'] ?? 'Tablet'}",
                                   style: const TextStyle(fontSize: 11, color: Colors.black54),
                                 ),
                               ],
                             ),
-                            Text(
-                              "Generic: ${item['generic_name']}",
-                              style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Colors.black54),
-                            ),
+                            if (item['generic_name'] != null)
+                              Text(
+                                "Generic: ${item['generic_name']}",
+                                style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Colors.black54),
+                              ),
                             const SizedBox(height: 3),
                             Text(
                               "Sig: ${item['dosage']} • ${item['frequency']}",
@@ -508,7 +557,13 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
             SizedBox(height: 12),
             Center(child: Text('No medical clearances on record.', style: TextStyle(color: Colors.black54, fontSize: 15))),
             SizedBox(height: 6),
-            Center(child: Text('Clearances issued for OJT, sports, or academic requirements appear here.', style: TextStyle(color: Colors.grey, fontSize: 12), textAlign: TextAlign.center)),
+            Center(
+              child: Text(
+                'Clearances issued for OJT, sports, or academic requirements appear here.',
+                style: TextStyle(color: Colors.grey, fontSize: 12),
+                textAlign: TextAlign.center,
+              ),
+            ),
           ],
         ),
       );
