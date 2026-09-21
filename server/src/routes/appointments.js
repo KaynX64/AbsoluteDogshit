@@ -3,6 +3,7 @@ import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { logAudit } from '../utils/auditLogger.js';
+import { logPhiAccess } from '../utils/phiLogger.js';
 import { sendAppointmentEmail } from '../utils/mailer.js';
 
 export default function appointmentRouter(io) {
@@ -133,7 +134,7 @@ export default function appointmentRouter(io) {
         recordId: appointmentId,
         oldValue: null,
         newValue: { doctor_user_id, date_time, appointment_type, notes },
-        ipAddress: req.ip
+        ipAddress: req.ip,
       });
 
       await connection.commit();
@@ -419,7 +420,7 @@ export default function appointmentRouter(io) {
     }
   });
 
-  // 9. GET /api/appointments/lookup
+  // 9. GET /api/appointments/lookup - Patient lookup with PHI Read Access Logging
   router.get('/lookup', authenticateToken, async (req, res) => {
     try {
       const { query, userId } = req.query;
@@ -452,6 +453,19 @@ export default function appointmentRouter(io) {
       sql += ` ORDER BY a.date_time ASC LIMIT 5`;
 
       const [results] = await pool.query(sql, params);
+
+      // Log Protected Health Information (PHI) read access when records are viewed
+      if (results.length > 0) {
+        logPhiAccess({
+          viewerUserId: req.user.user_id,
+          patientUserId: results[0].user_id,
+          table: 'HEALTH_PROFILES',
+          recordId: results[0].user_id,
+          purpose: 'Intake Triage & QR Verification',
+          ipAddress: req.ip,
+        });
+      }
+
       res.json(results);
     } catch (error) {
       res.status(500).json({ error: 'Failed to lookup patient appointments.' });
@@ -564,7 +578,7 @@ export default function appointmentRouter(io) {
     }
   });
 
-// 13. GET /api/appointments/patient/:userId/history - Longitudinal EMR timeline
+  // 13. GET /api/appointments/patient/:userId/history - Longitudinal EMR timeline with PHI Logging
   router.get('/patient/:userId/history', authenticateToken, async (req, res) => {
     try {
       const { userId } = req.params;
@@ -588,6 +602,16 @@ export default function appointmentRouter(io) {
         [userId]
       );
 
+      // Log PHI read access for doctor consultation review
+      logPhiAccess({
+        viewerUserId: req.user.user_id,
+        patientUserId: userId,
+        table: 'EMR_RECORDS',
+        recordId: userId,
+        purpose: 'Clinical Encounter History Review',
+        ipAddress: req.ip,
+      });
+
       res.json(history);
     } catch (error) {
       console.error('Failed to retrieve patient EMR history:', error);
@@ -595,15 +619,13 @@ export default function appointmentRouter(io) {
     }
   });
 
-// server/src/routes/appointments.js (Add right before `return router;`)
-
   // 14. GET /api/appointments/queue/my - Active daily queue ticket for the logged-in student
   router.get('/queue/my', authenticateToken, async (req, res) => {
     try {
       const userId = req.user.user_id;
       const today = new Date().toISOString().split('T')[0];
 
-      // 1. Fetch any active ticket for this student today
+      // Fetch active ticket for this student today
       const [tickets] = await pool.query(
         `SELECT q.queue_id, q.queue_number, q.status, q.counter_id,
                 DATE_FORMAT(q.checked_in_at, '%h:%i %p') AS arrival_time,
@@ -629,7 +651,7 @@ export default function appointmentRouter(io) {
 
       const currentTicket = tickets[0];
 
-      // 2. Count how many patients are waiting ahead of this student
+      // Count how many patients are waiting ahead of this student
       let patientsAhead = 0;
       let estimatedWaitMinutes = 0;
 
@@ -662,8 +684,6 @@ export default function appointmentRouter(io) {
       res.status(500).json({ error: 'Failed to retrieve active queue ticket.' });
     }
   });
-
-
 
   return router;
 }
