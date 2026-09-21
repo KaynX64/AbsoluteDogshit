@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { requireRoles } from '../middleware/rbac.js';
-import { logAudit } from '../utils/auditLogger.js';
+import { logPhiAccess } from '../utils/phiLogger.js';
 
 const router = express.Router();
 
@@ -80,15 +80,14 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
       throw new Error('Patient not found or deactivated.');
     }
 
-    // RA 10173 Audit: Log that the Nurse/Doctor viewed this specific student's PHI
-    await logAudit(connection, {
-      userId: req.user.user_id, // The staff member performing the scan
-      action: 'VIEW',
+// Log specific Protected Health Information (PHI) exposure
+    logPhiAccess({
+      viewerUserId: req.user.user_id,
+      patientUserId: patientUserId,
       table: 'HEALTH_PROFILES',
-      recordId: patientUserId,  // The student whose data was exposed
-      oldValue: null,
-      newValue: null,
-      ipAddress: req.ip
+      recordId: patientUserId,
+      purpose: 'Touchless Clinic Check-In Scan',
+      ipAddress: req.ip,
     });
 
     await connection.commit();

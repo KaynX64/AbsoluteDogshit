@@ -10,25 +10,33 @@ const router = express.Router();
 // All routes require ADMIN role
 router.use(authenticateToken, requireRoles('ADMIN'));
 
-// 1. GET /api/admin/users - Live list of all users and assigned roles
-router.get('/users', async (req, res) => {
+// GET /api/admin/phi-access-logs - Surveillance list of sensitive medical record views
+router.get('/phi-access-logs', async (req, res) => {
   try {
-    const [users] = await pool.query(
-      `SELECT u.user_id as id, 
-              CONCAT(u.first_name, ' ', u.last_name) as name, 
-              u.email, 
-              u.phone,
-              IF(u.is_active, 'Active', 'Inactive') as status,
-              COALESCE(r.code, 'NONE') as role
-       FROM USERS u
-       LEFT JOIN USER_ROLES ur ON u.user_id = ur.user_id
+    const [logs] = await pool.query(
+      `SELECT p.access_id as id,
+              CONCAT(v.first_name, ' ', v.last_name) as viewer_name,
+              v.email as viewer_email,
+              COALESCE(r.code, 'STAFF') as viewer_role,
+              CONCAT(pt.first_name, ' ', pt.last_name) as patient_name,
+              sp.student_no,
+              p.table_affected,
+              p.purpose,
+              p.accessed_at,
+              p.ip_address
+       FROM PHI_ACCESS_LOGS p
+       JOIN USERS v ON p.user_id = v.user_id
+       LEFT JOIN USER_ROLES ur ON v.user_id = ur.user_id
        LEFT JOIN ROLES r ON ur.role_id = r.role_id
-       WHERE u.deleted_at IS NULL
-       ORDER BY u.user_id ASC`
+       JOIN USERS pt ON p.patient_user_id = pt.user_id
+       LEFT JOIN STUDENT_PROFILES sp ON pt.user_id = sp.user_id
+       ORDER BY p.access_id DESC
+       LIMIT 100`
     );
-    res.json(users);
+    res.json(logs);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch user directory.' });
+    console.error('Failed to retrieve PHI access logs:', error);
+    res.status(500).json({ error: 'Failed to retrieve PHI access logs.' });
   }
 });
 

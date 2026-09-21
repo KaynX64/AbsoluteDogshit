@@ -1,32 +1,63 @@
 // desktop/src/components/AdminConsole.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import AnalyticsDashboard from './AnalyticsDashboard';
 
 export default function AdminConsole() {
   const [activeTab, setActiveTab] = useState<'users' | 'audit' | 'telemetry' | 'analytics'>('users');
+  const [auditSubTab, setAuditSubTab] = useState<'mutations' | 'phi'>('phi');
+
+  const [usersList, setUsersList] = useState<any[]>([]);
+  const [mutationLogs, setMutationLogs] = useState<any[]>([]);
+  const [phiLogs, setPhiLogs] = useState<any[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  const usersList = [
-    { id: 1, name: 'Dr. Clark Kim Castro', email: 'admin@psu.edu.ph', role: 'ADMIN', status: 'Active', department: 'IT Governance' },
-    { id: 2, name: 'Dr. Juan Mata', email: 'doctor@psu.edu.ph', role: 'DOCTOR', status: 'Active', department: 'Infirmary Medicine' },
-    { id: 3, name: 'Nurse Dimples Arenas', email: 'nurse@psu.edu.ph', role: 'NURSE', status: 'Active', department: 'Triage & Nursing' },
-    { id: 4, name: 'Denver Cerezo', email: 'responder@psu.edu.ph', role: 'EMERGENCY_RESPONDER', status: 'Active', department: 'Campus Security & QRT' },
-    { id: 5, name: 'Daniella Movida', email: 'student@psu.edu.ph', role: 'STUDENT', status: 'Active', department: 'BS Information Technology' },
-    { id: 6, name: 'Dr. Carmela Reyes', email: 'dentist@psu.edu.ph', role: 'DENTIST', status: 'Active', department: 'Dental Health Unit' },
-  ];
+  // Fetch live logs and users
+  const fetchUsers = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('http://localhost:5000/api/admin/users', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setUsersList(await res.json());
+    } catch (_) {}
+  };
 
-  const auditLogs = [
-    { id: 101, user: 'nurse@psu.edu.ph', action: 'DISPENSE', target: 'MEDICINE_BATCHES #1', hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', time: '10 mins ago', ip: '192.168.1.45' },
-    { id: 102, user: 'student@psu.edu.ph', action: 'SOS_TRIGGER', target: 'EMERGENCY_ALERTS', hash: 'ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb', time: '15 mins ago', ip: '192.168.1.112' },
-    { id: 103, user: 'admin@psu.edu.ph', action: 'LOGIN', target: 'AUTH_SESSIONS', hash: '875442a420b9271fe83742f0226650946fd0b0ce0ced83687d361144b0b06103', time: '1 hour ago', ip: '127.0.0.1' },
-    { id: 104, user: 'doctor@psu.edu.ph', action: 'CREATE', target: 'PRESCRIPTIONS #4', hash: '9b71d224bd62f3785d96d46ad3ea3d73319bfbc2890caadae2dff72519673ca7', time: '2 hours ago', ip: '192.168.1.40' },
-  ];
+  const fetchMutationLogs = async () => {
+    setLoadingLogs(true);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('http://localhost:5000/api/admin/audit-logs', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setMutationLogs(await res.json());
+    } catch (_) {}
+    setLoadingLogs(false);
+  };
+
+  const fetchPhiLogs = async () => {
+    setLoadingLogs(true);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('http://localhost:5000/api/admin/phi-access-logs', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setPhiLogs(await res.json());
+    } catch (_) {}
+    setLoadingLogs(false);
+  };
+
+  useEffect(() => {
+    fetchUsers();
+    fetchMutationLogs();
+    fetchPhiLogs();
+  }, []);
 
   const filteredUsers = usersList.filter(
     (u) =>
-      u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      u.role.toLowerCase().includes(searchTerm.toLowerCase())
+      (u.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (u.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (u.role || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
@@ -63,14 +94,7 @@ export default function AdminConsole() {
         </div>
 
         {/* Scalable Tab Switcher */}
-        <div
-          style={{
-            display: 'flex',
-            gap: 8,
-            flexWrap: 'wrap',
-            alignItems: 'center',
-          }}
-        >
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <button
             onClick={() => setActiveTab('users')}
             style={{
@@ -82,13 +106,16 @@ export default function AdminConsole() {
               color: activeTab === 'users' ? '#fff' : '#334155',
               fontWeight: 600,
               fontSize: 13,
-              transition: 'all 0.15s ease',
             }}
           >
             👥 User Roles (RBAC)
           </button>
           <button
-            onClick={() => setActiveTab('audit')}
+            onClick={() => {
+              setActiveTab('audit');
+              fetchPhiLogs();
+              fetchMutationLogs();
+            }}
             style={{
               padding: '8px 14px',
               borderRadius: 6,
@@ -98,10 +125,9 @@ export default function AdminConsole() {
               color: activeTab === 'audit' ? '#fff' : '#334155',
               fontWeight: 600,
               fontSize: 13,
-              transition: 'all 0.15s ease',
             }}
           >
-            🔒 RA 10173 Audit Logs
+            🔒 Privacy & PHI Audit Logs
           </button>
           <button
             onClick={() => setActiveTab('telemetry')}
@@ -114,7 +140,6 @@ export default function AdminConsole() {
               color: activeTab === 'telemetry' ? '#fff' : '#334155',
               fontWeight: 600,
               fontSize: 13,
-              transition: 'all 0.15s ease',
             }}
           >
             📡 System Health
@@ -130,7 +155,6 @@ export default function AdminConsole() {
               color: activeTab === 'analytics' ? '#fff' : '#334155',
               fontWeight: 600,
               fontSize: 13,
-              transition: 'all 0.15s ease',
             }}
           >
             📊 Health Analytics
@@ -138,20 +162,10 @@ export default function AdminConsole() {
         </div>
       </div>
 
-      {/* 2. TAB CONTENT: USERS DIRECTORY */}
+      {/* 2. TAB: USERS LIST */}
       {activeTab === 'users' && (
         <div style={{ marginTop: 16 }}>
-          {/* Quick Search & Count Filter */}
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: 12,
-              flexWrap: 'wrap',
-              gap: 10,
-            }}
-          >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
             <input
               type="text"
               placeholder="Search user by name, email, or role..."
@@ -167,52 +181,27 @@ export default function AdminConsole() {
               }}
             />
             <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>
-              Showing {filteredUsers.length} of {usersList.length} Active System Accounts
+              Showing {filteredUsers.length} of {usersList.length} Accounts
             </span>
           </div>
 
-          {/* Fluid Auto-Scrolling Table Container */}
-          <div
-            style={{
-              width: '100%',
-              overflowX: 'auto',
-              border: '1px solid #e2e8f0',
-              borderRadius: 8,
-              background: '#ffffff',
-            }}
-          >
-            <table
-              style={{
-                width: '100%',
-                minWidth: 700,
-                borderCollapse: 'collapse',
-                fontSize: 13,
-                textAlign: 'left',
-              }}
-            >
+          <div style={{ width: '100%', overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: 8, background: '#ffffff' }}>
+            <table style={{ width: '100%', minWidth: 700, borderCollapse: 'collapse', fontSize: 13, textAlign: 'left' }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
                   <th style={{ padding: '12px 14px' }}>User ID</th>
                   <th style={{ padding: '12px 14px' }}>Full Name</th>
                   <th style={{ padding: '12px 14px' }}>Institutional Email</th>
-                  <th style={{ padding: '12px 14px' }}>Unit / Department</th>
                   <th style={{ padding: '12px 14px' }}>Assigned RBAC Role</th>
                   <th style={{ padding: '12px 14px' }}>Account Status</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredUsers.map((u) => (
-                  <tr
-                    key={u.id}
-                    style={{
-                      borderBottom: '1px solid #f1f5f9',
-                      transition: 'background 0.15s ease',
-                    }}
-                  >
+                  <tr key={u.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                     <td style={{ padding: '12px 14px', color: '#64748b', fontWeight: 600 }}>#{u.id}</td>
                     <td style={{ padding: '12px 14px', fontWeight: 'bold', color: '#1e293b' }}>{u.name}</td>
                     <td style={{ padding: '12px 14px', color: '#334155' }}>{u.email}</td>
-                    <td style={{ padding: '12px 14px', color: '#64748b', fontSize: 12 }}>{u.department}</td>
                     <td style={{ padding: '12px 14px' }}>
                       <span
                         style={{
@@ -238,107 +227,173 @@ export default function AdminConsole() {
         </div>
       )}
 
-      {/* 3. TAB CONTENT: AUDIT LOGS */}
+      {/* 3. TAB: AUDIT LOGS & PHI SURVEILLANCE */}
       {activeTab === 'audit' && (
         <div style={{ marginTop: 16 }}>
-          <div
-            style={{
-              padding: '12px 16px',
-              background: '#f8fafc',
-              borderRadius: 8,
-              border: '1px solid #e2e8f0',
-              marginBottom: 14,
-              fontSize: 12,
-              color: '#334155',
-              lineHeight: 1.5,
-            }}
-          >
-            <strong>🔒 Cryptographic Append-Only Chain:</strong> Every transaction generates a SHA-256 hash
-            linking directly to the preceding log record. This tamper-evident mechanism fulfills the regulatory audit
-            standards mandated by the <strong>National Privacy Commission (NPC Circular 16-01)</strong>.
-          </div>
-
-          <div
-            style={{
-              width: '100%',
-              overflowX: 'auto',
-              maxHeight: 'calc(100vh - 300px)',
-              overflowY: 'auto',
-              border: '1px solid #e2e8f0',
-              borderRadius: 8,
-            }}
-          >
-            <table
+          {/* Sub-tab navigation */}
+          <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
+            <button
+              onClick={() => setAuditSubTab('phi')}
               style={{
-                width: '100%',
-                minWidth: 780,
-                borderCollapse: 'collapse',
+                padding: '6px 14px',
+                borderRadius: 6,
+                border: 'none',
+                cursor: 'pointer',
+                fontWeight: 'bold',
                 fontSize: 12,
-                textAlign: 'left',
+                background: auditSubTab === 'phi' ? '#0f766e' : '#f1f5f9',
+                color: auditSubTab === 'phi' ? '#ffffff' : '#475569',
               }}
             >
-              <thead style={{ position: 'sticky', top: 0, background: '#f8fafc', zIndex: 2 }}>
-                <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
-                  <th style={{ padding: '10px 12px' }}>Log ID</th>
-                  <th style={{ padding: '10px 12px' }}>Actor</th>
-                  <th style={{ padding: '10px 12px' }}>Action</th>
-                  <th style={{ padding: '10px 12px' }}>Target Entity</th>
-                  <th style={{ padding: '10px 12px' }}>IP Origin</th>
-                  <th style={{ padding: '10px 12px' }}>SHA-256 Verification Hash</th>
-                  <th style={{ padding: '10px 12px' }}>Timestamp</th>
-                </tr>
-              </thead>
-              <tbody>
-                {auditLogs.map((log) => (
-                  <tr key={log.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '10px 12px', fontWeight: 600 }}>#{log.id}</td>
-                    <td style={{ padding: '10px 12px', color: '#0f766e', fontWeight: 600 }}>{log.user}</td>
-                    <td style={{ padding: '10px 12px' }}>
-                      <span
-                        style={{
-                          background: log.action === 'SOS_TRIGGER' ? '#fee2e2' : '#f1f5f9',
-                          color: log.action === 'SOS_TRIGGER' ? '#dc2626' : '#334155',
-                          padding: '2px 6px',
-                          borderRadius: 4,
-                          fontWeight: 'bold',
-                        }}
-                      >
-                        {log.action}
-                      </span>
-                    </td>
-                    <td style={{ padding: '10px 12px', color: '#334155' }}>{log.target}</td>
-                    <td style={{ padding: '10px 12px', color: '#64748b' }}>{log.ip}</td>
-                    <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontSize: 11, color: '#475569' }}>
-                      {log.hash.substring(0, 24)}…
-                    </td>
-                    <td style={{ padding: '10px 12px', color: '#64748b', whiteSpace: 'nowrap' }}>{log.time}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              👁️ Protected Health Information (PHI) Access Logs
+            </button>
+            <button
+              onClick={() => setAuditSubTab('mutations')}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 6,
+                border: 'none',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                fontSize: 12,
+                background: auditSubTab === 'mutations' ? '#4f46e5' : '#f1f5f9',
+                color: auditSubTab === 'mutations' ? '#ffffff' : '#475569',
+              }}
+            >
+              ⛓️ SHA-256 Mutation Ledger (AUDIT_LOGS)
+            </button>
           </div>
+
+          {/* VIEW A: PHI READ ACCESS LOGS */}
+          {auditSubTab === 'phi' && (
+            <div>
+              <div
+                style={{
+                  padding: '12px 16px',
+                  background: '#f0fdfa',
+                  borderRadius: 8,
+                  border: '1px solid #99f6e4',
+                  marginBottom: 14,
+                  fontSize: 12,
+                  color: '#0f766e',
+                  lineHeight: 1.5,
+                }}
+              >
+                <strong>👁️ Statutory PHI Surveillance (R.A. 10173):</strong> This record logs every instance a medical
+                practitioner views a patient’s confidential health profile, EMR history, or clinical records, ensuring
+                full traceability for healthcare accountability.
+              </div>
+
+              {loadingLogs ? (
+                <p style={{ color: '#64748b', fontSize: 13 }}>Loading PHI access records...</p>
+              ) : phiLogs.length === 0 ? (
+                <div style={{ padding: 24, textAlign: 'center', color: '#64748b', background: '#f8fafc', borderRadius: 8 }}>
+                  No PHI read access events recorded yet. Have a doctor or nurse review a patient record to populate.
+                </div>
+              ) : (
+                <div style={{ width: '100%', overflowX: 'auto', maxHeight: 'calc(100vh - 340px)', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                  <table style={{ width: '100%', minWidth: 800, borderCollapse: 'collapse', fontSize: 12, textAlign: 'left' }}>
+                    <thead style={{ position: 'sticky', top: 0, background: '#f8fafc', zIndex: 2 }}>
+                      <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
+                        <th style={{ padding: '10px 12px' }}>Access ID</th>
+                        <th style={{ padding: '10px 12px' }}>Practitioner (Viewer)</th>
+                        <th style={{ padding: '10px 12px' }}>Patient Accessed</th>
+                        <th style={{ padding: '10px 12px' }}>Data Table</th>
+                        <th style={{ padding: '10px 12px' }}>Clinical Purpose</th>
+                        <th style={{ padding: '10px 12px' }}>IP Origin</th>
+                        <th style={{ padding: '10px 12px' }}>Access Timestamp</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {phiLogs.map((log) => (
+                        <tr key={log.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '10px 12px', fontWeight: 600 }}>#{log.id}</td>
+                          <td style={{ padding: '10px 12px' }}>
+                            <strong style={{ color: '#0f766e' }}>{log.viewer_name}</strong>
+                            <div style={{ fontSize: 10, color: '#64748b' }}>{log.viewer_role} • {log.viewer_email}</div>
+                          </td>
+                          <td style={{ padding: '10px 12px' }}>
+                            <strong>{log.patient_name}</strong>
+                            {log.student_no && <div style={{ fontSize: 10, color: '#64748b' }}>ID: {log.student_no}</div>}
+                          </td>
+                          <td style={{ padding: '10px 12px' }}>
+                            <span style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: 4, fontFamily: 'monospace' }}>
+                              {log.table_affected}
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px 12px', color: '#334155' }}>{log.purpose}</td>
+                          <td style={{ padding: '10px 12px', color: '#64748b' }}>{log.ip_address}</td>
+                          <td style={{ padding: '10px 12px', color: '#64748b', whiteSpace: 'nowrap' }}>
+                            {new Date(log.accessed_at).toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* VIEW B: MUTATION AUDIT LOGS */}
+          {auditSubTab === 'mutations' && (
+            <div>
+              <div style={{ padding: '12px 16px', background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0', marginBottom: 14, fontSize: 12, color: '#334155' }}>
+                <strong>🔒 Cryptographic Append-Only Chain:</strong> Every transaction generates a SHA-256 hash
+                linking directly to the preceding log record.
+              </div>
+
+              <div style={{ width: '100%', overflowX: 'auto', maxHeight: 'calc(100vh - 340px)', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                <table style={{ width: '100%', minWidth: 780, borderCollapse: 'collapse', fontSize: 12, textAlign: 'left' }}>
+                  <thead style={{ position: 'sticky', top: 0, background: '#f8fafc', zIndex: 2 }}>
+                    <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
+                      <th style={{ padding: '10px 12px' }}>Log ID</th>
+                      <th style={{ padding: '10px 12px' }}>Actor</th>
+                      <th style={{ padding: '10px 12px' }}>Action</th>
+                      <th style={{ padding: '10px 12px' }}>Target Entity</th>
+                      <th style={{ padding: '10px 12px' }}>SHA-256 Verification Hash</th>
+                      <th style={{ padding: '10px 12px' }}>Timestamp</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mutationLogs.map((log) => (
+                      <tr key={log.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '10px 12px', fontWeight: 600 }}>#{log.id}</td>
+                        <td style={{ padding: '10px 12px', color: '#4f46e5', fontWeight: 600 }}>{log.user}</td>
+                        <td style={{ padding: '10px 12px' }}>
+                          <span
+                            style={{
+                              background: log.action === 'CREATE' ? '#dcfce7' : log.action === 'UPDATE' ? '#fef3c7' : '#f1f5f9',
+                              color: log.action === 'CREATE' ? '#15803d' : log.action === 'UPDATE' ? '#b45309' : '#334155',
+                              padding: '2px 6px',
+                              borderRadius: 4,
+                              fontWeight: 'bold',
+                            }}
+                          >
+                            {log.action}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 12px', color: '#334155' }}>{log.target}</td>
+                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontSize: 11, color: '#475569' }}>
+                          {log.hash ? `${log.hash.substring(0, 22)}…` : 'N/A'}
+                        </td>
+                        <td style={{ padding: '10px 12px', color: '#64748b', whiteSpace: 'nowrap' }}>
+                          {new Date(log.created_at).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* 4. TAB CONTENT: AUTO-FIT DYNAMIC TELEMETRY GRID */}
+      {/* 4. TAB: TELEMETRY */}
       {activeTab === 'telemetry' && (
-        <div
-          style={{
-            marginTop: 16,
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-            gap: 16,
-          }}
-        >
-          <div
-            style={{
-              padding: 18,
-              border: '1px solid #cbd5e1',
-              borderRadius: 8,
-              background: '#f8fafc',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
-            }}
-          >
+        <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 16 }}>
+          <div style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#f8fafc' }}>
             <span style={{ fontSize: 12, fontWeight: 'bold', color: '#64748b' }}>PRIMARY DATABASE</span>
             <h4 style={{ margin: '6px 0 4px', fontSize: 16, color: '#0f172a' }}>Central MySQL 8.0</h4>
             <p style={{ color: '#16a34a', margin: '4px 0 10px', fontSize: 18, fontWeight: 'bold' }}>● Operational</p>
@@ -347,15 +402,7 @@ export default function AdminConsole() {
             </div>
           </div>
 
-          <div
-            style={{
-              padding: 18,
-              border: '1px solid #cbd5e1',
-              borderRadius: 8,
-              background: '#f8fafc',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
-            }}
-          >
+          <div style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#f8fafc' }}>
             <span style={{ fontSize: 12, fontWeight: 'bold', color: '#64748b' }}>REAL-TIME GATEWAY</span>
             <h4 style={{ margin: '6px 0 4px', fontSize: 16, color: '#0f172a' }}>Socket.IO Engine</h4>
             <p style={{ color: '#16a34a', margin: '4px 0 10px', fontSize: 18, fontWeight: 'bold' }}>● Connected</p>
@@ -364,43 +411,18 @@ export default function AdminConsole() {
             </div>
           </div>
 
-          <div
-            style={{
-              padding: 18,
-              border: '1px solid #cbd5e1',
-              borderRadius: 8,
-              background: '#f8fafc',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
-            }}
-          >
-            <span style={{ fontSize: 12, fontWeight: 'bold', color: '#64748b' }}>DESKTOP RUNTIME</span>
-            <h4 style={{ margin: '6px 0 4px', fontSize: 16, color: '#0f172a' }}>Electron Client</h4>
-            <p style={{ color: '#0284c7', margin: '4px 0 10px', fontSize: 18, fontWeight: 'bold' }}>v1.0.0 Stable</p>
-            <div style={{ fontSize: 12, color: '#64748b', borderTop: '1px dashed #cbd5e1', paddingTop: 8 }}>
-              Native Spooler & Hardware USB Scanner Bindings
-            </div>
-          </div>
-
-          <div
-            style={{
-              padding: 18,
-              border: '1px solid #cbd5e1',
-              borderRadius: 8,
-              background: '#f8fafc',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
-            }}
-          >
+          <div style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#f8fafc' }}>
             <span style={{ fontSize: 12, fontWeight: 'bold', color: '#64748b' }}>PRIVACY AUDIT VERIFIER</span>
             <h4 style={{ margin: '6px 0 4px', fontSize: 16, color: '#0f172a' }}>RA 10173 Audit Trail</h4>
             <p style={{ color: '#16a34a', margin: '4px 0 10px', fontSize: 18, fontWeight: 'bold' }}>● Valid Hash-Chain</p>
             <div style={{ fontSize: 12, color: '#64748b', borderTop: '1px dashed #cbd5e1', paddingTop: 8 }}>
-              0 Integrity Violations Detected Across Logs
+              Continuous Integrity Check Across Logs
             </div>
           </div>
         </div>
       )}
 
-      {/* 5. TAB CONTENT: FULL-SCALE ANALYTICS DASHBOARD */}
+      {/* 5. TAB: ANALYTICS */}
       {activeTab === 'analytics' && <AnalyticsDashboard />}
     </div>
   );
