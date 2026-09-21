@@ -84,6 +84,7 @@ mobile/
       .gitkeep
     widgets/
       .gitkeep
+      session_timeout_listener.dart
     main.dart
 server/
   src/
@@ -91,12 +92,16 @@ server/
       rbac.js
     routes/
       appointments.js
+      audit.js
       emergency.js
       healthPass.js
       inventory.js
       profile.js
     utils/
       auditLogger.js
+      dataRetention.js
+      encryption.js
+      logger.js
     auth.js
     db.js
     index.js
@@ -106,6 +111,279 @@ docker-compose.yml
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="mobile/lib/widgets/session_timeout_listener.dart">
+// mobile/lib/widgets/session_timeout_listener.dart
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../screens/login_screen.dart';
+
+class SessionTimeoutListener extends StatefulWidget {
+  final Widget child;
+  final Duration timeoutDuration;
+
+  const SessionTimeoutListener({
+    super.key,
+    required this.child,
+    this.timeoutDuration = const Duration(minutes: 15),
+  });
+
+  @override
+  State<SessionTimeoutListener> createState() => _SessionTimeoutListenerState();
+}
+
+class _SessionTimeoutListenerState extends State<SessionTimeoutListener> {
+  Timer? _timer;
+  final _storage = const FlutterSecureStorage();
+
+  void _resetTimer() {
+    _timer?.cancel();
+    _timer = Timer(widget.timeoutDuration, _handleTimeout);
+  }
+
+  Future<void> _handleTimeout() async {
+    await _storage.delete(key: 'jwt_token');
+    if (!mounted) return;
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Session timed out due to inactivity.'),
+        backgroundColor: Colors.orange,
+      ),
+    );
+
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _resetTimer();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => _resetTimer(),
+      onPointerMove: (_) => _resetTimer(),
+      child: widget.child,
+    );
+  }
+}
+</file>
+
+<file path="server/src/routes/audit.js">
+// server/src/routes/audit.js
+import express from 'express';
+import { pool } from '../db.js';
+import { authenticateToken } from '../auth.js';
+import { requireRoles } from '../middleware/rbac.js';
+
+const router = express.Router();
+
+// GET /api/audit - Fetch live cryptographic audit logs for Admin Console
+router.get('/', authenticateToken, requireRoles('ADMIN'), async (req, res) => {
+  try {
+    const [logs] = await pool.query(
+      `SELECT a.audit_id AS id, 
+              COALESCE(u.email, 'System / Automated') AS user, 
+              a.action, 
+              CONCAT(a.table_affected, ' #', COALESCE(a.record_id, 0)) AS target, 
+              a.entry_hash AS hash, 
+              a.created_at AS time 
+       FROM AUDIT_LOGS a 
+       LEFT JOIN USERS u ON a.user_id = u.user_id 
+       ORDER BY a.audit_id DESC 
+       LIMIT 50`
+    );
+    res.json(logs);
+  } catch (error) {
+    console.error('[Audit] Fetch error:', error);
+    res.status(500).json({ error: 'Failed to retrieve audit logs.' });
+  }
+});
+
+export default router;
+</file>
+
+<file path="server/src/utils/dataRetention.js">
+// server/src/utils/dataRetention.js
+import { pool } from '../db.js';
+
+export async function executeDataRetentionPurge() {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const cutoffQuery = "DATE_SUB(NOW(), INTERVAL 5 YEAR)";
+
+    // 1. Fetch users marked for deletion past the 5-year retention window under RA 10173
+    const [usersToPurge] = await connection.query(
+      `SELECT user_id FROM USERS WHERE deleted_at IS NOT NULL AND deleted_at < ${cutoffQuery}`
+    );
+
+    if (usersToPurge.length > 0) {
+      const userIds = usersToPurge.map(u => u.user_id);
+
+      // 2. Explicitly clean up all dependent child records to prevent foreign key constraint rejections
+      await connection.query(`DELETE FROM PHI_ACCESS_LOGS WHERE user_id IN (?) OR patient_user_id IN (?)`, [userIds, userIds]);
+      await connection.query(`DELETE FROM LOCAL_SYNC_LOGS WHERE user_id IN (?)`, [userIds]);
+      await connection.query(`DELETE FROM INVENTORY_LOGS WHERE performed_by IN (?)`, [userIds]);
+      await connection.query(`DELETE FROM EMERGENCY_ALERTS WHERE user_id IN (?) OR assigned_responder_id IN (?)`, [userIds, userIds]);
+      await connection.query(`DELETE FROM MEDICAL_CLEARANCES WHERE user_id IN (?) OR issued_by IN (?)`, [userIds, userIds]);
+      
+      // Delete prescription line items and headers
+      await connection.query(`DELETE pi FROM PRESCRIPTION_ITEMS pi JOIN PRESCRIPTIONS p ON pi.prescription_id = p.prescription_id WHERE p.patient_user_id IN (?) OR p.doctor_user_id IN (?)`, [userIds, userIds]);
+      await connection.query(`DELETE FROM PRESCRIPTIONS WHERE patient_user_id IN (?) OR doctor_user_id IN (?)`, [userIds, userIds]);
+      
+      // Delete vitals, EMR records, queue entries, and appointments
+      await connection.query(`DELETE FROM VITAL_SIGNS WHERE recorded_by IN (?) OR emr_id IN (SELECT emr_id FROM EMR_RECORDS WHERE patient_user_id IN (?) OR doctor_user_id IN (?))`, [userIds, userIds, userIds]);
+      await connection.query(`DELETE FROM EMR_RECORDS WHERE patient_user_id IN (?) OR doctor_user_id IN (?)`, [userIds, userIds]);
+      await connection.query(`DELETE FROM QUEUE WHERE patient_user_id IN (?)`, [userIds]);
+      await connection.query(`DELETE FROM APPOINTMENTS WHERE patient_user_id IN (?) OR doctor_user_id IN (?)`, [userIds, userIds]);
+      
+      // Delete role profiles and mappings
+      await connection.query(`DELETE FROM HEALTH_PROFILES WHERE user_id IN (?)`, [userIds]);
+      await connection.query(`DELETE FROM STUDENT_PROFILES WHERE user_id IN (?)`, [userIds]);
+      await connection.query(`DELETE FROM FACULTY_PROFILES WHERE user_id IN (?)`, [userIds]);
+      await connection.query(`DELETE FROM STAFF_PROFILES WHERE user_id IN (?)`, [userIds]);
+      await connection.query(`DELETE FROM USER_ROLES WHERE user_id IN (?)`, [userIds]);
+
+      // 3. Finally, delete the parent user accounts safely
+      await connection.query(
+        `DELETE FROM USERS WHERE deleted_at IS NOT NULL AND deleted_at < ${cutoffQuery}`
+      );
+    }
+
+    await connection.commit();
+    console.log('[Data Retention] 5-year RA 10173 retention purge executed successfully.');
+  } catch (error) {
+    await connection.rollback();
+    console.error('[Data Retention] Purge failed, transaction rolled back:', error);
+  } finally {
+    connection.release();
+  }
+}
+
+export function startRetentionCron() {
+  // Run purge check every 24 hours
+  const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+  setInterval(() => {
+    executeDataRetentionPurge();
+  }, TWENTY_FOUR_HOURS);
+  
+  // Initial check on server startup
+  executeDataRetentionPurge();
+}
+</file>
+
+<file path="server/src/utils/encryption.js">
+// server/src/utils/encryption.js
+import crypto from 'crypto';
+import 'dotenv/config'; // Ensure dotenv is loaded to read the key
+
+const ALGORITHM = 'aes-256-gcm';
+const rawKey = process.env.ENCRYPTION_KEY;
+
+// 1. STRICT SECURITY ENFORCEMENT: Fail completely if the key is missing
+if (!rawKey) {
+  console.error("FATAL ERROR: ENCRYPTION_KEY is not defined in .env");
+  console.error("Halting application to prevent unencrypted PHI storage fallback.");
+  process.exit(1);
+}
+
+// 2. Format the key (expects a 64-character hex string in .env to make 32 bytes)
+const ENCRYPTION_KEY = Buffer.from(rawKey, 'hex');
+
+// 3. Ensure the key is exactly 32 bytes for AES-256
+if (ENCRYPTION_KEY.length !== 32) {
+  console.error("FATAL ERROR: ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes).");
+  process.exit(1);
+}
+
+export function encryptPHI(text) {
+  if (!text || typeof text !== 'string') return text;
+  
+  const iv = crypto.randomBytes(12); // 96-bit IV for GCM
+  const cipher = crypto.createCipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
+  
+  let encrypted = cipher.update(text, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  
+  const authTag = cipher.getAuthTag().toString('hex');
+  
+  // Format: iv:authTag:encryptedText (Matches your database schema)
+  return `${iv.toString('hex')}:${authTag}:${encrypted}`;
+}
+
+export function decryptPHI(cipherText) {
+  if (!cipherText || typeof cipherText !== 'string' || !cipherText.includes(':')) {
+    return cipherText; // Return unencrypted raw fallback if unencrypted legacy data exists
+  }
+
+  try {
+    const [ivHex, authTagHex, encryptedText] = cipherText.split(':');
+    if (!ivHex || !authTagHex || !encryptedText) return cipherText;
+
+    const iv = Buffer.from(ivHex, 'hex');
+    const authTag = Buffer.from(authTagHex, 'hex');
+    const decipher = crypto.createDecipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
+    
+    decipher.setAuthTag(authTag);
+    let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    
+    return decrypted;
+  } catch (error) {
+    console.error('[Crypto] Decryption failed:', error.message);
+    return '[ENCRYPTED_PHI_RESTRICTED]';
+  }
+}
+</file>
+
+<file path="server/src/utils/logger.js">
+// server/src/utils/logger.js
+import { pool } from '../db.js';
+
+/**
+ * Logs read-access of Protected Health Information (PHI)
+ * @param {number|string} practitionerId - The ID of the clinic staff viewing the data (maps to user_id)
+ * @param {number|string} patientUserId - The ID of the student/patient
+ * @param {string} purpose - The clinical or administrative reason for access
+ * @param {string} tableAffected - The primary table being accessed (defaults to 'MULTIPLE')
+ * @param {number|string} recordId - The primary record ID being accessed (defaults to patient ID)
+ */
+export async function logPHIAccess(practitionerId, patientUserId, purpose, tableAffected = 'MULTIPLE', recordId = patientUserId) {
+    try {
+        const query = `
+            INSERT INTO PHI_ACCESS_LOGS 
+            (user_id, patient_user_id, table_affected, record_id, purpose, accessed_at)
+            VALUES (?, ?, ?, ?, ?, NOW())
+        `;
+        // Using MySQL '?' placeholders and the correct connection pool
+        await pool.query(query, [
+            practitionerId, 
+            patientUserId, 
+            tableAffected, 
+            recordId, 
+            purpose
+        ]);
+    } catch (error) {
+        console.error('CRITICAL: Failed to write to PHI_ACCESS_LOGS', error);
+    }
+}
+</file>
 
 <file path="desktop/electron/preload.cjs">
 // desktop/electron/preload.cjs
@@ -130,24 +408,50 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
 <file path="desktop/src/components/AdminConsole.tsx">
 // desktop/src/components/AdminConsole.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 export default function AdminConsole() {
   const [activeTab, setActiveTab] = useState<'users' | 'audit' | 'telemetry'>('users');
+  const [usersList, setUsersList] = useState<any[]>([]);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const usersList = [
-    { id: 1, name: 'Dr. Clark Kim Castro', email: 'admin@psu.edu.ph', role: 'ADMIN', status: 'Active' },
-    { id: 2, name: 'Dr. Juan Mata', email: 'doctor@psu.edu.ph', role: 'DOCTOR', status: 'Active' },
-    { id: 3, name: 'Nurse Dimples Arenas', email: 'nurse@psu.edu.ph', role: 'NURSE', status: 'Active' },
-    { id: 4, name: 'Denver Cerezo', email: 'responder@psu.edu.ph', role: 'EMERGENCY_RESPONDER', status: 'Active' },
-    { id: 5, name: 'Daniella Movida', email: 'student@psu.edu.ph', role: 'STUDENT', status: 'Active' },
-  ];
+  const token = localStorage.getItem('valetudo_token');
 
-  const auditLogs = [
-    { id: 101, user: 'nurse@psu.edu.ph', action: 'DISPENSE', target: 'MEDICINE_BATCHES #1', hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', time: '10 mins ago' },
-    { id: 102, user: 'student@psu.edu.ph', action: 'SOS_TRIGGER', target: 'EMERGENCY_ALERTS', hash: 'ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb', time: '15 mins ago' },
-    { id: 103, user: 'admin@psu.edu.ph', action: 'LOGIN', target: 'AUTH_SESSIONS', hash: '875442a420b9271fe83742f0226650946fd0b0ce0ced83687d361144b0b06103', time: '1 hour ago' },
-  ];
+  useEffect(() => {
+    if (activeTab === 'audit') {
+      fetchAuditLogs();
+    } else if (activeTab === 'users') {
+      fetchUsers();
+    }
+  }, [activeTab]);
+
+  const fetchAuditLogs = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('https://localhost:5000/api/audit', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        setAuditLogs(await res.json());
+      }
+    } catch (err) {
+      console.error('Failed to load audit logs:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchUsers = async () => {
+    // For demonstration, mapping the static mockup or an actual user endpoint if available
+    setUsersList([
+      { id: 1, name: 'Dr. Clark Kim Castro', email: 'admin@psu.edu.ph', role: 'ADMIN', status: 'Active' },
+      { id: 2, name: 'Dr. Juan Mata', email: 'doctor@psu.edu.ph', role: 'DOCTOR', status: 'Active' },
+      { id: 3, name: 'Nurse Dimples Arenas', email: 'nurse@psu.edu.ph', role: 'NURSE', status: 'Active' },
+      { id: 4, name: 'Denver Cerezo', email: 'responder@psu.edu.ph', role: 'EMERGENCY_RESPONDER', status: 'Active' },
+      { id: 5, name: 'Daniella Movida', email: 'student@psu.edu.ph', role: 'STUDENT', status: 'Active' },
+    ]);
+  };
 
   return (
     <div style={{ background: '#ffffff', padding: 20, borderRadius: 8, border: '1px solid #cbd5e1' }}>
@@ -214,30 +518,36 @@ export default function AdminConsole() {
           <div style={{ padding: 10, background: '#f8fafc', borderRadius: 6, marginBottom: 12, fontSize: 12, color: '#475569' }}>
             <b>Append-Only Chained Hash Integrity:</b> Every mutation records a cryptographic SHA-256 digest referencing the previous entry to prevent tamper attacks.
           </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, textAlign: 'left' }}>
-            <thead>
-              <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#64748b' }}>
-                <th style={{ padding: '8px' }}>Log ID</th>
-                <th style={{ padding: '8px' }}>Actor</th>
-                <th style={{ padding: '8px' }}>Action</th>
-                <th style={{ padding: '8px' }}>Target Table</th>
-                <th style={{ padding: '8px' }}>SHA-256 Entry Hash</th>
-                <th style={{ padding: '8px' }}>Time</th>
-              </tr>
-            </thead>
-            <tbody>
-              {auditLogs.map((log) => (
-                <tr key={log.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '8px' }}>#{log.id}</td>
-                  <td style={{ padding: '8px' }}>{log.user}</td>
-                  <td style={{ padding: '8px', fontWeight: 'bold' }}>{log.action}</td>
-                  <td style={{ padding: '8px' }}>{log.target}</td>
-                  <td style={{ padding: '8px', fontFamily: 'monospace', fontSize: 11 }}>{log.hash.substring(0, 20)}...</td>
-                  <td style={{ padding: '8px', color: '#64748b' }}>{log.time}</td>
+          {loading ? (
+            <p style={{ textAlign: 'center', color: '#64748b', fontSize: 13 }}>Loading cryptographic audit ledger...</p>
+          ) : auditLogs.length === 0 ? (
+            <p style={{ textAlign: 'center', color: '#64748b', fontSize: 13 }}>No audit logs recorded yet.</p>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, textAlign: 'left' }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#64748b' }}>
+                  <th style={{ padding: '8px' }}>Log ID</th>
+                  <th style={{ padding: '8px' }}>Actor</th>
+                  <th style={{ padding: '8px' }}>Action</th>
+                  <th style={{ padding: '8px' }}>Target Table</th>
+                  <th style={{ padding: '8px' }}>SHA-256 Entry Hash</th>
+                  <th style={{ padding: '8px' }}>Time</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {auditLogs.map((log) => (
+                  <tr key={log.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '8px' }}>#{log.id}</td>
+                    <td style={{ padding: '8px' }}>{log.user}</td>
+                    <td style={{ padding: '8px', fontWeight: 'bold' }}>{log.action}</td>
+                    <td style={{ padding: '8px' }}>{log.target}</td>
+                    <td style={{ padding: '8px', fontFamily: 'monospace', fontSize: 11 }}>{log.hash ? log.hash.substring(0, 20) + '...' : 'N/A'}</td>
+                    <td style={{ padding: '8px', color: '#64748b' }}>{new Date(log.time).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
 
@@ -321,8 +631,8 @@ export default function DoctorConsole() {
 
     const url =
       mode === 'history'
-        ? 'http://localhost:5000/api/appointments/today?filter=history'
-        : 'http://localhost:5000/api/appointments/today';
+        ? 'https://localhost:5000/api/appointments/today?filter=history'
+        : 'https://localhost:5000/api/appointments/today';
 
     try {
       const res = await fetch(url, {
@@ -375,7 +685,7 @@ export default function DoctorConsole() {
     if (!selectedApp) return;
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`http://localhost:5000/api/appointments/${selectedApp.appointment_id}/status`, {
+      const res = await fetch(`https://localhost:5000/api/appointments/${selectedApp.appointment_id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ status: 'serving' }),
@@ -403,7 +713,7 @@ export default function DoctorConsole() {
     setIsSubmittingEMR(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`http://localhost:5000/api/appointments/${selectedApp.appointment_id}/complete`, {
+      const res = await fetch(`https://localhost:5000/api/appointments/${selectedApp.appointment_id}/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -435,7 +745,7 @@ export default function DoctorConsole() {
     if (!selectedApp || !window.confirm('Mark this appointment as No-Show? It will be removed from the active queue.')) return;
     const token = localStorage.getItem('valetudo_token');
     try {
-      await fetch(`http://localhost:5000/api/appointments/${selectedApp.appointment_id}/status`, {
+      await fetch(`https://localhost:5000/api/appointments/${selectedApp.appointment_id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ status: 'no_show' }),
@@ -947,7 +1257,7 @@ export default function EmergencyAlertBanner() {
       const token = localStorage.getItem('valetudo_token');
       if (!token) return;
       try {
-        const res = await fetch('http://localhost:5000/api/emergency/active', {
+        const res = await fetch('https://localhost:5000/api/emergency/active', {
           headers: { Authorization: `Bearer ${token}` },
         });
         const data = await res.json();
@@ -977,7 +1287,7 @@ export default function EmergencyAlertBanner() {
     fetchActiveAlerts();
 
     // 2. Connect Socket.IO
-    const socket: Socket = io('http://localhost:5000');
+    const socket: Socket = io('https://localhost:5000');
 
     socket.on('emergency:new_alert', (newAlert: EmergencyAlert) => {
       playEmergencyAlarm();
@@ -1000,7 +1310,7 @@ export default function EmergencyAlertBanner() {
   const updateStatus = async (alertId: number, status: string) => {
     const token = localStorage.getItem('valetudo_token');
     try {
-      await fetch(`http://localhost:5000/api/emergency/${alertId}/status`, {
+      await fetch(`https://localhost:5000/api/emergency/${alertId}/status`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -1158,7 +1468,7 @@ export default function NurseConsole() {
     setLoadingQueue(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('http://localhost:5000/api/appointments/queue/today', {
+      const res = await fetch('https://localhost:5000/api/appointments/queue/today', {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
@@ -1186,7 +1496,7 @@ export default function NurseConsole() {
 
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`http://localhost:5000/api/appointments/queue/${nextPatient.queue_id}/status`, {
+      const res = await fetch(`https://localhost:5000/api/appointments/queue/${nextPatient.queue_id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ status: 'in-consultation' }),
@@ -2713,6 +3023,8 @@ import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { requireRoles } from '../middleware/rbac.js';
+import { decryptPHI } from '../utils/encryption.js'; // Added decryption
+import { logPHIAccess } from '../utils/logger.js'; // Added RA 10173 access logging
 
 export default function emergencyRouter(io) {
   const router = express.Router();
@@ -2750,6 +3062,10 @@ export default function emergencyRouter(io) {
       );
 
       const patientInfo = details[0] || {};
+      
+      // Decrypt vital PHI before broadcasting to emergency responders
+      const decryptedAllergies = decryptPHI(patientInfo.allergies);
+      const decryptedConditions = decryptPHI(patientInfo.chronic_conditions);
 
       const alertPayload = {
         alertId,
@@ -2759,8 +3075,8 @@ export default function emergencyRouter(io) {
         studentNo: patientInfo.student_no,
         course: patientInfo.course,
         bloodType: patientInfo.blood_type || 'Unknown',
-        allergies: patientInfo.allergies || 'None listed',
-        chronicConditions: patientInfo.chronic_conditions || 'None listed',
+        allergies: decryptedAllergies || 'None listed',
+        chronicConditions: decryptedConditions || 'None listed',
         emergencyContact: `${patientInfo.emergency_contact_name || 'N/A'} (${patientInfo.emergency_contact_phone || 'N/A'})`,
         latitude: Number(latitude),
         longitude: Number(longitude),
@@ -2771,6 +3087,15 @@ export default function emergencyRouter(io) {
 
       // Broadcast immediately across all connected clinic desktops & responders
       io.emit('emergency:new_alert', alertPayload);
+      
+      // Log that the system exposed PHI to the WebSocket broadcast for this emergency
+      await logPHIAccess(
+        userId, // Actor is the student triggering the SOS
+        userId, 
+        'Automated SOS Emergency Broadcast',
+        'EMERGENCY_ALERTS',
+        alertId
+      );
 
       res.status(201).json({
         message: 'Emergency alert dispatched to PSU Clinic and Quick-Response team.',
@@ -2783,8 +3108,10 @@ export default function emergencyRouter(io) {
   });
 
   // 2. GET /api/emergency/active - List all currently active/unresolved alerts
-  router.get('/active', authenticateToken, async (req, res) => {
+  router.get('/active', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN', 'EMERGENCY_RESPONDER'), async (req, res) => {
     try {
+      const practitionerId = req.user.user_id;
+      
       const [alerts] = await pool.query(
         `SELECT a.alert_id, a.user_id, a.latitude, a.longitude, a.status, a.created_at, a.notes,
                 u.first_name, u.last_name, u.phone,
@@ -2795,14 +3122,34 @@ export default function emergencyRouter(io) {
          WHERE a.status IN ('triggered', 'acknowledged', 'dispatched')
          ORDER BY a.created_at DESC`
       );
-      res.json(alerts);
+      
+      // Decrypt PHI and log access for the responder viewing the dashboard
+      const processedAlerts = await Promise.all(
+        alerts.map(async (alert) => {
+            await logPHIAccess(
+                practitionerId,
+                alert.user_id,
+                'Emergency Dashboard Monitoring',
+                'EMERGENCY_ALERTS',
+                alert.alert_id
+            );
+            
+            return {
+                ...alert,
+                allergies: decryptPHI(alert.allergies)
+            };
+        })
+      );
+      
+      res.json(processedAlerts);
     } catch (error) {
+      console.error('Active alerts fetch error:', error);
       res.status(500).json({ error: 'Failed to fetch active alerts.' });
     }
   });
 
   // 3. PATCH /api/emergency/:alertId/status - Update response status (Nurse/Doctor/Responder)
-  router.patch('/:alertId/status', authenticateToken, async (req, res) => {
+  router.patch('/:alertId/status', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN', 'EMERGENCY_RESPONDER'), async (req, res) => {
     try {
       const { alertId } = req.params;
       const { status } = req.body; // 'acknowledged' | 'dispatched' | 'resolved' | 'false_alarm'
@@ -2836,6 +3183,7 @@ export default function emergencyRouter(io) {
 
       res.json({ message: `Alert #${alertId} updated to ${status}.` });
     } catch (error) {
+      console.error('Alert status update error:', error);
       res.status(500).json({ error: 'Failed to update alert status.' });
     }
   });
@@ -2878,17 +3226,30 @@ export async function logAudit(connection, { userId, action, table, recordId, ol
 import React, { useState, useEffect } from 'react';
 
 export default function InventoryManager() {
+  const [activeTab, setActiveTab] = useState<'deduct' | 'receive'>('deduct');
+
+  // Deduction state
   const [batchId, setBatchId] = useState('');
   const [quantity, setQuantity] = useState('1');
   const [reason, setReason] = useState('Prescription issuance');
   const [statusMessage, setStatusMessage] = useState('');
   const [batches, setBatches] = useState<any[]>([]);
 
-  // Fetch live catalog data on load and after deductions
+  // Receive stock state
+  const [medicines, setMedicines] = useState<any[]>([]);
+  const [selectedMedicineId, setSelectedMedicineId] = useState('');
+  const [newBatchNo, setNewBatchNo] = useState('');
+  const [mfgDate, setMfgDate] = useState('');
+  const [expDate, setExpDate] = useState('');
+  const [supplier, setSupplier] = useState('Unilab Philippines');
+  const [qtyReceived, setQtyReceived] = useState('100');
+  const [receiveReason, setReceiveReason] = useState('New shipment delivery');
+  const [receiveStatus, setReceiveStatus] = useState('');
+
   const fetchBatches = async () => {
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('http://localhost:5000/api/inventory/batches', {
+      const res = await fetch('https://localhost:5000/api/inventory/batches', {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -2899,8 +3260,25 @@ export default function InventoryManager() {
     }
   };
 
+  const fetchMedicines = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('https://localhost:5000/api/inventory/medicines', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMedicines(data);
+        if (data.length > 0) setSelectedMedicineId(data[0].medicine_id.toString());
+      }
+    } catch (err) {
+      console.error("Failed to fetch medicines:", err);
+    }
+  };
+
   useEffect(() => {
     fetchBatches();
+    fetchMedicines();
   }, []);
 
   const handleDeductStock = async (e: React.FormEvent) => {
@@ -2909,7 +3287,7 @@ export default function InventoryManager() {
 
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('http://localhost:5000/api/inventory/deduct', {
+      const res = await fetch('https://localhost:5000/api/inventory/deduct', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -2925,8 +3303,8 @@ export default function InventoryManager() {
       const data = await res.json();
       if (res.ok) {
         setStatusMessage('✅ Success: ' + data.message);
-        fetchBatches(); // Refresh stock immediately after deduction
-        setBatchId(''); // Clear selection
+        fetchBatches();
+        setBatchId('');
         setQuantity('1');
       } else {
         setStatusMessage('❌ Error: ' + (data.error || 'Failed to deduct stock'));
@@ -2936,121 +3314,276 @@ export default function InventoryManager() {
     }
   };
 
-  // Helper to dynamically color-code FEFO status
-  const getExpiryStatus = (expiryDate: string) => {
-    const daysUntil = (new Date(expiryDate).getTime() - new Date().getTime()) / (1000 * 3600 * 24);
+  const handleReceiveStock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setReceiveStatus('Processing stock receipt...');
+
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('https://localhost:5000/api/inventory/receive', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          medicine_id: Number(selectedMedicineId),
+          batch_no: newBatchNo,
+          manufacture_date: mfgDate,
+          expiry_date: expDate,
+          supplier,
+          quantity_received: Number(qtyReceived),
+          reason: receiveReason,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setReceiveStatus('✅ Success: ' + data.message);
+        fetchBatches();
+        setNewBatchNo('');
+        setMfgDate('');
+        setExpDate('');
+      } else {
+        setReceiveStatus('❌ Error: ' + (data.error || 'Failed to receive stock'));
+      }
+    } catch (err: any) {
+      setReceiveStatus('❌ Network Error: ' + err.message);
+    }
+  };
+
+  const getExpiryStatus = (expiryDateStr: string) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const [year, month, day] = expiryDateStr.split('-').map(Number);
+    const expiryDate = new Date(year, month - 1, day);
+    const daysUntil = (expiryDate.getTime() - today.getTime()) / (1000 * 3600 * 24);
+    
     if (daysUntil < 0) return { label: 'EXPIRED', color: 'red' };
-    if (daysUntil <= 90) return { label: 'EXPIRING SOON', color: '#b45309' }; // dark orange
+    if (daysUntil <= 90) return { label: 'EXPIRING SOON', color: '#b45309' };
     return { label: 'GOOD', color: 'green' };
   };
 
   return (
-    <section style={{ padding: 16, border: '1px solid #ccc', borderRadius: 8, marginTop: 24, display: 'flex', gap: '20px' }}>
-      
-      {/* LEFT COLUMN: LIVE CATALOG VIEWER */}
-      <div style={{ flex: 2, borderRight: '1px solid #eee', paddingRight: '20px' }}>
-        <h3 style={{ marginTop: 0, color: '#0f766e' }}>📦 Live Pharmacy Catalog (FEFO)</h3>
-        <p style={{ fontSize: 13, color: '#666', marginTop: '-10px', marginBottom: '10px' }}>
-          Click a row to select it for deduction.
-        </p>
-        
-        <div style={{ maxHeight: '250px', overflowY: 'auto' }}>
-          <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead>
-              <tr style={{ borderBottom: '2px solid #ddd' }}>
-                <th style={{ padding: 8 }}>ID</th>
-                <th style={{ padding: 8 }}>Medicine / Batch</th>
-                <th style={{ padding: 8 }}>Stock</th>
-                <th style={{ padding: 8 }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {batches.map((b) => {
-                const status = getExpiryStatus(b.expiry_date);
-                const isLowStock = b.quantity_on_hand < 20; 
-                const isSelected = batchId === b.batch_id.toString();
-
-                return (
-                  <tr 
-                    key={b.batch_id} 
-                    onClick={() => setBatchId(b.batch_id.toString())}
-                    style={{ 
-                      cursor: 'pointer', 
-                      borderBottom: '1px solid #eee',
-                      background: isSelected ? '#ccfbf1' : 'transparent',
-                      transition: 'background 0.2s'
-                    }}
-                  >
-                    <td style={{ padding: 8 }}><b>{b.batch_id}</b></td>
-                    <td style={{ padding: 8 }}>
-                      <span style={{ fontWeight: 600 }}>{b.name}</span><br/>
-                      <small style={{ color: '#666' }}>{b.batch_no}</small>
-                    </td>
-                    <td style={{ 
-                      padding: 8, 
-                      color: isLowStock ? 'red' : 'inherit', 
-                      fontWeight: isLowStock ? 'bold' : 'normal' 
-                    }}>
-                      {b.quantity_on_hand}
-                    </td>
-                    <td style={{ padding: 8, color: status.color, fontWeight: 'bold' }}>
-                      {status.label}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+    <section style={{ padding: 16, border: '1px solid #ccc', borderRadius: 8, marginTop: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h3 style={{ margin: 0, color: '#0f766e' }}>📦 Live Pharmacy Catalog & Inventory (FEFO)</h3>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={() => setActiveTab('deduct')}
+            style={{
+              padding: '6px 12px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold',
+              background: activeTab === 'deduct' ? '#0f766e' : '#f1f5f9',
+              color: activeTab === 'deduct' ? '#fff' : '#334155',
+              border: '1px solid #0f766e'
+            }}
+          >
+            ➖ Stock Deduction
+          </button>
+          <button
+            onClick={() => setActiveTab('receive')}
+            style={{
+              padding: '6px 12px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold',
+              background: activeTab === 'receive' ? '#0f766e' : '#f1f5f9',
+              color: activeTab === 'receive' ? '#fff' : '#334155',
+              border: '1px solid #0f766e'
+            }}
+          >
+            ➕ Receive New Batch
+          </button>
         </div>
       </div>
 
-      {/* RIGHT COLUMN: DEDUCTION FORM */}
-      <div style={{ flex: 1 }}>
-        <h3 style={{ marginTop: 0, color: '#0f766e' }}>Stock Deduction</h3>
-        <form onSubmit={handleDeductStock}>
-          <div style={{ marginBottom: 10 }}>
-              <label style={{ fontSize: 13 }}>Selected Batch ID:</label>
-              <input 
-               style={{ width: '100%', padding: 6, marginTop: 2, background: '#f1f5f9', color: '#000' }} 
-               value={batchId} 
-                readOnly
-              placeholder="Select from catalog..."
-               />
-          </div>
-          <div style={{ marginBottom: 10 }}>
-            <label style={{ fontSize: 13 }}>Quantity to Dispense:</label>
-            <input 
-              style={{ width: '100%', padding: 6, marginTop: 2 }} 
-              type="number" 
-              min="1"
-              value={quantity} 
-              onChange={(e) => setQuantity(e.target.value)} 
-            />
-          </div>
-          <div style={{ marginBottom: 14 }}>
-            <label style={{ fontSize: 13 }}>Reason / Remarks:</label>
-            <input 
-              style={{ width: '100%', padding: 6, marginTop: 2 }} 
-              value={reason} 
-              onChange={(e) => setReason(e.target.value)} 
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={!batchId}
-            style={{ 
-              width: '100%', padding: 10, border: 'none', borderRadius: 4, fontWeight: 'bold',
-              background: batchId ? '#0f766e' : '#ccc', 
-              color: '#fff', 
-              cursor: batchId ? 'pointer' : 'not-allowed' 
-            }}
-          >
-            ➖ Deduct Stock
-          </button>
-        </form>
-        {statusMessage && <p style={{ fontSize: 13, marginTop: 10 }}>{statusMessage}</p>}
-      </div>
+      <div style={{ display: 'flex', gap: '20px' }}>
+        {/* LEFT COLUMN: LIVE CATALOG VIEWER */}
+        <div style={{ flex: 2, borderRight: '1px solid #eee', paddingRight: '20px' }}>
+          <p style={{ fontSize: 13, color: '#666', marginTop: '-5px', marginBottom: '10px' }}>
+            Click a row to select it for stock deduction.
+          </p>
+          
+          <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
+            <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #ddd' }}>
+                  <th style={{ padding: 8 }}>ID</th>
+                  <th style={{ padding: 8 }}>Medicine / Batch</th>
+                  <th style={{ padding: 8 }}>Stock</th>
+                  <th style={{ padding: 8 }}>Expiry Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {batches.map((b) => {
+                  const status = getExpiryStatus(b.expiry_date);
+                  const isLowStock = b.quantity_on_hand < 20; 
+                  const isSelected = batchId === b.batch_id.toString();
 
+                  return (
+                    <tr 
+                      key={b.batch_id} 
+                      onClick={() => { setActiveTab('deduct'); setBatchId(b.batch_id.toString()); }}
+                      style={{ 
+                        cursor: 'pointer', 
+                        borderBottom: '1px solid #eee',
+                        background: isSelected ? '#ccfbf1' : 'transparent',
+                        transition: 'background 0.2s'
+                      }}
+                    >
+                      <td style={{ padding: 8 }}><b>{b.batch_id}</b></td>
+                      <td style={{ padding: 8 }}>
+                        <span style={{ fontWeight: 600 }}>{b.name}</span><br/>
+                        <small style={{ color: '#666' }}>Batch: {b.batch_no}</small>
+                      </td>
+                      <td style={{ 
+                        padding: 8, 
+                        color: isLowStock ? 'red' : 'inherit', 
+                        fontWeight: isLowStock ? 'bold' : 'normal' 
+                      }}>
+                        {b.quantity_on_hand}
+                      </td>
+                      <td style={{ padding: 8, color: status.color, fontWeight: 'bold' }}>
+                        {status.label} <small style={{ fontWeight: 'normal', color: '#555' }}>({b.expiry_date})</small>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* RIGHT COLUMN: ACTION FORMS */}
+        <div style={{ flex: 1 }}>
+          {activeTab === 'deduct' ? (
+            <div>
+              <h4 style={{ marginTop: 0, color: '#0f766e' }}>Stock Deduction</h4>
+              <form onSubmit={handleDeductStock}>
+                <div style={{ marginBottom: 10 }}>
+                  <label style={{ fontSize: 13 }}>Selected Batch ID:</label>
+                  <input 
+                    style={{ width: '100%', padding: 6, marginTop: 2, background: '#f1f5f9', color: '#000', boxSizing: 'border-box' }} 
+                    value={batchId} 
+                    readOnly
+                    placeholder="Click a row from catalog..."
+                  />
+                </div>
+                <div style={{ marginBottom: 10 }}>
+                  <label style={{ fontSize: 13 }}>Quantity to Dispense:</label>
+                  <input 
+                    style={{ width: '100%', padding: 6, marginTop: 2, boxSizing: 'border-box' }} 
+                    type="number" 
+                    min="1"
+                    value={quantity} 
+                    onChange={(e) => setQuantity(e.target.value)} 
+                  />
+                </div>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ fontSize: 13 }}>Reason / Remarks:</label>
+                  <input 
+                    style={{ width: '100%', padding: 6, marginTop: 2, boxSizing: 'border-box' }} 
+                    value={reason} 
+                    onChange={(e) => setReason(e.target.value)} 
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={!batchId}
+                  style={{ 
+                    width: '100%', padding: 10, border: 'none', borderRadius: 4, fontWeight: 'bold',
+                    background: batchId ? '#0f766e' : '#ccc', 
+                    color: '#fff', 
+                    cursor: batchId ? 'pointer' : 'not-allowed' 
+                  }}
+                >
+                  ➖ Deduct Stock
+                </button>
+              </form>
+              {statusMessage && <p style={{ fontSize: 13, marginTop: 10 }}>{statusMessage}</p>}
+            </div>
+          ) : (
+            <div>
+              <h4 style={{ marginTop: 0, color: '#0f766e' }}>Receive New Stock Batch</h4>
+              <form onSubmit={handleReceiveStock}>
+                <div style={{ marginBottom: 8 }}>
+                  <label style={{ fontSize: 12 }}>Select Medicine:</label>
+                  <select 
+                    style={{ width: '100%', padding: 6, marginTop: 2, boxSizing: 'border-box', background: '#fff' }}
+                    value={selectedMedicineId}
+                    onChange={(e) => setSelectedMedicineId(e.target.value)}
+                  >
+                    {medicines.map((m) => (
+                      <option key={m.medicine_id} value={m.medicine_id}>
+                        {m.name} ({m.strength} - {m.form})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ marginBottom: 8 }}>
+                  <label style={{ fontSize: 12 }}>Batch Number:</label>
+                  <input 
+                    style={{ width: '100%', padding: 6, marginTop: 2, boxSizing: 'border-box' }}
+                    placeholder="e.g. BATCH-PAR-2026C"
+                    value={newBatchNo}
+                    onChange={(e) => setNewBatchNo(e.target.value)}
+                    required
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: 12 }}>Mfg Date:</label>
+                    <input 
+                      type="date"
+                      style={{ width: '100%', padding: 6, marginTop: 2, boxSizing: 'border-box' }}
+                      value={mfgDate}
+                      onChange={(e) => setMfgDate(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: 12 }}>Expiry Date:</label>
+                    <input 
+                      type="date"
+                      style={{ width: '100%', padding: 6, marginTop: 2, boxSizing: 'border-box' }}
+                      value={expDate}
+                      onChange={(e) => setExpDate(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+                <div style={{ marginBottom: 8 }}>
+                  <label style={{ fontSize: 12 }}>Quantity Received:</label>
+                  <input 
+                    type="number"
+                    min="1"
+                    style={{ width: '100%', padding: 6, marginTop: 2, boxSizing: 'border-box' }}
+                    value={qtyReceived}
+                    onChange={(e) => setQtyReceived(e.target.value)}
+                    required
+                  />
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 12 }}>Supplier:</label>
+                  <input 
+                    style={{ width: '100%', padding: 6, marginTop: 2, boxSizing: 'border-box' }}
+                    value={supplier}
+                    onChange={(e) => setSupplier(e.target.value)}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  style={{ 
+                    width: '100%', padding: 10, border: 'none', borderRadius: '4px', fontWeight: 'bold',
+                    background: '#0f766e', color: '#fff', cursor: 'pointer' 
+                  }}
+                >
+                  ➕ Record Stock Receipt
+                </button>
+              </form>
+              {receiveStatus && <p style={{ fontSize: 13, marginTop: 10 }}>{receiveStatus}</p>}
+            </div>
+          )}
+        </div>
+      </div>
     </section>
   );
 }
@@ -3070,11 +3603,13 @@ const router = express.Router();
 router.get('/batches', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT b.batch_id, m.name, b.batch_no, b.quantity_on_hand, b.expiry_date 
-       FROM MEDICINE_BATCHES b 
-       JOIN MEDICINES m ON b.medicine_id = m.medicine_id 
-       WHERE b.deleted_at IS NULL 
-       ORDER BY b.expiry_date ASC`
+      `SELECT b.batch_id, m.name, b.batch_no, b.quantity_on_hand, b.expiry_date, b.manufacture_date, b.supplier, b.medicine_id 
+      FROM MEDICINE_BATCHES b 
+      JOIN MEDICINES m ON b.medicine_id = m.medicine_id 
+      WHERE b.deleted_at IS NULL 
+      AND m.deleted_at IS NULL 
+      AND m.is_active = TRUE
+      ORDER BY b.expiry_date ASC`
     );
     res.json(rows);
   } catch (error) {
@@ -3082,11 +3617,85 @@ router.get('/batches', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
   }
 });
 
+// GET /api/inventory/medicines - Fetch master medicines catalog for batch receiving
+router.get('/medicines', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT medicine_id, name, generic_name, form, strength, unit FROM MEDICINES WHERE deleted_at IS NULL AND is_active = TRUE ORDER BY name ASC`
+    );
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch medicines master list.' });
+  }
+});
+
+// POST /api/inventory/receive - Add a new medicine batch / stock receipt
+router.post('/receive', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+  const { medicine_id, batch_no, manufacture_date, expiry_date, supplier, quantity_received, reason } = req.body;
+
+  const parsedMedicineId = parseInt(medicine_id, 10);
+  const parsedQuantity = parseInt(quantity_received, 10);
+
+  if (isNaN(parsedMedicineId) || parsedMedicineId <= 0) {
+    return res.status(400).json({ error: 'Valid medicine ID is required.' });
+  }
+  if (!batch_no || !manufacture_date || !expiry_date) {
+    return res.status(400).json({ error: 'Batch number, manufacture date, and expiry date are required.' });
+  }
+  if (isNaN(parsedQuantity) || parsedQuantity <= 0) {
+    return res.status(400).json({ error: 'Quantity received must be a positive integer.' });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [batchResult] = await connection.query(
+      `INSERT INTO MEDICINE_BATCHES (medicine_id, batch_no, manufacture_date, expiry_date, supplier, quantity_on_hand)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [parsedMedicineId, batch_no, manufacture_date, expiry_date, supplier || 'University Supplier', parsedQuantity]
+    );
+
+    const batchId = batchResult.insertId;
+
+    await connection.query(
+      `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
+       VALUES (?, ?, 'receive', ?, ?)`,
+      [batchId, parsedQuantity, reason || 'New stock shipment received', req.user.user_id]
+    );
+
+    await logAudit(connection, {
+      userId: req.user.user_id,
+      action: 'CREATE',
+      table: 'MEDICINE_BATCHES',
+      recordId: batchId,
+      oldValue: null,
+      newValue: { medicine_id: parsedMedicineId, batch_no, quantity_on_hand: parsedQuantity, expiry_date },
+      ipAddress: req.ip
+    });
+
+    await connection.commit();
+    return res.status(201).json({ message: 'New medicine batch successfully received and logged.', batchId });
+  } catch (error) {
+    await connection.rollback();
+    return res.status(500).json({ error: error.message || 'Failed to receive stock batch.' });
+  } finally {
+    connection.release();
+  }
+});
+
 // POST /api/inventory/deduct - Deduct stock from a specific batch
 router.post('/deduct', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
   const { batch_id, quantity_deducted, reason } = req.body;
   
-  if (!Number.isInteger(quantity_deducted) || quantity_deducted <= 0) {
+  const parsedBatchId = parseInt(batch_id, 10);
+  const parsedQuantity = parseInt(quantity_deducted, 10);
+
+  if (isNaN(parsedBatchId) || parsedBatchId <= 0) {
+    return res.status(400).json({ error: 'Valid batch ID is required.' });
+  }
+
+  if (isNaN(parsedQuantity) || parsedQuantity <= 0) {
     return res.status(400).json({ error: 'Quantity deducted must be a positive integer.' });
   }
   
@@ -3095,52 +3704,40 @@ router.post('/deduct', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
   try {
     await connection.beginTransaction();
 
-    // 1. Lock the batch row and check current stock levels
-    const [batchRows] = await connection.query(
-      'SELECT quantity_on_hand FROM MEDICINE_BATCHES WHERE batch_id = ? FOR UPDATE',
-      [batch_id]
+    const [batches] = await connection.query(
+      'SELECT quantity_on_hand FROM MEDICINE_BATCHES WHERE batch_id = ? AND deleted_at IS NULL FOR UPDATE',
+      [parsedBatchId]
     );
 
-    if (batchRows.length === 0) throw new Error('Medicine batch not found.');
-    
-    const oldQuantity = batchRows[0].quantity_on_hand;
-    if (oldQuantity < quantity_deducted) {
-      throw new Error('Insufficient stock in this batch to complete dispensation.');
+    if (batches.length === 0) {
+      throw new Error('Batch not found or has been deleted.');
     }
 
-    const newQuantity = oldQuantity - quantity_deducted;
+    const currentStock = batches[0].quantity_on_hand;
+    if (currentStock < parsedQuantity) {
+      throw new Error(`Insufficient stock. Only ${currentStock} units remaining in this batch.`);
+    }
 
-    // 2. Deduct the quantity from the batch
     await connection.query(
-      'UPDATE MEDICINE_BATCHES SET quantity_on_hand = ? WHERE batch_id = ?',
-      [newQuantity, batch_id]
+      'UPDATE MEDICINE_BATCHES SET quantity_on_hand = quantity_on_hand - ? WHERE batch_id = ?',
+      [parsedQuantity, parsedBatchId]
     );
 
-    // 3. Append to internal INVENTORY_LOGS
     await connection.query(
-      `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
+      `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by) 
        VALUES (?, ?, 'dispense', ?, ?)`,
-      [batch_id, -quantity_deducted, reason || 'Prescription issuance', req.user.user_id]
+      [parsedBatchId, -parsedQuantity, reason || 'Prescription issuance', req.user.user_id]
     );
-
-    // 4. Append to Global Cryptographic Audit Trail (RA 10173 Compliance)
-    await logAudit(connection, {
-      userId: req.user.user_id,
-      action: 'UPDATE',
-      table: 'MEDICINE_BATCHES',
-      recordId: batch_id,
-      oldValue: { quantity_on_hand: oldQuantity },
-      newValue: { quantity_on_hand: newQuantity },
-      ipAddress: req.ip
-    });
 
     await connection.commit();
-    res.json({ message: 'Stock successfully deducted and logged.' });
+    connection.release();
+    
+    return res.status(200).json({ message: 'Stock successfully deducted.' });
+
   } catch (error) {
     await connection.rollback();
-    res.status(400).json({ error: error.message });
-  } finally {
     connection.release();
+    return res.status(400).json({ error: error.message });
   }
 });
 
@@ -3152,82 +3749,66 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { pool } from './db.js';
 
+const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
+
 export async function loginUser(req, res) {
   const { email, password } = req.body;
-
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required.' });
-  }
+  if (!email || !password) return res.status(400).json({ error: 'Email and password are required.' });
 
   try {
-    // 1. Fetch user by email
     const [users] = await pool.query(
       'SELECT * FROM USERS WHERE email = ? AND is_active = TRUE AND deleted_at IS NULL',
       [email]
     );
 
-    if (users.length === 0) {
-      return res.status(401).json({ error: 'Invalid credentials.' });
-    }
-
+    if (users.length === 0) return res.status(401).json({ error: 'Invalid credentials.' });
     const user = users[0];
 
-    // 2. Validate Password (supports testing with fallback password)
     const isMatch = await bcrypt.compare(password, user.password_hash) || (password === 'Password123!');
-    if (!isMatch) {
-      return res.status(401).json({ error: 'Invalid credentials.' });
-    }
+    if (!isMatch) return res.status(401).json({ error: 'Invalid credentials.' });
 
-    // 3. Fetch user's assigned roles from M:N tables
     const [roles] = await pool.query(
-      `SELECT r.code, r.name 
-       FROM ROLES r 
-       INNER JOIN USER_ROLES ur ON r.role_id = ur.role_id 
-       WHERE ur.user_id = ?`,
+      `SELECT r.code, r.name FROM ROLES r 
+       INNER JOIN USER_ROLES ur ON r.role_id = ur.role_id WHERE ur.user_id = ?`,
       [user.user_id]
     );
 
     const roleCodes = roles.map((r) => r.code);
 
-    // 4. Inside server/src/auth.js (around line 43)
-    const token = jwt.sign(
-      {
-        user_id: user.user_id,
-        email: user.email,
-        roles: roleCodes,
-      },
-      'supersecretkeyvaletudo', // <-- Hardcode the secret directly here
-      { expiresIn: '24h' }
-    );
+    // FIX: Extended backend expiry to 8h. 
+    // The 15-minute security limit is now safely enforced by the frontend SessionTimeoutListener.
+    // server/src/auth.js (inside your login route handler)
+const token = jwt.sign(
+  { user_id: user.user_id, email: user.email, roles: roleCodes },
+  JWT_SECRET,
+  { expiresIn: '15m' } // <-- FIX: Reduced from '8h' to 15 minutes to match session timeout
+);
 
-    return res.json({
-      message: 'Login successful',
-      token,
-      user: {
-        user_id: user.user_id,
-        email: user.email,
-        first_name: user.first_name,
-        last_name: user.last_name,
-        roles: roleCodes,
-      },
-    });
+return res.json({
+  message: 'Login successful',
+  token,
+  user: {
+    user_id: user.user_id,
+    email: user.email,
+    first_name: user.first_name,
+    last_name: user.last_name,
+    roles: roleCodes,
+    consent_given: Boolean(user.consent_given), // <-- FIX: Added property to prevent infinite loop
+  },
+});
   } catch (error) {
-    console.error('Login error:', error);
     return res.status(500).json({ error: 'Internal server error.' });
   }
 }
 
-// Middleware to verify JWT
 export function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Format: Bearer <token>
+  const token = authHeader && authHeader.split(' ')[1];
 
-  if (!token) {
-    return res.status(401).json({ error: 'Access token required.' });
-  }
+  if (!token) return res.status(401).json({ error: 'Access token required.' });
 
-  // Updated to use the hardcoded secret
-  jwt.verify(token, 'supersecretkeyvaletudo', (err, user) => {
+  // FIX: Use the unified JWT_SECRET variable instead of the hardcoded string
+  jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) return res.status(403).json({ error: 'Token expired or invalid.' });
     req.user = user;
     next();
@@ -3674,6 +4255,12 @@ INSERT INTO `MEDICINE_BATCHES` (`batch_id`, `medicine_id`, `batch_no`, `manufact
 (1, 1, 'BATCH-PAR-2026A', '2026-01-10', '2028-01-10', 'Unilab Philippines', 200),
 (2, 2, 'BATCH-NZP-2026B', '2026-02-15', '2027-08-15', 'Unilab Philippines', 150),
 (3, 3, 'BATCH-SLB-2025X', '2025-06-01', '2027-06-01', 'GlaxoSmithKline', 15);
+
+-- Migration: Add Consent Tracking to USERS
+ALTER TABLE `USERS`
+ADD COLUMN `consent_given` BOOLEAN NOT NULL DEFAULT FALSE AFTER `is_active`,
+ADD COLUMN `consent_timestamp` TIMESTAMP NULL DEFAULT NULL AFTER `consent_given`,
+ADD COLUMN `consent_version` VARCHAR(20) NULL DEFAULT NULL AFTER `consent_timestamp`;
 </file>
 
 <file path="docker-compose.yml">
@@ -3762,7 +4349,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
 
     const jwt = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('http://localhost:5000/api/health-pass/verify', {
+      const res = await fetch('https://localhost:5000/api/health-pass/verify', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -3797,7 +4384,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
     const jwt = localStorage.getItem('valetudo_token');
 
     try {
-      const res = await fetch(`http://localhost:5000/api/appointments/lookup?query=${encodeURIComponent(searchQuery.trim())}`, {
+      const res = await fetch(`https://localhost:5000/api/appointments/lookup?query=${encodeURIComponent(searchQuery.trim())}`, {
         headers: { Authorization: `Bearer ${jwt}` },
       });
       const data = await res.json();
@@ -3828,7 +4415,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
   const checkPatientAppointments = async (userId: number) => {
     const jwt = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`http://localhost:5000/api/appointments/lookup?userId=${userId}`, {
+      const res = await fetch(`https://localhost:5000/api/appointments/lookup?userId=${userId}`, {
         headers: { Authorization: `Bearer ${jwt}` },
       });
       const data = await res.json();
@@ -3846,7 +4433,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
 
     const jwt = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`http://localhost:5000/api/appointments/${pendingAppointment.appointment_id}/checkin`, {
+      const res = await fetch(`https://localhost:5000/api/appointments/${pendingAppointment.appointment_id}/checkin`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -4161,8 +4748,67 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   @override
   void initState() {
     super.initState();
+    _checkPrivacyConsent(widget.user);
     _fetchQRPass();
     _fetchProfile();
+  }
+
+
+  // --- RA 10173 Consent Logic ---
+  void _checkPrivacyConsent(Map<String, dynamic> user) {
+    if (user['consent_given'] != true) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showConsentModal();
+      });
+    }
+  }
+
+  void _showConsentModal() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.privacy_tip, color: Color(0xFF0F766E)),
+            SizedBox(width: 8),
+            Text('RA 10173 Data Privacy Consent', style: TextStyle(fontSize: 16)),
+          ],
+        ),
+        content: const SingleChildScrollView(
+          child: Text(
+            'Pursuant to the Philippine Data Privacy Act of 2012 (R.A. 10173), Pangasinan State University Infirmary collects and processes your Protected Health Information (PHI) solely for clinical triage, emergency response, and health clearances.\n\n'
+            'By tapping "I Agree", you give express consent to PSU Medical Personnel to store and access your medical records under encrypted safeguards.',
+            style: TextStyle(fontSize: 13, height: 1.4),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              // Sign out if consent rejected
+              _storage.delete(key: 'jwt_token');
+              Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
+            },
+            child: const Text('Decline', style: TextStyle(color: Colors.red)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F766E), foregroundColor: Colors.white),
+            onPressed: () async {
+              final token = await _storage.read(key: 'jwt_token');
+              await http.post(
+                Uri.parse('${ApiConfig.baseUrl}/api/profile/consent'),
+                headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+                body: jsonEncode({'consent_version': 'v1.0-2026'}),
+              );
+              if (!mounted) return;
+              Navigator.pop(ctx);
+            },
+            child: const Text('I Agree & Consent'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _fetchQRPass() async {
@@ -4693,541 +5339,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
 }
 </file>
 
-<file path="server/src/routes/appointments.js">
-// server/src/routes/appointments.js
-import express from 'express';
-import { pool } from '../db.js';
-import { authenticateToken } from '../auth.js';
-import { logAudit } from '../utils/auditLogger.js';
-import { requireRoles } from '../middleware/rbac.js';
-
-const router = express.Router();
-
-// =============================================================================
-// 1. GET /api/appointments/doctors
-// Description: Returns active doctors and dentists with clinic specialties
-// =============================================================================
-router.get('/doctors', authenticateToken, async (req, res) => {
-  try {
-    const [doctors] = await pool.query(
-      `SELECT u.user_id, u.first_name, u.last_name, u.email,
-              r.code AS role_code,
-              COALESCE(sp.specialty, 'General Practitioner') AS specialty,
-              COALESCE(sp.department, 'University Infirmary') AS department,
-              sp.license_no
-       FROM USERS u
-       INNER JOIN USER_ROLES ur ON u.user_id = ur.user_id
-       INNER JOIN ROLES r ON ur.role_id = r.role_id
-       LEFT JOIN STAFF_PROFILES sp ON u.user_id = sp.user_id
-       WHERE r.code IN ('DOCTOR', 'DENTIST')
-         AND u.is_active = TRUE
-         AND u.deleted_at IS NULL
-       ORDER BY u.last_name ASC`
-    );
-    res.json(doctors);
-  } catch (error) {
-    console.error('[Appointments] Doctors fetch error:', error);
-    res.status(500).json({ error: 'Failed to retrieve clinical practitioners.' });
-  }
-});
-
-// =============================================================================
-// 2. GET /api/appointments/slots
-// Description: Computes available and booked 30-minute time slots for a given
-//              doctor on a specific date (08:00 - 17:00, lunch 12:00 - 13:00 excluded)
-// Query params: ?doctorId=2&date=2026-09-20
-// =============================================================================
-router.get('/slots', authenticateToken, async (req, res) => {
-  try {
-    const { doctorId, date } = req.query;
-
-    if (!doctorId || !date) {
-      return res.status(400).json({ error: 'doctorId and date (YYYY-MM-DD) are required query parameters.' });
-    }
-
-    // Define standard PSU Lingayen infirmary consultation blocks (30 mins each)
-    const operationalSlots = [
-      '08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
-      // 12:00 - 13:00 Lunch Break Excluded
-      '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30'
-    ];
-
-    // Query existing scheduled or in-progress appointments for this doctor and date
-    const [existingBookings] = await pool.query(
-      `SELECT DATE_FORMAT(date_time, '%H:%i') as booked_time
-       FROM APPOINTMENTS
-       WHERE doctor_user_id = ?
-         AND DATE(date_time) = ?
-         AND status IN ('scheduled', 'checked_in', 'serving')`,
-      [doctorId, date]
-    );
-
-    const bookedSet = new Set(existingBookings.map((b) => b.booked_time));
-
-    // Construct slot status map
-    const slots = operationalSlots.map((time) => ({
-      time,
-      isAvailable: !bookedSet.has(time),
-    }));
-
-    res.json({ date, doctorId: Number(doctorId), slots });
-  } catch (error) {
-    console.error('[Appointments] Slots calculation error:', error);
-    res.status(500).json({ error: 'Failed to compute slot availability.' });
-  }
-});
-
-// =============================================================================
-// 3. POST /api/appointments
-// Description: Books a consultation with slot collision safety (Process 2.0)
-// Body: { doctor_user_id, date_time, appointment_type, notes }
-// =============================================================================
-router.post('/', authenticateToken, async (req, res) => {
-  const { doctor_user_id, date_time, appointment_type, notes } = req.body;
-  const patientUserId = req.user.user_id;
-
-  if (!doctor_user_id || !date_time || !appointment_type) {
-    return res.status(400).json({ error: 'Doctor, date/time, and appointment purpose are required.' });
-  }
-
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    // 1. Lock the Doctor's record to serialize booking attempts for this specific doctor
-    await connection.query(
-      `SELECT user_id FROM USERS WHERE user_id = ? FOR UPDATE`, 
-      [doctor_user_id]
-    );
-
-    // 2. Concurrency safe check: Verify if the requested slot is already taken
-    const [conflict] = await connection.query(
-      `SELECT appointment_id FROM APPOINTMENTS 
-       WHERE doctor_user_id = ? 
-         AND date_time = ? 
-         AND status IN ('scheduled', 'checked_in', 'serving')`,
-      [doctor_user_id, date_time]
-    );
-
-    if (conflict.length > 0) {
-      throw new Error('Selected time slot is already booked.');
-    }
-
-    // 3. Prevent patient from double-booking themselves at the exact same time
-    const [patientConflict] = await connection.query(
-      `SELECT appointment_id FROM APPOINTMENTS 
-       WHERE patient_user_id = ? 
-         AND date_time = ? 
-         AND status IN ('scheduled', 'checked_in', 'serving')`,
-      [patientUserId, date_time]
-    );
-
-    if (patientConflict.length > 0) {
-      throw new Error('You already have an active appointment scheduled at this exact time.');
-    }
-
-    // 4. Insert Appointment Record
-    const [insertResult] = await connection.query(
-      `INSERT INTO APPOINTMENTS (patient_user_id, doctor_user_id, date_time, appointment_type, status, notes)
-       VALUES (?, ?, ?, ?, 'scheduled', ?)`,
-      [patientUserId, doctor_user_id, date_time, appointment_type, notes || '']
-    );
-
-    const appointmentId = insertResult.insertId;
-
-    // 5. RA 10173 Audit: Log the creation of the appointment
-    await logAudit(connection, {
-      userId: patientUserId,
-      action: 'CREATE',
-      table: 'APPOINTMENTS',
-      recordId: appointmentId,
-      oldValue: null,
-      newValue: { doctor_user_id, date_time, appointment_type, notes },
-      ipAddress: req.ip
-    });
-
-    await connection.commit();
-
-    // 6. Automated Notification Dispatch Simulation (Push / Email Trigger)
-    console.log(`[Notification Service] Confirmation sent to User #${patientUserId} for appointment #${appointmentId} on ${date_time}`);
-
-    res.status(201).json({
-      message: 'Consultation appointment scheduled successfully.',
-      appointmentId,
-      bookingSummary: {
-        date_time,
-        appointment_type,
-        status: 'scheduled',
-      },
-    });
-  } catch (error) {
-    await connection.rollback();
-    if (error.message === 'Selected time slot is already booked.' || error.message === 'You already have an active appointment scheduled at this exact time.') {
-      return res.status(409).json({ error: error.message });
-    }
-    console.error('[Appointments] Booking transaction error:', error);
-    res.status(500).json({ error: 'Failed to book consultation.' });
-  } finally {
-    connection.release();
-  }
-});
-
-// =============================================================================
-// 4. GET /api/appointments/my
-// Description: Retrieves the logged-in student or faculty member's bookings
-// =============================================================================
-router.get('/my', authenticateToken, async (req, res) => {
-  try {
-    const userId = req.user.user_id;
-    const [rows] = await pool.query(
-      `SELECT a.appointment_id, 
-              DATE_FORMAT(a.date_time, '%Y-%m-%d %H:%i') as formatted_date_time,
-              a.date_time, a.appointment_type, a.status, a.notes, a.cancelled_reason,
-              u.first_name AS doctor_first_name, 
-              u.last_name AS doctor_last_name,
-              COALESCE(sp.specialty, 'Campus Health Specialist') AS doctor_specialty
-       FROM APPOINTMENTS a
-       JOIN USERS u ON a.doctor_user_id = u.user_id
-       LEFT JOIN STAFF_PROFILES sp ON u.user_id = sp.user_id
-       WHERE a.patient_user_id = ?
-       ORDER BY a.date_time DESC`,
-      [userId]
-    );
-    res.json(rows);
-  } catch (error) {
-    console.error('[Appointments] My appointments error:', error);
-    res.status(500).json({ error: 'Failed to retrieve appointment history.' });
-  }
-});
-
-// =============================================================================
-// 5. PATCH /api/appointments/:id/cancel
-// Description: Cancels an existing scheduled appointment
-// =============================================================================
-router.patch('/:id/cancel', authenticateToken, async (req, res) => {
-  try {
-    const appointmentId = req.params.id;
-    const userId = req.user.user_id;
-    const { cancelled_reason } = req.body;
-
-    // Verify ownership
-    const [existing] = await pool.query(
-      'SELECT appointment_id, status FROM APPOINTMENTS WHERE appointment_id = ? AND patient_user_id = ?',
-      [appointmentId, userId]
-    );
-
-    if (existing.length === 0) {
-      return res.status(404).json({ error: 'Appointment not found or not authorized to cancel.' });
-    }
-
-    if (existing[0].status !== 'scheduled') {
-      return res.status(400).json({ error: `Cannot cancel an appointment with status '${existing[0].status}'.` });
-    }
-
-    await pool.query(
-      `UPDATE APPOINTMENTS 
-       SET status = 'cancelled', cancelled_reason = ? 
-       WHERE appointment_id = ?`,
-      [cancelled_reason || 'Cancelled by patient via mobile app', appointmentId]
-    );
-
-    res.json({ message: 'Appointment cancelled successfully.' });
-  } catch (error) {
-    console.error('[Appointments] Cancel error:', error);
-    res.status(500).json({ error: 'Failed to cancel appointment.' });
-  }
-});
-
-// =============================================================================
-// 6. GET /api/appointments/today
-// Description: Returns active appointments by default (scheduled, checked_in, serving).
-//              Pass ?filter=history to retrieve past completed & cancelled records.
-// =============================================================================
-router.get('/today', authenticateToken, async (req, res) => {
-  try {
-    const { date, filter } = req.query;
-
-    let whereClause = '';
-    const params = [];
-
-    if (filter === 'history') {
-      // History Archive: Show finished, cancelled, or no-show encounters
-      whereClause = `WHERE a.status IN ('completed', 'cancelled', 'no_show')`;
-    } else if (date) {
-      // Active for a specific date (excludes completed and cancelled)
-      whereClause = `WHERE DATE(a.date_time) = ? AND a.status IN ('scheduled', 'checked_in', 'serving')`;
-      params.push(date);
-    } else {
-      // Active queue: from today onwards that still require attention
-      whereClause = `WHERE a.date_time >= CURDATE() AND a.status IN ('scheduled', 'checked_in', 'serving')`;
-    }
-
-    const [rows] = await pool.query(
-      `SELECT a.appointment_id, 
-              DATE_FORMAT(a.date_time, '%h:%i %p') AS time_slot,
-              DATE_FORMAT(a.date_time, '%Y-%m-%d') AS date_str,
-              a.date_time, a.appointment_type, a.status, a.notes, a.cancelled_reason,
-              u.user_id AS patient_id, u.first_name, u.last_name, u.phone,
-              sp.student_no, sp.course,
-              hp.blood_type, hp.allergies, hp.chronic_conditions,
-              hp.height, hp.weight,
-              emr.diagnosis AS past_diagnosis,
-              emr.treatment_plan AS past_treatment
-       FROM APPOINTMENTS a
-       JOIN USERS u ON a.patient_user_id = u.user_id
-       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
-       LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
-       LEFT JOIN EMR_RECORDS emr ON (emr.patient_user_id = a.patient_user_id AND DATE(emr.encounter_date) = DATE(a.date_time))
-       ${whereClause}
-       ORDER BY a.date_time DESC`,
-      params
-    );
-    res.json(rows);
-  } catch (error) {
-    console.error('[Appointments] Roster fetch error:', error);
-    res.status(500).json({ error: 'Failed to retrieve appointments roster.' });
-  }
-});
-
-// =============================================================================
-// 7. PATCH /api/appointments/:id/status
-// Description: Transitions appointment state (serving, completed, no_show)
-// =============================================================================
-router.patch('/:id/status', authenticateToken, async (req, res) => {
-  try {
-    const appointmentId = req.params.id;
-    const { status } = req.body; // 'serving' | 'completed' | 'no_show'
-
-    if (!['serving', 'completed', 'no_show', 'checked_in'].includes(status)) {
-      return res.status(400).json({ error: 'Invalid appointment status transition.' });
-    }
-
-    await pool.query(
-      `UPDATE APPOINTMENTS SET status = ? WHERE appointment_id = ?`,
-      [status, appointmentId]
-    );
-
-    res.json({ message: `Appointment #${appointmentId} status updated to ${status}.` });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to update appointment status.' });
-  }
-});
-
-// =============================================================================
-// 8. POST /api/appointments/:id/complete
-// Description: Saves EMR clinical consultation record and marks appointment done
-// =============================================================================
-router.post('/:id/complete', authenticateToken, async (req, res) => {
-  const connection = await pool.getConnection();
-  try {
-    const appointmentId = req.params.id;
-    const doctorUserId = req.user.user_id;
-    const { patient_user_id, chief_complaint, diagnosis, treatment_plan, notes } = req.body;
-
-    await connection.beginTransaction();
-
-    // 1. Insert into EMR_RECORDS
-    const [emrResult] = await connection.query(
-      `INSERT INTO EMR_RECORDS (patient_user_id, doctor_user_id, chief_complaint, diagnosis, treatment_plan, notes)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [patient_user_id, doctorUserId, chief_complaint, diagnosis, treatment_plan, notes || '']
-    );
-
-    // 2. Mark Appointment as completed
-    await connection.query(
-      `UPDATE APPOINTMENTS SET status = 'completed' WHERE appointment_id = ?`,
-      [appointmentId]
-    );
-
-    // 3. Mark corresponding Queue entry as done (if one exists)
-    await connection.query(
-      `UPDATE QUEUE SET status = 'done', served_at = CURRENT_TIMESTAMP WHERE appointment_id = ?`,
-      [appointmentId]
-    );
-
-    await connection.commit();
-    res.json({ message: 'Consultation finalized and saved to patient EMR history!', emrId: emrResult.insertId });
-  } catch (error) {
-    await connection.rollback();
-    console.error('[EMR] Complete error:', error);
-    res.status(500).json({ error: 'Failed to complete consultation encounter.' });
-  } finally {
-    connection.release();
-  }
-});
-
-// =============================================================================
-// 9. GET /api/appointments/lookup
-// Description: Nurse searches for a patient's booking by Student No, Name, or User ID
-// Query params: ?query=22-LN-0123 OR ?userId=5
-// =============================================================================
-router.get('/lookup', authenticateToken, async (req, res) => {
-  try {
-    const { query, userId } = req.query;
-
-    let sql = `
-      SELECT a.appointment_id, 
-             DATE_FORMAT(a.date_time, '%Y-%m-%d %h:%i %p') AS formatted_schedule,
-             a.date_time, a.appointment_type, a.status, a.notes,
-             u.user_id, u.first_name, u.last_name, u.phone,
-             sp.student_no, sp.course,
-             hp.blood_type, hp.allergies, hp.chronic_conditions,
-             doc.first_name AS doc_first_name, doc.last_name AS doc_last_name
-      FROM APPOINTMENTS a
-      JOIN USERS u ON a.patient_user_id = u.user_id
-      JOIN USERS doc ON a.doctor_user_id = doc.user_id
-      LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
-      LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
-      WHERE a.status IN ('scheduled', 'checked_in')
-    `;
-    const params = [];
-
-    if (userId) {
-      sql += ` AND a.patient_user_id = ? `;
-      params.push(userId);
-    } else if (query) {
-      sql += ` AND (sp.student_no LIKE ? OR u.last_name LIKE ? OR u.first_name LIKE ?) `;
-      params.push(`%${query}%`, `%${query}%`, `%${query}%`);
-    }
-
-    sql += ` ORDER BY a.date_time ASC LIMIT 5`;
-
-    const [results] = await pool.query(sql, params);
-    res.json(results);
-  } catch (error) {
-    console.error('[Appointments] Lookup error:', error);
-    res.status(500).json({ error: 'Failed to lookup patient appointments.' });
-  }
-});
-
-// =============================================================================
-// 10. POST /api/appointments/:id/checkin
-// Description: Nurse confirms patient physical arrival, logs arrival timestamp,
-//              generates a daily queue ticket, and saves triage vitals
-// =============================================================================
-router.post('/:id/checkin', authenticateToken, async (req, res) => {
-  const connection = await pool.getConnection();
-  try {
-    const appointmentId = req.params.id;
-    const { blood_pressure, temperature, pulse, spo2 } = req.body;
-
-    await connection.beginTransaction();
-
-    // 1. Verify appointment exists and is still scheduled
-    const [appRows] = await connection.query(
-      `SELECT patient_user_id FROM APPOINTMENTS WHERE appointment_id = ? FOR UPDATE`,
-      [appointmentId]
-    );
-
-    if (appRows.length === 0) {
-      await connection.rollback();
-      return res.status(404).json({ error: 'Appointment not found.' });
-    }
-
-    const patientUserId = appRows[0].patient_user_id;
-
-    // 2. Update APPOINTMENTS status to 'checked_in'
-    await connection.query(
-      `UPDATE APPOINTMENTS 
-       SET status = 'checked_in' 
-       WHERE appointment_id = ?`,
-      [appointmentId]
-    );
-
-    // 3. Generate a daily Queue Ticket (e.g., Ticket #Q-101)
-    const today = new Date().toISOString().split('T')[0];
-    const [queueCount] = await connection.query(
-      `SELECT COUNT(*) as totalToday FROM QUEUE WHERE queue_date = ?`,
-      [today]
-    );
-    const nextQueueNo = (queueCount[0].totalToday || 0) + 1;
-
-    await connection.query(
-      `INSERT INTO QUEUE (patient_user_id, appointment_id, queue_date, counter_id, queue_number, status, checked_in_at)
-       VALUES (?, ?, ?, 1, ?, 'waiting', CURRENT_TIMESTAMP)`,
-      [patientUserId, appointmentId, today, nextQueueNo]
-    );
-
-    // 4. Record Triage Vitals if provided by nurse
-    if (blood_pressure || temperature || pulse || spo2) {
-      await connection.query(
-        `UPDATE HEALTH_PROFILES 
-         SET updated_at = CURRENT_TIMESTAMP 
-         WHERE user_id = ?`,
-        [patientUserId]
-      );
-    }
-
-    await connection.commit();
-
-    const arrivalTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-    res.json({
-      message: `Patient checked in successfully at ${arrivalTime}!`,
-      queueTicket: `Q-${nextQueueNo.toString().padStart(2, '0')}`,
-      arrivalTime,
-    });
-  } catch (error) {
-    await connection.rollback();
-    console.error('[Appointments] Checkin error:', error);
-    res.status(500).json({ error: 'Failed to process clinic intake check-in.' });
-  } finally {
-    connection.release();
-  }
-});
-
-// =============================================================================
-// 11. GET /api/appointments/queue/today
-// Description: Fetches today's live triage queue (Feature 7)
-// =============================================================================
-router.get('/queue/today', authenticateToken, async (req, res) => {
-  try {
-    const today = new Date().toISOString().split('T')[0];
-    const [rows] = await pool.query(
-      `SELECT q.queue_id, q.queue_number, q.status, q.counter_id,
-              DATE_FORMAT(q.checked_in_at, '%h:%i %p') AS arrival_time,
-              CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS ticket_no,
-              u.first_name, u.last_name, sp.student_no,
-              COALESCE(a.appointment_type, 'Walk-in Intake') AS visit_type
-       FROM QUEUE q
-       JOIN USERS u ON q.patient_user_id = u.user_id
-       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
-       LEFT JOIN APPOINTMENTS a ON q.appointment_id = a.appointment_id
-       WHERE q.queue_date = ? AND q.status != 'done'
-       ORDER BY q.queue_number ASC`,
-      [today]
-    );
-    res.json(rows);
-  } catch (error) {
-    console.error('[Queue] Fetch error:', error);
-    res.status(500).json({ error: 'Failed to retrieve live queue.' });
-  }
-});
-
-// =============================================================================
-// 12. PATCH /api/appointments/queue/:id/status
-// Description: Nurse calls patient or completes triage
-// =============================================================================
-router.patch('/queue/:id/status', authenticateToken, async (req, res) => {
-  try {
-    const queueId = req.params.id;
-    const { status } = req.body; // 'waiting' | 'in-consultation' | 'done'
-
-    await pool.query(
-      `UPDATE QUEUE SET status = ? WHERE queue_id = ?`,
-      [status, queueId]
-    );
-
-    res.json({ message: `Queue ticket #${queueId} updated to ${status}.` });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to update queue status.' });
-  }
-});
-
-export default router;
-</file>
-
 <file path="server/src/routes/healthPass.js">
 // server/src/routes/healthPass.js
 import express from 'express';
@@ -5235,7 +5346,11 @@ import crypto from 'crypto';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { requireRoles } from '../middleware/rbac.js';
-import { logAudit } from '../utils/auditLogger.js';
+// Remove logAudit if you are no longer using it elsewhere in this file
+// import { logAudit } from '../utils/auditLogger.js';
+
+// Use ES module import instead of require
+import { logPHIAccess } from '../utils/logger.js'; 
 
 const router = express.Router();
 
@@ -5311,16 +5426,12 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
       throw new Error('Patient not found or deactivated.');
     }
 
-    // RA 10173 Audit: Log that the Nurse/Doctor viewed this specific student's PHI
-    await logAudit(connection, {
-      userId: req.user.user_id, // The staff member performing the scan
-      action: 'VIEW',
-      table: 'HEALTH_PROFILES',
-      recordId: patientUserId,  // The student whose data was exposed
-      oldValue: null,
-      newValue: null,
-      ipAddress: req.ip
-    });
+    // Correct PHI logging routed to PHI_ACCESS_LOGS with specific purpose
+    await logPHIAccess(
+      req.user.user_id, 
+      patientUserId, 
+      'QR Code Clinic Check-in and Triage'
+    );
 
     await connection.commit();
     
@@ -5338,7 +5449,7 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
   } finally {
     connection.release();
   }
-});
+}); // <-- Added the missing closing brackets here
 
 export default router;
 </file>
@@ -5347,6 +5458,16 @@ export default router;
 // desktop/electron/main.cjs
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
+
+// FIX: Bypass self-signed certificate errors for local HTTPS backend development
+app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
+  if (url.startsWith('https://localhost:5000')) {
+    event.preventDefault();
+    callback(true); // Trust the self-signed certificate for local backend
+  } else {
+    callback(false);
+  }
+});
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -5399,44 +5520,666 @@ app.on('window-all-closed', () => {
 </file>
 
 <file path="mobile/lib/config/api_config.dart">
+// mobile/lib/config/api_config.dart
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show Platform;
 
 class ApiConfig {
   static String get baseUrl {
-    if (kIsWeb) return 'http://localhost:5000';
+    if (kIsWeb) return 'https://localhost:5000';
     try {
       if (Platform.isAndroid) {
-        // Standard Android Emulator loopback is 10.0.2.2.
-        // Replace with your PC's LAN IP if testing on a physical mobile device.
-        return 'http://10.0.2.2:5000'; 
+        // FIX: Use https and 10.0.2.2 for Android emulator loopback
+        return 'https://10.0.2.2:5000'; 
       }
     } catch (_) {}
-    return 'http://localhost:5000'; // iOS / Desktop fallback
+    return 'https://localhost:5000'; // iOS / Desktop fallback
   }
 }
 </file>
 
 <file path="mobile/lib/main.dart">
+// mobile/lib/main.dart
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'screens/login_screen.dart';
+import 'widgets/session_timeout_listener.dart'; 
 
-void main() {
-  runApp(const ValetudoMobileApp());
+// FIX: Custom override to trust local self-signed HTTPS certificates
+class MyHttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    return super.createHttpClient(context)
+      ..badCertificateCallback = (X509Certificate cert, String host, int port) => true;
+  }
 }
 
-class ValetudoMobileApp extends StatelessWidget {
-  const ValetudoMobileApp({super.key});
+void main() {
+  // Apply the certificate override globally before running the app
+  HttpOverrides.global = MyHttpOverrides();
+  runApp(const ValetudoApp());
+}
+
+class ValetudoApp extends StatelessWidget {
+  const ValetudoApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Valetudo HealthLink',
-      theme: ThemeData(primarySwatch: Colors.teal, useMaterial3: true),
-      home: const LoginScreen(),
+    return SessionTimeoutListener(
+      child: MaterialApp(
+        title: 'Valetudo HealthLink',
+        theme: ThemeData(
+          primaryColor: const Color(0xFF0F766E),
+        ),
+        home: const LoginScreen(),
+      ),
     );
   }
 }
+</file>
+
+<file path="server/src/routes/appointments.js">
+// server/src/routes/appointments.js
+import express from 'express';
+import { pool } from '../db.js';
+import { authenticateToken } from '../auth.js';
+import { logAudit } from '../utils/auditLogger.js';
+import { requireRoles } from '../middleware/rbac.js';
+import { encryptPHI, decryptPHI } from '../utils/encryption.js';
+import { logPHIAccess } from '../utils/logger.js';
+
+const router = express.Router();
+
+// =============================================================================
+// 1. GET /api/appointments/doctors
+// Description: Returns active doctors and dentists with clinic specialties
+// =============================================================================
+router.get('/doctors', authenticateToken, async (req, res) => {
+  try {
+    const [doctors] = await pool.query(
+      `SELECT u.user_id, u.first_name, u.last_name, u.email,
+              r.code AS role_code,
+              COALESCE(sp.specialty, 'General Practitioner') AS specialty,
+              COALESCE(sp.department, 'University Infirmary') AS department,
+              sp.license_no
+       FROM USERS u
+       INNER JOIN USER_ROLES ur ON u.user_id = ur.user_id
+       INNER JOIN ROLES r ON ur.role_id = r.role_id
+       LEFT JOIN STAFF_PROFILES sp ON u.user_id = sp.user_id
+       WHERE r.code IN ('DOCTOR', 'DENTIST')
+         AND u.is_active = TRUE
+         AND u.deleted_at IS NULL
+       ORDER BY u.last_name ASC`
+    );
+    res.json(doctors);
+  } catch (error) {
+    console.error('[Appointments] Doctors fetch error:', error);
+    res.status(500).json({ error: 'Failed to retrieve clinical practitioners.' });
+  }
+});
+
+// =============================================================================
+// 2. GET /api/appointments/slots
+// Description: Computes available and booked 30-minute time slots for a given
+//              doctor on a specific date (08:00 - 17:00, lunch 12:00 - 13:00 excluded)
+// Query params: ?doctorId=2&date=2026-09-20
+// =============================================================================
+router.get('/slots', authenticateToken, async (req, res) => {
+  try {
+    const { doctorId, date } = req.query;
+
+    if (!doctorId || !date) {
+      return res.status(400).json({ error: 'doctorId and date (YYYY-MM-DD) are required query parameters.' });
+    }
+
+    const operationalSlots = [
+      '08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
+      '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30'
+    ];
+
+    const [existingBookings] = await pool.query(
+      `SELECT DATE_FORMAT(date_time, '%H:%i') as booked_time
+       FROM APPOINTMENTS
+       WHERE doctor_user_id = ?
+         AND DATE(date_time) = ?
+         AND status IN ('scheduled', 'checked_in', 'serving')`,
+      [doctorId, date]
+    );
+
+    const bookedSet = new Set(existingBookings.map((b) => b.booked_time));
+
+    const slots = operationalSlots.map((time) => ({
+      time,
+      isAvailable: !bookedSet.has(time),
+    }));
+
+    res.json({ date, doctorId: Number(doctorId), slots });
+  } catch (error) {
+    console.error('[Appointments] Slots calculation error:', error);
+    res.status(500).json({ error: 'Failed to compute slot availability.' });
+  }
+});
+
+// =============================================================================
+// 3. POST /api/appointments
+// Description: Books a consultation with slot collision safety (Process 2.0)
+// Body: { doctor_user_id, date_time, appointment_type, notes }
+// =============================================================================
+router.post('/', authenticateToken, async (req, res) => {
+  const { doctor_user_id, date_time, appointment_type, notes } = req.body;
+  const patientUserId = req.user.user_id;
+
+  if (!doctor_user_id || !date_time || !appointment_type) {
+    return res.status(400).json({ error: 'Doctor, date/time, and appointment purpose are required.' });
+  }
+
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    await connection.query(
+      `SELECT user_id FROM USERS WHERE user_id = ? FOR UPDATE`, 
+      [doctor_user_id]
+    );
+
+    const [conflict] = await connection.query(
+      `SELECT appointment_id FROM APPOINTMENTS 
+       WHERE doctor_user_id = ? 
+         AND date_time = ? 
+         AND status IN ('scheduled', 'checked_in', 'serving')`,
+      [doctor_user_id, date_time]
+    );
+
+    if (conflict.length > 0) {
+      throw new Error('Selected time slot is already booked.');
+    }
+
+    const [patientConflict] = await connection.query(
+      `SELECT appointment_id FROM APPOINTMENTS 
+       WHERE patient_user_id = ? 
+         AND date_time = ? 
+         AND status IN ('scheduled', 'checked_in', 'serving')`,
+      [patientUserId, date_time]
+    );
+
+    if (patientConflict.length > 0) {
+      throw new Error('You already have an active appointment scheduled at this exact time.');
+    }
+
+    const [insertResult] = await connection.query(
+      `INSERT INTO APPOINTMENTS (patient_user_id, doctor_user_id, date_time, appointment_type, status, notes)
+       VALUES (?, ?, ?, ?, 'scheduled', ?)`,
+      [patientUserId, doctor_user_id, date_time, appointment_type, notes || '']
+    );
+
+    const appointmentId = insertResult.insertId;
+
+    await logAudit(connection, {
+      userId: patientUserId,
+      action: 'CREATE',
+      table: 'APPOINTMENTS',
+      recordId: appointmentId,
+      oldValue: null,
+      newValue: { doctor_user_id, date_time, appointment_type, notes },
+      ipAddress: req.ip
+    });
+
+    await connection.commit();
+
+    res.status(201).json({
+      message: 'Consultation appointment scheduled successfully.',
+      appointmentId,
+      bookingSummary: {
+        date_time,
+        appointment_type,
+        status: 'scheduled',
+      },
+    });
+  } catch (error) {
+    await connection.rollback();
+    if (error.message === 'Selected time slot is already booked.' || error.message === 'You already have an active appointment scheduled at this exact time.') {
+      return res.status(409).json({ error: error.message });
+    }
+    console.error('[Appointments] Booking transaction error:', error);
+    res.status(500).json({ error: 'Failed to book consultation.' });
+  } finally {
+    connection.release();
+  }
+});
+
+// =============================================================================
+// 4. GET /api/appointments/my
+// Description: Retrieves the logged-in student or faculty member's bookings
+// =============================================================================
+router.get('/my', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.user_id;
+    const [rows] = await pool.query(
+      `SELECT a.appointment_id, 
+              DATE_FORMAT(a.date_time, '%Y-%m-%d %H:%i') as formatted_date_time,
+              a.date_time, a.appointment_type, a.status, a.notes, a.cancelled_reason,
+              u.first_name AS doctor_first_name, 
+              u.last_name AS doctor_last_name,
+              COALESCE(sp.specialty, 'Campus Health Specialist') AS doctor_specialty
+       FROM APPOINTMENTS a
+       JOIN USERS u ON a.doctor_user_id = u.user_id
+       LEFT JOIN STAFF_PROFILES sp ON u.user_id = sp.user_id
+       WHERE a.patient_user_id = ?
+       ORDER BY a.date_time DESC`,
+      [userId]
+    );
+
+    res.json(rows);
+  } catch (error) {
+    console.error('[Appointments] My appointments error:', error);
+    res.status(500).json({ error: 'Failed to retrieve appointment history.' });
+  }
+});
+
+// =============================================================================
+// 5. PATCH /api/appointments/:id/cancel
+// Description: Cancels an existing scheduled appointment
+// =============================================================================
+router.patch('/:id/cancel', authenticateToken, async (req, res) => {
+  try {
+    const appointmentId = req.params.id;
+    const userId = req.user.user_id;
+    const { cancelled_reason } = req.body;
+
+    const [existing] = await pool.query(
+      'SELECT appointment_id, status FROM APPOINTMENTS WHERE appointment_id = ? AND patient_user_id = ?',
+      [appointmentId, userId]
+    );
+
+    if (existing.length === 0) {
+      return res.status(404).json({ error: 'Appointment not found or not authorized to cancel.' });
+    }
+
+    if (existing[0].status !== 'scheduled') {
+      return res.status(400).json({ error: `Cannot cancel an appointment with status '${existing[0].status}'.` });
+    }
+
+    await pool.query(
+      `UPDATE APPOINTMENTS 
+       SET status = 'cancelled', cancelled_reason = ? 
+       WHERE appointment_id = ?`,
+      [cancelled_reason || 'Cancelled by patient via mobile app', appointmentId]
+    );
+
+    res.json({ message: 'Appointment cancelled successfully.' });
+  } catch (error) {
+    console.error('[Appointments] Cancel error:', error);
+    res.status(500).json({ error: 'Failed to cancel appointment.' });
+  }
+});
+
+// =============================================================================
+// 6. GET /api/appointments/today
+// Description: Returns active appointments by default (scheduled, checked_in, serving).
+//              Pass ?filter=history to retrieve past completed & cancelled records.
+// =============================================================================
+router.get('/today', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+  try {
+    const { date, filter } = req.query;
+    const practitionerId = req.user.user_id;
+
+    let whereClause = '';
+    const params = [];
+
+    if (filter === 'history') {
+      whereClause = `WHERE a.status IN ('completed', 'cancelled', 'no_show')`;
+    } else if (date) {
+      whereClause = `WHERE DATE(a.date_time) = ? AND a.status IN ('scheduled', 'checked_in', 'serving')`;
+      params.push(date);
+    } else {
+      whereClause = `WHERE a.date_time >= CURDATE() AND a.status IN ('scheduled', 'checked_in', 'serving')`;
+    }
+
+    const [rows] = await pool.query(
+      `SELECT a.appointment_id, 
+              DATE_FORMAT(a.date_time, '%h:%i %p') AS time_slot,
+              DATE_FORMAT(a.date_time, '%Y-%m-%d') AS date_str,
+              a.date_time, a.appointment_type, a.status, a.notes, a.cancelled_reason,
+              u.user_id AS patient_id, u.first_name, u.last_name, u.phone,
+              sp.student_no, sp.course,
+              hp.blood_type, hp.allergies, hp.chronic_conditions,
+              hp.height, hp.weight,
+              emr.diagnosis AS past_diagnosis,
+              emr.treatment_plan AS past_treatment
+       FROM APPOINTMENTS a
+       JOIN USERS u ON a.patient_user_id = u.user_id
+       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+       LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+       LEFT JOIN EMR_RECORDS emr ON (emr.patient_user_id = a.patient_user_id AND DATE(emr.encounter_date) = DATE(a.date_time))
+       ${whereClause}
+       ORDER BY a.date_time DESC`,
+      params
+    );
+
+    const formattedRows = await Promise.all(
+      rows.map(async (r) => {
+        await logPHIAccess(
+          practitionerId,
+          r.patient_id,
+          'Clinic Queue Dashboard Generation'
+        );
+
+        return {
+          ...r,
+          past_diagnosis: decryptPHI(r.past_diagnosis),
+          past_treatment: decryptPHI(r.past_treatment),
+          allergies: decryptPHI(r.allergies),
+          chronic_conditions: decryptPHI(r.chronic_conditions),
+        };
+      })
+    );
+
+    res.json(formattedRows);
+  } catch (error) {
+    console.error('[Appointments] Roster fetch error:', error);
+    res.status(500).json({ error: 'Failed to retrieve appointments roster.' });
+  }
+});
+
+// =============================================================================
+// 7. PATCH /api/appointments/:id/status
+// Description: Transitions appointment state (serving, completed, no_show)
+// =============================================================================
+router.patch('/:id/status', authenticateToken, async (req, res) => {
+  try {
+    const appointmentId = req.params.id;
+    const { status } = req.body;
+
+    if (!['serving', 'completed', 'no_show', 'checked_in'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid appointment status transition.' });
+    }
+
+    await pool.query(
+      `UPDATE APPOINTMENTS SET status = ? WHERE appointment_id = ?`,
+      [status, appointmentId]
+    );
+
+    res.json({ message: `Appointment #${appointmentId} status updated to ${status}.` });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update appointment status.' });
+  }
+});
+
+// =============================================================================
+// 8. POST /api/appointments/:id/complete
+// Description: Saves encrypted EMR clinical consultation record, processes FEFO inventory, and completes appointment
+// =============================================================================
+router.post('/:id/complete', authenticateToken, requireRoles('DOCTOR', 'ADMIN'), async (req, res) => {
+  const appointmentId = req.params.id;
+  const doctorUserId = req.user.user_id;
+  const { patient_user_id, chief_complaint, diagnosis, treatment_plan, notes, prescriptions } = req.body;
+  
+  const connection = await pool.getConnection();
+  
+  try {
+    await connection.beginTransaction();
+
+    // 1. Encrypt and save EMR Record for RA 10173 compliance
+    const encryptedChiefComplaint = encryptPHI(chief_complaint || '');
+    const encryptedDiagnosis = encryptPHI(diagnosis || '');
+    const encryptedTreatmentPlan = encryptPHI(treatment_plan || '');
+    const encryptedNotes = encryptPHI(notes || '');
+
+    const [emrResult] = await connection.query(
+      `INSERT INTO EMR_RECORDS (patient_user_id, doctor_user_id, chief_complaint, diagnosis, treatment_plan, notes)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [patient_user_id, doctorUserId, encryptedChiefComplaint, encryptedDiagnosis, encryptedTreatmentPlan, encryptedNotes]
+    );
+    const emrId = emrResult.insertId;
+
+    // 2. Log EMR creation in the cryptographic audit trail
+    await logAudit(connection, {
+      userId: doctorUserId,
+      action: 'CREATE',
+      table: 'EMR_RECORDS',
+      recordId: emrId,
+      oldValue: null,
+      newValue: { patient_user_id, diagnosis },
+      ipAddress: req.ip
+    });
+
+    // 3. Update appointment status to completed
+    await connection.query(
+      'UPDATE APPOINTMENTS SET status = "completed" WHERE appointment_id = ?',
+      [appointmentId]
+    );
+
+    // 4. Process prescribed items using FEFO stock deduction
+    if (prescriptions && prescriptions.length > 0) {
+      for (const item of prescriptions) {
+        let remainingQty = item.quantity;
+
+        const [batches] = await connection.query(
+          `SELECT batch_id, quantity_on_hand FROM MEDICINE_BATCHES 
+           WHERE medicine_id = ? AND quantity_on_hand > 0 AND deleted_at IS NULL 
+           ORDER BY expiry_date ASC FOR UPDATE`,
+          [item.medicine_id]
+        );
+
+        for (const batch of batches) {
+          if (remainingQty <= 0) break;
+
+          const deductAmount = Math.min(batch.quantity_on_hand, remainingQty);
+
+          await connection.query(
+            'UPDATE MEDICINE_BATCHES SET quantity_on_hand = quantity_on_hand - ? WHERE batch_id = ?',
+            [deductAmount, batch.batch_id]
+          );
+
+          await connection.query(
+            `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by) 
+             VALUES (?, ?, 'dispense', ?, ?)`,
+            [batch.batch_id, -deductAmount, `Encounter prescription fulfillment (#${appointmentId})`, doctorUserId]
+          );
+
+          remainingQty -= deductAmount;
+        }
+
+        if (remainingQty > 0) {
+          throw new Error(`Insufficient stock for medicine ID ${item.medicine_id}. Short by ${remainingQty} units.`);
+        }
+      }
+    }
+
+    await connection.commit();
+    return res.status(200).json({ message: 'Consultation completed, EMR securely encrypted, and inventory updated.' });
+
+  } catch (error) {
+    await connection.rollback();
+    return res.status(500).json({ error: error.message });
+  } finally {
+    connection.release();
+  }
+});
+
+// =============================================================================
+// 9. GET /api/appointments/lookup
+// Description: Nurse searches for a patient's booking by Student No, Name, or User ID
+// =============================================================================
+router.get('/lookup', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+  try {
+    const { query, userId } = req.query;
+    const practitionerId = req.user.user_id;
+
+    let sql = `
+      SELECT a.appointment_id, 
+             DATE_FORMAT(a.date_time, '%Y-%m-%d %h:%i %p') AS formatted_schedule,
+             a.date_time, a.appointment_type, a.status, a.notes,
+             u.user_id, u.first_name, u.last_name, u.phone,
+             sp.student_no, sp.course,
+             hp.blood_type, hp.allergies, hp.chronic_conditions,
+             doc.first_name AS doc_first_name, doc.last_name AS doc_last_name
+      FROM APPOINTMENTS a
+      JOIN USERS u ON a.patient_user_id = u.user_id
+      JOIN USERS doc ON a.doctor_user_id = doc.user_id
+      LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+      LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+      WHERE a.status IN ('scheduled', 'checked_in')
+    `;
+    const params = [];
+
+    if (userId) {
+      sql += ` AND a.patient_user_id = ? `;
+      params.push(userId);
+    } else if (query) {
+      sql += ` AND (sp.student_no LIKE ? OR u.last_name LIKE ? OR u.first_name LIKE ?) `;
+      params.push(`%${query}%`, `%${query}%`, `%${query}%`);
+    }
+
+    sql += ` ORDER BY a.date_time ASC LIMIT 5`;
+
+    const [results] = await pool.query(sql, params);
+
+    const formattedResults = await Promise.all(
+      results.map(async (r) => {
+        await logPHIAccess(
+          practitionerId,
+          r.user_id,
+          'Manual Electronic Medical Record Lookup'
+        );
+
+        return {
+          ...r,
+          allergies: decryptPHI(r.allergies),
+          chronic_conditions: decryptPHI(r.chronic_conditions),
+        };
+      })
+    );
+
+    res.json(formattedResults);
+  } catch (error) {
+    console.error('[Appointments] Lookup error:', error);
+    res.status(500).json({ error: 'Failed to lookup patient appointments.' });
+  }
+});
+
+// =============================================================================
+// 10. POST /api/appointments/:id/checkin
+// Description: Nurse confirms patient physical arrival, logs arrival timestamp,
+//              generates a daily queue ticket, and saves triage vitals
+// =============================================================================
+router.post('/:id/checkin', authenticateToken, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    const appointmentId = req.params.id;
+    const { blood_pressure, temperature, pulse, spo2 } = req.body;
+
+    await connection.beginTransaction();
+
+    const [appRows] = await connection.query(
+      `SELECT patient_user_id FROM APPOINTMENTS WHERE appointment_id = ? FOR UPDATE`,
+      [appointmentId]
+    );
+
+    if (appRows.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Appointment not found.' });
+    }
+
+    const patientUserId = appRows[0].patient_user_id;
+
+    await connection.query(
+      `UPDATE APPOINTMENTS 
+       SET status = 'checked_in' 
+       WHERE appointment_id = ?`,
+      [appointmentId]
+    );
+
+    const today = new Date().toISOString().split('T')[0];
+    const [queueCount] = await connection.query(
+      `SELECT COUNT(*) as totalToday FROM QUEUE WHERE queue_date = ?`,
+      [today]
+    );
+    const nextQueueNo = (queueCount[0].totalToday || 0) + 1;
+
+    await connection.query(
+      `INSERT INTO QUEUE (patient_user_id, appointment_id, queue_date, counter_id, queue_number, status, checked_in_at)
+       VALUES (?, ?, ?, ?, ?, 'waiting', CURRENT_TIMESTAMP)`,
+      [patientUserId, appointmentId, today, 1, nextQueueNo]
+    );
+
+    if (blood_pressure || temperature || pulse || spo2) {
+      await connection.query(
+        `UPDATE HEALTH_PROFILES 
+         SET updated_at = CURRENT_TIMESTAMP 
+         WHERE user_id = ?`,
+        [patientUserId]
+      );
+    }
+
+    await connection.commit();
+
+    const arrivalTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    res.json({
+      message: `Patient checked in successfully at ${arrivalTime}!`,
+      queueTicket: `Q-${nextQueueNo.toString().padStart(2, '0')}`,
+      arrivalTime,
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[Appointments] Checkin error:', error);
+    res.status(500).json({ error: 'Failed to process clinic intake check-in.' });
+  } finally {
+    connection.release();
+  }
+});
+
+// =============================================================================
+// 11. GET /api/appointments/queue/today
+// Description: Fetches today's live triage queue (Feature 7)
+// =============================================================================
+router.get('/queue/today', authenticateToken, async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const [rows] = await pool.query(
+      `SELECT q.queue_id, q.queue_number, q.status, q.counter_id,
+              DATE_FORMAT(q.checked_in_at, '%h:%i %p') AS arrival_time,
+              CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS ticket_no,
+              u.first_name, u.last_name, sp.student_no,
+              COALESCE(a.appointment_type, 'Walk-in Intake') AS visit_type
+       FROM QUEUE q
+       JOIN USERS u ON q.patient_user_id = u.user_id
+       LEFT JOIN STUDENT_PROFILES sp ON q.patient_user_id = sp.user_id
+       LEFT JOIN APPOINTMENTS a ON q.appointment_id = a.appointment_id
+       WHERE q.queue_date = ? AND q.status != 'done'
+       ORDER BY q.queue_number ASC`,
+      [today]
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('[Queue] Fetch error:', error);
+    res.status(500).json({ error: 'Failed to retrieve live queue.' });
+  }
+});
+
+// =============================================================================
+// 12. PATCH /api/appointments/queue/:id/status
+// Description: Nurse calls patient or completes triage
+// =============================================================================
+router.patch('/queue/:id/status', authenticateToken, async (req, res) => {
+  try {
+    const queueId = req.params.id;
+    const { status } = req.body;
+
+    await pool.query(
+      `UPDATE QUEUE SET status = ? WHERE queue_id = ?`,
+      [status, queueId]
+    );
+
+    res.json({ message: `Queue ticket #${queueId} updated to ${status}.` });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update queue status.' });
+  }
+});
+
+export default router;
 </file>
 
 <file path="server/src/routes/profile.js">
@@ -5445,6 +6188,9 @@ import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { logAudit } from '../utils/auditLogger.js';
+import { encryptPHI, decryptPHI } from '../utils/encryption.js';
+import { logPHIAccess } from '../utils/logger.js';
+import { requireRoles } from '../middleware/rbac.js'; 
 
 const router = express.Router();
 
@@ -5476,7 +6222,30 @@ router.get('/me', authenticateToken, async (req, res) => {
       [userId]
     );
 
-    const healthProfile = healthRows.length > 0 ? healthRows[0] : null;
+    let healthProfile = null;
+
+    if (healthRows.length > 0) {
+      const rawProfile = healthRows[0];
+
+      // 3. Strictly log read access before exposing decrypted PHI
+      await logPHIAccess(
+        userId, 
+        userId, 
+        'Patient Self-Access of Mobile Health Profile',
+        'HEALTH_PROFILES',
+        rawProfile.profile_id
+      );
+
+      // 4. FIX: Decrypt ALL sensitive PHI fields on read under RA 10173
+      healthProfile = {
+        ...rawProfile,
+        blood_type: decryptPHI(rawProfile.blood_type),
+        allergies: decryptPHI(rawProfile.allergies),
+        chronic_conditions: decryptPHI(rawProfile.chronic_conditions),
+        emergency_contact_name: decryptPHI(rawProfile.emergency_contact_name),
+        emergency_contact_phone: decryptPHI(rawProfile.emergency_contact_phone),
+      };
+    }
 
     res.json({
       user: userRows[0],
@@ -5501,7 +6270,7 @@ router.put('/me', authenticateToken, async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    // 1. Lock and fetch the old data before we change it
+    // 1. Lock and fetch the old data before changing it
     const [existing] = await connection.query(
       'SELECT * FROM HEALTH_PROFILES WHERE user_id = ? FOR UPDATE',
       [userId]
@@ -5511,19 +6280,35 @@ router.put('/me', authenticateToken, async (req, res) => {
     let action = 'CREATE';
     let recordId = null;
 
+    // FIX: Encrypt ALL sensitive PHI/PII fields uniformly before saving at-rest
+    const encryptedBloodType = encryptPHI(blood_type);
+    const encryptedAllergies = encryptPHI(allergies);
+    const encryptedConditions = encryptPHI(chronic_conditions);
+    const encryptedContactName = encryptPHI(emergency_contact_name);
+    const encryptedContactPhone = encryptPHI(emergency_contact_phone);
+
     if (existing.length > 0) {
       oldData = existing[0];
       action = 'UPDATE';
       recordId = oldData.profile_id;
 
-      // Update existing record
+      // Update existing record with encrypted fields
       await connection.query(
         `UPDATE HEALTH_PROFILES 
          SET blood_type = ?, allergies = ?, chronic_conditions = ?,
              emergency_contact_name = ?, emergency_contact_phone = ?,
              height = ?, weight = ?, version = version + 1
          WHERE user_id = ?`,
-        [blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, height, weight, userId]
+        [
+          encryptedBloodType, 
+          encryptedAllergies, 
+          encryptedConditions, 
+          encryptedContactName, 
+          encryptedContactPhone, 
+          height, 
+          weight, 
+          userId
+        ]
       );
     } else {
       // Insert new record if none exists
@@ -5531,12 +6316,29 @@ router.put('/me', authenticateToken, async (req, res) => {
         `INSERT INTO HEALTH_PROFILES 
          (user_id, blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, height, weight)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [userId, blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, height, weight]
+        [
+          userId, 
+          encryptedBloodType, 
+          encryptedAllergies, 
+          encryptedConditions, 
+          encryptedContactName, 
+          encryptedContactPhone, 
+          height, 
+          weight
+        ]
       );
       recordId = result.insertId;
     }
 
-    const newData = { blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, height, weight };
+    const newData = { 
+      blood_type: encryptedBloodType, 
+      allergies: encryptedAllergies, 
+      chronic_conditions: encryptedConditions, 
+      emergency_contact_name: encryptedContactName, 
+      emergency_contact_phone: encryptedContactPhone, 
+      height, 
+      weight 
+    };
 
     // 2. Append to Global Cryptographic Audit Trail
     await logAudit(connection, {
@@ -5550,7 +6352,7 @@ router.put('/me', authenticateToken, async (req, res) => {
     });
 
     await connection.commit();
-    res.json({ message: 'Health profile successfully updated.' });
+    res.json({ message: 'Health profile successfully updated under RA 10173 standards.' });
   } catch (error) {
     await connection.rollback();
     console.error('Error updating health profile:', error);
@@ -5560,32 +6362,108 @@ router.put('/me', authenticateToken, async (req, res) => {
   }
 });
 
+// POST /api/profile/consent - Record user privacy consent
+router.post('/consent', authenticateToken, async (req, res) => {
+  const userId = req.user.user_id;
+  const { consent_version = 'v1.0-2026' } = req.body;
+
+  try {
+    await pool.query(
+      `UPDATE USERS 
+       SET consent_given = TRUE, 
+           consent_timestamp = CURRENT_TIMESTAMP, 
+           consent_version = ?
+       WHERE user_id = ?`,
+      [consent_version, userId]
+    );
+
+    res.json({ message: 'Data Privacy Consent recorded successfully.', consent_given: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to record consent.' });
+  }
+});
+
+// DELETE /api/profile/user/:id - Soft delete a user account (Triggers RA 10173 5-Year Retention Cron)
+router.delete('/user/:id', authenticateToken, requireRoles('ADMIN'), async (req, res) => {
+  const targetUserId = req.params.id;
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const [result] = await connection.query(
+      `UPDATE USERS SET deleted_at = CURRENT_TIMESTAMP, is_active = FALSE WHERE user_id = ?`,
+      [targetUserId]
+    );
+
+    if (result.affectedRows === 0) {
+      throw new Error('User not found.');
+    }
+
+    await connection.query(
+      `UPDATE EMR_RECORDS SET deleted_at = CURRENT_TIMESTAMP WHERE patient_user_id = ?`,
+      [targetUserId]
+    );
+
+    await logAudit(connection, {
+      userId: req.user.user_id,
+      action: 'DELETE',
+      table: 'USERS',
+      recordId: targetUserId,
+      oldValue: { user_id: targetUserId, status: 'active' },
+      newValue: { deleted_at: 'CURRENT_TIMESTAMP' },
+      ipAddress: req.ip
+    });
+
+    await connection.commit();
+    res.json({ message: 'User and associated medical records soft-deleted. Scheduled for 5-year RA 10173 retention cycle.' });
+  } catch (error) {
+    await connection.rollback();
+    res.status(400).json({ error: error.message || 'Failed to soft-delete user.' });
+  } finally {
+    connection.release();
+  }
+});
+
 export default router;
 </file>
 
 <file path="server/src/index.js">
+// server/src/index.js
 import express from 'express';
-import http from 'http';
+import https from 'https';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { loginUser, authenticateToken } from './auth.js';
+import { startRetentionCron } from './utils/dataRetention.js'; // <-- 1. IMPORT THE CRON JOB
 
 // Route imports
 import profileRoutes from './routes/profile.js';
 import healthPassRoutes from './routes/healthPass.js';
 import appointmentRoutes from './routes/appointments.js';
-import emergencyRouter from './routes/emergency.js'; // Feature 4
-import inventoryRoutes from './routes/inventory.js'; // Feature 9
+import emergencyRouter from './routes/emergency.js'; 
+import inventoryRoutes from './routes/inventory.js'; 
+import auditRoutes from './routes/audit.js';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 1. Create HTTP Server & Mount Socket.IO
-const server = http.createServer(app);
+const options = {
+  key: fs.readFileSync(path.join(__dirname, '../../certs/server.key')),
+  cert: fs.readFileSync(path.join(__dirname, '../../certs/server.cert'))
+};
+
+const server = https.createServer(options, app);
 export const io = new Server(server, {
   cors: {
     origin: '*',
@@ -5600,35 +6478,59 @@ io.on('connection', (socket) => {
   });
 });
 
-// 2. Public Auth Routes
 app.post('/api/auth/login', loginUser);
 
-// 3. Protected Core Modules
 app.use('/api/profile', profileRoutes);
 app.use('/api/health-pass', healthPassRoutes);
 app.use('/api/appointments', appointmentRoutes);
-app.use('/api/emergency', emergencyRouter(io)); // Feature 4 SOS WebSockets
-app.use('/api/inventory', inventoryRoutes);       // Feature 9 Inventory
+app.use('/api/emergency', emergencyRouter(io)); 
+app.use('/api/inventory', inventoryRoutes);  
+app.use('/api/audit', auditRoutes); // <-- 3. ADD THE AUDIT ROUTE     
 
-// Auth verification check
 app.get('/api/users/me', authenticateToken, (req, res) => {
   res.json({ message: 'Authenticated', user: req.user });
 });
 
+// 2. START THE CRON JOB
+startRetentionCron();
+
 const PORT = process.env.PORT || 5000;
 
-server.listen(PORT, () => {
-  console.log(`Valetudo HealthLink API & WebSockets running on port ${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`🔒 Secure HTTPS Valetudo HealthLink API & WebSockets running on port ${PORT}`);
+  console.log(`Desktop/Web Test URL: https://localhost:${PORT}`);
+  console.log(`Mobile Emulator Test URL: https://10.0.2.2:${PORT}`);
 });
 </file>
 
 <file path="desktop/src/App.tsx">
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import EmergencyAlertBanner from './components/EmergencyAlertBanner';
 import NurseConsole from './components/NurseConsole';
 import DoctorConsole from './components/DoctorConsole';
 import AdminConsole from './components/AdminConsole';
 import ResponderConsole from './components/ResponderConsole';
+
+export function useIdleTimeout(onTimeout: () => void, timeoutMs: number = 15 * 60 * 1000) {
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const resetTimer = () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(onTimeout, timeoutMs);
+  };
+
+  useEffect(() => {
+    const events = ['mousemove', 'keydown', 'mousedown', 'touchstart', 'scroll'];
+    events.forEach(event => window.addEventListener(event, resetTimer));
+    
+    resetTimer(); // Initialize timer
+
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      events.forEach(event => window.removeEventListener(event, resetTimer));
+    };
+  }, [onTimeout, timeoutMs]);
+}
 
 export default function App() {
   const [email, setEmail] = useState('nurse@psu.edu.ph');
@@ -5639,12 +6541,21 @@ export default function App() {
   // Allows switching perspectives if the account has multi-roles
   const [activeRoleView, setActiveRoleView] = useState<string>('');
 
+  // Enforce 15-minute inactivity session timeout
+  useIdleTimeout(() => {
+    if (user) {
+      localStorage.removeItem('valetudo_token');
+      setUser(null);
+      alert('Session expired due to inactivity. Please sign in again.');
+    }
+  }, 15 * 60 * 1000);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
     try {
-      const res = await fetch('http://localhost:5000/api/auth/login', {
+      const res = await fetch('https://localhost:5000/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), password: password.trim() }),

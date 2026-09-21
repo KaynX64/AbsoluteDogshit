@@ -53,8 +53,8 @@ export default function DoctorConsole() {
 
     const url =
       mode === 'history'
-        ? 'http://localhost:5000/api/appointments/today?filter=history'
-        : 'http://localhost:5000/api/appointments/today';
+        ? 'https://localhost:5000/api/appointments/today?filter=history'
+        : 'https://localhost:5000/api/appointments/today';
 
     try {
       const res = await fetch(url, {
@@ -107,7 +107,7 @@ export default function DoctorConsole() {
     if (!selectedApp) return;
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`http://localhost:5000/api/appointments/${selectedApp.appointment_id}/status`, {
+      const res = await fetch(`https://localhost:5000/api/appointments/${selectedApp.appointment_id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ status: 'serving' }),
@@ -135,7 +135,7 @@ export default function DoctorConsole() {
     setIsSubmittingEMR(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`http://localhost:5000/api/appointments/${selectedApp.appointment_id}/complete`, {
+      const res = await fetch(`https://localhost:5000/api/appointments/${selectedApp.appointment_id}/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -167,7 +167,7 @@ export default function DoctorConsole() {
     if (!selectedApp || !window.confirm('Mark this appointment as No-Show? It will be removed from the active queue.')) return;
     const token = localStorage.getItem('valetudo_token');
     try {
-      await fetch(`http://localhost:5000/api/appointments/${selectedApp.appointment_id}/status`, {
+      await fetch(`https://localhost:5000/api/appointments/${selectedApp.appointment_id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ status: 'no_show' }),

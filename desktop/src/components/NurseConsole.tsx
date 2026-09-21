@@ -26,7 +26,7 @@ export default function NurseConsole() {
     setLoadingQueue(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('http://localhost:5000/api/appointments/queue/today', {
+      const res = await fetch('https://localhost:5000/api/appointments/queue/today', {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
@@ -54,7 +54,7 @@ export default function NurseConsole() {
 
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`http://localhost:5000/api/appointments/queue/${nextPatient.queue_id}/status`, {
+      const res = await fetch(`https://localhost:5000/api/appointments/queue/${nextPatient.queue_id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ status: 'in-consultation' }),

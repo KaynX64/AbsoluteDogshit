@@ -420,3 +420,9 @@ INSERT INTO `MEDICINE_BATCHES` (`batch_id`, `medicine_id`, `batch_no`, `manufact
 (1, 1, 'BATCH-PAR-2026A', '2026-01-10', '2028-01-10', 'Unilab Philippines', 200),
 (2, 2, 'BATCH-NZP-2026B', '2026-02-15', '2027-08-15', 'Unilab Philippines', 150),
 (3, 3, 'BATCH-SLB-2025X', '2025-06-01', '2027-06-01', 'GlaxoSmithKline', 15);
+
+-- Migration: Add Consent Tracking to USERS
+ALTER TABLE `USERS`
+ADD COLUMN `consent_given` BOOLEAN NOT NULL DEFAULT FALSE AFTER `is_active`,
+ADD COLUMN `consent_timestamp` TIMESTAMP NULL DEFAULT NULL AFTER `consent_given`,
+ADD COLUMN `consent_version` VARCHAR(20) NULL DEFAULT NULL AFTER `consent_timestamp`;

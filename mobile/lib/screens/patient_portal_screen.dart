@@ -41,8 +41,67 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   @override
   void initState() {
     super.initState();
+    _checkPrivacyConsent(widget.user);
     _fetchQRPass();
     _fetchProfile();
+  }
+
+
+  // --- RA 10173 Consent Logic ---
+  void _checkPrivacyConsent(Map<String, dynamic> user) {
+    if (user['consent_given'] != true) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showConsentModal();
+      });
+    }
+  }
+
+  void _showConsentModal() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.privacy_tip, color: Color(0xFF0F766E)),
+            SizedBox(width: 8),
+            Text('RA 10173 Data Privacy Consent', style: TextStyle(fontSize: 16)),
+          ],
+        ),
+        content: const SingleChildScrollView(
+          child: Text(
+            'Pursuant to the Philippine Data Privacy Act of 2012 (R.A. 10173), Pangasinan State University Infirmary collects and processes your Protected Health Information (PHI) solely for clinical triage, emergency response, and health clearances.\n\n'
+            'By tapping "I Agree", you give express consent to PSU Medical Personnel to store and access your medical records under encrypted safeguards.',
+            style: TextStyle(fontSize: 13, height: 1.4),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              // Sign out if consent rejected
+              _storage.delete(key: 'jwt_token');
+              Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
+            },
+            child: const Text('Decline', style: TextStyle(color: Colors.red)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F766E), foregroundColor: Colors.white),
+            onPressed: () async {
+              final token = await _storage.read(key: 'jwt_token');
+              await http.post(
+                Uri.parse('${ApiConfig.baseUrl}/api/profile/consent'),
+                headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+                body: jsonEncode({'consent_version': 'v1.0-2026'}),
+              );
+              if (!mounted) return;
+              Navigator.pop(ctx);
+            },
+            child: const Text('I Agree & Consent'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _fetchQRPass() async {

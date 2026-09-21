@@ -1,22 +1,48 @@
 // desktop/src/components/AdminConsole.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 export default function AdminConsole() {
   const [activeTab, setActiveTab] = useState<'users' | 'audit' | 'telemetry'>('users');
+  const [usersList, setUsersList] = useState<any[]>([]);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const usersList = [
-    { id: 1, name: 'Dr. Clark Kim Castro', email: 'admin@psu.edu.ph', role: 'ADMIN', status: 'Active' },
-    { id: 2, name: 'Dr. Juan Mata', email: 'doctor@psu.edu.ph', role: 'DOCTOR', status: 'Active' },
-    { id: 3, name: 'Nurse Dimples Arenas', email: 'nurse@psu.edu.ph', role: 'NURSE', status: 'Active' },
-    { id: 4, name: 'Denver Cerezo', email: 'responder@psu.edu.ph', role: 'EMERGENCY_RESPONDER', status: 'Active' },
-    { id: 5, name: 'Daniella Movida', email: 'student@psu.edu.ph', role: 'STUDENT', status: 'Active' },
-  ];
+  const token = localStorage.getItem('valetudo_token');
 
-  const auditLogs = [
-    { id: 101, user: 'nurse@psu.edu.ph', action: 'DISPENSE', target: 'MEDICINE_BATCHES #1', hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', time: '10 mins ago' },
-    { id: 102, user: 'student@psu.edu.ph', action: 'SOS_TRIGGER', target: 'EMERGENCY_ALERTS', hash: 'ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb', time: '15 mins ago' },
-    { id: 103, user: 'admin@psu.edu.ph', action: 'LOGIN', target: 'AUTH_SESSIONS', hash: '875442a420b9271fe83742f0226650946fd0b0ce0ced83687d361144b0b06103', time: '1 hour ago' },
-  ];
+  useEffect(() => {
+    if (activeTab === 'audit') {
+      fetchAuditLogs();
+    } else if (activeTab === 'users') {
+      fetchUsers();
+    }
+  }, [activeTab]);
+
+  const fetchAuditLogs = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('https://localhost:5000/api/audit', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        setAuditLogs(await res.json());
+      }
+    } catch (err) {
+      console.error('Failed to load audit logs:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchUsers = async () => {
+    // For demonstration, mapping the static mockup or an actual user endpoint if available
+    setUsersList([
+      { id: 1, name: 'Dr. Clark Kim Castro', email: 'admin@psu.edu.ph', role: 'ADMIN', status: 'Active' },
+      { id: 2, name: 'Dr. Juan Mata', email: 'doctor@psu.edu.ph', role: 'DOCTOR', status: 'Active' },
+      { id: 3, name: 'Nurse Dimples Arenas', email: 'nurse@psu.edu.ph', role: 'NURSE', status: 'Active' },
+      { id: 4, name: 'Denver Cerezo', email: 'responder@psu.edu.ph', role: 'EMERGENCY_RESPONDER', status: 'Active' },
+      { id: 5, name: 'Daniella Movida', email: 'student@psu.edu.ph', role: 'STUDENT', status: 'Active' },
+    ]);
+  };
 
   return (
     <div style={{ background: '#ffffff', padding: 20, borderRadius: 8, border: '1px solid #cbd5e1' }}>
@@ -83,30 +109,36 @@ export default function AdminConsole() {
           <div style={{ padding: 10, background: '#f8fafc', borderRadius: 6, marginBottom: 12, fontSize: 12, color: '#475569' }}>
             <b>Append-Only Chained Hash Integrity:</b> Every mutation records a cryptographic SHA-256 digest referencing the previous entry to prevent tamper attacks.
           </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, textAlign: 'left' }}>
-            <thead>
-              <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#64748b' }}>
-                <th style={{ padding: '8px' }}>Log ID</th>
-                <th style={{ padding: '8px' }}>Actor</th>
-                <th style={{ padding: '8px' }}>Action</th>
-                <th style={{ padding: '8px' }}>Target Table</th>
-                <th style={{ padding: '8px' }}>SHA-256 Entry Hash</th>
-                <th style={{ padding: '8px' }}>Time</th>
-              </tr>
-            </thead>
-            <tbody>
-              {auditLogs.map((log) => (
-                <tr key={log.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '8px' }}>#{log.id}</td>
-                  <td style={{ padding: '8px' }}>{log.user}</td>
-                  <td style={{ padding: '8px', fontWeight: 'bold' }}>{log.action}</td>
-                  <td style={{ padding: '8px' }}>{log.target}</td>
-                  <td style={{ padding: '8px', fontFamily: 'monospace', fontSize: 11 }}>{log.hash.substring(0, 20)}...</td>
-                  <td style={{ padding: '8px', color: '#64748b' }}>{log.time}</td>
+          {loading ? (
+            <p style={{ textAlign: 'center', color: '#64748b', fontSize: 13 }}>Loading cryptographic audit ledger...</p>
+          ) : auditLogs.length === 0 ? (
+            <p style={{ textAlign: 'center', color: '#64748b', fontSize: 13 }}>No audit logs recorded yet.</p>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, textAlign: 'left' }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#64748b' }}>
+                  <th style={{ padding: '8px' }}>Log ID</th>
+                  <th style={{ padding: '8px' }}>Actor</th>
+                  <th style={{ padding: '8px' }}>Action</th>
+                  <th style={{ padding: '8px' }}>Target Table</th>
+                  <th style={{ padding: '8px' }}>SHA-256 Entry Hash</th>
+                  <th style={{ padding: '8px' }}>Time</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {auditLogs.map((log) => (
+                  <tr key={log.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '8px' }}>#{log.id}</td>
+                    <td style={{ padding: '8px' }}>{log.user}</td>
+                    <td style={{ padding: '8px', fontWeight: 'bold' }}>{log.action}</td>
+                    <td style={{ padding: '8px' }}>{log.target}</td>
+                    <td style={{ padding: '8px', fontFamily: 'monospace', fontSize: 11 }}>{log.hash ? log.hash.substring(0, 20) + '...' : 'N/A'}</td>
+                    <td style={{ padding: '8px', color: '#64748b' }}>{new Date(log.time).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
 

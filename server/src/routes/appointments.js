@@ -4,6 +4,8 @@ import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { logAudit } from '../utils/auditLogger.js';
 import { requireRoles } from '../middleware/rbac.js';
+import { encryptPHI, decryptPHI } from '../utils/encryption.js';
+import { logPHIAccess } from '../utils/logger.js';
 
 const router = express.Router();
 
@@ -49,14 +51,11 @@ router.get('/slots', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'doctorId and date (YYYY-MM-DD) are required query parameters.' });
     }
 
-    // Define standard PSU Lingayen infirmary consultation blocks (30 mins each)
     const operationalSlots = [
       '08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
-      // 12:00 - 13:00 Lunch Break Excluded
       '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30'
     ];
 
-    // Query existing scheduled or in-progress appointments for this doctor and date
     const [existingBookings] = await pool.query(
       `SELECT DATE_FORMAT(date_time, '%H:%i') as booked_time
        FROM APPOINTMENTS
@@ -68,7 +67,6 @@ router.get('/slots', authenticateToken, async (req, res) => {
 
     const bookedSet = new Set(existingBookings.map((b) => b.booked_time));
 
-    // Construct slot status map
     const slots = operationalSlots.map((time) => ({
       time,
       isAvailable: !bookedSet.has(time),
@@ -99,13 +97,11 @@ router.post('/', authenticateToken, async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    // 1. Lock the Doctor's record to serialize booking attempts for this specific doctor
     await connection.query(
       `SELECT user_id FROM USERS WHERE user_id = ? FOR UPDATE`, 
       [doctor_user_id]
     );
 
-    // 2. Concurrency safe check: Verify if the requested slot is already taken
     const [conflict] = await connection.query(
       `SELECT appointment_id FROM APPOINTMENTS 
        WHERE doctor_user_id = ? 
@@ -118,7 +114,6 @@ router.post('/', authenticateToken, async (req, res) => {
       throw new Error('Selected time slot is already booked.');
     }
 
-    // 3. Prevent patient from double-booking themselves at the exact same time
     const [patientConflict] = await connection.query(
       `SELECT appointment_id FROM APPOINTMENTS 
        WHERE patient_user_id = ? 
@@ -131,7 +126,6 @@ router.post('/', authenticateToken, async (req, res) => {
       throw new Error('You already have an active appointment scheduled at this exact time.');
     }
 
-    // 4. Insert Appointment Record
     const [insertResult] = await connection.query(
       `INSERT INTO APPOINTMENTS (patient_user_id, doctor_user_id, date_time, appointment_type, status, notes)
        VALUES (?, ?, ?, ?, 'scheduled', ?)`,
@@ -140,7 +134,6 @@ router.post('/', authenticateToken, async (req, res) => {
 
     const appointmentId = insertResult.insertId;
 
-    // 5. RA 10173 Audit: Log the creation of the appointment
     await logAudit(connection, {
       userId: patientUserId,
       action: 'CREATE',
@@ -152,9 +145,6 @@ router.post('/', authenticateToken, async (req, res) => {
     });
 
     await connection.commit();
-
-    // 6. Automated Notification Dispatch Simulation (Push / Email Trigger)
-    console.log(`[Notification Service] Confirmation sent to User #${patientUserId} for appointment #${appointmentId} on ${date_time}`);
 
     res.status(201).json({
       message: 'Consultation appointment scheduled successfully.',
@@ -198,6 +188,7 @@ router.get('/my', authenticateToken, async (req, res) => {
        ORDER BY a.date_time DESC`,
       [userId]
     );
+
     res.json(rows);
   } catch (error) {
     console.error('[Appointments] My appointments error:', error);
@@ -215,7 +206,6 @@ router.patch('/:id/cancel', authenticateToken, async (req, res) => {
     const userId = req.user.user_id;
     const { cancelled_reason } = req.body;
 
-    // Verify ownership
     const [existing] = await pool.query(
       'SELECT appointment_id, status FROM APPOINTMENTS WHERE appointment_id = ? AND patient_user_id = ?',
       [appointmentId, userId]
@@ -248,22 +238,20 @@ router.patch('/:id/cancel', authenticateToken, async (req, res) => {
 // Description: Returns active appointments by default (scheduled, checked_in, serving).
 //              Pass ?filter=history to retrieve past completed & cancelled records.
 // =============================================================================
-router.get('/today', authenticateToken, async (req, res) => {
+router.get('/today', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
   try {
     const { date, filter } = req.query;
+    const practitionerId = req.user.user_id;
 
     let whereClause = '';
     const params = [];
 
     if (filter === 'history') {
-      // History Archive: Show finished, cancelled, or no-show encounters
       whereClause = `WHERE a.status IN ('completed', 'cancelled', 'no_show')`;
     } else if (date) {
-      // Active for a specific date (excludes completed and cancelled)
       whereClause = `WHERE DATE(a.date_time) = ? AND a.status IN ('scheduled', 'checked_in', 'serving')`;
       params.push(date);
     } else {
-      // Active queue: from today onwards that still require attention
       whereClause = `WHERE a.date_time >= CURDATE() AND a.status IN ('scheduled', 'checked_in', 'serving')`;
     }
 
@@ -287,7 +275,26 @@ router.get('/today', authenticateToken, async (req, res) => {
        ORDER BY a.date_time DESC`,
       params
     );
-    res.json(rows);
+
+    const formattedRows = await Promise.all(
+      rows.map(async (r) => {
+        await logPHIAccess(
+          practitionerId,
+          r.patient_id,
+          'Clinic Queue Dashboard Generation'
+        );
+
+        return {
+          ...r,
+          past_diagnosis: decryptPHI(r.past_diagnosis),
+          past_treatment: decryptPHI(r.past_treatment),
+          allergies: decryptPHI(r.allergies),
+          chronic_conditions: decryptPHI(r.chronic_conditions),
+        };
+      })
+    );
+
+    res.json(formattedRows);
   } catch (error) {
     console.error('[Appointments] Roster fetch error:', error);
     res.status(500).json({ error: 'Failed to retrieve appointments roster.' });
@@ -301,7 +308,7 @@ router.get('/today', authenticateToken, async (req, res) => {
 router.patch('/:id/status', authenticateToken, async (req, res) => {
   try {
     const appointmentId = req.params.id;
-    const { status } = req.body; // 'serving' | 'completed' | 'no_show'
+    const { status } = req.body;
 
     if (!['serving', 'completed', 'no_show', 'checked_in'].includes(status)) {
       return res.status(400).json({ error: 'Invalid appointment status transition.' });
@@ -320,42 +327,91 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
 
 // =============================================================================
 // 8. POST /api/appointments/:id/complete
-// Description: Saves EMR clinical consultation record and marks appointment done
+// Description: Saves encrypted EMR clinical consultation record, processes FEFO inventory, and completes appointment
 // =============================================================================
-router.post('/:id/complete', authenticateToken, async (req, res) => {
+router.post('/:id/complete', authenticateToken, requireRoles('DOCTOR', 'ADMIN'), async (req, res) => {
+  const appointmentId = req.params.id;
+  const doctorUserId = req.user.user_id;
+  const { patient_user_id, chief_complaint, diagnosis, treatment_plan, notes, prescriptions } = req.body;
+  
   const connection = await pool.getConnection();
+  
   try {
-    const appointmentId = req.params.id;
-    const doctorUserId = req.user.user_id;
-    const { patient_user_id, chief_complaint, diagnosis, treatment_plan, notes } = req.body;
-
     await connection.beginTransaction();
 
-    // 1. Insert into EMR_RECORDS
+    // 1. Encrypt and save EMR Record for RA 10173 compliance
+    const encryptedChiefComplaint = encryptPHI(chief_complaint || '');
+    const encryptedDiagnosis = encryptPHI(diagnosis || '');
+    const encryptedTreatmentPlan = encryptPHI(treatment_plan || '');
+    const encryptedNotes = encryptPHI(notes || '');
+
     const [emrResult] = await connection.query(
       `INSERT INTO EMR_RECORDS (patient_user_id, doctor_user_id, chief_complaint, diagnosis, treatment_plan, notes)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [patient_user_id, doctorUserId, chief_complaint, diagnosis, treatment_plan, notes || '']
+      [patient_user_id, doctorUserId, encryptedChiefComplaint, encryptedDiagnosis, encryptedTreatmentPlan, encryptedNotes]
     );
+    const emrId = emrResult.insertId;
 
-    // 2. Mark Appointment as completed
+    // 2. Log EMR creation in the cryptographic audit trail
+    await logAudit(connection, {
+      userId: doctorUserId,
+      action: 'CREATE',
+      table: 'EMR_RECORDS',
+      recordId: emrId,
+      oldValue: null,
+      newValue: { patient_user_id, diagnosis },
+      ipAddress: req.ip
+    });
+
+    // 3. Update appointment status to completed
     await connection.query(
-      `UPDATE APPOINTMENTS SET status = 'completed' WHERE appointment_id = ?`,
+      'UPDATE APPOINTMENTS SET status = "completed" WHERE appointment_id = ?',
       [appointmentId]
     );
 
-    // 3. Mark corresponding Queue entry as done (if one exists)
-    await connection.query(
-      `UPDATE QUEUE SET status = 'done', served_at = CURRENT_TIMESTAMP WHERE appointment_id = ?`,
-      [appointmentId]
-    );
+    // 4. Process prescribed items using FEFO stock deduction
+    if (prescriptions && prescriptions.length > 0) {
+      for (const item of prescriptions) {
+        let remainingQty = item.quantity;
+
+        const [batches] = await connection.query(
+          `SELECT batch_id, quantity_on_hand FROM MEDICINE_BATCHES 
+           WHERE medicine_id = ? AND quantity_on_hand > 0 AND deleted_at IS NULL 
+           ORDER BY expiry_date ASC FOR UPDATE`,
+          [item.medicine_id]
+        );
+
+        for (const batch of batches) {
+          if (remainingQty <= 0) break;
+
+          const deductAmount = Math.min(batch.quantity_on_hand, remainingQty);
+
+          await connection.query(
+            'UPDATE MEDICINE_BATCHES SET quantity_on_hand = quantity_on_hand - ? WHERE batch_id = ?',
+            [deductAmount, batch.batch_id]
+          );
+
+          await connection.query(
+            `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by) 
+             VALUES (?, ?, 'dispense', ?, ?)`,
+            [batch.batch_id, -deductAmount, `Encounter prescription fulfillment (#${appointmentId})`, doctorUserId]
+          );
+
+          remainingQty -= deductAmount;
+        }
+
+        if (remainingQty > 0) {
+          throw new Error(`Insufficient stock for medicine ID ${item.medicine_id}. Short by ${remainingQty} units.`);
+        }
+      }
+    }
 
     await connection.commit();
-    res.json({ message: 'Consultation finalized and saved to patient EMR history!', emrId: emrResult.insertId });
+    return res.status(200).json({ message: 'Consultation completed, EMR securely encrypted, and inventory updated.' });
+
   } catch (error) {
     await connection.rollback();
-    console.error('[EMR] Complete error:', error);
-    res.status(500).json({ error: 'Failed to complete consultation encounter.' });
+    return res.status(500).json({ error: error.message });
   } finally {
     connection.release();
   }
@@ -364,11 +420,11 @@ router.post('/:id/complete', authenticateToken, async (req, res) => {
 // =============================================================================
 // 9. GET /api/appointments/lookup
 // Description: Nurse searches for a patient's booking by Student No, Name, or User ID
-// Query params: ?query=22-LN-0123 OR ?userId=5
 // =============================================================================
-router.get('/lookup', authenticateToken, async (req, res) => {
+router.get('/lookup', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
   try {
     const { query, userId } = req.query;
+    const practitionerId = req.user.user_id;
 
     let sql = `
       SELECT a.appointment_id, 
@@ -398,7 +454,24 @@ router.get('/lookup', authenticateToken, async (req, res) => {
     sql += ` ORDER BY a.date_time ASC LIMIT 5`;
 
     const [results] = await pool.query(sql, params);
-    res.json(results);
+
+    const formattedResults = await Promise.all(
+      results.map(async (r) => {
+        await logPHIAccess(
+          practitionerId,
+          r.user_id,
+          'Manual Electronic Medical Record Lookup'
+        );
+
+        return {
+          ...r,
+          allergies: decryptPHI(r.allergies),
+          chronic_conditions: decryptPHI(r.chronic_conditions),
+        };
+      })
+    );
+
+    res.json(formattedResults);
   } catch (error) {
     console.error('[Appointments] Lookup error:', error);
     res.status(500).json({ error: 'Failed to lookup patient appointments.' });
@@ -418,7 +491,6 @@ router.post('/:id/checkin', authenticateToken, async (req, res) => {
 
     await connection.beginTransaction();
 
-    // 1. Verify appointment exists and is still scheduled
     const [appRows] = await connection.query(
       `SELECT patient_user_id FROM APPOINTMENTS WHERE appointment_id = ? FOR UPDATE`,
       [appointmentId]
@@ -431,7 +503,6 @@ router.post('/:id/checkin', authenticateToken, async (req, res) => {
 
     const patientUserId = appRows[0].patient_user_id;
 
-    // 2. Update APPOINTMENTS status to 'checked_in'
     await connection.query(
       `UPDATE APPOINTMENTS 
        SET status = 'checked_in' 
@@ -439,7 +510,6 @@ router.post('/:id/checkin', authenticateToken, async (req, res) => {
       [appointmentId]
     );
 
-    // 3. Generate a daily Queue Ticket (e.g., Ticket #Q-101)
     const today = new Date().toISOString().split('T')[0];
     const [queueCount] = await connection.query(
       `SELECT COUNT(*) as totalToday FROM QUEUE WHERE queue_date = ?`,
@@ -449,11 +519,10 @@ router.post('/:id/checkin', authenticateToken, async (req, res) => {
 
     await connection.query(
       `INSERT INTO QUEUE (patient_user_id, appointment_id, queue_date, counter_id, queue_number, status, checked_in_at)
-       VALUES (?, ?, ?, 1, ?, 'waiting', CURRENT_TIMESTAMP)`,
-      [patientUserId, appointmentId, today, nextQueueNo]
+       VALUES (?, ?, ?, ?, ?, 'waiting', CURRENT_TIMESTAMP)`,
+      [patientUserId, appointmentId, today, 1, nextQueueNo]
     );
 
-    // 4. Record Triage Vitals if provided by nurse
     if (blood_pressure || temperature || pulse || spo2) {
       await connection.query(
         `UPDATE HEALTH_PROFILES 
@@ -496,7 +565,7 @@ router.get('/queue/today', authenticateToken, async (req, res) => {
               COALESCE(a.appointment_type, 'Walk-in Intake') AS visit_type
        FROM QUEUE q
        JOIN USERS u ON q.patient_user_id = u.user_id
-       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+       LEFT JOIN STUDENT_PROFILES sp ON q.patient_user_id = sp.user_id
        LEFT JOIN APPOINTMENTS a ON q.appointment_id = a.appointment_id
        WHERE q.queue_date = ? AND q.status != 'done'
        ORDER BY q.queue_number ASC`,
@@ -516,7 +585,7 @@ router.get('/queue/today', authenticateToken, async (req, res) => {
 router.patch('/queue/:id/status', authenticateToken, async (req, res) => {
   try {
     const queueId = req.params.id;
-    const { status } = req.body; // 'waiting' | 'in-consultation' | 'done'
+    const { status } = req.body;
 
     await pool.query(
       `UPDATE QUEUE SET status = ? WHERE queue_id = ?`,

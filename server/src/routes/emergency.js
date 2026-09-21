@@ -3,6 +3,8 @@ import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { requireRoles } from '../middleware/rbac.js';
+import { decryptPHI } from '../utils/encryption.js'; // Added decryption
+import { logPHIAccess } from '../utils/logger.js'; // Added RA 10173 access logging
 
 export default function emergencyRouter(io) {
   const router = express.Router();
@@ -40,6 +42,10 @@ export default function emergencyRouter(io) {
       );
 
       const patientInfo = details[0] || {};
+      
+      // Decrypt vital PHI before broadcasting to emergency responders
+      const decryptedAllergies = decryptPHI(patientInfo.allergies);
+      const decryptedConditions = decryptPHI(patientInfo.chronic_conditions);
 
       const alertPayload = {
         alertId,
@@ -49,8 +55,8 @@ export default function emergencyRouter(io) {
         studentNo: patientInfo.student_no,
         course: patientInfo.course,
         bloodType: patientInfo.blood_type || 'Unknown',
-        allergies: patientInfo.allergies || 'None listed',
-        chronicConditions: patientInfo.chronic_conditions || 'None listed',
+        allergies: decryptedAllergies || 'None listed',
+        chronicConditions: decryptedConditions || 'None listed',
         emergencyContact: `${patientInfo.emergency_contact_name || 'N/A'} (${patientInfo.emergency_contact_phone || 'N/A'})`,
         latitude: Number(latitude),
         longitude: Number(longitude),
@@ -61,6 +67,15 @@ export default function emergencyRouter(io) {
 
       // Broadcast immediately across all connected clinic desktops & responders
       io.emit('emergency:new_alert', alertPayload);
+      
+      // Log that the system exposed PHI to the WebSocket broadcast for this emergency
+      await logPHIAccess(
+        userId, // Actor is the student triggering the SOS
+        userId, 
+        'Automated SOS Emergency Broadcast',
+        'EMERGENCY_ALERTS',
+        alertId
+      );
 
       res.status(201).json({
         message: 'Emergency alert dispatched to PSU Clinic and Quick-Response team.',
@@ -73,8 +88,10 @@ export default function emergencyRouter(io) {
   });
 
   // 2. GET /api/emergency/active - List all currently active/unresolved alerts
-  router.get('/active', authenticateToken, async (req, res) => {
+  router.get('/active', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN', 'EMERGENCY_RESPONDER'), async (req, res) => {
     try {
+      const practitionerId = req.user.user_id;
+      
       const [alerts] = await pool.query(
         `SELECT a.alert_id, a.user_id, a.latitude, a.longitude, a.status, a.created_at, a.notes,
                 u.first_name, u.last_name, u.phone,
@@ -85,14 +102,34 @@ export default function emergencyRouter(io) {
          WHERE a.status IN ('triggered', 'acknowledged', 'dispatched')
          ORDER BY a.created_at DESC`
       );
-      res.json(alerts);
+      
+      // Decrypt PHI and log access for the responder viewing the dashboard
+      const processedAlerts = await Promise.all(
+        alerts.map(async (alert) => {
+            await logPHIAccess(
+                practitionerId,
+                alert.user_id,
+                'Emergency Dashboard Monitoring',
+                'EMERGENCY_ALERTS',
+                alert.alert_id
+            );
+            
+            return {
+                ...alert,
+                allergies: decryptPHI(alert.allergies)
+            };
+        })
+      );
+      
+      res.json(processedAlerts);
     } catch (error) {
+      console.error('Active alerts fetch error:', error);
       res.status(500).json({ error: 'Failed to fetch active alerts.' });
     }
   });
 
   // 3. PATCH /api/emergency/:alertId/status - Update response status (Nurse/Doctor/Responder)
-  router.patch('/:alertId/status', authenticateToken, async (req, res) => {
+  router.patch('/:alertId/status', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN', 'EMERGENCY_RESPONDER'), async (req, res) => {
     try {
       const { alertId } = req.params;
       const { status } = req.body; // 'acknowledged' | 'dispatched' | 'resolved' | 'false_alarm'
@@ -126,6 +163,7 @@ export default function emergencyRouter(io) {
 
       res.json({ message: `Alert #${alertId} updated to ${status}.` });
     } catch (error) {
+      console.error('Alert status update error:', error);
       res.status(500).json({ error: 'Failed to update alert status.' });
     }
   });

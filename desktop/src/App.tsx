@@ -1,9 +1,30 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import EmergencyAlertBanner from './components/EmergencyAlertBanner';
 import NurseConsole from './components/NurseConsole';
 import DoctorConsole from './components/DoctorConsole';
 import AdminConsole from './components/AdminConsole';
 import ResponderConsole from './components/ResponderConsole';
+
+export function useIdleTimeout(onTimeout: () => void, timeoutMs: number = 15 * 60 * 1000) {
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const resetTimer = () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(onTimeout, timeoutMs);
+  };
+
+  useEffect(() => {
+    const events = ['mousemove', 'keydown', 'mousedown', 'touchstart', 'scroll'];
+    events.forEach(event => window.addEventListener(event, resetTimer));
+    
+    resetTimer(); // Initialize timer
+
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      events.forEach(event => window.removeEventListener(event, resetTimer));
+    };
+  }, [onTimeout, timeoutMs]);
+}
 
 export default function App() {
   const [email, setEmail] = useState('nurse@psu.edu.ph');
@@ -14,12 +35,21 @@ export default function App() {
   // Allows switching perspectives if the account has multi-roles
   const [activeRoleView, setActiveRoleView] = useState<string>('');
 
+  // Enforce 15-minute inactivity session timeout
+  useIdleTimeout(() => {
+    if (user) {
+      localStorage.removeItem('valetudo_token');
+      setUser(null);
+      alert('Session expired due to inactivity. Please sign in again.');
+    }
+  }, 15 * 60 * 1000);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
     try {
-      const res = await fetch('http://localhost:5000/api/auth/login', {
+      const res = await fetch('https://localhost:5000/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), password: password.trim() }),

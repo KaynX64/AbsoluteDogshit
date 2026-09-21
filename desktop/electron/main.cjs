@@ -2,6 +2,16 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 
+// FIX: Bypass self-signed certificate errors for local HTTPS backend development
+app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
+  if (url.startsWith('https://localhost:5000')) {
+    event.preventDefault();
+    callback(true); // Trust the self-signed certificate for local backend
+  } else {
+    callback(false);
+  }
+});
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1300,
