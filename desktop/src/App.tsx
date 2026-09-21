@@ -168,7 +168,8 @@ export default function App() {
   // ROLE-BASED CONSOLE ROUTING
   // ---------------------------------------------------------------------------
   return (
-    <div style={{ padding: 24, fontFamily: 'sans-serif', maxWidth: 1250, margin: '0 auto' }}>
+    // To a fully fluid, dynamically scalable container:
+<div style={{ padding: 'clamp(14px, 2vw, 28px)', fontFamily: 'sans-serif', width: '100%', boxSizing: 'border-box', maxWidth: '1600px', margin: '0 auto' }}>
       {/* Top Header */}
       <header
         style={{
