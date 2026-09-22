@@ -8,7 +8,6 @@ import { sendAppointmentEmail } from '../utils/mailer.js';
 import { encrypt, decrypt } from '../utils/cryptoVault.js';
 import { requirePrivacyConsent } from '../middleware/consent.js';
 
-
 export default function appointmentRouter(io) {
   const router = express.Router();
 
@@ -53,11 +52,11 @@ export default function appointmentRouter(io) {
 
       const [existingBookings] = await pool.query(
         `SELECT DATE_FORMAT(date_time, '%H:%i') as booked_time
- FROM APPOINTMENTS
- WHERE doctor_user_id = ?
-   AND DATE(date_time) = ?
-   AND status IN ('scheduled', 'checked_in', 'serving')
-   AND deleted_at IS NULL`
+         FROM APPOINTMENTS
+         WHERE doctor_user_id = ?
+           AND DATE(date_time) = ?
+           AND status IN ('scheduled', 'checked_in', 'serving')
+           AND deleted_at IS NULL`,
         [doctorId, date]
       );
 
@@ -101,7 +100,8 @@ export default function appointmentRouter(io) {
         `SELECT appointment_id FROM APPOINTMENTS 
          WHERE doctor_user_id = ? 
            AND date_time = ? 
-           AND status IN ('scheduled', 'checked_in', 'serving')`,
+           AND status IN ('scheduled', 'checked_in', 'serving')
+           AND deleted_at IS NULL`,
         [doctor_user_id, date_time]
       );
 
@@ -113,7 +113,8 @@ export default function appointmentRouter(io) {
         `SELECT appointment_id FROM APPOINTMENTS 
          WHERE patient_user_id = ? 
            AND date_time = ? 
-           AND status IN ('scheduled', 'checked_in', 'serving')`,
+           AND status IN ('scheduled', 'checked_in', 'serving')
+           AND deleted_at IS NULL`,
         [patientUserId, date_time]
       );
 
@@ -129,21 +130,15 @@ export default function appointmentRouter(io) {
 
       const appointmentId = insertResult.insertId;
 
-      // In POST /api/appointments/:id/complete inside the transaction:
-await logAudit(connection, {
-  userId: doctorUserId,
-  action: 'CREATE',
-  table: 'EMR_RECORDS',
-  recordId: emrId,
-  oldValue: null,
-  newValue: {
-    patient_user_id,
-    appointment_id: appointmentId,
-    vitals_logged: vitals ? Object.keys(vitals) : [],
-    encrypted: true,
-  },
-  ipAddress: req.ip,
-});
+      await logAudit(connection, {
+        userId: patientUserId,
+        action: 'CREATE',
+        table: 'APPOINTMENTS',
+        recordId: appointmentId,
+        oldValue: null,
+        newValue: { doctor_user_id, date_time, appointment_type, notes },
+        ipAddress: req.ip,
+      });
 
       await connection.commit();
 
@@ -224,7 +219,7 @@ await logAudit(connection, {
          FROM APPOINTMENTS a
          JOIN USERS u ON a.doctor_user_id = u.user_id
          LEFT JOIN STAFF_PROFILES sp ON u.user_id = sp.user_id
-         WHERE a.patient_user_id = ?
+         WHERE a.patient_user_id = ? AND a.deleted_at IS NULL
          ORDER BY a.date_time DESC`,
         [userId]
       );
@@ -292,21 +287,30 @@ await logAudit(connection, {
     }
   });
 
-  // 6. GET /api/appointments/today
+// 6. GET /api/appointments/today
   router.get('/today', authenticateToken, async (req, res) => {
     try {
       const { date, filter } = req.query;
-      whereClause += ' AND a.deleted_at IS NULL';
+      let whereClause = '';
       const params = [];
 
       if (filter === 'history') {
+        // Archived completed, cancelled, or no-show consultations
         whereClause = `WHERE a.status IN ('completed', 'cancelled', 'no_show')`;
+      } else if (filter === 'scheduled') {
+        // Booked on app, but NOT yet checked in or triaged by clinic nurse
+        whereClause = `WHERE a.status = 'scheduled' AND a.date_time >= CURDATE()`;
+      } else if (filter === 'all') {
+        whereClause = `WHERE a.status IN ('scheduled', 'checked_in', 'serving')`;
       } else if (date) {
-        whereClause = `WHERE DATE(a.date_time) = ? AND a.status IN ('scheduled', 'checked_in', 'serving')`;
+        whereClause = `WHERE DATE(a.date_time) = ? AND a.status IN ('checked_in', 'serving')`;
         params.push(date);
       } else {
-        whereClause = `WHERE a.date_time >= CURDATE() AND a.status IN ('scheduled', 'checked_in', 'serving')`;
+        // Default Active Queue: All patients currently triaged & admitted to clinic
+        whereClause = `WHERE a.status IN ('checked_in', 'serving')`;
       }
+
+      whereClause += ' AND a.deleted_at IS NULL';
 
       const [rows] = await pool.query(
         `SELECT a.appointment_id, 
@@ -318,14 +322,17 @@ await logAudit(connection, {
                 hp.blood_type, hp.allergies, hp.chronic_conditions,
                 hp.height, hp.weight,
                 emr.diagnosis AS past_diagnosis,
-                emr.treatment_plan AS past_treatment
+                emr.treatment_plan AS past_treatment,
+                CONCAT('Q-', LPAD(COALESCE(q.queue_number, 1), 2, '0')) AS queue_ticket,
+                q.status AS queue_status
          FROM APPOINTMENTS a
          JOIN USERS u ON a.patient_user_id = u.user_id
          LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
          LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
          LEFT JOIN EMR_RECORDS emr ON (emr.patient_user_id = a.patient_user_id AND DATE(emr.encounter_date) = DATE(a.date_time))
+         LEFT JOIN QUEUE q ON (q.appointment_id = a.appointment_id AND q.status != 'done')
          ${whereClause}
-         ORDER BY a.date_time DESC`,
+         ORDER BY COALESCE(q.queue_number, 999) ASC, a.date_time ASC`,
         params
       );
 
@@ -340,6 +347,7 @@ await logAudit(connection, {
 
       res.json(decryptedRows);
     } catch (error) {
+      console.error('[Appointments] Today roster error:', error);
       res.status(500).json({ error: 'Failed to retrieve appointments roster.' });
     }
   });
@@ -420,6 +428,21 @@ await logAudit(connection, {
 
       await connection.query(`UPDATE APPOINTMENTS SET status = 'completed' WHERE appointment_id = ?`, [appointmentId]);
       await connection.query(`UPDATE QUEUE SET status = 'done', served_at = CURRENT_TIMESTAMP WHERE appointment_id = ?`, [appointmentId]);
+
+      await logAudit(connection, {
+        userId: doctorUserId,
+        action: 'CREATE',
+        table: 'EMR_RECORDS',
+        recordId: emrId,
+        oldValue: null,
+        newValue: {
+          patient_user_id,
+          appointment_id: appointmentId,
+          vitals_logged: vitals ? Object.keys(vitals) : [],
+          encrypted: true,
+        },
+        ipAddress: req.ip,
+      });
 
       await connection.commit();
 
@@ -582,13 +605,24 @@ await logAudit(connection, {
     }
   });
 
-  // 12. PATCH /api/appointments/queue/:id/status
+// 12. PATCH /api/appointments/queue/:id/status
   router.patch('/queue/:id/status', authenticateToken, async (req, res) => {
     try {
       const queueId = req.params.id;
       const { status } = req.body;
 
       await pool.query('UPDATE QUEUE SET status = ? WHERE queue_id = ?', [status, queueId]);
+
+      // When the nurse calls 'in-consultation', automatically sync the linked appointment to 'serving'
+      if (status === 'in-consultation') {
+        const [qRow] = await pool.query('SELECT appointment_id FROM QUEUE WHERE queue_id = ?', [queueId]);
+        if (qRow.length > 0 && qRow[0].appointment_id) {
+          await pool.query("UPDATE APPOINTMENTS SET status = 'serving' WHERE appointment_id = ?", [qRow[0].appointment_id]);
+          if (io) {
+            io.emit('appointment:status_changed', { appointmentId: qRow[0].appointment_id, status: 'serving' });
+          }
+        }
+      }
 
       if (io) {
         io.emit('queue:updated');
@@ -599,13 +633,12 @@ await logAudit(connection, {
       res.status(500).json({ error: 'Failed to update queue status.' });
     }
   });
-
-  // 13. GET /api/appointments/patient/:userId/history (CORRECTED ORDER & DECRYPTED)
+  
+  // 13. GET /api/appointments/patient/:userId/history
   router.get('/patient/:userId/history', authenticateToken, async (req, res) => {
     try {
       const { userId } = req.params;
 
-      // 1. Fetch encrypted encounters from MySQL
       const [history] = await pool.query(
         `SELECT e.emr_id, e.encounter_date, e.chief_complaint, e.diagnosis, e.treatment_plan, e.notes,
                 doc.first_name as doctor_first_name, doc.last_name as doctor_last_name,
@@ -625,7 +658,6 @@ await logAudit(connection, {
         [userId]
       );
 
-      // 2. Decrypt clinical PHI with AES-256
       const decryptedHistory = history.map((item) => ({
         ...item,
         chief_complaint: decrypt(item.chief_complaint),
@@ -634,17 +666,15 @@ await logAudit(connection, {
         notes: decrypt(item.notes),
       }));
 
-      // 3. Log PHI read access for clinical accountability
       logPhiAccess({
         viewerUserId: req.user.user_id,
-        patientUserId: userId,
+        patientUserId: Number(userId),
         table: 'EMR_RECORDS',
-        recordId: userId,
+        recordId: Number(userId),
         purpose: 'Clinical Encounter History Review',
         ipAddress: req.ip,
       });
 
-      // 4. Return the decrypted medical encounters
       res.json(decryptedHistory);
     } catch (error) {
       console.error('Failed to retrieve patient EMR history:', error);

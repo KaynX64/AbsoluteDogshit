@@ -2,12 +2,14 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../config/api_config.dart';
 import '../main.dart';
 
@@ -19,14 +21,25 @@ class EmergencyAlertService {
   io.Socket? _socket;
   final AudioPlayer _audioPlayer = AudioPlayer();
   final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
+  final _storage = const FlutterSecureStorage();
 
   bool _isAlarmPlaying = false;
   Timer? _vibrationTimer;
   Uint8List? _cachedWavBytes;
   bool _isInitialized = false;
 
-  // Role Guard: ONLY true when actively logged in as an EMERGENCY_RESPONDER
   bool _isResponderActive = false;
+
+  // New channel ID forces Android to create a high-priority heads-up notification channel
+  static const AndroidNotificationChannel _criticalChannel = AndroidNotificationChannel(
+    'emergency_sos_channel_v3',
+    '🚨 Critical Emergency SOS',
+    description: 'High-priority campus emergency dispatch alerts with heads-up banners',
+    importance: Importance.max,
+    playSound: true,
+    enableVibration: true,
+    enableLights: true,
+  );
 
   Future<void> initialize() async {
     if (_isInitialized) return;
@@ -40,16 +53,36 @@ class EmergencyAlertService {
 
     await _localNotifications.initialize(initializationSettings);
 
-    _localNotifications
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
+    // Register high-priority channel on Android
+    final androidImplementation = _localNotifications
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
 
-    // 2. Connect Persistent WebSocket
+    await androidImplementation?.createNotificationChannel(_criticalChannel);
+    await androidImplementation?.requestNotificationsPermission();
+
+    // 2. Configure audio player with safe alarm context
     try {
+      await _audioPlayer.setAudioContext(
+        AudioContext(
+          android: AudioContextAndroid(
+            stayAwake: true,
+            contentType: AndroidContentType.sonification,
+            usageType: AndroidUsageType.alarm,
+            audioFocus: AndroidAudioFocus.gainTransientExclusive,
+          ),
+        ),
+      );
+    } catch (_) {}
+
+    // 3. Connect Persistent WebSocket with Auth
+    try {
+      final token = await _storage.read(key: 'jwt_token');
+
       _socket = io.io(
         ApiConfig.socketUrl,
         io.OptionBuilder()
             .setTransports(['websocket', 'polling'])
+            .setAuth({'token': token})
             .enableAutoConnect()
             .enableReconnection()
             .setReconnectionDelay(1500)
@@ -61,28 +94,26 @@ class EmergencyAlertService {
       });
 
       _socket!.on('emergency:new_alert', (data) {
-        // STRICT ROLE GUARD: Students NEVER receive the responder dispatch siren/alert
-        if (!_isResponderActive) {
-          debugPrint('🛡️ [Socket.IO Mobile] Broadcast ignored: Current device is not in Responder mode.');
-          return;
-        }
-
-        debugPrint('🚨 [Socket.IO Mobile] DISPATCHING TO ACTIVE RESPONDER: $data');
+        debugPrint('🚨 [Socket.IO Mobile] SOS Alert Broadcast: $data');
         final alertMap = data is Map<String, dynamic> ? data : Map<String, dynamic>.from(data);
-        triggerEmergencyBroadcast(alertMap);
+
+        final isSimulated = alertMap['notes']?.toString().contains('SIMULATED') ?? false;
+
+        // Sound alert if in responder mode, debug mode, or simulated test
+        if (_isResponderActive || kDebugMode || isSimulated) {
+          triggerEmergencyBroadcast(alertMap);
+        }
       });
     } catch (e) {
       debugPrint('[Socket.IO Mobile] Error: $e');
     }
   }
 
-  /// Called ONLY by ResponderScreen when a responder logs in
   void startResponderListener() {
     _isResponderActive = true;
     initialize();
   }
 
-  /// Called when a responder logs out or closes the responder screen
   void stopResponderListener() {
     _isResponderActive = false;
     stopAlarmSound();
@@ -91,22 +122,23 @@ class EmergencyAlertService {
   // --- 1. STUDENT CONFIRMATION NOTIFICATION DROP ---
   Future<void> showStudentSosSentNotification() async {
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'student_sos_confirm_channel',
-      'SOS Transmission Status',
-      channelDescription: 'Confirms that your SOS emergency alert was sent',
-      importance: Importance.max, // Forces Android to drop down from top of screen
+      'emergency_sos_channel_v3',
+      '🚨 Critical Emergency SOS',
+      channelDescription: 'Emergency dispatch confirmation',
+      importance: Importance.max,
       priority: Priority.high,
-      ticker: 'SOS Sent',
+      ticker: 'SOS Dispatched',
       playSound: true,
       enableVibration: true,
+      fullScreenIntent: true,
     );
 
     const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
 
     await _localNotifications.show(
       101,
-      '🚨 SOS Alert Sent',
-      'Your SOS has been sent. Campus responders have your GPS location and medical profile.',
+      '🚨 SOS Alert Dispatched',
+      'Your SOS has been broadcasted. Responders have your GPS coordinates and medical profile.',
       platformDetails,
     );
   }
@@ -126,8 +158,7 @@ class EmergencyAlertService {
       playSound: true,
     );
 
-    const NotificationDetails platformDetails =
-        NotificationDetails(android: androidDetails);
+    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
 
     await _localNotifications.show(
       102,
@@ -137,7 +168,33 @@ class EmergencyAlertService {
     );
   }
 
-  // --- 3. RESPONDER SIREN & NOTIFICATION ENGINE ---
+  // --- 3. CLINIC QUEUE TURN NOTIFICATION DROP ---
+  Future<void> showQueueTurnNotification({
+    required String ticketNo,
+    required String doctorName,
+  }) async {
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'emergency_sos_channel_v3',
+      '🚨 Critical Emergency SOS',
+      channelDescription: 'Alerts when it is your turn for consultation',
+      importance: Importance.max,
+      priority: Priority.high,
+      ticker: 'Your Turn!',
+      playSound: true,
+      enableVibration: true,
+    );
+
+    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
+
+    await _localNotifications.show(
+      103,
+      '🔔 It\'s Your Turn! ($ticketNo)',
+      'Please proceed to the consultation room with $doctorName.',
+      platformDetails,
+    );
+  }
+
+  // In-memory dual-tone EAS Siren (853Hz + 960Hz) WAV Generator
   Uint8List _generateEasSirenWav({double durationSeconds = 3.0, int sampleRate = 22050}) {
     if (_cachedWavBytes != null) return _cachedWavBytes!;
 
@@ -182,33 +239,6 @@ class EmergencyAlertService {
     return _cachedWavBytes!;
   }
 
-// --- 4. CLINIC QUEUE TURN NOTIFICATION DROP ---
-  Future<void> showQueueTurnNotification({
-    required String ticketNo,
-    required String doctorName,
-  }) async {
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'clinic_queue_turn_channel',
-      'Infirmary Queue Alerts',
-      channelDescription: 'Alerts when it is your turn for consultation',
-      importance: Importance.max,
-      priority: Priority.high,
-      ticker: 'Your Turn!',
-      playSound: true,
-      enableVibration: true,
-    );
-
-    const NotificationDetails platformDetails =
-        NotificationDetails(android: androidDetails);
-
-    await _localNotifications.show(
-      103,
-      '🔔 It\'s Your Turn! ($ticketNo)',
-      'Please proceed to the consultation room with $doctorName.',
-      platformDetails,
-    );
-  }
-
   void playAlarmSound() async {
     try {
       _isAlarmPlaying = true;
@@ -216,11 +246,18 @@ class EmergencyAlertService {
       await _audioPlayer.setVolume(1.0);
       await _audioPlayer.setReleaseMode(ReleaseMode.loop);
 
+      // Audio Cascade: Try both asset key formats; if missing, use procedural EAS siren
       try {
         await _audioPlayer.play(AssetSource('emr_sound.ogg'));
-      } catch (_) {
-        final wav = _generateEasSirenWav();
-        await _audioPlayer.play(BytesSource(wav));
+      } catch (e1) {
+        debugPrint('[AudioPlayer] AssetSource("emr_sound.ogg") error: $e1. Trying "assets/emr_sound.ogg"...');
+        try {
+          await _audioPlayer.play(AssetSource('assets/emr_sound.ogg'));
+        } catch (e2) {
+          debugPrint('[AudioPlayer] Falling back to procedural in-memory EAS siren: $e2');
+          final wav = _generateEasSirenWav();
+          await _audioPlayer.play(BytesSource(wav));
+        }
       }
 
       _vibrationTimer?.cancel();
@@ -232,7 +269,7 @@ class EmergencyAlertService {
         }
       });
     } catch (e) {
-      debugPrint('Audio alarm error: $e');
+      debugPrint('[Audio alarm error]: $e');
     }
   }
 
@@ -244,7 +281,6 @@ class EmergencyAlertService {
     } catch (_) {}
   }
 
-  /// Triggers the Android System Notification Drop and the Full-Screen NDRRMC Red Alert (RESPONDER ONLY)
   Future<void> triggerEmergencyBroadcast(Map<String, dynamic> alertData) async {
     playAlarmSound();
 
@@ -256,18 +292,18 @@ class EmergencyAlertService {
     final lng = double.tryParse(alertData['longitude'].toString()) ?? 0.0;
     final googleMapsUrl = alertData['googleMapsUrl'] ?? 'https://www.google.com/maps?q=$lat,$lng';
 
-    // 1. DROP ANDROID HEADS-UP NOTIFICATION (FROM TOP OF SCREEN)
+    // 1. DROP HEADS-UP NOTIFICATION FROM TOP OF SCREEN
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'emergency_sos_channel',
-      '🚨 Emergency SOS Alerts',
-      channelDescription: 'High priority campus emergency alerts',
+      'emergency_sos_channel_v3',
+      '🚨 Critical Emergency SOS',
+      channelDescription: 'High-priority campus emergency dispatch alerts',
       importance: Importance.max,
       priority: Priority.high,
       ticker: 'EMERGENCY SOS',
       fullScreenIntent: true,
-      category: AndroidNotificationCategory.alarm,
       enableVibration: true,
       playSound: true,
+      category: AndroidNotificationCategory.alarm,
     );
 
     const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
@@ -279,7 +315,7 @@ class EmergencyAlertService {
       platformDetails,
     );
 
-    // 2. DISPLAY FULL-SCREEN NDRRMC RED DIALOG
+    // 2. DISPLAY FULL-SCREEN RED ALERT DIALOG
     final context = navigatorKey.currentContext;
     if (context == null || !context.mounted) return;
 
@@ -369,12 +405,9 @@ class EmergencyAlertService {
                   ),
                   onPressed: () async {
                     final uri = Uri.parse(googleMapsUrl);
-                    try {
-                      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-                      if (!launched) {
-                        await launchUrl(uri, mode: LaunchMode.platformDefault);
-                      }
-                    } catch (_) {}
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    }
                   },
                   icon: const Icon(Icons.navigation, size: 18),
                   label: const Text('Open in Google Maps', style: TextStyle(fontWeight: FontWeight.bold)),

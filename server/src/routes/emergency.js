@@ -130,7 +130,8 @@ export default function emergencyRouter(io) {
         params
       );
 
-      io.emit('emergency:status_change', { alertId: Number(alertId), status, responderId });
+      // Broadcast emergency alert to all connected clinic consoles and responders
+      io.emit('emergency:new_alert', alertPayload);
 
       res.json({ message: `Alert #${alertId} updated to ${status}.` });
     } catch (error) {

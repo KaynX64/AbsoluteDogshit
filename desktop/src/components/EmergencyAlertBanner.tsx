@@ -93,8 +93,8 @@ export default function EmergencyAlertBanner() {
     socket.on('emergency:status_change', ({ alertId, status }: { alertId: number; status: string }) => {
       setAlerts((prev) =>
         prev
-          .map((a) => (a.alertId === alertId ? { ...a, status } : a))
-          .filter((a) => a.status !== 'resolved' && a.status !== 'false_alarm')
+          .map((a) => (Number(a.alertId) === Number(alertId) ? { ...a, status } : a))
+          .filter((a) => (status !== 'resolved' && status !== 'false_alarm' ? true : Number(a.alertId) !== Number(alertId)))
       );
     });
 

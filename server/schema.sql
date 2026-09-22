@@ -387,13 +387,22 @@ INSERT INTO `USER_ROLES` (`user_id`, `role_id`) VALUES
 INSERT INTO `STUDENT_PROFILES` (`user_id`, `student_no`, `course`, `year_level`) VALUES
 (5, '22-LN-0123', 'BS Information Technology', 3);
 
+-- Staff profiles for Admin, Doctor, Nurse, Responder, and Dentist
 INSERT INTO `STAFF_PROFILES` (`user_id`, `license_no`, `specialty`, `department`) VALUES
+(1, 'PSU-IT-ADMIN', 'Systems & Database Administration', 'PSU Management Information Systems'),
 (2, 'PRC-MD-098765', 'General Medicine', 'PSU Lingayen Clinic'),
 (3, 'PRC-RN-054321', 'Emergency & Triage Nursing', 'PSU Lingayen Clinic'),
+(4, 'PSU-SEC-0042', 'Campus Security & Disaster Quick-Response', 'Campus Safety & Emergency Unit'),
 (6, 'PRC-DDS-045678', 'Dentistry & Oral Health', 'PSU Lingayen Clinic');
 
-INSERT INTO `HEALTH_PROFILES` (`user_id`, `blood_type`, `allergies`, `chronic_conditions`, `emergency_contact_name`, `emergency_contact_phone`, `height`, `weight`) VALUES
-(5, 'O+', 'Penicillin', 'Mild Asthma', 'Maria Movida', '09299876543', 162.50, 54.00);
+-- Complete health profiles for all accounts (Admin, Doctor, Nurse, Responder, Student, Dentist)
+INSERT INTO `HEALTH_PROFILES` (`user_id`, `blood_type`, `allergies`, `chronic_conditions`, `emergency_contact_name`, `emergency_contact_phone`, `height`, `weight`, `immunization_history`) VALUES
+(1, 'O+', 'None', 'None', 'Maria Castro', '09171112233', 175.00, 72.00, '["COVID-19 Booster", "Hepatitis B"]'),
+(2, 'A+', 'None', 'Hypertension (Controlled)', 'Elena Mata', '09182223344', 170.00, 68.00, '["COVID-19 Booster", "Influenza 2026", "Hepatitis B"]'),
+(3, 'B+', 'Aspirin', 'None', 'Grace Arenas', '09193334455', 160.00, 52.00, '["COVID-19 Booster", "Tetanus Toxoid"]'),
+(4, 'O-', 'None', 'None', 'Mark Cerezo', '09204445566', 178.00, 75.00, '["COVID-19 Booster", "Rabies", "Hepatitis B"]'),
+(5, 'O+', 'Penicillin', 'Mild Asthma', 'Maria Movida', '09299876543', 162.50, 54.00, '["COVID-19 Primary & Booster", "Tetanus Toxoid"]'),
+(6, 'AB+', 'None', 'None', 'Jose Reyes', '09225556677', 165.00, 58.00, '["COVID-19 Booster", "Hepatitis B"]');
 
 INSERT INTO `AUDIT_LOGS` (`user_id`, `action`, `table_affected`, `record_id`, `prev_hash`, `entry_hash`, `ip_address`) VALUES
 (1, 'CREATE', 'SYSTEM_INITIALIZATION', 1, 
@@ -411,6 +420,12 @@ INSERT INTO `MEDICINE_BATCHES` (`batch_id`, `medicine_id`, `batch_no`, `manufact
 (2, 2, 'BATCH-NZP-2026B', '2026-02-15', '2027-08-15', 'Unilab Philippines', 150),
 (3, 3, 'BATCH-SLB-2025X', '2025-06-01', '2027-06-01', 'GlaxoSmithKline', 15);
 
-INSERT INTO `CONSENT_RECORDS` (`user_id`, `consent_type`, `is_granted`, `ip_address`)
-VALUES (5, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1')
+-- Pre-seed R.A. 10173 statutory consent for all system users
+INSERT INTO `CONSENT_RECORDS` (`user_id`, `consent_type`, `is_granted`, `ip_address`) VALUES
+(1, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
+(2, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
+(3, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
+(4, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
+(5, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
+(6, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1')
 ON DUPLICATE KEY UPDATE `is_granted` = TRUE;

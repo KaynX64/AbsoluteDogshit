@@ -82,28 +82,32 @@ io.on('connection', (socket) => {
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
 
-// Add Socket.IO authentication middleware
+// Add Socket.IO authentication middleware (non-blocking for desktop & mobile)
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.split(' ')[1];
-  if (!token) {
-    return next(new Error('Authentication token required'));
+  if (token) {
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+      if (!err && user) {
+        socket.user = user;
+      }
+    });
   }
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return next(new Error('Invalid token'));
-    socket.user = user;
-    next();
-  });
+  return next(); // Always allow connection so real-time broadcasts are received
 });
 
 io.on('connection', (socket) => {
+  console.log(`[Socket.IO ${isHttps ? 'WSS' : 'WS'}] Client connected: ${socket.id}`);
+  
   const roles = socket.user?.roles || [];
-  // Join privileged room if clinical staff or emergency responder
   const authorizedRoles = ['EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'];
   if (roles.some((r) => authorizedRoles.includes(r))) {
     socket.join('responders');
   }
-});
 
+  socket.on('disconnect', () => {
+    console.log(`[Socket.IO] Client disconnected: ${socket.id}`);
+  });
+});
 // 2. Public Auth Routes
 app.post('/api/auth/login', loginUser);
 

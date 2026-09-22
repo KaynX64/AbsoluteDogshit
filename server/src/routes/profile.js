@@ -8,13 +8,69 @@ import { requirePrivacyConsent } from '../middleware/consent.js';
 
 const router = express.Router();
 
-// GET /api/profile/me
-// server/src/routes/profile.js
+// GET /api/profile/me - Dynamically retrieves patient demographics & clinical profile
+router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => {
+  try {
+    const userId = req.user.user_id;
+
+    // 1. Fetch user info dynamically joined with role-extension tables
+    const [userRows] = await pool.query(
+      `SELECT u.user_id, u.email, u.first_name, u.last_name, u.phone,
+              sp.student_no, sp.course, sp.year_level,
+              st.license_no, st.specialty,
+              COALESCE(st.department, fp.department, sp.course, 'PSU Lingayen Clinic') AS department,
+              fp.position
+       FROM USERS u
+       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+       LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
+       LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
+       WHERE u.user_id = ? AND u.deleted_at IS NULL`,
+      [userId]
+    );
+
+    if (userRows.length === 0) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    // 2. Fetch clinical profile directly from MySQL HEALTH_PROFILES table
+    const [healthRows] = await pool.query(
+      `SELECT profile_id, blood_type, allergies, chronic_conditions, immunization_history,
+              emergency_contact_name, emergency_contact_phone, height, weight, updated_at
+       FROM HEALTH_PROFILES
+       WHERE user_id = ? AND deleted_at IS NULL`,
+      [userId]
+    );
+
+    let healthProfile = healthRows.length > 0 ? healthRows[0] : null;
+
+    if (healthProfile) {
+      // Decrypt sensitive medical indicators stored under AES-256
+      healthProfile.allergies = decrypt(healthProfile.allergies);
+      healthProfile.chronic_conditions = decrypt(healthProfile.chronic_conditions);
+    }
+
+    res.json({
+      user: userRows[0],
+      healthProfile,
+    });
+  } catch (error) {
+    console.error('[Profile API Error]:', error);
+    res.status(500).json({ error: 'Failed to retrieve profile data from database.' });
+  }
+});
+
+// PUT /api/profile/me - Dynamically persists updates to MySQL
 router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => {
   const userId = req.user.user_id;
   const {
-    blood_type, allergies, chronic_conditions,
-    emergency_contact_name, emergency_contact_phone, height, weight, phone
+    phone,
+    blood_type,
+    allergies,
+    chronic_conditions,
+    emergency_contact_name,
+    emergency_contact_phone,
+    height,
+    weight,
   } = req.body;
 
   const connection = await pool.getConnection();
@@ -22,33 +78,33 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
   try {
     await connection.beginTransaction();
 
-    // 1. Update phone on USERS table if provided
-    if (phone !== undefined) {
-      await connection.query('UPDATE USERS SET phone = ? WHERE user_id = ?', [phone, userId]);
+    // 1. Update personal phone on USERS table if provided
+    if (phone !== undefined && phone !== null) {
+      await connection.query('UPDATE USERS SET phone = ? WHERE user_id = ?', [phone.trim(), userId]);
     }
 
+    // 2. Fetch current record to prevent wiping untouched fields
     const [existing] = await connection.query(
       'SELECT * FROM HEALTH_PROFILES WHERE user_id = ? FOR UPDATE',
       [userId]
     );
 
-    let oldData = null;
     let action = 'CREATE';
     let recordId = null;
 
     if (existing.length > 0) {
-      oldData = { ...existing[0] };
+      const old = existing[0];
       action = 'UPDATE';
-      recordId = oldData.profile_id;
+      recordId = old.profile_id;
 
-      // Preserve existing encrypted data if not explicitly provided in the payload
-      const finalAllergies = allergies !== undefined ? encrypt(allergies) : oldData.allergies;
-      const finalConditions = chronic_conditions !== undefined ? encrypt(chronic_conditions) : oldData.chronic_conditions;
-      const finalBloodType = blood_type !== undefined ? blood_type : oldData.blood_type;
-      const finalEmName = emergency_contact_name !== undefined ? emergency_contact_name : oldData.emergency_contact_name;
-      const finalEmPhone = emergency_contact_phone !== undefined ? emergency_contact_phone : oldData.emergency_contact_phone;
-      const finalHeight = height !== undefined ? height : oldData.height;
-      const finalWeight = weight !== undefined ? weight : oldData.weight;
+      // Preserve existing DB values if not supplied in this request
+      const updatedBlood = blood_type !== undefined ? blood_type : old.blood_type;
+      const updatedAllergies = allergies !== undefined ? encrypt(allergies) : old.allergies;
+      const updatedConditions = chronic_conditions !== undefined ? encrypt(chronic_conditions) : old.chronic_conditions;
+      const updatedEmName = emergency_contact_name !== undefined ? emergency_contact_name : old.emergency_contact_name;
+      const updatedEmPhone = emergency_contact_phone !== undefined ? emergency_contact_phone : old.emergency_contact_phone;
+      const updatedHeight = height !== undefined ? height : old.height;
+      const updatedWeight = weight !== undefined ? weight : old.weight;
 
       await connection.query(
         `UPDATE HEALTH_PROFILES 
@@ -56,7 +112,7 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
              emergency_contact_name = ?, emergency_contact_phone = ?,
              height = ?, weight = ?, version = version + 1
          WHERE user_id = ?`,
-        [finalBloodType, finalAllergies, finalConditions, finalEmName, finalEmPhone, finalHeight, finalWeight, userId]
+        [updatedBlood, updatedAllergies, updatedConditions, updatedEmName, updatedEmPhone, updatedHeight, updatedWeight, userId]
       );
     } else {
       const [result] = await connection.query(
@@ -66,8 +122,8 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
         [
           userId,
           blood_type || null,
-          encrypt(allergies || ''),
-          encrypt(chronic_conditions || ''),
+          allergies ? encrypt(allergies) : null,
+          chronic_conditions ? encrypt(chronic_conditions) : null,
           emergency_contact_name || null,
           emergency_contact_phone || null,
           height || null,
@@ -77,22 +133,23 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
       recordId = result.insertId;
     }
 
+    // 3. Cryptographic audit log (R.A. 10173 compliance)
     await logAudit(connection, {
       userId: req.user.user_id,
       action,
       table: 'HEALTH_PROFILES',
       recordId,
       oldValue: null,
-      newValue: { blood_type, height, weight, encrypted: true },
+      newValue: { blood_type, height, weight, emergency_contact_name, encrypted: true },
       ipAddress: req.ip,
     });
 
     await connection.commit();
-    res.json({ message: 'Health profile encrypted & saved successfully.' });
+    res.json({ message: 'Profile updated in database successfully.' });
   } catch (error) {
     await connection.rollback();
     console.error('[Profile Update Error]:', error);
-    res.status(500).json({ error: 'Failed to update health profile.' });
+    res.status(500).json({ error: 'Failed to update database record.' });
   } finally {
     connection.release();
   }

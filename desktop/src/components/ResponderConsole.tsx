@@ -6,8 +6,8 @@ export default function ResponderConsole() {
   const [activeAlerts, setActiveAlerts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const fetchAlerts = async () => {
-    setLoading(true);
+  const fetchAlerts = async (silent = false) => {
+    if (!silent) setLoading(true);
     const token = localStorage.getItem('valetudo_token');
     try {
       const res = await fetch('https://localhost:5000/api/emergency/active', {
@@ -20,23 +20,60 @@ export default function ResponderConsole() {
     } catch (err) {
       console.error('Failed to fetch alerts:', err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchAlerts();
+    fetchAlerts(false);
 
-    const socket = io('https://localhost:5000');
-    socket.on('emergency:new_alert', () => fetchAlerts());
-    socket.on('emergency:status_change', () => fetchAlerts());
+    const token = localStorage.getItem('valetudo_token');
+    const socket = io('https://localhost:5000', {
+      auth: { token },
+      transports: ['websocket', 'polling'],
+    });
+
+    // 1. Listen for new emergencies in real time
+    socket.on('emergency:new_alert', () => {
+      fetchAlerts(true);
+    });
+
+    // 2. Real-time update when status is changed from mobile (or another console)
+    socket.on('emergency:status_change', (data: { alertId: number; status: string }) => {
+      setActiveAlerts((prev) => {
+        if (data.status === 'resolved' || data.status === 'false_alarm') {
+          // Instantly remove resolved/false alarm incidents
+          return prev.filter((a) => Number(a.alert_id) !== Number(data.alertId));
+        } else {
+          // Update status in place
+          return prev.map((a) =>
+            Number(a.alert_id) === Number(data.alertId) ? { ...a, status: data.status } : a
+          );
+        }
+      });
+      // Silent sync from server
+      fetchAlerts(true);
+    });
+
+    // 3. Silent 3-second heartbeat to guarantee zero-refresh sync under all conditions
+    const interval = setInterval(() => {
+      fetchAlerts(true);
+    }, 3000);
 
     return () => {
+      clearInterval(interval);
       socket.disconnect();
     };
   }, []);
 
+  // Instant optimistic update for clicks directly on this console
   const updateStatus = async (alertId: number, status: string) => {
+    setActiveAlerts((prev) =>
+      prev
+        .map((a) => (Number(a.alert_id) === Number(alertId) ? { ...a, status } : a))
+        .filter((a) => (status === 'resolved' || status === 'false_alarm' ? Number(a.alert_id) !== Number(alertId) : true))
+    );
+
     const token = localStorage.getItem('valetudo_token');
     try {
       await fetch(`https://localhost:5000/api/emergency/${alertId}/status`, {
@@ -44,9 +81,10 @@ export default function ResponderConsole() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ status }),
       });
-      fetchAlerts();
+      fetchAlerts(true);
     } catch (err) {
       alert('Failed to update status');
+      fetchAlerts(true);
     }
   };
 
@@ -59,18 +97,18 @@ export default function ResponderConsole() {
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <span style={{ background: '#fee2e2', color: '#dc2626', padding: '4px 10px', borderRadius: 4, fontWeight: 'bold', fontSize: 12 }}>
-            Dispatch: LIVE ON-DUTY
+            Dispatch: LIVE ON-DUTY (AUTO-SYNCING)
           </span>
           <button
-            onClick={fetchAlerts}
+            onClick={() => fetchAlerts(false)}
             style={{ padding: '4px 10px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
           >
-            🔄 Refresh
+            🔄 Manual Refresh
           </button>
         </div>
       </div>
 
-      {loading ? (
+      {loading && activeAlerts.length === 0 ? (
         <p style={{ color: '#64748b', fontSize: 13 }}>Checking dispatch telemetry...</p>
       ) : activeAlerts.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '30px 0', color: '#16a34a', background: '#f0fdf4', borderRadius: 6 }}>
@@ -102,7 +140,7 @@ export default function ResponderConsole() {
                 </div>
                 <div style={{ fontSize: 13, color: '#334155', marginTop: 4 }}>
                   <b>Blood Type:</b> {a.blood_type || 'Unknown'} | <b>Allergies:</b>{' '}
-                  <span style={{ color: a.allergies ? '#dc2626' : '#16a34a', fontWeight: 'bold' }}>
+                  <span style={{ color: a.allergies && a.allergies !== 'None' ? '#dc2626' : '#16a34a', fontWeight: 'bold' }}>
                     {a.allergies || 'None listed'}
                   </span>
                 </div>
@@ -142,6 +180,12 @@ export default function ResponderConsole() {
                   style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
                 >
                   Resolve
+                </button>
+                <button
+                  onClick={() => updateStatus(a.alert_id, 'false_alarm')}
+                  style={{ background: '#6b7280', color: '#fff', border: 'none', padding: '6px 10px', borderRadius: 4, cursor: 'pointer' }}
+                >
+                  False Alarm
                 </button>
               </div>
             </div>

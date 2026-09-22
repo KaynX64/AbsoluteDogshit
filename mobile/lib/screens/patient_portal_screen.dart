@@ -38,12 +38,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
 
   // Privacy & Consent State (R.A. 10173)
   bool _hasConsented = false;
-  Map<String, dynamic>? _consentDetails;
-  bool _isCheckingConsent = false;
 
   // Live Queue Ticket State
   Map<String, dynamic>? _activeQueueTicket;
-  bool _loadingQueue = false;
   Timer? _queuePollingTimer;
   io.Socket? _socket;
   String _previousQueueStatus = '';
@@ -89,7 +86,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   // ===========================================================================
 
   Future<void> _checkPrivacyConsent() async {
-    setState(() => _isCheckingConsent = true);
     final token = await _storage.read(key: 'jwt_token');
 
     try {
@@ -105,7 +101,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         if (mounted) {
           setState(() {
             _hasConsented = consented;
-            _consentDetails = data['details'];
           });
 
           // Gatekeeper: If user has not consented, prompt immediately
@@ -115,8 +110,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         }
       }
     } catch (_) {}
-
-    if (mounted) setState(() => _isCheckingConsent = false);
   }
 
   Future<void> _recordConsent() async {
@@ -228,7 +221,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
             TextButton(
               onPressed: () async {
                 await _storage.deleteAll();
-                if (ctx.mounted) {
+                if (mounted) {
                   Navigator.pushAndRemoveUntil(
                     context,
                     MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -280,7 +273,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   Future<void> _fetchActiveQueueTicket({bool silent = false}) async {
-    if (!silent) setState(() => _loadingQueue = true);
     final token = await _storage.read(key: 'jwt_token');
 
     try {
@@ -312,8 +304,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         }
       }
     } catch (_) {}
-
-    if (!silent && mounted) setState(() => _loadingQueue = false);
   }
 
   Future<void> _fetchQRPass() async {
@@ -347,7 +337,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   // ===========================================================================
-  // 3. CAMPUS EMERGENCY SOS LOGIC
+  // 3. CAMPUS EMERGENCY SOS LOGIC (WITH ALARM SOUND + NOTIFICATION)
   // ===========================================================================
 
   void _startHold() {
@@ -428,8 +418,13 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
           _sosStatusMessage = 'EMERGENCY DISPATCHED!\nClinic and Response team alerted.';
         });
 
+        // 1. Play local alarm siren on student's phone
+        EmergencyAlertService().playAlarmSound();
+
+        // 2. Drop Android Notification from the top of the screen
         EmergencyAlertService().showStudentSosSentNotification();
 
+        // 3. Show Active SOS Dialog
         if (mounted) {
           _showEmergencyDialog();
         }
@@ -457,8 +452,12 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         actions: [
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('I Understand'),
+            onPressed: () {
+              // Silences the audible alarm and dismisses dialog
+              EmergencyAlertService().stopAlarmSound();
+              Navigator.pop(ctx);
+            },
+            child: const Text('I Understand (Silence Siren)'),
           )
         ],
       ),
@@ -466,8 +465,19 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   // ===========================================================================
-  // 4. MAIN BUILD METHOD WITH 15-MIN SESSION TIMEOUT LISTENER
+  // 4. LOGOUT & MAIN BUILD METHOD (WITH 15-MIN SESSION TIMEOUT LISTENER)
   // ===========================================================================
+
+  Future<void> _handleSignOut() async {
+    await _storage.delete(key: 'jwt_token');
+    await _storage.delete(key: 'user_data');
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -496,15 +506,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
             IconButton(
               icon: const Icon(Icons.logout),
               tooltip: 'Sign Out',
-              onPressed: () async {
-                await _storage.delete(key: 'jwt_token');
-                await _storage.delete(key: 'user_data');
-                if (!context.mounted) return;
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (_) => const LoginScreen()),
-                );
-              },
+              onPressed: _handleSignOut,
             )
           ],
         ),
