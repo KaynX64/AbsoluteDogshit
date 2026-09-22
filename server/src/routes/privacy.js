@@ -94,8 +94,8 @@ router.get('/status', authenticateToken, async (req, res) => {
     );
 
     res.json({
-      hasConsented: rows.length > 0 && rows[0].is_granted === 1,
-      details: rows[0] || null,
+  hasConsented: rows.length > 0 && Boolean(rows[0].is_granted),
+  details: rows[0] || null,
     });
   } catch (error) {
     console.error('[Privacy] Status check error:', error);
@@ -196,10 +196,18 @@ router.post('/retention/sweep', authenticateToken, requireRoles('ADMIN'), async 
          AND deleted_at IS NULL`
     );
 
+    const [clrResult] = await connection.query(
+  `UPDATE MEDICAL_CLEARANCES 
+   SET status = 'expired', deleted_at = CURRENT_TIMESTAMP 
+   WHERE expires_at < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
+     AND deleted_at IS NULL`
+);
+
     const totalPurged =
       (emrResult.affectedRows || 0) +
-      (appResult.affectedRows || 0) +
-      (rxResult.affectedRows || 0);
+  (appResult.affectedRows || 0) +
+  (rxResult.affectedRows || 0) +
+  (clrResult.affectedRows || 0);
 
     await logAudit(connection, {
       userId: req.user.user_id,

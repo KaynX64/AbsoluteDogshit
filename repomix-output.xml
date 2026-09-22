@@ -123,6 +123,22 @@ docker-compose.yml
 <files>
 This section contains the contents of the repository's files.
 
+<file path="desktop/src/electron.d.ts">
+// desktop/src/electron.d.ts
+export {};
+
+declare global {
+  interface ElectronAPI {
+    printDocument: (options: { htmlContent: string }) => Promise<{ success: boolean; error?: string }>;
+    showNotification: (options: { title: string; body: string }) => Promise<{ success: boolean; error?: string }>;
+  }
+
+  interface Window {
+    electronAPI?: ElectronAPI;
+  }
+}
+</file>
+
 <file path="mobile/lib/widgets/session_timeout_listener.dart">
 // mobile/lib/widgets/session_timeout_listener.dart
 import 'dart:async';
@@ -352,8 +368,8 @@ router.get('/status', authenticateToken, async (req, res) => {
     );
 
     res.json({
-      hasConsented: rows.length > 0 && rows[0].is_granted === 1,
-      details: rows[0] || null,
+  hasConsented: rows.length > 0 && Boolean(rows[0].is_granted),
+  details: rows[0] || null,
     });
   } catch (error) {
     console.error('[Privacy] Status check error:', error);
@@ -454,10 +470,18 @@ router.post('/retention/sweep', authenticateToken, requireRoles('ADMIN'), async 
          AND deleted_at IS NULL`
     );
 
+    const [clrResult] = await connection.query(
+  `UPDATE MEDICAL_CLEARANCES 
+   SET status = 'expired', deleted_at = CURRENT_TIMESTAMP 
+   WHERE expires_at < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
+     AND deleted_at IS NULL`
+);
+
     const totalPurged =
       (emrResult.affectedRows || 0) +
-      (appResult.affectedRows || 0) +
-      (rxResult.affectedRows || 0);
+  (appResult.affectedRows || 0) +
+  (rxResult.affectedRows || 0) +
+  (clrResult.affectedRows || 0);
 
     await logAudit(connection, {
       userId: req.user.user_id,
@@ -563,22 +587,6 @@ export function decrypt(cipherText) {
   } catch (error) {
     console.error('[AES-256 Decryption Error]:', error.message);
     return '[ENCRYPTED PHI - INTEGRITY VERIFICATION FAILED]';
-  }
-}
-</file>
-
-<file path="desktop/src/electron.d.ts">
-// desktop/src/electron.d.ts
-export {};
-
-declare global {
-  interface ElectronAPI {
-    printDocument: (options: { htmlContent: string }) => Promise<{ success: boolean; error?: string }>;
-    showNotification: (options: { title: string; body: string }) => Promise<{ success: boolean; error?: string }>;
-  }
-
-  interface Window {
-    electronAPI?: ElectronAPI;
   }
 }
 </file>
@@ -1814,6 +1822,173 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 }
 </file>
 
+<file path="mobile/lib/services/.gitkeep">
+
+</file>
+
+<file path="mobile/lib/widgets/.gitkeep">
+
+</file>
+
+<file path="server/src/middleware/rbac.js">
+export function requireRoles(...allowedRoles) {
+  return (req, res, next) => {
+    if (!req.user || !req.user.roles) {
+      return res.status(403).json({ error: 'Access forbidden: No roles assigned.' });
+    }
+    const hasRole = req.user.roles.some((role) => allowedRoles.includes(role));
+    if (!hasRole) {
+      return res.status(403).json({ error: 'Access forbidden: Insufficient permissions.' });
+    }
+    next();
+  };
+}
+</file>
+
+<file path="server/src/utils/auditLogger.js">
+import crypto from 'crypto';
+
+export async function logAudit(connection, { userId, action, table, recordId, oldValue, newValue, ipAddress }) {
+  // 1. Lock and fetch the most recent hash to prevent branching in concurrent requests
+  const [lastLog] = await connection.query(
+    'SELECT entry_hash FROM AUDIT_LOGS ORDER BY audit_id DESC LIMIT 1 FOR UPDATE'
+  );
+  
+  // Fallback to 64 zeros if the Genesis block is somehow missing
+  const prevHash = lastLog.length > 0 ? lastLog[0].entry_hash : '0'.repeat(64);
+
+  // 2. Prepare JSON representations of the data changes
+  const oldValStr = oldValue ? JSON.stringify(oldValue) : null;
+  const newValStr = newValue ? JSON.stringify(newValue) : null;
+
+  // 3. Generate the cryptographic signature for RA 10173 tamper-proofing
+  const payload = `${prevHash}${action}${table}${recordId}${oldValStr || ''}${newValStr || ''}`;
+  const entryHash = crypto.createHash('sha256').update(payload).digest('hex');
+
+  // 4. Insert the immutable log into the chain
+  await connection.query(
+    `INSERT INTO AUDIT_LOGS 
+     (user_id, action, table_affected, record_id, old_value, new_value, ip_address, prev_hash, entry_hash)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [userId, action, table, recordId, oldValStr, newValStr, ipAddress || 'Unknown', prevHash, entryHash]
+  );
+}
+</file>
+
+<file path="mobile/lib/screens/login_screen.dart">
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../config/api_config.dart';
+import 'patient_portal_screen.dart';
+import 'responder_screen.dart'; // <-- IMPORTED HERE
+
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final _emailController = TextEditingController(text: 'student@psu.edu.ph');
+  final _passwordController = TextEditingController(text: 'Password123!');
+  final _storage = const FlutterSecureStorage();
+  bool _isLoading = false;
+  String _errorMessage = '';
+
+  Future<void> _handleLogin() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = '';
+    });
+
+    try {
+      final res = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/api/auth/login'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': _emailController.text.trim(),
+          'password': _passwordController.text.trim(),
+        }),
+      );
+
+      final data = jsonDecode(res.body);
+
+      if (res.statusCode == 200) {
+        // Save BOTH token and user profile into secure storage
+        await _storage.write(key: 'jwt_token', value: data['token']);
+        await _storage.write(key: 'user_data', value: jsonEncode(data['user']));
+
+        if (!mounted) return;
+
+        final List<dynamic> roles = data['user']['roles'] ?? [];
+
+        if (roles.contains('EMERGENCY_RESPONDER')) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => ResponderScreen(user: data['user'])),
+          );
+        } else {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => PatientPortalScreen(user: data['user'])),
+          );
+        }
+      } else {
+        setState(() => _errorMessage = data['error'] ?? 'Login failed');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _errorMessage = 'Unable to connect. Please try again.');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Valetudo HealthLink')),
+      body: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.local_hospital_rounded, size: 72, color: Colors.teal),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _emailController,
+              decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _passwordController,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 12),
+            if (_errorMessage.isNotEmpty) Text(_errorMessage, style: const TextStyle(color: Colors.red)),
+            const SizedBox(height: 12),
+            _isLoading
+                ? const CircularProgressIndicator()
+                : ElevatedButton(
+                    style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(50)),
+                    onPressed: _handleLogin,
+                    child: const Text('Sign In'),
+                  )
+          ],
+        ),
+      ),
+    );
+  }
+}
+</file>
+
 <file path="mobile/lib/screens/responder_screen.dart">
 // mobile/lib/screens/responder_screen.dart
 import 'dart:async';
@@ -2266,29 +2441,6 @@ _goToLogin();
       ),
     );
   }
-}
-</file>
-
-<file path="mobile/lib/services/.gitkeep">
-
-</file>
-
-<file path="mobile/lib/widgets/.gitkeep">
-
-</file>
-
-<file path="server/src/middleware/rbac.js">
-export function requireRoles(...allowedRoles) {
-  return (req, res, next) => {
-    if (!req.user || !req.user.roles) {
-      return res.status(403).json({ error: 'Access forbidden: No roles assigned.' });
-    }
-    const hasRole = req.user.roles.some((role) => allowedRoles.includes(role));
-    if (!hasRole) {
-      return res.status(403).json({ error: 'Access forbidden: Insufficient permissions.' });
-    }
-    next();
-  };
 }
 </file>
 
@@ -2883,7 +3035,8 @@ export default function emergencyRouter(io) {
         createdAt: new Date().toISOString(),
       };
 
-      io.emit('emergency:new_alert', alertPayload);
+      // Replace global broadcast with targeted room emit:
+      io.to('responders').emit('emergency:new_alert', alertPayload);
 
       res.status(201).json({
         message: 'Emergency alert dispatched to PSU Clinic and Quick-Response team.',
@@ -2963,34 +3116,74 @@ export default function emergencyRouter(io) {
 }
 </file>
 
-<file path="server/src/utils/auditLogger.js">
-import crypto from 'crypto';
+<file path="server/src/db.js">
+// server/src/db.js
+import mysql from 'mysql2/promise';
 
-export async function logAudit(connection, { userId, action, table, recordId, oldValue, newValue, ipAddress }) {
-  // 1. Lock and fetch the most recent hash to prevent branching in concurrent requests
-  const [lastLog] = await connection.query(
-    'SELECT entry_hash FROM AUDIT_LOGS ORDER BY audit_id DESC LIMIT 1 FOR SHARE'
-  );
-  
-  // Fallback to 64 zeros if the Genesis block is somehow missing
-  const prevHash = lastLog.length > 0 ? lastLog[0].entry_hash : '0'.repeat(64);
+export const pool = mysql.createPool({
+  host: 'localhost',
+  port: 3307,
+  user: 'root',
+  password: 'rootpassword',
+  database: 'valetudo_healthlink',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+});
+</file>
 
-  // 2. Prepare JSON representations of the data changes
-  const oldValStr = oldValue ? JSON.stringify(oldValue) : null;
-  const newValStr = newValue ? JSON.stringify(newValue) : null;
+<file path="docker-compose.yml">
+services:
+  # 1. MySQL 8.0 with Spatial Support
+  mysql:
+    image: mysql:8.0
+    container_name: valetudo-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: valetudo_healthlink
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
 
-  // 3. Generate the cryptographic signature for RA 10173 tamper-proofing
-  const payload = `${prevHash}${action}${table}${recordId}${oldValStr || ''}${newValStr || ''}`;
-  const entryHash = crypto.createHash('sha256').update(payload).digest('hex');
+  # 2. Redis Live Queue Cache
+  redis:
+    image: redis:7-alpine
+    container_name: valetudo-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
 
-  // 4. Insert the immutable log into the chain
-  await connection.query(
-    `INSERT INTO AUDIT_LOGS 
-     (user_id, action, table_affected, record_id, old_value, new_value, ip_address, prev_hash, entry_hash)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [userId, action, table, recordId, oldValStr, newValStr, ipAddress || 'Unknown', prevHash, entryHash]
-  );
-}
+  # 3. MinIO S3-Compatible Object Storage
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: valetudo-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web UI
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: miniopassword
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+
+volumes:
+  mysql_data:
+  minio_data:
+</file>
+
+<file path="desktop/electron/preload.cjs">
+// desktop/electron/preload.cjs
+const { contextBridge, ipcRenderer } = require('electron');
+
+// Exposes the API safely across the Electron security boundary
+contextBridge.exposeInMainWorld('electronAPI', {
+  printDocument: (options) => ipcRenderer.invoke('print-document', options),
+  showNotification: (options) => ipcRenderer.invoke('show-notification', options),
+});
 </file>
 
 <file path="desktop/src/components/AnalyticsDashboard.tsx">
@@ -4177,1113 +4370,6 @@ export default function ResponderConsole() {
         </div>
       )}
     </div>
-  );
-}
-</file>
-
-<file path="mobile/lib/screens/login_screen.dart">
-import 'dart:convert';
-import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import '../config/api_config.dart';
-import 'patient_portal_screen.dart';
-import 'responder_screen.dart'; // <-- IMPORTED HERE
-
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
-
-  @override
-  State<LoginScreen> createState() => _LoginScreenState();
-}
-
-class _LoginScreenState extends State<LoginScreen> {
-  final _emailController = TextEditingController(text: 'student@psu.edu.ph');
-  final _passwordController = TextEditingController(text: 'Password123!');
-  final _storage = const FlutterSecureStorage();
-  bool _isLoading = false;
-  String _errorMessage = '';
-
-  Future<void> _handleLogin() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = '';
-    });
-
-    try {
-      final res = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/api/auth/login'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'email': _emailController.text.trim(),
-          'password': _passwordController.text.trim(),
-        }),
-      );
-
-      final data = jsonDecode(res.body);
-
-      if (res.statusCode == 200) {
-        // Save BOTH token and user profile into secure storage
-        await _storage.write(key: 'jwt_token', value: data['token']);
-        await _storage.write(key: 'user_data', value: jsonEncode(data['user']));
-
-        if (!mounted) return;
-
-        final List<dynamic> roles = data['user']['roles'] ?? [];
-
-        if (roles.contains('EMERGENCY_RESPONDER')) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => ResponderScreen(user: data['user'])),
-          );
-        } else {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => PatientPortalScreen(user: data['user'])),
-          );
-        }
-      } else {
-        setState(() => _errorMessage = data['error'] ?? 'Login failed');
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _errorMessage = 'Unable to connect. Please try again.');
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Valetudo HealthLink')),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.local_hospital_rounded, size: 72, color: Colors.teal),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _emailController,
-              decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder()),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _passwordController,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder()),
-            ),
-            const SizedBox(height: 12),
-            if (_errorMessage.isNotEmpty) Text(_errorMessage, style: const TextStyle(color: Colors.red)),
-            const SizedBox(height: 12),
-            _isLoading
-                ? const CircularProgressIndicator()
-                : ElevatedButton(
-                    style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(50)),
-                    onPressed: _handleLogin,
-                    child: const Text('Sign In'),
-                  )
-          ],
-        ),
-      ),
-    );
-  }
-}
-</file>
-
-<file path="server/src/db.js">
-// server/src/db.js
-import mysql from 'mysql2/promise';
-
-export const pool = mysql.createPool({
-  host: 'localhost',
-  port: 3307,
-  user: 'root',
-  password: 'rootpassword',
-  database: 'valetudo_healthlink',
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-});
-</file>
-
-<file path="docker-compose.yml">
-services:
-  # 1. MySQL 8.0 with Spatial Support
-  mysql:
-    image: mysql:8.0
-    container_name: valetudo-mysql
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: valetudo_healthlink
-    ports:
-      - "3307:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-
-  # 2. Redis Live Queue Cache
-  redis:
-    image: redis:7-alpine
-    container_name: valetudo-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-
-  # 3. MinIO S3-Compatible Object Storage
-  minio:
-    image: quay.io/minio/minio:latest
-    container_name: valetudo-minio
-    restart: unless-stopped
-    ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Web UI
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: miniopassword
-    volumes:
-      - minio_data:/data
-    command: server /data --console-address ":9001"
-
-volumes:
-  mysql_data:
-  minio_data:
-</file>
-
-<file path="desktop/electron/preload.cjs">
-// desktop/electron/preload.cjs
-const { contextBridge, ipcRenderer } = require('electron');
-
-// Exposes the API safely across the Electron security boundary
-contextBridge.exposeInMainWorld('electronAPI', {
-  printDocument: (options) => ipcRenderer.invoke('print-document', options),
-  showNotification: (options) => ipcRenderer.invoke('show-notification', options),
-});
-</file>
-
-<file path="desktop/src/components/NurseConsole.tsx">
-// desktop/src/components/NurseConsole.tsx
-import { useState, useEffect } from 'react';
-import QrIntakeScanner from './QrIntakeScanner';
-import InventoryManager from './InventoryManager';
-import { io } from 'socket.io-client';
-
-interface QueueItem {
-  queue_id: number;
-  ticket_no: string;
-  first_name: string;
-  last_name: string;
-  student_no?: string;
-  visit_type: string;
-  status: string;
-  arrival_time: string;
-}
-
-export default function NurseConsole() {
-  const [, setVerifiedPatient] = useState<any>(null);
-  const [, setScannedToken] = useState('');
-
-  // Live database queue state
-  const [queue, setQueue] = useState<QueueItem[]>([]);
-  const [loadingQueue, setLoadingQueue] = useState(false);
-
-  const fetchLiveQueue = async () => {
-    setLoadingQueue(true);
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch('https://localhost:5000/api/appointments/queue/today', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        setQueue(data);
-      }
-    } catch (err) {
-      console.error('Error loading live queue:', err);
-    } finally {
-      setLoadingQueue(false);
-    }
-  };
-
-    useEffect(() => {
-    fetchLiveQueue();
-
-    const socket = io('https://localhost:5000');
-    socket.on('queue:updated', () => {
-      fetchLiveQueue();
-    });
-
-    // 🔔 Notify Clinic Nurse of new bookings
-    socket.on('appointment:booked', (newBooking: any) => {
-      if (window.electronAPI?.showNotification) {
-        window.electronAPI.showNotification({
-          title: '📋 New Appointment in System',
-          body: `${newBooking.patientName || 'Student'} booked for ${newBooking.date_time}.`,
-        });
-      }
-    });
-
-    return () => {
-      socket.disconnect();
-    };
-  }, []);
-
-  // Nurse advances the queue: calls the next 'waiting' patient
-  const callNextPatient = async () => {
-    const nextPatient = queue.find((p) => p.status === 'waiting');
-    if (!nextPatient) {
-      alert('No more waiting patients in the queue!');
-      return;
-    }
-
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch(`https://localhost:5000/api/appointments/queue/${nextPatient.queue_id}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ status: 'in-consultation' }),
-      });
-
-      if (res.ok) {
-        fetchLiveQueue();
-      }
-    } catch (err) {
-      alert('Failed to update queue ticket.');
-    }
-  };
-
-  return (
-    <div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 20, marginBottom: 24 }}>
-        {/* 1. QR Health Pass Scanner & Vitals Verification */}
-        <QrIntakeScanner
-          onPatientVerified={(patient, token) => {
-            setVerifiedPatient(patient);
-            setScannedToken(token);
-            // Auto refresh queue when a patient is checked in
-            fetchLiveQueue();
-          }}
-        />
-
-        {/* 2. Live Triage Queue (Feature 7 connected to MySQL QUEUE table) */}
-        <section style={{ padding: 16, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <div>
-              <h3 style={{ margin: 0, color: '#0f766e' }}>2. Live Triage Queue (Feature 7)</h3>
-              <small style={{ color: '#64748b' }}>Active daily clinic queue tickets</small>
-            </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button
-                onClick={callNextPatient}
-                style={{ padding: '6px 12px', background: '#0f766e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
-              >
-                📢 Call Next
-              </button>
-              <button
-                onClick={fetchLiveQueue}
-                style={{ padding: '6px 10px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
-              >
-                🔄
-              </button>
-            </div>
-          </div>
-
-          {loadingQueue ? (
-            <p style={{ color: '#64748b', fontSize: 13 }}>Updating queue...</p>
-          ) : queue.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '24px 0', color: '#94a3b8', fontSize: 13 }}>
-              No patients currently waiting in the infirmary queue.
-            </div>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, textAlign: 'left' }}>
-              <thead>
-                <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#64748b' }}>
-                  <th style={{ padding: '6px' }}>Ticket</th>
-                  <th style={{ padding: '6px' }}>Patient Name</th>
-                  <th style={{ padding: '6px' }}>Arrival</th>
-                  <th style={{ padding: '6px' }}>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {queue.map((q) => {
-                  let badgeBg = '#fef3c7';
-                  let badgeColor = '#b45309';
-
-                  if (q.status === 'in-consultation') {
-                    badgeBg = '#dcfce7';
-                    badgeColor = '#15803d';
-                  }
-
-                  return (
-                    <tr key={q.queue_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '8px 6px', fontWeight: 'bold', color: '#0f766e' }}>{q.ticket_no}</td>
-                      <td style={{ padding: '8px 6px' }}>
-                        <b>{q.first_name} {q.last_name}</b>
-                        <div style={{ fontSize: 11, color: '#64748b' }}>{q.visit_type}</div>
-                      </td>
-                      <td style={{ padding: '8px 6px', fontSize: 12, color: '#64748b' }}>{q.arrival_time}</td>
-                      <td style={{ padding: '8px 6px' }}>
-                        <span
-                          style={{
-                            padding: '2px 8px',
-                            borderRadius: 4,
-                            fontSize: 11,
-                            fontWeight: 'bold',
-                            background: badgeBg,
-                            color: badgeColor,
-                            textTransform: 'capitalize',
-                          }}
-                        >
-                          {q.status}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </section>
-      </div>
-
-      {/* 3. Medicine Inventory Management */}
-      <InventoryManager />
-    </div>
-  );
-}
-</file>
-
-<file path="desktop/src/components/PrescriptionGenerator.tsx">
-// desktop/src/components/PrescriptionGenerator.tsx
-
-import React, { useState, useEffect } from 'react';
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  boxSizing: 'border-box',
-  padding: '6px 8px',
-  marginTop: 4,
-  border: '1px solid #cbd5e1',
-  borderRadius: 4,
-  fontSize: 13,
-  color: '#0f172a',
-  backgroundColor: '#ffffff',
-};
-
-interface MedicineMaster {
-  medicine_id: number;
-  name: string;
-  generic_name: string;
-  form: string;
-  strength: string;
-}
-
-interface PrescriptionGeneratorProps {
-  patientUserId: number;
-  verifiedPatient: {
-    first_name: string;
-    last_name: string;
-    student_no: string;
-    course: string;
-    allergies: string;
-  };
-  onPrescriptionIssued?: () => void;
-}
-
-export default function PrescriptionGenerator({
-  patientUserId,
-  verifiedPatient,
-  onPrescriptionIssued,
-}: PrescriptionGeneratorProps) {
-  const [medicines, setMedicines] = useState<MedicineMaster[]>([]);
-  const [selectedMedicineId, setSelectedMedicineId] = useState<number>(1);
-  const [rxMedName, setRxMedName] = useState('Biogesic (Paracetamol)');
-  const [rxDosage, setRxDosage] = useState('500mg');
-  const [rxFrequency, setRxFrequency] = useState('Every 4-6 hours as needed');
-  const [rxDurationDays, setRxDurationDays] = useState('5');
-  const [rxQuantity, setRxQuantity] = useState('10');
-  const [rxInstructions, setRxInstructions] = useState('Take 1 tablet after meals when fever exceeds 37.8°C.');
-  const [doctorNotes, setDoctorNotes] = useState('Maintain proper hydration and rest.');
-
-  const [isSaving, setIsSaving] = useState(false);
-  const [issuedStatus, setIssuedStatus] = useState<string | null>(null);
-
-  // 1. Fetch live medicine catalogue
-  useEffect(() => {
-    const fetchCatalog = async () => {
-      const token = localStorage.getItem('valetudo_token');
-      try {
-        const res = await fetch('https://localhost:5000/api/inventory/medicines', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const data: MedicineMaster[] = await res.json();
-          setMedicines(data);
-          if (data.length > 0) {
-            setSelectedMedicineId(data[0].medicine_id);
-            setRxMedName(`${data[0].name} (${data[0].generic_name})`);
-            setRxDosage(data[0].strength);
-          }
-        }
-      } catch (err) {
-        console.error('Could not fetch medicines catalog:', err);
-      }
-    };
-    fetchCatalog();
-  }, []);
-
-  const handleSelectMedicine = (medId: number) => {
-    setSelectedMedicineId(medId);
-    const chosen = medicines.find((m) => m.medicine_id === medId);
-    if (chosen) {
-      setRxMedName(`${chosen.name} (${chosen.generic_name})`);
-      setRxDosage(chosen.strength);
-    }
-  };
-
-  // 2. Persist to MySQL and Spool to Printer
-  const handleSaveAndPrintPrescription = async () => {
-    if (!patientUserId) {
-      alert('Error: No patient selected. Please choose a patient from the queue first.');
-      return;
-    }
-
-    setIsSaving(true);
-    setIssuedStatus(null);
-    const token = localStorage.getItem('valetudo_token');
-
-    try {
-      // Step A: POST to backend
-      const res = await fetch('https://localhost:5000/api/documents/prescriptions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          patient_user_id: patientUserId,
-          notes: doctorNotes,
-          items: [
-            {
-              medicine_id: selectedMedicineId,
-              dosage: rxDosage,
-              frequency: rxFrequency,
-              route: 'Oral',
-              duration_days: Number(rxDurationDays) || 3,
-              quantity_dispensed: Number(rxQuantity) || 10,
-              instructions: rxInstructions,
-            },
-          ],
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to issue prescription.');
-      }
-
-      const realQrToken = data.qrToken;
-      const prescriptionId = data.prescriptionId;
-
-      setIssuedStatus(`✅ Prescription #${prescriptionId} recorded and signed! Verification Token: ${realQrToken}`);
-      if (onPrescriptionIssued) onPrescriptionIssued();
-
-      // Step B: Build official print HTML containing verifiable QR Code image
-      const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(realQrToken)}`;
-
-      const htmlContent = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <title>Prescription #${prescriptionId}</title>
-            <style>
-              body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 40px; color: #1e293b; max-width: 800px; margin: 0 auto; }
-              .header { text-align: center; border-bottom: 2px solid #0f766e; padding-bottom: 12px; }
-              .header h1 { margin: 0; color: #0f766e; font-size: 20px; }
-              .header p { margin: 4px 0 0 0; font-size: 13px; color: #64748b; }
-              .patient-box { margin-top: 20px; padding: 14px; background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 6px; font-size: 13px; line-height: 1.6; }
-              .rx-symbol { font-size: 42px; font-weight: 900; color: #0f766e; margin: 16px 0 8px 0; }
-              .med-item { margin-bottom: 14px; padding: 12px; background: #f8fafc; border-left: 4px solid #0f766e; border-radius: 4px; }
-              .med-name { font-size: 15px; font-weight: bold; color: #0f172a; }
-              .med-instructions { font-style: italic; color: #334155; margin-top: 4px; font-size: 13px; }
-              .verification-panel { margin-top: 30px; display: flex; align-items: center; gap: 20px; border: 1px dashed #cbd5e1; padding: 16px; border-radius: 6px; }
-              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; font-size: 12px; }
-              .sig-line { border-top: 1px solid #000; width: 220px; text-align: center; font-weight: bold; padding-top: 4px; }
-            </style>
-          </head>
-          <body>
-            <div class="header">
-              <h1>PANGASINAN STATE UNIVERSITY INFIRMARY</h1>
-              <p>Lingayen Campus Medical Services • Republic Act No. 10173 Verified E-Prescription</p>
-            </div>
-
-            <div class="patient-box">
-              <b>Patient:</b> ${verifiedPatient.first_name} ${verifiedPatient.last_name} &nbsp;|&nbsp;
-              <b>Student No:</b> ${verifiedPatient.student_no || 'N/A'}<br/>
-              <b>Course:</b> ${verifiedPatient.course || 'N/A'} &nbsp;|&nbsp;
-              <b>Allergies:</b> <span style="color:red; font-weight:bold;">${verifiedPatient.allergies || 'None recorded'}</span>
-            </div>
-
-            <div class="rx-symbol">℞</div>
-
-            <div class="med-item">
-              <div class="med-name">${rxMedName} - ${rxDosage}</div>
-              <div class="med-instructions">Sig: ${rxInstructions} • ${rxFrequency}</div>
-              <div style="margin-top: 4px; font-size: 12px;">Duration: <b>${rxDurationDays} days</b> &nbsp;|&nbsp; Quantity Dispensed: <b>${rxQuantity} pcs</b></div>
-            </div>
-
-            ${doctorNotes ? `<p style="font-size: 13px; color: #475569;"><b>Physician Notes:</b> ${doctorNotes}</p>` : ''}
-
-            <div class="verification-panel">
-              <img src="${qrImageUrl}" width="110" height="110" alt="Rx QR Verification" />
-              <div>
-                <b style="color: #0f766e;">Digital Prescription Verification</b>
-                <p style="margin: 4px 0; font-size: 11px; color: #64748b;">
-                  Scan using Valetudo mobile scanner or infirmary terminal to confirm valid issuance.
-                </p>
-                <code style="font-size: 10px; background: #eee; padding: 2px 6px; border-radius: 4px;">${realQrToken}</code>
-              </div>
-            </div>
-
-            <div class="footer">
-              <div>
-                <p>Issued: ${new Date().toLocaleString()}</p>
-                <p>Prescription #${prescriptionId}</p>
-              </div>
-              <div class="sig-line">
-                Attending Campus Physician<br/>
-                <small>PRC License Verified E-Signature</small>
-              </div>
-            </div>
-          </body>
-        </html>
-      `;
-
-      if (window.electronAPI?.printDocument) {
-        await window.electronAPI.printDocument({ htmlContent });
-      } else {
-        const printWin = window.open('', '_blank');
-        if (printWin) {
-          printWin.document.write(htmlContent);
-          printWin.document.close();
-          printWin.focus();
-          printWin.print();
-        }
-      }
-    } catch (err: any) {
-      alert('Error issuing prescription: ' + err.message);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  return (
-    <section style={{ padding: 16, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff' }}>
-      <h3 style={{ marginTop: 0, color: '#0f766e', fontSize: 16 }}>℞ Official Digital Prescription</h3>
-
-      {/* Select Formulary Drug */}
-      <div style={{ marginBottom: 10 }}>
-        <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Select Medicine (Formulary):</label>
-        <select
-          style={{ width: '100%', padding: 6, marginTop: 4, borderRadius: 4, border: '1px solid #cbd5e1', fontSize: 13 }}
-          value={selectedMedicineId}
-          onChange={(e) => handleSelectMedicine(Number(e.target.value))}
-        >
-          {medicines.map((m) => (
-            <option key={m.medicine_id} value={m.medicine_id}>
-              {m.name} ({m.generic_name}) - {m.strength} [{m.form}]
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-        <div>
-          <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Dosage:</label>
-          <input
-            style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
-            value={rxDosage}
-            onChange={(e) => setRxDosage(e.target.value)}
-          />
-        </div>
-        <div>
-          <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Quantity (pcs/bottles):</label>
-          <input
-            type="number"
-            min="1"
-            style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
-            value={rxQuantity}
-            onChange={(e) => setRxQuantity(e.target.value)}
-          />
-        </div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-        <div>
-          <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Frequency:</label>
-          <input
-            style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
-            value={rxFrequency}
-            onChange={(e) => setRxFrequency(e.target.value)}
-          />
-        </div>
-        <div>
-          <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Duration (Days):</label>
-          <input
-            type="number"
-            min="1"
-            style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
-            value={rxDurationDays}
-            onChange={(e) => setRxDurationDays(e.target.value)}
-          />
-        </div>
-      </div>
-
-      <div style={{ marginBottom: 10 }}>
-        <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Instructions (Sig):</label>
-        <textarea
-          rows={2}
-          style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
-          value={rxInstructions}
-          onChange={(e) => setRxInstructions(e.target.value)}
-        />
-      </div>
-
-      <div style={{ marginBottom: 14 }}>
-        <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Physician Dietary / Clinical Notes:</label>
-        <input
-          style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
-          value={doctorNotes}
-          onChange={(e) => setDoctorNotes(e.target.value)}
-        />
-      </div>
-
-      <button
-        onClick={handleSaveAndPrintPrescription}
-        disabled={isSaving}
-        style={{
-          width: '100%',
-          padding: 10,
-          background: isSaving ? '#94a3b8' : '#0f766e',
-          color: '#fff',
-          border: 'none',
-          borderRadius: 6,
-          cursor: isSaving ? 'not-allowed' : 'pointer',
-          fontWeight: 'bold',
-          fontSize: 13,
-        }}
-      >
-        {isSaving ? 'Signing & Printing...' : '🖨️ Issue, Sign & Print Prescription'}
-      </button>
-
-      {issuedStatus && (
-        <p style={{ fontSize: 11, color: '#16a34a', fontWeight: 'bold', marginTop: 8, wordBreak: 'break-all' }}>
-          {issuedStatus}
-        </p>
-      )}
-    </section>
-  );
-}
-</file>
-
-<file path="desktop/src/components/QrIntakeScanner.tsx">
-// desktop/src/components/QrIntakeScanner.tsx
-import React, { useState, useEffect, useRef } from 'react';
-import jsQR from 'jsqr';
-
-interface QrIntakeScannerProps {
-  onPatientVerified: (patient: any, token: string) => void;
-}
-
-export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerProps) {
-  const [scanMode, setScanMode] = useState<'camera' | 'search' | 'manual'>('camera');
-  const [searchQuery, setSearchQuery] = useState('22-LN-0123'); // Default test student
-  const [manualToken, setManualToken] = useState('');
-  const [verifiedPatient, setVerifiedPatient] = useState<any>(null);
-  const [scanStatus, setScanStatus] = useState('');
-
-  // Scheduled appointment detected for this patient
-  const [pendingAppointment, setPendingAppointment] = useState<any>(null);
-  const [checkInSuccess, setCheckInSuccess] = useState<string | null>(null);
-
-  // Triage vitals intake
-  const [bp, setBp] = useState('120/80');
-  const [temp, setTemp] = useState('36.6');
-  const [pulse, setPulse] = useState('78');
-
-  // Camera stream refs
-  const [isCameraActive, setIsCameraActive] = useState(false);
-  const [cameraError, setCameraError] = useState('');
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const animationFrameId = useRef<number | null>(null);
-
-  // 1. Verify QR Token
-  const verifyToken = async (tokenToVerify: string) => {
-    if (!tokenToVerify || tokenToVerify.trim().length === 0) return;
-
-    setScanStatus('🔍 Verifying cryptographic QR pass signature...');
-    setVerifiedPatient(null);
-    setPendingAppointment(null);
-    setCheckInSuccess(null);
-
-    const jwt = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch('https://localhost:5000/api/health-pass/verify', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${jwt}`,
-        },
-        body: JSON.stringify({ qrToken: tokenToVerify.trim() }),
-      });
-
-      const data = await res.json();
-      if (res.ok && data.verified) {
-        setVerifiedPatient(data.patient);
-        onPatientVerified(data.patient, tokenToVerify.trim());
-        setScanStatus('✅ Patient identity verified.');
-        stopCamera();
-        // Check if patient has any appointment to check in
-        checkPatientAppointments(data.patient.user_id);
-      } else {
-        setScanStatus('❌ Verification Failed: ' + (data.error || 'Invalid or Expired QR Pass'));
-      }
-    } catch (err: any) {
-      setScanStatus('❌ Connection Error: ' + err.message);
-    }
-  };
-
-  // 2. Search Patient by Student ID / Name (Manual Fallback)
-  const handleManualSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) return;
-
-    setScanStatus('🔍 Searching student records...');
-    setCheckInSuccess(null);
-    const jwt = localStorage.getItem('valetudo_token');
-
-    try {
-      const res = await fetch(`https://localhost:5000/api/appointments/lookup?query=${encodeURIComponent(searchQuery.trim())}`, {
-        headers: { Authorization: `Bearer ${jwt}` },
-      });
-      const data = await res.json();
-
-      if (Array.isArray(data) && data.length > 0) {
-        const app = data[0];
-        setVerifiedPatient({
-          user_id: app.user_id,
-          first_name: app.first_name,
-          last_name: app.last_name,
-          student_no: app.student_no,
-          course: app.course,
-          blood_type: app.blood_type,
-          allergies: app.allergies,
-          chronic_conditions: app.chronic_conditions,
-        });
-        setPendingAppointment(app);
-        setScanStatus(`✅ Patient record located: ${app.first_name} ${app.last_name}`);
-      } else {
-        setScanStatus('❌ No scheduled appointments found matching that query.');
-      }
-    } catch (err: any) {
-      setScanStatus('❌ Search error: ' + err.message);
-    }
-  };
-
-  // Check if verified patient has a booking
-  const checkPatientAppointments = async (userId: number) => {
-    const jwt = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch(`https://localhost:5000/api/appointments/lookup?userId=${userId}`, {
-        headers: { Authorization: `Bearer ${jwt}` },
-      });
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        setPendingAppointment(data[0]);
-      } else {
-        setPendingAppointment(null);
-      }
-    } catch (_) {}
-  };
-
-  // 3. Confirm Arrival & Admit to Queue
-  const handleConfirmArrival = async () => {
-    if (!pendingAppointment) return;
-
-    const jwt = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch(`https://localhost:5000/api/appointments/${pendingAppointment.appointment_id}/checkin`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${jwt}`,
-        },
-        body: JSON.stringify({
-          blood_pressure: bp,
-          temperature: temp,
-          pulse: pulse,
-        }),
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        setCheckInSuccess(`✅ Arrival Confirmed! Ticket ${data.queueTicket} assigned at ${data.arrivalTime}.`);
-        setPendingAppointment({ ...pendingAppointment, status: 'checked_in' });
-      } else {
-        alert(data.error || 'Failed to check in patient.');
-      }
-    } catch (err: any) {
-      alert('Error during check-in: ' + err.message);
-    }
-  };
-
-  // Webcam Controls
-  const startCamera = async () => {
-    setCameraError('');
-    setIsCameraActive(true);
-    setScanStatus('📷 Webcam active. Center the student QR code.');
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
-      });
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.setAttribute('playsinline', 'true');
-        videoRef.current.play();
-        requestAnimationFrame(tickScan);
-      }
-    } catch (err: any) {
-      setCameraError('Cannot access webcam: ' + err.message);
-      setIsCameraActive(false);
-    }
-  };
-
-  const stopCamera = () => {
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach((t) => t.stop());
-      videoRef.current.srcObject = null;
-    }
-    if (animationFrameId.current) {
-      cancelAnimationFrame(animationFrameId.current);
-      animationFrameId.current = null;
-    }
-    setIsCameraActive(false);
-  };
-
-  const tickScan = () => {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-
-    if (video && video.readyState === video.HAVE_ENOUGH_DATA && canvas) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-
-      if (ctx) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = jsQR(imageData.data, imageData.width, imageData.height, {
-          inversionAttempts: 'attemptBoth',
-        });
-
-        if (code && code.data && code.data.length > 20) {
-          verifyToken(code.data);
-          return;
-        }
-      }
-    }
-    animationFrameId.current = requestAnimationFrame(tickScan);
-  };
-
-  useEffect(() => () => stopCamera(), []);
-
-  return (
-    <section style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff' }}>
-      {/* Header & Mode Selector */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <h3 style={{ margin: 0, color: '#0f766e', fontSize: 16 }}>1. Patient Intake & Triage Check-in</h3>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button
-            type="button"
-            onClick={() => { setScanMode('camera'); setScanStatus(''); }}
-            style={{
-              padding: '4px 10px',
-              fontSize: 12,
-              borderRadius: 4,
-              border: '1px solid #0f766e',
-              background: scanMode === 'camera' ? '#0f766e' : '#ffffff',
-              color: scanMode === 'camera' ? '#ffffff' : '#0f766e',
-              cursor: 'pointer',
-              fontWeight: 'bold',
-            }}
-          >
-            📷 Scan QR
-          </button>
-          <button
-            type="button"
-            onClick={() => { setScanMode('search'); stopCamera(); setScanStatus(''); }}
-            style={{
-              padding: '4px 10px',
-              fontSize: 12,
-              borderRadius: 4,
-              border: '1px solid #0f766e',
-              background: scanMode === 'search' ? '#0f766e' : '#ffffff',
-              color: scanMode === 'search' ? '#ffffff' : '#0f766e',
-              cursor: 'pointer',
-              fontWeight: 'bold',
-            }}
-          >
-            🔍 Search ID
-          </button>
-        </div>
-      </div>
-
-      {/* MODE A: QR CAMERA */}
-      {scanMode === 'camera' && (
-        <div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10 }}>
-            {!isCameraActive ? (
-              <button
-                type="button"
-                onClick={startCamera}
-                style={{ padding: '8px 14px', background: '#0f766e', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
-              >
-                ▶ Turn On Webcam
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={stopCamera}
-                style={{ padding: '8px 14px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
-              >
-                ⏹ Stop Camera
-              </button>
-            )}
-            <small style={{ color: '#64748b' }}>Scan student dynamic pass upon physical arrival.</small>
-          </div>
-
-          <div style={{ position: 'relative', width: '100%', maxWidth: 360, height: 200, background: '#0f172a', borderRadius: 8, overflow: 'hidden', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'cover', display: isCameraActive ? 'block' : 'none' }} />
-            <canvas ref={canvasRef} style={{ display: 'none' }} />
-            {!isCameraActive && <p style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center' }}>Webcam off.<br/>Click "Turn On Webcam" to scan.</p>}
-          </div>
-        </div>
-      )}
-
-      {/* MODE B: MANUAL STUDENT ID SEARCH */}
-      {scanMode === 'search' && (
-        <form onSubmit={handleManualSearch} style={{ display: 'flex', gap: 8, margin: '10px 0' }}>
-          <input
-            style={{ flex: 1, padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13, color: '#0f172a', background: '#ffffff' }}
-            placeholder="Enter Student ID (e.g. 22-LN-0123) or Last Name"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-          <button
-            type="submit"
-            style={{ padding: '8px 16px', background: '#0f766e', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer', fontSize: 13 }}
-          >
-            Find Booking
-          </button>
-        </form>
-      )}
-
-      {scanStatus && (
-        <p style={{ fontSize: 13, margin: '10px 0', fontWeight: 'bold', color: scanStatus.includes('✅') ? '#16a34a' : '#dc2626' }}>
-          {scanStatus}
-        </p>
-      )}
-
-      {/* VERIFIED PATIENT & SCHEDULED APPOINTMENT CARD */}
-      {verifiedPatient && (
-        <div style={{ marginTop: 14, padding: 14, background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 8 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h4 style={{ margin: 0, color: '#0f766e', fontSize: 15 }}>
-              👤 {verifiedPatient.first_name} {verifiedPatient.last_name} ({verifiedPatient.student_no || 'Staff'})
-            </h4>
-            <span style={{ fontSize: 12, color: '#64748b' }}>{verifiedPatient.course}</span>
-          </div>
-
-          <p style={{ margin: '6px 0', fontSize: 13 }}>
-            <b>Allergies:</b> <span style={{ color: verifiedPatient.allergies ? '#dc2626' : '#16a34a', fontWeight: 'bold' }}>{verifiedPatient.allergies || 'None reported'}</span> &nbsp;|&nbsp;
-            <b>Blood:</b> {verifiedPatient.blood_type || 'O+'}
-          </p>
-
-          {/* If patient has an active appointment */}
-          {pendingAppointment ? (
-            <div style={{ marginTop: 12, padding: 12, background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 6 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <b style={{ color: '#0f766e', fontSize: 13 }}>📅 Scheduled Booking Detected:</b>
-                <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: pendingAppointment.status === 'checked_in' ? '#dcfce7' : '#fef3c7', color: pendingAppointment.status === 'checked_in' ? '#15803d' : '#b45309', fontWeight: 'bold', textTransform: 'uppercase' }}>
-                  {pendingAppointment.status}
-                </span>
-              </div>
-              <p style={{ margin: '4px 0', fontSize: 13 }}>
-                <b>Time:</b> {pendingAppointment.formatted_schedule || pendingAppointment.date_time}
-              </p>
-              <p style={{ margin: '2px 0 10px', fontSize: 13 }}>
-                <b>Purpose:</b> {pendingAppointment.appointment_type} (Attending: Dr. {pendingAppointment.doc_last_name || 'Mata'})
-              </p>
-
-              {/* Triage Vitals Input by Nurse */}
-              {pendingAppointment.status !== 'checked_in' && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 'bold', color: '#475569' }}>Blood Pressure:</label>
-                    <input style={{ width: '100%', padding: 4, fontSize: 12, boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: 4, background: '#fff', color: '#0f172a' }} value={bp} onChange={(e) => setBp(e.target.value)} />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 'bold', color: '#475569' }}>Temp (°C):</label>
-                    <input style={{ width: '100%', padding: 4, fontSize: 12, boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: 4, background: '#fff', color: '#0f172a' }} value={temp} onChange={(e) => setTemp(e.target.value)} />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 'bold', color: '#475569' }}>Pulse (bpm):</label>
-                    <input style={{ width: '100%', padding: 4, fontSize: 12, boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: 4, background: '#fff', color: '#0f172a' }} value={pulse} onChange={(e) => setPulse(e.target.value)} />
-                  </div>
-                </div>
-              )}
-
-              {/* Check-In Confirm Button */}
-              {pendingAppointment.status === 'checked_in' ? (
-                <div style={{ color: '#16a34a', fontWeight: 'bold', fontSize: 13, textAlign: 'center' }}>
-                  {checkInSuccess || '✅ Patient is checked in and waiting in queue.'}
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleConfirmArrival}
-                  style={{
-                    width: '100%',
-                    padding: '10px',
-                    background: '#0f766e',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: 6,
-                    fontWeight: 'bold',
-                    cursor: 'pointer',
-                    fontSize: 13,
-                  }}
-                >
-                  📍 Confirm Arrival & Check-in Patient
-                </button>
-              )}
-            </div>
-          ) : (
-            <p style={{ fontSize: 12, color: '#64748b', fontStyle: 'italic', marginTop: 8 }}>
-              No scheduled appointment found. Student can be treated as a regular walk-in.
-            </p>
-          )}
-        </div>
-      )}
-    </section>
   );
 }
 </file>
@@ -6508,6 +5594,1295 @@ class EmergencyAlertService {
 }
 </file>
 
+<file path="desktop/src/components/NurseConsole.tsx">
+// desktop/src/components/NurseConsole.tsx
+import { useState, useEffect } from 'react';
+import QrIntakeScanner from './QrIntakeScanner';
+import InventoryManager from './InventoryManager';
+import { io } from 'socket.io-client';
+
+interface QueueItem {
+  queue_id: number;
+  ticket_no: string;
+  first_name: string;
+  last_name: string;
+  student_no?: string;
+  visit_type: string;
+  status: string;
+  arrival_time: string;
+}
+
+export default function NurseConsole() {
+  const [, setVerifiedPatient] = useState<any>(null);
+  const [, setScannedToken] = useState('');
+
+  // Live database queue state
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [loadingQueue, setLoadingQueue] = useState(false);
+
+  const fetchLiveQueue = async () => {
+    setLoadingQueue(true);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('https://localhost:5000/api/appointments/queue/today', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setQueue(data);
+      }
+    } catch (err) {
+      console.error('Error loading live queue:', err);
+    } finally {
+      setLoadingQueue(false);
+    }
+  };
+
+    useEffect(() => {
+    fetchLiveQueue();
+
+    const socket = io('https://localhost:5000');
+    socket.on('queue:updated', () => {
+      fetchLiveQueue();
+    });
+
+    // 🔔 Notify Clinic Nurse of new bookings
+    socket.on('appointment:booked', (newBooking: any) => {
+      if (window.electronAPI?.showNotification) {
+        window.electronAPI.showNotification({
+          title: '📋 New Appointment in System',
+          body: `${newBooking.patientName || 'Student'} booked for ${newBooking.date_time}.`,
+        });
+      }
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
+
+  // Nurse advances the queue: calls the next 'waiting' patient
+  const callNextPatient = async () => {
+    const nextPatient = queue.find((p) => p.status === 'waiting');
+    if (!nextPatient) {
+      alert('No more waiting patients in the queue!');
+      return;
+    }
+
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`https://localhost:5000/api/appointments/queue/${nextPatient.queue_id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: 'in-consultation' }),
+      });
+
+      if (res.ok) {
+        fetchLiveQueue();
+      }
+    } catch (err) {
+      alert('Failed to update queue ticket.');
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 20, marginBottom: 24 }}>
+        {/* 1. QR Health Pass Scanner & Vitals Verification */}
+        <QrIntakeScanner
+          onPatientVerified={(patient, token) => {
+            setVerifiedPatient(patient);
+            setScannedToken(token);
+            // Auto refresh queue when a patient is checked in
+            fetchLiveQueue();
+          }}
+        />
+
+        {/* 2. Live Triage Queue (Feature 7 connected to MySQL QUEUE table) */}
+        <section style={{ padding: 16, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div>
+              <h3 style={{ margin: 0, color: '#0f766e' }}>2. Live Triage Queue (Feature 7)</h3>
+              <small style={{ color: '#64748b' }}>Active daily clinic queue tickets</small>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                onClick={callNextPatient}
+                style={{ padding: '6px 12px', background: '#0f766e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
+              >
+                📢 Call Next
+              </button>
+              <button
+                onClick={fetchLiveQueue}
+                style={{ padding: '6px 10px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
+              >
+                🔄
+              </button>
+            </div>
+          </div>
+
+          {loadingQueue ? (
+            <p style={{ color: '#64748b', fontSize: 13 }}>Updating queue...</p>
+          ) : queue.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '24px 0', color: '#94a3b8', fontSize: 13 }}>
+              No patients currently waiting in the infirmary queue.
+            </div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, textAlign: 'left' }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#64748b' }}>
+                  <th style={{ padding: '6px' }}>Ticket</th>
+                  <th style={{ padding: '6px' }}>Patient Name</th>
+                  <th style={{ padding: '6px' }}>Arrival</th>
+                  <th style={{ padding: '6px' }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {queue.map((q) => {
+                  let badgeBg = '#fef3c7';
+                  let badgeColor = '#b45309';
+
+                  if (q.status === 'in-consultation') {
+                    badgeBg = '#dcfce7';
+                    badgeColor = '#15803d';
+                  }
+
+                  return (
+                    <tr key={q.queue_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '8px 6px', fontWeight: 'bold', color: '#0f766e' }}>{q.ticket_no}</td>
+                      <td style={{ padding: '8px 6px' }}>
+                        <b>{q.first_name} {q.last_name}</b>
+                        <div style={{ fontSize: 11, color: '#64748b' }}>{q.visit_type}</div>
+                      </td>
+                      <td style={{ padding: '8px 6px', fontSize: 12, color: '#64748b' }}>{q.arrival_time}</td>
+                      <td style={{ padding: '8px 6px' }}>
+                        <span
+                          style={{
+                            padding: '2px 8px',
+                            borderRadius: 4,
+                            fontSize: 11,
+                            fontWeight: 'bold',
+                            background: badgeBg,
+                            color: badgeColor,
+                            textTransform: 'capitalize',
+                          }}
+                        >
+                          {q.status}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </section>
+      </div>
+
+      {/* 3. Medicine Inventory Management */}
+      <InventoryManager />
+    </div>
+  );
+}
+</file>
+
+<file path="desktop/src/components/PrescriptionGenerator.tsx">
+// desktop/src/components/PrescriptionGenerator.tsx
+
+import React, { useState, useEffect } from 'react';
+
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  boxSizing: 'border-box',
+  padding: '6px 8px',
+  marginTop: 4,
+  border: '1px solid #cbd5e1',
+  borderRadius: 4,
+  fontSize: 13,
+  color: '#0f172a',
+  backgroundColor: '#ffffff',
+};
+
+interface MedicineMaster {
+  medicine_id: number;
+  name: string;
+  generic_name: string;
+  form: string;
+  strength: string;
+}
+
+interface PrescriptionGeneratorProps {
+  patientUserId: number;
+  verifiedPatient: {
+    first_name: string;
+    last_name: string;
+    student_no: string;
+    course: string;
+    allergies: string;
+  };
+  onPrescriptionIssued?: () => void;
+}
+
+export default function PrescriptionGenerator({
+  patientUserId,
+  verifiedPatient,
+  onPrescriptionIssued,
+}: PrescriptionGeneratorProps) {
+  const [medicines, setMedicines] = useState<MedicineMaster[]>([]);
+  const [selectedMedicineId, setSelectedMedicineId] = useState<number>(1);
+  const [rxMedName, setRxMedName] = useState('Biogesic (Paracetamol)');
+  const [rxDosage, setRxDosage] = useState('500mg');
+  const [rxFrequency, setRxFrequency] = useState('Every 4-6 hours as needed');
+  const [rxDurationDays, setRxDurationDays] = useState('5');
+  const [rxQuantity, setRxQuantity] = useState('10');
+  const [rxInstructions, setRxInstructions] = useState('Take 1 tablet after meals when fever exceeds 37.8°C.');
+  const [doctorNotes, setDoctorNotes] = useState('Maintain proper hydration and rest.');
+
+  const [isSaving, setIsSaving] = useState(false);
+  const [issuedStatus, setIssuedStatus] = useState<string | null>(null);
+
+  // 1. Fetch live medicine catalogue
+  useEffect(() => {
+    const fetchCatalog = async () => {
+      const token = localStorage.getItem('valetudo_token');
+      try {
+        const res = await fetch('https://localhost:5000/api/inventory/medicines', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data: MedicineMaster[] = await res.json();
+          setMedicines(data);
+          if (data.length > 0) {
+            setSelectedMedicineId(data[0].medicine_id);
+            setRxMedName(`${data[0].name} (${data[0].generic_name})`);
+            setRxDosage(data[0].strength);
+          }
+        }
+      } catch (err) {
+        console.error('Could not fetch medicines catalog:', err);
+      }
+    };
+    fetchCatalog();
+  }, []);
+
+  const handleSelectMedicine = (medId: number) => {
+    setSelectedMedicineId(medId);
+    const chosen = medicines.find((m) => m.medicine_id === medId);
+    if (chosen) {
+      setRxMedName(`${chosen.name} (${chosen.generic_name})`);
+      setRxDosage(chosen.strength);
+    }
+  };
+
+  // 2. Persist to MySQL and Spool to Printer
+  const handleSaveAndPrintPrescription = async () => {
+    if (!patientUserId) {
+      alert('Error: No patient selected. Please choose a patient from the queue first.');
+      return;
+    }
+
+    setIsSaving(true);
+    setIssuedStatus(null);
+    const token = localStorage.getItem('valetudo_token');
+
+    try {
+      // Step A: POST to backend
+      const res = await fetch('https://localhost:5000/api/documents/prescriptions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          patient_user_id: patientUserId,
+          notes: doctorNotes,
+          items: [
+            {
+              medicine_id: selectedMedicineId,
+              dosage: rxDosage,
+              frequency: rxFrequency,
+              route: 'Oral',
+              duration_days: Number(rxDurationDays) || 3,
+              quantity_dispensed: Number(rxQuantity) || 10,
+              instructions: rxInstructions,
+            },
+          ],
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to issue prescription.');
+      }
+
+      const realQrToken = data.qrToken;
+      const prescriptionId = data.prescriptionId;
+
+      setIssuedStatus(`✅ Prescription #${prescriptionId} recorded and signed! Verification Token: ${realQrToken}`);
+      if (onPrescriptionIssued) onPrescriptionIssued();
+
+      // Step B: Build official print HTML containing verifiable QR Code image
+      const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(realQrToken)}`;
+
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Prescription #${prescriptionId}</title>
+            <style>
+              body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 40px; color: #1e293b; max-width: 800px; margin: 0 auto; }
+              .header { text-align: center; border-bottom: 2px solid #0f766e; padding-bottom: 12px; }
+              .header h1 { margin: 0; color: #0f766e; font-size: 20px; }
+              .header p { margin: 4px 0 0 0; font-size: 13px; color: #64748b; }
+              .patient-box { margin-top: 20px; padding: 14px; background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 6px; font-size: 13px; line-height: 1.6; }
+              .rx-symbol { font-size: 42px; font-weight: 900; color: #0f766e; margin: 16px 0 8px 0; }
+              .med-item { margin-bottom: 14px; padding: 12px; background: #f8fafc; border-left: 4px solid #0f766e; border-radius: 4px; }
+              .med-name { font-size: 15px; font-weight: bold; color: #0f172a; }
+              .med-instructions { font-style: italic; color: #334155; margin-top: 4px; font-size: 13px; }
+              .verification-panel { margin-top: 30px; display: flex; align-items: center; gap: 20px; border: 1px dashed #cbd5e1; padding: 16px; border-radius: 6px; }
+              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; font-size: 12px; }
+              .sig-line { border-top: 1px solid #000; width: 220px; text-align: center; font-weight: bold; padding-top: 4px; }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <h1>PANGASINAN STATE UNIVERSITY INFIRMARY</h1>
+              <p>Lingayen Campus Medical Services • Republic Act No. 10173 Verified E-Prescription</p>
+            </div>
+
+            <div class="patient-box">
+              <b>Patient:</b> ${verifiedPatient.first_name} ${verifiedPatient.last_name} &nbsp;|&nbsp;
+              <b>Student No:</b> ${verifiedPatient.student_no || 'N/A'}<br/>
+              <b>Course:</b> ${verifiedPatient.course || 'N/A'} &nbsp;|&nbsp;
+              <b>Allergies:</b> <span style="color:red; font-weight:bold;">${verifiedPatient.allergies || 'None recorded'}</span>
+            </div>
+
+            <div class="rx-symbol">℞</div>
+
+            <div class="med-item">
+              <div class="med-name">${rxMedName} - ${rxDosage}</div>
+              <div class="med-instructions">Sig: ${rxInstructions} • ${rxFrequency}</div>
+              <div style="margin-top: 4px; font-size: 12px;">Duration: <b>${rxDurationDays} days</b> &nbsp;|&nbsp; Quantity Dispensed: <b>${rxQuantity} pcs</b></div>
+            </div>
+
+            ${doctorNotes ? `<p style="font-size: 13px; color: #475569;"><b>Physician Notes:</b> ${doctorNotes}</p>` : ''}
+
+            <div class="verification-panel">
+              <img src="${qrImageUrl}" width="110" height="110" alt="Rx QR Verification" />
+              <div>
+                <b style="color: #0f766e;">Digital Prescription Verification</b>
+                <p style="margin: 4px 0; font-size: 11px; color: #64748b;">
+                  Scan using Valetudo mobile scanner or infirmary terminal to confirm valid issuance.
+                </p>
+                <code style="font-size: 10px; background: #eee; padding: 2px 6px; border-radius: 4px;">${realQrToken}</code>
+              </div>
+            </div>
+
+            <div class="footer">
+              <div>
+                <p>Issued: ${new Date().toLocaleString()}</p>
+                <p>Prescription #${prescriptionId}</p>
+              </div>
+              <div class="sig-line">
+                Attending Campus Physician<br/>
+                <small>PRC License Verified E-Signature</small>
+              </div>
+            </div>
+          </body>
+        </html>
+      `;
+
+      if (window.electronAPI?.printDocument) {
+        await window.electronAPI.printDocument({ htmlContent });
+      } else {
+        const printWin = window.open('', '_blank');
+        if (printWin) {
+          printWin.document.write(htmlContent);
+          printWin.document.close();
+          printWin.focus();
+          printWin.print();
+        }
+      }
+    } catch (err: any) {
+      alert('Error issuing prescription: ' + err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <section style={{ padding: 16, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff' }}>
+      <h3 style={{ marginTop: 0, color: '#0f766e', fontSize: 16 }}>℞ Official Digital Prescription</h3>
+
+      {/* Select Formulary Drug */}
+      <div style={{ marginBottom: 10 }}>
+        <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Select Medicine (Formulary):</label>
+        <select
+          style={{ width: '100%', padding: 6, marginTop: 4, borderRadius: 4, border: '1px solid #cbd5e1', fontSize: 13 }}
+          value={selectedMedicineId}
+          onChange={(e) => handleSelectMedicine(Number(e.target.value))}
+        >
+          {medicines.map((m) => (
+            <option key={m.medicine_id} value={m.medicine_id}>
+              {m.name} ({m.generic_name}) - {m.strength} [{m.form}]
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Dosage:</label>
+          <input
+            style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
+            value={rxDosage}
+            onChange={(e) => setRxDosage(e.target.value)}
+          />
+        </div>
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Quantity (pcs/bottles):</label>
+          <input
+            type="number"
+            min="1"
+            style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
+            value={rxQuantity}
+            onChange={(e) => setRxQuantity(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Frequency:</label>
+          <input
+            style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
+            value={rxFrequency}
+            onChange={(e) => setRxFrequency(e.target.value)}
+          />
+        </div>
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Duration (Days):</label>
+          <input
+            type="number"
+            min="1"
+            style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
+            value={rxDurationDays}
+            onChange={(e) => setRxDurationDays(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 10 }}>
+        <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Instructions (Sig):</label>
+        <textarea
+          rows={2}
+          style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
+          value={rxInstructions}
+          onChange={(e) => setRxInstructions(e.target.value)}
+        />
+      </div>
+
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Physician Dietary / Clinical Notes:</label>
+        <input
+          style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
+          value={doctorNotes}
+          onChange={(e) => setDoctorNotes(e.target.value)}
+        />
+      </div>
+
+      <button
+        onClick={handleSaveAndPrintPrescription}
+        disabled={isSaving}
+        style={{
+          width: '100%',
+          padding: 10,
+          background: isSaving ? '#94a3b8' : '#0f766e',
+          color: '#fff',
+          border: 'none',
+          borderRadius: 6,
+          cursor: isSaving ? 'not-allowed' : 'pointer',
+          fontWeight: 'bold',
+          fontSize: 13,
+        }}
+      >
+        {isSaving ? 'Signing & Printing...' : '🖨️ Issue, Sign & Print Prescription'}
+      </button>
+
+      {issuedStatus && (
+        <p style={{ fontSize: 11, color: '#16a34a', fontWeight: 'bold', marginTop: 8, wordBreak: 'break-all' }}>
+          {issuedStatus}
+        </p>
+      )}
+    </section>
+  );
+}
+</file>
+
+<file path="desktop/src/components/QrIntakeScanner.tsx">
+// desktop/src/components/QrIntakeScanner.tsx
+import React, { useState, useEffect, useRef } from 'react';
+import jsQR from 'jsqr';
+
+interface QrIntakeScannerProps {
+  onPatientVerified: (patient: any, token: string) => void;
+}
+
+export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerProps) {
+  const [scanMode, setScanMode] = useState<'camera' | 'search' | 'manual'>('camera');
+  const [searchQuery, setSearchQuery] = useState('22-LN-0123'); // Default test student
+  const [manualToken, setManualToken] = useState('');
+  const [verifiedPatient, setVerifiedPatient] = useState<any>(null);
+  const [scanStatus, setScanStatus] = useState('');
+
+  // Scheduled appointment detected for this patient
+  const [pendingAppointment, setPendingAppointment] = useState<any>(null);
+  const [checkInSuccess, setCheckInSuccess] = useState<string | null>(null);
+
+  // Triage vitals intake
+  const [bp, setBp] = useState('120/80');
+  const [temp, setTemp] = useState('36.6');
+  const [pulse, setPulse] = useState('78');
+
+  // Camera stream refs
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState('');
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const animationFrameId = useRef<number | null>(null);
+
+  // 1. Verify QR Token
+  const verifyToken = async (tokenToVerify: string) => {
+    if (!tokenToVerify || tokenToVerify.trim().length === 0) return;
+
+    setScanStatus('🔍 Verifying cryptographic QR pass signature...');
+    setVerifiedPatient(null);
+    setPendingAppointment(null);
+    setCheckInSuccess(null);
+
+    const jwt = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('https://localhost:5000/api/health-pass/verify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${jwt}`,
+        },
+        body: JSON.stringify({ qrToken: tokenToVerify.trim() }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.verified) {
+        setVerifiedPatient(data.patient);
+        onPatientVerified(data.patient, tokenToVerify.trim());
+        setScanStatus('✅ Patient identity verified.');
+        stopCamera();
+        // Check if patient has any appointment to check in
+        checkPatientAppointments(data.patient.user_id);
+      } else {
+        setScanStatus('❌ Verification Failed: ' + (data.error || 'Invalid or Expired QR Pass'));
+      }
+    } catch (err: any) {
+      setScanStatus('❌ Connection Error: ' + err.message);
+    }
+  };
+
+  // 2. Search Patient by Student ID / Name (Manual Fallback)
+  const handleManualSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+
+    setScanStatus('🔍 Searching student records...');
+    setCheckInSuccess(null);
+    const jwt = localStorage.getItem('valetudo_token');
+
+    try {
+      const res = await fetch(`https://localhost:5000/api/appointments/lookup?query=${encodeURIComponent(searchQuery.trim())}`, {
+        headers: { Authorization: `Bearer ${jwt}` },
+      });
+      const data = await res.json();
+
+      if (Array.isArray(data) && data.length > 0) {
+        const app = data[0];
+        setVerifiedPatient({
+          user_id: app.user_id,
+          first_name: app.first_name,
+          last_name: app.last_name,
+          student_no: app.student_no,
+          course: app.course,
+          blood_type: app.blood_type,
+          allergies: app.allergies,
+          chronic_conditions: app.chronic_conditions,
+        });
+        setPendingAppointment(app);
+        setScanStatus(`✅ Patient record located: ${app.first_name} ${app.last_name}`);
+      } else {
+        setScanStatus('❌ No scheduled appointments found matching that query.');
+      }
+    } catch (err: any) {
+      setScanStatus('❌ Search error: ' + err.message);
+    }
+  };
+
+  // Check if verified patient has a booking
+  const checkPatientAppointments = async (userId: number) => {
+    const jwt = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`https://localhost:5000/api/appointments/lookup?userId=${userId}`, {
+        headers: { Authorization: `Bearer ${jwt}` },
+      });
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        setPendingAppointment(data[0]);
+      } else {
+        setPendingAppointment(null);
+      }
+    } catch (_) {}
+  };
+
+  // 3. Confirm Arrival & Admit to Queue
+  const handleConfirmArrival = async () => {
+    if (!pendingAppointment) return;
+
+    const jwt = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`https://localhost:5000/api/appointments/${pendingAppointment.appointment_id}/checkin`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${jwt}`,
+        },
+        body: JSON.stringify({
+          blood_pressure: bp,
+          temperature: temp,
+          pulse: pulse,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setCheckInSuccess(`✅ Arrival Confirmed! Ticket ${data.queueTicket} assigned at ${data.arrivalTime}.`);
+        setPendingAppointment({ ...pendingAppointment, status: 'checked_in' });
+      } else {
+        alert(data.error || 'Failed to check in patient.');
+      }
+    } catch (err: any) {
+      alert('Error during check-in: ' + err.message);
+    }
+  };
+
+  // Webcam Controls
+  const startCamera = async () => {
+    setCameraError('');
+    setIsCameraActive(true);
+    setScanStatus('📷 Webcam active. Center the student QR code.');
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+      });
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.setAttribute('playsinline', 'true');
+        videoRef.current.play();
+        requestAnimationFrame(tickScan);
+      }
+    } catch (err: any) {
+      setCameraError('Cannot access webcam: ' + err.message);
+      setIsCameraActive(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach((t) => t.stop());
+      videoRef.current.srcObject = null;
+    }
+    if (animationFrameId.current) {
+      cancelAnimationFrame(animationFrameId.current);
+      animationFrameId.current = null;
+    }
+    setIsCameraActive(false);
+  };
+
+  const tickScan = () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+
+    if (video && video.readyState === video.HAVE_ENOUGH_DATA && canvas) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imageData.data, imageData.width, imageData.height, {
+          inversionAttempts: 'attemptBoth',
+        });
+
+        if (code && code.data && code.data.length > 20) {
+          verifyToken(code.data);
+          return;
+        }
+      }
+    }
+    animationFrameId.current = requestAnimationFrame(tickScan);
+  };
+
+  useEffect(() => () => stopCamera(), []);
+
+  return (
+    <section style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff' }}>
+      {/* Header & Mode Selector */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <h3 style={{ margin: 0, color: '#0f766e', fontSize: 16 }}>1. Patient Intake & Triage Check-in</h3>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button
+            type="button"
+            onClick={() => { setScanMode('camera'); setScanStatus(''); }}
+            style={{
+              padding: '4px 10px',
+              fontSize: 12,
+              borderRadius: 4,
+              border: '1px solid #0f766e',
+              background: scanMode === 'camera' ? '#0f766e' : '#ffffff',
+              color: scanMode === 'camera' ? '#ffffff' : '#0f766e',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+            }}
+          >
+            📷 Scan QR
+          </button>
+          <button
+            type="button"
+            onClick={() => { setScanMode('search'); stopCamera(); setScanStatus(''); }}
+            style={{
+              padding: '4px 10px',
+              fontSize: 12,
+              borderRadius: 4,
+              border: '1px solid #0f766e',
+              background: scanMode === 'search' ? '#0f766e' : '#ffffff',
+              color: scanMode === 'search' ? '#ffffff' : '#0f766e',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+            }}
+          >
+            🔍 Search ID
+          </button>
+        </div>
+      </div>
+
+      {/* MODE A: QR CAMERA */}
+      {scanMode === 'camera' && (
+        <div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10 }}>
+            {!isCameraActive ? (
+              <button
+                type="button"
+                onClick={startCamera}
+                style={{ padding: '8px 14px', background: '#0f766e', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
+              >
+                ▶ Turn On Webcam
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={stopCamera}
+                style={{ padding: '8px 14px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
+              >
+                ⏹ Stop Camera
+              </button>
+            )}
+            <small style={{ color: '#64748b' }}>Scan student dynamic pass upon physical arrival.</small>
+          </div>
+
+          <div style={{ position: 'relative', width: '100%', maxWidth: 360, height: 200, background: '#0f172a', borderRadius: 8, overflow: 'hidden', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'cover', display: isCameraActive ? 'block' : 'none' }} />
+            <canvas ref={canvasRef} style={{ display: 'none' }} />
+            {!isCameraActive && <p style={{ color: '#94a3b8', fontSize: 13, textAlign: 'center' }}>Webcam off.<br/>Click "Turn On Webcam" to scan.</p>}
+          </div>
+        </div>
+      )}
+
+      {/* MODE B: MANUAL STUDENT ID SEARCH */}
+      {scanMode === 'search' && (
+        <form onSubmit={handleManualSearch} style={{ display: 'flex', gap: 8, margin: '10px 0' }}>
+          <input
+            style={{ flex: 1, padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13, color: '#0f172a', background: '#ffffff' }}
+            placeholder="Enter Student ID (e.g. 22-LN-0123) or Last Name"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          <button
+            type="submit"
+            style={{ padding: '8px 16px', background: '#0f766e', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer', fontSize: 13 }}
+          >
+            Find Booking
+          </button>
+        </form>
+      )}
+
+      {scanStatus && (
+        <p style={{ fontSize: 13, margin: '10px 0', fontWeight: 'bold', color: scanStatus.includes('✅') ? '#16a34a' : '#dc2626' }}>
+          {scanStatus}
+        </p>
+      )}
+
+      {/* VERIFIED PATIENT & SCHEDULED APPOINTMENT CARD */}
+      {verifiedPatient && (
+        <div style={{ marginTop: 14, padding: 14, background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h4 style={{ margin: 0, color: '#0f766e', fontSize: 15 }}>
+              👤 {verifiedPatient.first_name} {verifiedPatient.last_name} ({verifiedPatient.student_no || 'Staff'})
+            </h4>
+            <span style={{ fontSize: 12, color: '#64748b' }}>{verifiedPatient.course}</span>
+          </div>
+
+          <p style={{ margin: '6px 0', fontSize: 13 }}>
+            <b>Allergies:</b> <span style={{ color: verifiedPatient.allergies ? '#dc2626' : '#16a34a', fontWeight: 'bold' }}>{verifiedPatient.allergies || 'None reported'}</span> &nbsp;|&nbsp;
+            <b>Blood:</b> {verifiedPatient.blood_type || 'O+'}
+          </p>
+
+          {/* If patient has an active appointment */}
+          {pendingAppointment ? (
+            <div style={{ marginTop: 12, padding: 12, background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 6 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <b style={{ color: '#0f766e', fontSize: 13 }}>📅 Scheduled Booking Detected:</b>
+                <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: pendingAppointment.status === 'checked_in' ? '#dcfce7' : '#fef3c7', color: pendingAppointment.status === 'checked_in' ? '#15803d' : '#b45309', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                  {pendingAppointment.status}
+                </span>
+              </div>
+              <p style={{ margin: '4px 0', fontSize: 13 }}>
+                <b>Time:</b> {pendingAppointment.formatted_schedule || pendingAppointment.date_time}
+              </p>
+              <p style={{ margin: '2px 0 10px', fontSize: 13 }}>
+                <b>Purpose:</b> {pendingAppointment.appointment_type} (Attending: Dr. {pendingAppointment.doc_last_name || 'Mata'})
+              </p>
+
+              {/* Triage Vitals Input by Nurse */}
+              {pendingAppointment.status !== 'checked_in' && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 'bold', color: '#475569' }}>Blood Pressure:</label>
+                    <input style={{ width: '100%', padding: 4, fontSize: 12, boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: 4, background: '#fff', color: '#0f172a' }} value={bp} onChange={(e) => setBp(e.target.value)} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 'bold', color: '#475569' }}>Temp (°C):</label>
+                    <input style={{ width: '100%', padding: 4, fontSize: 12, boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: 4, background: '#fff', color: '#0f172a' }} value={temp} onChange={(e) => setTemp(e.target.value)} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 'bold', color: '#475569' }}>Pulse (bpm):</label>
+                    <input style={{ width: '100%', padding: 4, fontSize: 12, boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: 4, background: '#fff', color: '#0f172a' }} value={pulse} onChange={(e) => setPulse(e.target.value)} />
+                  </div>
+                </div>
+              )}
+
+              {/* Check-In Confirm Button */}
+              {pendingAppointment.status === 'checked_in' ? (
+                <div style={{ color: '#16a34a', fontWeight: 'bold', fontSize: 13, textAlign: 'center' }}>
+                  {checkInSuccess || '✅ Patient is checked in and waiting in queue.'}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleConfirmArrival}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    background: '#0f766e',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 6,
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    fontSize: 13,
+                  }}
+                >
+                  📍 Confirm Arrival & Check-in Patient
+                </button>
+              )}
+            </div>
+          ) : (
+            <p style={{ fontSize: 12, color: '#64748b', fontStyle: 'italic', marginTop: 8 }}>
+              No scheduled appointment found. Student can be treated as a regular walk-in.
+            </p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+</file>
+
+<file path="server/src/routes/inventory.js">
+// server/src/routes/inventory.js
+import express from 'express';
+import { pool } from '../db.js';
+import { authenticateToken } from '../auth.js';
+import { requireRoles } from '../middleware/rbac.js';
+import { logAudit } from '../utils/auditLogger.js';
+
+const router = express.Router();
+
+// =============================================================================
+// 1. READ / QUERY CATALOGUE
+// =============================================================================
+
+// GET /api/inventory/batches - Fetch all active inventory batches (FEFO sorted)
+router.get('/batches', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT b.batch_id, m.medicine_id, m.name, m.generic_name, m.form, m.strength,
+              b.batch_no, b.quantity_on_hand, b.manufacture_date, b.expiry_date, b.supplier,
+              DATEDIFF(b.expiry_date, CURDATE()) as days_until_expiry
+       FROM MEDICINE_BATCHES b 
+       JOIN MEDICINES m ON b.medicine_id = m.medicine_id 
+       WHERE b.deleted_at IS NULL 
+       ORDER BY b.expiry_date ASC`
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('Error fetching inventory batches:', error);
+    res.status(500).json({ error: 'Failed to fetch inventory batches.' });
+  }
+});
+
+// GET /api/inventory/medicines - Master drug catalogue for prescriptions & stock-in dropdowns
+router.get('/medicines', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
+  try {
+    const [medicines] = await pool.query(
+      `SELECT medicine_id, name, generic_name, form, strength, unit, reorder_level 
+       FROM MEDICINES 
+       WHERE is_active = TRUE AND deleted_at IS NULL 
+       ORDER BY name ASC`
+    );
+    res.json(medicines);
+  } catch (error) {
+    console.error('Failed to fetch medicine master:', error);
+    res.status(500).json({ error: 'Failed to fetch medicines catalogue.' });
+  }
+});
+
+// GET /api/inventory/expiring-soon - Sweeps for lots expiring within 90 days or below reorder level
+router.get('/expiring-soon', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT b.batch_id, m.name, m.generic_name, b.batch_no, b.quantity_on_hand, m.reorder_level,
+              b.expiry_date, DATEDIFF(b.expiry_date, CURDATE()) as days_until_expiry,
+              CASE 
+                WHEN DATEDIFF(b.expiry_date, CURDATE()) < 0 THEN 'EXPIRED'
+                WHEN DATEDIFF(b.expiry_date, CURDATE()) <= 30 THEN 'CRITICAL'
+                WHEN DATEDIFF(b.expiry_date, CURDATE()) <= 90 THEN 'EXPIRING_SOON'
+                ELSE 'OK'
+              END AS alert_level
+       FROM MEDICINE_BATCHES b
+       JOIN MEDICINES m ON b.medicine_id = m.medicine_id
+       WHERE b.deleted_at IS NULL 
+         AND (DATEDIFF(b.expiry_date, CURDATE()) <= 90 OR b.quantity_on_hand <= m.reorder_level)
+       ORDER BY b.expiry_date ASC`
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('Error in expiry sweep:', error);
+    res.status(500).json({ error: 'Failed to execute expiry sweep.' });
+  }
+});
+
+// =============================================================================
+// 2. INBOUND & STOCK REPLENISHMENT (NEW FEATURE)
+// =============================================================================
+
+// POST /api/inventory/receive - Log a new shipment delivery / stock-in
+router.post('/receive', authenticateToken, requireRoles('NURSE', 'ADMIN'), async (req, res) => {
+  const { medicine_id, batch_no, manufacture_date, expiry_date, supplier, quantity_received } = req.body;
+
+  if (!medicine_id || !batch_no || !manufacture_date || !expiry_date || !quantity_received) {
+    return res.status(400).json({
+      error: 'medicine_id, batch_no, manufacture_date, expiry_date, and quantity_received are required.',
+    });
+  }
+
+  if (!Number.isInteger(Number(quantity_received)) || Number(quantity_received) <= 0) {
+    return res.status(400).json({ error: 'Quantity received must be a positive integer.' });
+  }
+
+  if (new Date(expiry_date) <= new Date(manufacture_date)) {
+    return res.status(400).json({ error: 'Expiry date must be later than manufacture date.' });
+  }
+
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    // 1. Verify medicine exists in master
+    const [medRows] = await connection.query(
+      'SELECT name FROM MEDICINES WHERE medicine_id = ? AND deleted_at IS NULL',
+      [medicine_id]
+    );
+    if (medRows.length === 0) throw new Error('Medicine not found in master formulary.');
+
+    // 2. Check if this exact batch number already exists for this medicine
+    const [existingBatch] = await connection.query(
+      'SELECT batch_id, quantity_on_hand FROM MEDICINE_BATCHES WHERE medicine_id = ? AND batch_no = ? FOR UPDATE',
+      [medicine_id, batch_no]
+    );
+
+    let targetBatchId;
+    let newQty;
+
+    if (existingBatch.length > 0) {
+      // Restock existing lot
+      targetBatchId = existingBatch[0].batch_id;
+      newQty = existingBatch[0].quantity_on_hand + Number(quantity_received);
+
+      await connection.query(
+        'UPDATE MEDICINE_BATCHES SET quantity_on_hand = ?, supplier = ? WHERE batch_id = ?',
+        [newQty, supplier || null, targetBatchId]
+      );
+    } else {
+      // Create new lot batch
+      const [batchResult] = await connection.query(
+        `INSERT INTO MEDICINE_BATCHES 
+         (medicine_id, batch_no, manufacture_date, expiry_date, supplier, quantity_on_hand)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [medicine_id, batch_no, manufacture_date, expiry_date, supplier || 'PSU Central Depot', Number(quantity_received)]
+      );
+      targetBatchId = batchResult.insertId;
+      newQty = Number(quantity_received);
+    }
+
+    // 3. Log into INVENTORY_LOGS as 'receive'
+    await connection.query(
+      `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
+       VALUES (?, ?, 'receive', ?, ?)`,
+      [targetBatchId, Number(quantity_received), `Shipment received from ${supplier || 'Depot'}`, req.user.user_id]
+    );
+
+    // 4. Record to R.A. 10173 Audit Ledger
+    await logAudit(connection, {
+      userId: req.user.user_id,
+      action: 'CREATE',
+      table: 'MEDICINE_BATCHES',
+      recordId: targetBatchId,
+      oldValue: null,
+      newValue: {
+        medicine: medRows[0].name,
+        batch_no,
+        quantity_received: Number(quantity_received),
+        new_total_stock: newQty,
+        supplier,
+      },
+      ipAddress: req.ip,
+    });
+
+    await connection.commit();
+
+    res.status(201).json({
+      message: `Stock successfully logged. Batch ${batch_no} now has ${newQty} units.`,
+      batchId: targetBatchId,
+      quantityOnHand: newQty,
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Stock-in error:', error);
+    res.status(400).json({ error: error.message || 'Failed to process shipment intake.' });
+  } finally {
+    connection.release();
+  }
+});
+
+// =============================================================================
+// 3. MASTER FORMULARY REGISTRATION (NEW FEATURE)
+// =============================================================================
+
+// POST /api/inventory/medicines - Add a new drug definition to the University formulary
+router.post('/medicines', authenticateToken, requireRoles('DOCTOR', 'ADMIN'), async (req, res) => {
+  const { name, generic_name, form, strength, unit, reorder_level } = req.body;
+
+  if (!name || !generic_name || !form || !strength) {
+    return res.status(400).json({ error: 'name, generic_name, form, and strength are required.' });
+  }
+
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const [result] = await connection.query(
+      `INSERT INTO MEDICINES (name, generic_name, form, strength, unit, reorder_level)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [name, generic_name, form, strength, unit || 'pcs', Number(reorder_level) || 15]
+    );
+
+    const medicineId = result.insertId;
+
+    await logAudit(connection, {
+      userId: req.user.user_id,
+      action: 'CREATE',
+      table: 'MEDICINES',
+      recordId: medicineId,
+      oldValue: null,
+      newValue: { name, generic_name, form, strength, reorder_level },
+      ipAddress: req.ip,
+    });
+
+    await connection.commit();
+
+    res.status(201).json({
+      message: `Medicine "${name}" (${generic_name}) added to hospital formulary.`,
+      medicineId,
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Add medicine error:', error);
+    res.status(500).json({ error: 'Failed to create medicine definition.' });
+  } finally {
+    connection.release();
+  }
+});
+
+// =============================================================================
+// 4. DISPENSATION & OUTBOUND DEDUCTIONS
+// =============================================================================
+
+// POST /api/inventory/deduct - Deduct stock from a specific batch for prescription
+router.post('/deduct', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+  const { batch_id, quantity_deducted, reason } = req.body;
+
+  if (!Number.isInteger(Number(quantity_deducted)) || Number(quantity_deducted) <= 0) {
+    return res.status(400).json({ error: 'Quantity deducted must be a positive integer.' });
+  }
+
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    // 1. Lock the batch row and check current stock levels
+    const [batchRows] = await connection.query(
+      'SELECT quantity_on_hand, batch_no FROM MEDICINE_BATCHES WHERE batch_id = ? FOR UPDATE',
+      [batch_id]
+    );
+
+    if (batchRows.length === 0) throw new Error('Medicine batch not found.');
+
+    const oldQuantity = batchRows[0].quantity_on_hand;
+    if (oldQuantity < Number(quantity_deducted)) {
+      throw new Error(`Insufficient stock. Batch ${batchRows[0].batch_no} only has ${oldQuantity} units left.`);
+    }
+
+    const newQuantity = oldQuantity - Number(quantity_deducted);
+
+    // 2. Deduct the quantity
+    await connection.query(
+      'UPDATE MEDICINE_BATCHES SET quantity_on_hand = ? WHERE batch_id = ?',
+      [newQuantity, batch_id]
+    );
+
+    // 3. Append to internal INVENTORY_LOGS
+    await connection.query(
+      `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
+       VALUES (?, ?, 'dispense', ?, ?)`,
+      [batch_id, -Number(quantity_deducted), reason || 'Prescription issuance', req.user.user_id]
+    );
+
+    // 4. Append to Global Cryptographic Audit Trail
+    await logAudit(connection, {
+      userId: req.user.user_id,
+      action: 'UPDATE',
+      table: 'MEDICINE_BATCHES',
+      recordId: batch_id,
+      oldValue: { quantity_on_hand: oldQuantity },
+      newValue: { quantity_on_hand: newQuantity },
+      ipAddress: req.ip,
+    });
+
+    await connection.commit();
+    res.json({ message: 'Stock successfully deducted and logged.', remainingStock: newQuantity });
+  } catch (error) {
+    await connection.rollback();
+    res.status(400).json({ error: error.message });
+  } finally {
+    connection.release();
+  }
+});
+
+// =============================================================================
+// 5. STOCK ADJUSTMENT & EXPIRED DRUG DISPOSAL (NEW FEATURE)
+// =============================================================================
+
+// POST /api/inventory/adjust - Discard expired medicine, damaged bottles, or log returns
+router.post('/adjust', authenticateToken, requireRoles('NURSE', 'ADMIN'), async (req, res) => {
+  const { batch_id, quantity_removed, transaction_type, reason } = req.body;
+  // Allowed types: 'dispose', 'adjust', 'recall', 'return'
+  const validTypes = ['dispose', 'adjust', 'recall', 'return'];
+
+  if (!validTypes.includes(transaction_type)) {
+    return res.status(400).json({ error: `transaction_type must be one of: ${validTypes.join(', ')}` });
+  }
+
+  if (!Number.isInteger(Number(quantity_removed)) || Number(quantity_removed) <= 0) {
+    return res.status(400).json({ error: 'Quantity removed must be a positive integer.' });
+  }
+
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const [batchRows] = await connection.query(
+      'SELECT quantity_on_hand, batch_no FROM MEDICINE_BATCHES WHERE batch_id = ? FOR UPDATE',
+      [batch_id]
+    );
+
+    if (batchRows.length === 0) throw new Error('Medicine batch not found.');
+
+    const oldQty = batchRows[0].quantity_on_hand;
+    if (oldQty < Number(quantity_removed)) {
+      throw new Error(`Cannot discard ${quantity_removed} units; lot only has ${oldQty} units.`);
+    }
+
+    const newQty = oldQty - Number(quantity_removed);
+
+    await connection.query('UPDATE MEDICINE_BATCHES SET quantity_on_hand = ? WHERE batch_id = ?', [newQty, batch_id]);
+
+    await connection.query(
+      `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
+       VALUES (?, ?, ?, ?, ?)`,
+      [batch_id, -Number(quantity_removed), transaction_type, reason || 'Disposal of spoiled/expired drugs', req.user.user_id]
+    );
+
+    await logAudit(connection, {
+      userId: req.user.user_id,
+      action: 'UPDATE',
+      table: 'MEDICINE_BATCHES',
+      recordId: batch_id,
+      oldValue: { quantity_on_hand: oldQty },
+      newValue: { quantity_on_hand: newQty, transaction_type, reason },
+      ipAddress: req.ip,
+    });
+
+    await connection.commit();
+
+    res.json({
+      message: `Adjustment logged. ${quantity_removed} units marked as '${transaction_type}'. Remaining: ${newQty}.`,
+      remainingStock: newQty,
+    });
+  } catch (error) {
+    await connection.rollback();
+    res.status(400).json({ error: error.message });
+  } finally {
+    connection.release();
+  }
+});
+
+export default router;
+</file>
+
 <file path="server/src/auth.js">
 // server/src/auth.js
 import bcrypt from 'bcryptjs';
@@ -7425,30 +7800,25 @@ import { authenticateToken } from '../auth.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
 import { decrypt } from '../utils/cryptoVault.js';
+import { requirePrivacyConsent } from '../middleware/consent.js';
 
 const router = express.Router();
+const HMAC_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
 
 // GET /api/health-pass/token
-router.get('/token', authenticateToken, (req, res) => {
+router.get('/token', authenticateToken, requirePrivacyConsent, (req, res) => {
   try {
     const userId = req.user.user_id;
     const timestamp = Date.now();
     const nonce = crypto.randomBytes(4).toString('hex');
 
     const payload = `${userId}.${timestamp}.${nonce}`;
-    const hmac = crypto
-      .createHmac('sha256', 'supersecretkeyvaletudo')
-      .update(payload)
-      .digest('hex');
+    const hmac = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
 
     const qrToken = `${payload}.${hmac}`;
-
-    res.json({
-      qrToken,
-      expiresInSeconds: 300,
-    });
+    res.json({ qrToken, expiresInSeconds: 300 });
   } catch (error) {
-    console.error('QR generation error:', error);
+    console.error('[HealthPass] QR generation error:', error);
     res.status(500).json({ error: 'Failed to generate QR token.' });
   }
 });
@@ -7466,21 +7836,48 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
   const [patientUserId, timestampStr, nonce, receivedSig] = parts;
   const payload = `${patientUserId}.${timestampStr}.${nonce}`;
 
-  const expectedSig = crypto.createHmac('sha256', 'supersecretkeyvaletudo').update(payload).digest('hex');
-  if (expectedSig !== receivedSig) {
+  // 1. Compute expected signature using consistent HMAC secret
+  const expectedSig = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
+
+  // Constant-time signature verification
+  const expectedBuffer = Buffer.from(expectedSig);
+  const receivedBuffer = Buffer.from(receivedSig);
+  if (
+    expectedBuffer.length !== receivedBuffer.length ||
+    !crypto.timingSafeEqual(expectedBuffer, receivedBuffer)
+  ) {
     return res.status(401).json({ error: 'QR verification failed: Invalid signature.' });
   }
 
+  // 2. Expiration check (15 minutes grace window)
   const tokenTime = parseInt(timestampStr, 10);
-  if (Date.now() - tokenTime > 15 * 60 * 1000) {
+  if (isNaN(tokenTime) || Date.now() - tokenTime > 15 * 60 * 1000) {
     return res.status(401).json({ error: 'QR pass expired. Ask student to refresh pass.' });
   }
 
+  // 3. Acquire DB connection and execute queries safely inside try/finally
   const connection = await pool.getConnection();
 
   try {
     await connection.beginTransaction();
 
+    // R.A. 10173 Consent check on the scanned patient
+    const [consentRows] = await connection.query(
+      `SELECT is_granted FROM CONSENT_RECORDS 
+       WHERE user_id = ? 
+       ORDER BY consent_id DESC LIMIT 1`,
+      [patientUserId]
+    );
+
+    if (consentRows.length === 0 || !Boolean(consentRows[0].is_granted)) {
+      await connection.rollback();
+      return res.status(403).json({
+        error: 'PRIVACY_CONSENT_REVOKED',
+        message: 'Student has revoked or not granted R.A. 10173 data processing consent. Intake suspended.',
+      });
+    }
+
+    // Retrieve active patient records
     const [patient] = await connection.query(
       `SELECT u.user_id, u.first_name, u.last_name, u.email,
               sp.student_no, sp.course, sp.year_level,
@@ -7493,14 +7890,16 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
     );
 
     if (patient.length === 0) {
-      throw new Error('Patient not found or deactivated.');
+      await connection.rollback();
+      return res.status(404).json({ error: 'Patient not found or deactivated.' });
     }
 
+    // Log PHI read access
     logPhiAccess({
       viewerUserId: req.user.user_id,
-      patientUserId: patientUserId,
+      patientUserId: Number(patientUserId),
       table: 'HEALTH_PROFILES',
-      recordId: patientUserId,
+      recordId: Number(patientUserId),
       purpose: 'Touchless Clinic Check-In Scan',
       ipAddress: req.ip,
     });
@@ -7519,377 +7918,8 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
     });
   } catch (error) {
     await connection.rollback();
-    if (error.message === 'Patient not found or deactivated.') {
-      return res.status(404).json({ error: error.message });
-    }
-    console.error('Verification error:', error);
+    console.error('[HealthPass] Verification error:', error);
     res.status(500).json({ error: 'Error during verification.' });
-  } finally {
-    connection.release();
-  }
-});
-
-export default router;
-</file>
-
-<file path="server/src/routes/inventory.js">
-// server/src/routes/inventory.js
-import express from 'express';
-import { pool } from '../db.js';
-import { authenticateToken } from '../auth.js';
-import { requireRoles } from '../middleware/rbac.js';
-import { logAudit } from '../utils/auditLogger.js';
-
-const router = express.Router();
-
-// =============================================================================
-// 1. READ / QUERY CATALOGUE
-// =============================================================================
-
-// GET /api/inventory/batches - Fetch all active inventory batches (FEFO sorted)
-router.get('/batches', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
-  try {
-    const [rows] = await pool.query(
-      `SELECT b.batch_id, m.medicine_id, m.name, m.generic_name, m.form, m.strength,
-              b.batch_no, b.quantity_on_hand, b.manufacture_date, b.expiry_date, b.supplier,
-              DATEDIFF(b.expiry_date, CURDATE()) as days_until_expiry
-       FROM MEDICINE_BATCHES b 
-       JOIN MEDICINES m ON b.medicine_id = m.medicine_id 
-       WHERE b.deleted_at IS NULL 
-       ORDER BY b.expiry_date ASC`
-    );
-    res.json(rows);
-  } catch (error) {
-    console.error('Error fetching inventory batches:', error);
-    res.status(500).json({ error: 'Failed to fetch inventory batches.' });
-  }
-});
-
-// GET /api/inventory/medicines - Master drug catalogue for prescriptions & stock-in dropdowns
-router.get('/medicines', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
-  try {
-    const [medicines] = await pool.query(
-      `SELECT medicine_id, name, generic_name, form, strength, unit, reorder_level 
-       FROM MEDICINES 
-       WHERE is_active = TRUE AND deleted_at IS NULL 
-       ORDER BY name ASC`
-    );
-    res.json(medicines);
-  } catch (error) {
-    console.error('Failed to fetch medicine master:', error);
-    res.status(500).json({ error: 'Failed to fetch medicines catalogue.' });
-  }
-});
-
-// GET /api/inventory/expiring-soon - Sweeps for lots expiring within 90 days or below reorder level
-router.get('/expiring-soon', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
-  try {
-    const [rows] = await pool.query(
-      `SELECT b.batch_id, m.name, m.generic_name, b.batch_no, b.quantity_on_hand, m.reorder_level,
-              b.expiry_date, DATEDIFF(b.expiry_date, CURDATE()) as days_until_expiry,
-              CASE 
-                WHEN DATEDIFF(b.expiry_date, CURDATE()) < 0 THEN 'EXPIRED'
-                WHEN DATEDIFF(b.expiry_date, CURDATE()) <= 30 THEN 'CRITICAL'
-                WHEN DATEDIFF(b.expiry_date, CURDATE()) <= 90 THEN 'EXPIRING_SOON'
-                ELSE 'OK'
-              END AS alert_level
-       FROM MEDICINE_BATCHES b
-       JOIN MEDICINES m ON b.medicine_id = m.medicine_id
-       WHERE b.deleted_at IS NULL 
-         AND (DATEDIFF(b.expiry_date, CURDATE()) <= 90 OR b.quantity_on_hand <= m.reorder_level)
-       ORDER BY b.expiry_date ASC`
-    );
-    res.json(rows);
-  } catch (error) {
-    console.error('Error in expiry sweep:', error);
-    res.status(500).json({ error: 'Failed to execute expiry sweep.' });
-  }
-});
-
-// =============================================================================
-// 2. INBOUND & STOCK REPLENISHMENT (NEW FEATURE)
-// =============================================================================
-
-// POST /api/inventory/receive - Log a new shipment delivery / stock-in
-router.post('/receive', authenticateToken, requireRoles('NURSE', 'ADMIN'), async (req, res) => {
-  const { medicine_id, batch_no, manufacture_date, expiry_date, supplier, quantity_received } = req.body;
-
-  if (!medicine_id || !batch_no || !manufacture_date || !expiry_date || !quantity_received) {
-    return res.status(400).json({
-      error: 'medicine_id, batch_no, manufacture_date, expiry_date, and quantity_received are required.',
-    });
-  }
-
-  if (!Number.isInteger(Number(quantity_received)) || Number(quantity_received) <= 0) {
-    return res.status(400).json({ error: 'Quantity received must be a positive integer.' });
-  }
-
-  if (new Date(expiry_date) <= new Date(manufacture_date)) {
-    return res.status(400).json({ error: 'Expiry date must be later than manufacture date.' });
-  }
-
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    // 1. Verify medicine exists in master
-    const [medRows] = await connection.query(
-      'SELECT name FROM MEDICINES WHERE medicine_id = ? AND deleted_at IS NULL',
-      [medicine_id]
-    );
-    if (medRows.length === 0) throw new Error('Medicine not found in master formulary.');
-
-    // 2. Check if this exact batch number already exists for this medicine
-    const [existingBatch] = await connection.query(
-      'SELECT batch_id, quantity_on_hand FROM MEDICINE_BATCHES WHERE medicine_id = ? AND batch_no = ? FOR UPDATE',
-      [medicine_id, batch_no]
-    );
-
-    let targetBatchId;
-    let newQty;
-
-    if (existingBatch.length > 0) {
-      // Restock existing lot
-      targetBatchId = existingBatch[0].batch_id;
-      newQty = existingBatch[0].quantity_on_hand + Number(quantity_received);
-
-      await connection.query(
-        'UPDATE MEDICINE_BATCHES SET quantity_on_hand = ?, supplier = ? WHERE batch_id = ?',
-        [newQty, supplier || null, targetBatchId]
-      );
-    } else {
-      // Create new lot batch
-      const [batchResult] = await connection.query(
-        `INSERT INTO MEDICINE_BATCHES 
-         (medicine_id, batch_no, manufacture_date, expiry_date, supplier, quantity_on_hand)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [medicine_id, batch_no, manufacture_date, expiry_date, supplier || 'PSU Central Depot', Number(quantity_received)]
-      );
-      targetBatchId = batchResult.insertId;
-      newQty = Number(quantity_received);
-    }
-
-    // 3. Log into INVENTORY_LOGS as 'receive'
-    await connection.query(
-      `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
-       VALUES (?, ?, 'receive', ?, ?)`,
-      [targetBatchId, Number(quantity_received), `Shipment received from ${supplier || 'Depot'}`, req.user.user_id]
-    );
-
-    // 4. Record to R.A. 10173 Audit Ledger
-    await logAudit(connection, {
-      userId: req.user.user_id,
-      action: 'CREATE',
-      table: 'MEDICINE_BATCHES',
-      recordId: targetBatchId,
-      oldValue: null,
-      newValue: {
-        medicine: medRows[0].name,
-        batch_no,
-        quantity_received: Number(quantity_received),
-        new_total_stock: newQty,
-        supplier,
-      },
-      ipAddress: req.ip,
-    });
-
-    await connection.commit();
-
-    res.status(201).json({
-      message: `Stock successfully logged. Batch ${batch_no} now has ${newQty} units.`,
-      batchId: targetBatchId,
-      quantityOnHand: newQty,
-    });
-  } catch (error) {
-    await connection.rollback();
-    console.error('Stock-in error:', error);
-    res.status(400).json({ error: error.message || 'Failed to process shipment intake.' });
-  } finally {
-    connection.release();
-  }
-});
-
-// =============================================================================
-// 3. MASTER FORMULARY REGISTRATION (NEW FEATURE)
-// =============================================================================
-
-// POST /api/inventory/medicines - Add a new drug definition to the University formulary
-router.post('/medicines', authenticateToken, requireRoles('DOCTOR', 'ADMIN'), async (req, res) => {
-  const { name, generic_name, form, strength, unit, reorder_level } = req.body;
-
-  if (!name || !generic_name || !form || !strength) {
-    return res.status(400).json({ error: 'name, generic_name, form, and strength are required.' });
-  }
-
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    const [result] = await connection.query(
-      `INSERT INTO MEDICINES (name, generic_name, form, strength, unit, reorder_level)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [name, generic_name, form, strength, unit || 'pcs', Number(reorder_level) || 15]
-    );
-
-    const medicineId = result.insertId;
-
-    await logAudit(connection, {
-      userId: req.user.user_id,
-      action: 'CREATE',
-      table: 'MEDICINES',
-      recordId: medicineId,
-      oldValue: null,
-      newValue: { name, generic_name, form, strength, reorder_level },
-      ipAddress: req.ip,
-    });
-
-    await connection.commit();
-
-    res.status(201).json({
-      message: `Medicine "${name}" (${generic_name}) added to hospital formulary.`,
-      medicineId,
-    });
-  } catch (error) {
-    await connection.rollback();
-    console.error('Add medicine error:', error);
-    res.status(500).json({ error: 'Failed to create medicine definition.' });
-  } finally {
-    connection.release();
-  }
-});
-
-// =============================================================================
-// 4. DISPENSATION & OUTBOUND DEDUCTIONS
-// =============================================================================
-
-// POST /api/inventory/deduct - Deduct stock from a specific batch for prescription
-router.post('/deduct', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
-  const { batch_id, quantity_deducted, reason } = req.body;
-
-  if (!Number.isInteger(Number(quantity_deducted)) || Number(quantity_deducted) <= 0) {
-    return res.status(400).json({ error: 'Quantity deducted must be a positive integer.' });
-  }
-
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    // 1. Lock the batch row and check current stock levels
-    const [batchRows] = await connection.query(
-      'SELECT quantity_on_hand, batch_no FROM MEDICINE_BATCHES WHERE batch_id = ? FOR UPDATE',
-      [batch_id]
-    );
-
-    if (batchRows.length === 0) throw new Error('Medicine batch not found.');
-
-    const oldQuantity = batchRows[0].quantity_on_hand;
-    if (oldQuantity < Number(quantity_deducted)) {
-      throw new Error(`Insufficient stock. Batch ${batchRows[0].batch_no} only has ${oldQuantity} units left.`);
-    }
-
-    const newQuantity = oldQuantity - Number(quantity_deducted);
-
-    // 2. Deduct the quantity
-    await connection.query(
-      'UPDATE MEDICINE_BATCHES SET quantity_on_hand = ? WHERE batch_id = ?',
-      [newQuantity, batch_id]
-    );
-
-    // 3. Append to internal INVENTORY_LOGS
-    await connection.query(
-      `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
-       VALUES (?, ?, 'dispense', ?, ?)`,
-      [batch_id, -Number(quantity_deducted), reason || 'Prescription issuance', req.user.user_id]
-    );
-
-    // 4. Append to Global Cryptographic Audit Trail
-    await logAudit(connection, {
-      userId: req.user.user_id,
-      action: 'UPDATE',
-      table: 'MEDICINE_BATCHES',
-      recordId: batch_id,
-      oldValue: { quantity_on_hand: oldQuantity },
-      newValue: { quantity_on_hand: newQuantity },
-      ipAddress: req.ip,
-    });
-
-    await connection.commit();
-    res.json({ message: 'Stock successfully deducted and logged.', remainingStock: newQuantity });
-  } catch (error) {
-    await connection.rollback();
-    res.status(400).json({ error: error.message });
-  } finally {
-    connection.release();
-  }
-});
-
-// =============================================================================
-// 5. STOCK ADJUSTMENT & EXPIRED DRUG DISPOSAL (NEW FEATURE)
-// =============================================================================
-
-// POST /api/inventory/adjust - Discard expired medicine, damaged bottles, or log returns
-router.post('/adjust', authenticateToken, requireRoles('NURSE', 'ADMIN'), async (req, res) => {
-  const { batch_id, quantity_removed, transaction_type, reason } = req.body;
-  // Allowed types: 'dispose', 'adjust', 'recall', 'return'
-  const validTypes = ['dispose', 'adjust', 'recall', 'return'];
-
-  if (!validTypes.includes(transaction_type)) {
-    return res.status(400).json({ error: `transaction_type must be one of: ${validTypes.join(', ')}` });
-  }
-
-  if (!Number.isInteger(Number(quantity_removed)) || Number(quantity_removed) <= 0) {
-    return res.status(400).json({ error: 'Quantity removed must be a positive integer.' });
-  }
-
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    const [batchRows] = await connection.query(
-      'SELECT quantity_on_hand, batch_no FROM MEDICINE_BATCHES WHERE batch_id = ? FOR UPDATE',
-      [batch_id]
-    );
-
-    if (batchRows.length === 0) throw new Error('Medicine batch not found.');
-
-    const oldQty = batchRows[0].quantity_on_hand;
-    if (oldQty < Number(quantity_removed)) {
-      throw new Error(`Cannot discard ${quantity_removed} units; lot only has ${oldQty} units.`);
-    }
-
-    const newQty = oldQty - Number(quantity_removed);
-
-    await connection.query('UPDATE MEDICINE_BATCHES SET quantity_on_hand = ? WHERE batch_id = ?', [newQty, batch_id]);
-
-    await connection.query(
-      `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
-       VALUES (?, ?, ?, ?, ?)`,
-      [batch_id, -Number(quantity_removed), transaction_type, reason || 'Disposal of spoiled/expired drugs', req.user.user_id]
-    );
-
-    await logAudit(connection, {
-      userId: req.user.user_id,
-      action: 'UPDATE',
-      table: 'MEDICINE_BATCHES',
-      recordId: batch_id,
-      oldValue: { quantity_on_hand: oldQty },
-      newValue: { quantity_on_hand: newQty, transaction_type, reason },
-      ipAddress: req.ip,
-    });
-
-    await connection.commit();
-
-    res.json({
-      message: `Adjustment logged. ${quantity_removed} units marked as '${transaction_type}'. Remaining: ${newQty}.`,
-      remainingStock: newQty,
-    });
-  } catch (error) {
-    await connection.rollback();
-    res.status(400).json({ error: error.message });
   } finally {
     connection.release();
   }
@@ -7910,52 +7940,12 @@ import { requirePrivacyConsent } from '../middleware/consent.js';
 const router = express.Router();
 
 // GET /api/profile/me
-router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => {
-  try {
-    const userId = req.user.user_id;
-
-    const [userRows] = await pool.query(
-      `SELECT u.user_id, u.email, u.first_name, u.last_name, u.phone,
-              sp.student_no, sp.course, sp.year_level
-       FROM USERS u
-       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
-       WHERE u.user_id = ?`,
-      [userId]
-    );
-
-    if (userRows.length === 0) return res.status(404).json({ error: 'User not found.' });
-
-    const [healthRows] = await pool.query(
-      `SELECT profile_id, blood_type, allergies, chronic_conditions,
-              emergency_contact_name, emergency_contact_phone, height, weight, updated_at
-       FROM HEALTH_PROFILES
-       WHERE user_id = ? AND deleted_at IS NULL`,
-      [userId]
-    );
-
-    let healthProfile = healthRows.length > 0 ? healthRows[0] : null;
-
-    if (healthProfile) {
-      // Decrypt sensitive medical indicators before sending over TLS
-      healthProfile.allergies = decrypt(healthProfile.allergies);
-      healthProfile.chronic_conditions = decrypt(healthProfile.chronic_conditions);
-    }
-
-    res.json({
-      user: userRows[0],
-      healthProfile,
-    });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to retrieve profile data.' });
-  }
-});
-
-// PUT /api/profile/me
+// server/src/routes/profile.js
 router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => {
   const userId = req.user.user_id;
   const {
     blood_type, allergies, chronic_conditions,
-    emergency_contact_name, emergency_contact_phone, height, weight,
+    emergency_contact_name, emergency_contact_phone, height, weight, phone
   } = req.body;
 
   const connection = await pool.getConnection();
@@ -7963,14 +7953,15 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
   try {
     await connection.beginTransaction();
 
+    // 1. Update phone on USERS table if provided
+    if (phone !== undefined) {
+      await connection.query('UPDATE USERS SET phone = ? WHERE user_id = ?', [phone, userId]);
+    }
+
     const [existing] = await connection.query(
       'SELECT * FROM HEALTH_PROFILES WHERE user_id = ? FOR UPDATE',
       [userId]
     );
-
-    // Encrypt confidential indicators with AES-256 before writing to MySQL
-    const encryptedAllergies = encrypt(allergies);
-    const encryptedConditions = encrypt(chronic_conditions);
 
     let oldData = null;
     let action = 'CREATE';
@@ -7981,25 +7972,42 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
       action = 'UPDATE';
       recordId = oldData.profile_id;
 
+      // Preserve existing encrypted data if not explicitly provided in the payload
+      const finalAllergies = allergies !== undefined ? encrypt(allergies) : oldData.allergies;
+      const finalConditions = chronic_conditions !== undefined ? encrypt(chronic_conditions) : oldData.chronic_conditions;
+      const finalBloodType = blood_type !== undefined ? blood_type : oldData.blood_type;
+      const finalEmName = emergency_contact_name !== undefined ? emergency_contact_name : oldData.emergency_contact_name;
+      const finalEmPhone = emergency_contact_phone !== undefined ? emergency_contact_phone : oldData.emergency_contact_phone;
+      const finalHeight = height !== undefined ? height : oldData.height;
+      const finalWeight = weight !== undefined ? weight : oldData.weight;
+
       await connection.query(
         `UPDATE HEALTH_PROFILES 
          SET blood_type = ?, allergies = ?, chronic_conditions = ?,
              emergency_contact_name = ?, emergency_contact_phone = ?,
              height = ?, weight = ?, version = version + 1
          WHERE user_id = ?`,
-        [blood_type, encryptedAllergies, encryptedConditions, emergency_contact_name, emergency_contact_phone, height, weight, userId]
+        [finalBloodType, finalAllergies, finalConditions, finalEmName, finalEmPhone, finalHeight, finalWeight, userId]
       );
     } else {
       const [result] = await connection.query(
         `INSERT INTO HEALTH_PROFILES 
          (user_id, blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, height, weight)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [userId, blood_type, encryptedAllergies, encryptedConditions, emergency_contact_name, emergency_contact_phone, height, weight]
+        [
+          userId,
+          blood_type || null,
+          encrypt(allergies || ''),
+          encrypt(chronic_conditions || ''),
+          emergency_contact_name || null,
+          emergency_contact_phone || null,
+          height || null,
+          weight || null,
+        ]
       );
       recordId = result.insertId;
     }
 
-    // Cryptographic audit log (records hash without exposing plaintext)
     await logAudit(connection, {
       userId: req.user.user_id,
       action,
@@ -8014,6 +8022,7 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
     res.json({ message: 'Health profile encrypted & saved successfully.' });
   } catch (error) {
     await connection.rollback();
+    console.error('[Profile Update Error]:', error);
     res.status(500).json({ error: 'Failed to update health profile.' });
   } finally {
     connection.release();
@@ -10691,14 +10700,14 @@ import DoctorConsole from './components/DoctorConsole';
 import AdminConsole from './components/AdminConsole';
 import ResponderConsole from './components/ResponderConsole';
 
-export function useSessionTimeout(timeoutMinutes = 15) {
+export function useSessionTimeout(isActive: boolean, timeoutMinutes = 15) {
   useEffect(() => {
+    if (!isActive) return;
+
     let timeoutId: NodeJS.Timeout;
-    
     const resetTimer = () => {
       clearTimeout(timeoutId);
       timeoutId = setTimeout(() => {
-        // Inactivity threshold reached
         localStorage.removeItem('valetudo_token');
         localStorage.removeItem('token');
         alert('🔒 Session expired due to inactivity (R.A. 10173 Compliance). Please log in again.');
@@ -10708,14 +10717,13 @@ export function useSessionTimeout(timeoutMinutes = 15) {
 
     const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
     events.forEach((event) => window.addEventListener(event, resetTimer));
-
     resetTimer();
 
     return () => {
       clearTimeout(timeoutId);
       events.forEach((event) => window.removeEventListener(event, resetTimer));
     };
-  }, [timeoutMinutes]);
+  }, [isActive, timeoutMinutes]);
 }
 
 export default function App() {
@@ -10728,7 +10736,7 @@ export default function App() {
   const [activeRoleView, setActiveRoleView] = useState<string>('');
 
   // Activate the RA 10173 Session Timeout
-  useSessionTimeout(15);
+  useSessionTimeout(Boolean(user), 15);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -10954,6 +10962,7 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { loginUser, authenticateToken } from './auth.js';
+import jwt from 'jsonwebtoken';
 
 // Route imports
 import privacyRouter from './routes/privacy.js';
@@ -11022,6 +11031,30 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log(`[Socket.IO] Client disconnected: ${socket.id}`);
   });
+});
+
+const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
+
+// Add Socket.IO authentication middleware
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.split(' ')[1];
+  if (!token) {
+    return next(new Error('Authentication token required'));
+  }
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return next(new Error('Invalid token'));
+    socket.user = user;
+    next();
+  });
+});
+
+io.on('connection', (socket) => {
+  const roles = socket.user?.roles || [];
+  // Join privileged room if clinical staff or emergency responder
+  const authorizedRoles = ['EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'];
+  if (roles.some((r) => authorizedRoles.includes(r))) {
+    socket.join('responders');
+  }
 });
 
 // 2. Public Auth Routes
@@ -11106,10 +11139,11 @@ export default function appointmentRouter(io) {
 
       const [existingBookings] = await pool.query(
         `SELECT DATE_FORMAT(date_time, '%H:%i') as booked_time
-         FROM APPOINTMENTS
-         WHERE doctor_user_id = ?
-           AND DATE(date_time) = ?
-           AND status IN ('scheduled', 'checked_in', 'serving')`,
+ FROM APPOINTMENTS
+ WHERE doctor_user_id = ?
+   AND DATE(date_time) = ?
+   AND status IN ('scheduled', 'checked_in', 'serving')
+   AND deleted_at IS NULL`
         [doctorId, date]
       );
 
@@ -11181,15 +11215,21 @@ export default function appointmentRouter(io) {
 
       const appointmentId = insertResult.insertId;
 
-      await logAudit(connection, {
-        userId: patientUserId,
-        action: 'CREATE',
-        table: 'APPOINTMENTS',
-        recordId: appointmentId,
-        oldValue: null,
-        newValue: { doctor_user_id, date_time, appointment_type, notes },
-        ipAddress: req.ip,
-      });
+      // In POST /api/appointments/:id/complete inside the transaction:
+await logAudit(connection, {
+  userId: doctorUserId,
+  action: 'CREATE',
+  table: 'EMR_RECORDS',
+  recordId: emrId,
+  oldValue: null,
+  newValue: {
+    patient_user_id,
+    appointment_id: appointmentId,
+    vitals_logged: vitals ? Object.keys(vitals) : [],
+    encrypted: true,
+  },
+  ipAddress: req.ip,
+});
 
       await connection.commit();
 
@@ -11342,7 +11382,7 @@ export default function appointmentRouter(io) {
   router.get('/today', authenticateToken, async (req, res) => {
     try {
       const { date, filter } = req.query;
-      let whereClause = '';
+      whereClause += ' AND a.deleted_at IS NULL';
       const params = [];
 
       if (filter === 'history') {
@@ -11502,7 +11542,7 @@ export default function appointmentRouter(io) {
         JOIN USERS doc ON a.doctor_user_id = doc.user_id
         LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
-        WHERE a.status IN ('scheduled', 'checked_in')
+        WHERE a.status IN ('scheduled', 'checked_in') AND a.deleted_at IS NULL
       `;
       const params = [];
 

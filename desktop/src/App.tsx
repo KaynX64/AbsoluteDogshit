@@ -5,14 +5,14 @@ import DoctorConsole from './components/DoctorConsole';
 import AdminConsole from './components/AdminConsole';
 import ResponderConsole from './components/ResponderConsole';
 
-export function useSessionTimeout(timeoutMinutes = 15) {
+export function useSessionTimeout(isActive: boolean, timeoutMinutes = 15) {
   useEffect(() => {
+    if (!isActive) return;
+
     let timeoutId: NodeJS.Timeout;
-    
     const resetTimer = () => {
       clearTimeout(timeoutId);
       timeoutId = setTimeout(() => {
-        // Inactivity threshold reached
         localStorage.removeItem('valetudo_token');
         localStorage.removeItem('token');
         alert('🔒 Session expired due to inactivity (R.A. 10173 Compliance). Please log in again.');
@@ -22,14 +22,13 @@ export function useSessionTimeout(timeoutMinutes = 15) {
 
     const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
     events.forEach((event) => window.addEventListener(event, resetTimer));
-
     resetTimer();
 
     return () => {
       clearTimeout(timeoutId);
       events.forEach((event) => window.removeEventListener(event, resetTimer));
     };
-  }, [timeoutMinutes]);
+  }, [isActive, timeoutMinutes]);
 }
 
 export default function App() {
@@ -42,7 +41,7 @@ export default function App() {
   const [activeRoleView, setActiveRoleView] = useState<string>('');
 
   // Activate the RA 10173 Session Timeout
-  useSessionTimeout(15);
+  useSessionTimeout(Boolean(user), 15);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
