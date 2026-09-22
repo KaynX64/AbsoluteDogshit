@@ -53,10 +53,11 @@ export default function appointmentRouter(io) {
 
       const [existingBookings] = await pool.query(
         `SELECT DATE_FORMAT(date_time, '%H:%i') as booked_time
-         FROM APPOINTMENTS
-         WHERE doctor_user_id = ?
-           AND DATE(date_time) = ?
-           AND status IN ('scheduled', 'checked_in', 'serving')`,
+ FROM APPOINTMENTS
+ WHERE doctor_user_id = ?
+   AND DATE(date_time) = ?
+   AND status IN ('scheduled', 'checked_in', 'serving')
+   AND deleted_at IS NULL`
         [doctorId, date]
       );
 
@@ -128,15 +129,21 @@ export default function appointmentRouter(io) {
 
       const appointmentId = insertResult.insertId;
 
-      await logAudit(connection, {
-        userId: patientUserId,
-        action: 'CREATE',
-        table: 'APPOINTMENTS',
-        recordId: appointmentId,
-        oldValue: null,
-        newValue: { doctor_user_id, date_time, appointment_type, notes },
-        ipAddress: req.ip,
-      });
+      // In POST /api/appointments/:id/complete inside the transaction:
+await logAudit(connection, {
+  userId: doctorUserId,
+  action: 'CREATE',
+  table: 'EMR_RECORDS',
+  recordId: emrId,
+  oldValue: null,
+  newValue: {
+    patient_user_id,
+    appointment_id: appointmentId,
+    vitals_logged: vitals ? Object.keys(vitals) : [],
+    encrypted: true,
+  },
+  ipAddress: req.ip,
+});
 
       await connection.commit();
 
@@ -289,7 +296,7 @@ export default function appointmentRouter(io) {
   router.get('/today', authenticateToken, async (req, res) => {
     try {
       const { date, filter } = req.query;
-      let whereClause = '';
+      whereClause += ' AND a.deleted_at IS NULL';
       const params = [];
 
       if (filter === 'history') {
@@ -449,7 +456,7 @@ export default function appointmentRouter(io) {
         JOIN USERS doc ON a.doctor_user_id = doc.user_id
         LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
-        WHERE a.status IN ('scheduled', 'checked_in')
+        WHERE a.status IN ('scheduled', 'checked_in') AND a.deleted_at IS NULL
       `;
       const params = [];
 

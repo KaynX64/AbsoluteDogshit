@@ -61,7 +61,8 @@ export default function emergencyRouter(io) {
         createdAt: new Date().toISOString(),
       };
 
-      io.emit('emergency:new_alert', alertPayload);
+      // Replace global broadcast with targeted room emit:
+      io.to('responders').emit('emergency:new_alert', alertPayload);
 
       res.status(201).json({
         message: 'Emergency alert dispatched to PSU Clinic and Quick-Response team.',

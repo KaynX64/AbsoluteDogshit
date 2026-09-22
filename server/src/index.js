@@ -9,6 +9,7 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { loginUser, authenticateToken } from './auth.js';
+import jwt from 'jsonwebtoken';
 
 // Route imports
 import privacyRouter from './routes/privacy.js';
@@ -77,6 +78,30 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log(`[Socket.IO] Client disconnected: ${socket.id}`);
   });
+});
+
+const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
+
+// Add Socket.IO authentication middleware
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.split(' ')[1];
+  if (!token) {
+    return next(new Error('Authentication token required'));
+  }
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return next(new Error('Invalid token'));
+    socket.user = user;
+    next();
+  });
+});
+
+io.on('connection', (socket) => {
+  const roles = socket.user?.roles || [];
+  // Join privileged room if clinical staff or emergency responder
+  const authorizedRoles = ['EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'];
+  if (roles.some((r) => authorizedRoles.includes(r))) {
+    socket.join('responders');
+  }
 });
 
 // 2. Public Auth Routes

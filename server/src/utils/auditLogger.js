@@ -3,7 +3,7 @@ import crypto from 'crypto';
 export async function logAudit(connection, { userId, action, table, recordId, oldValue, newValue, ipAddress }) {
   // 1. Lock and fetch the most recent hash to prevent branching in concurrent requests
   const [lastLog] = await connection.query(
-    'SELECT entry_hash FROM AUDIT_LOGS ORDER BY audit_id DESC LIMIT 1 FOR SHARE'
+    'SELECT entry_hash FROM AUDIT_LOGS ORDER BY audit_id DESC LIMIT 1 FOR UPDATE'
   );
   
   // Fallback to 64 zeros if the Genesis block is somehow missing
