@@ -5,37 +5,31 @@ import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
+import { decrypt } from '../utils/cryptoVault.js';
+import { requirePrivacyConsent } from '../middleware/consent.js';
 
 const router = express.Router();
+const HMAC_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
 
-// GET /api/health-pass/token - Generates dynamic QR token for mobile user
-router.get('/token', authenticateToken, (req, res) => {
+// GET /api/health-pass/token
+router.get('/token', authenticateToken, requirePrivacyConsent, (req, res) => {
   try {
     const userId = req.user.user_id;
     const timestamp = Date.now();
     const nonce = crypto.randomBytes(4).toString('hex');
 
-    // Payload: userId.timestamp.nonce
     const payload = `${userId}.${timestamp}.${nonce}`;
-    const hmac = crypto
-      .createHmac('sha256', 'supersecretkeyvaletudo')
-      .update(payload)
-      .digest('hex');
+    const hmac = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
 
-    // Signed token format: userId.timestamp.nonce.signature
     const qrToken = `${payload}.${hmac}`;
-
-    res.json({
-      qrToken,
-      expiresInSeconds: 300, // Client should refresh every 5 mins
-    });
+    res.json({ qrToken, expiresInSeconds: 300 });
   } catch (error) {
-    console.error('QR generation error:', error);
+    console.error('[HealthPass] QR generation error:', error);
     res.status(500).json({ error: 'Failed to generate QR token.' });
   }
 });
 
-// POST /api/health-pass/verify - Scanned by Nurse/Doctor on Electron
+// POST /api/health-pass/verify
 router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
   const { qrToken } = req.body;
   if (!qrToken) return res.status(400).json({ error: 'QR token required.' });
@@ -48,23 +42,48 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
   const [patientUserId, timestampStr, nonce, receivedSig] = parts;
   const payload = `${patientUserId}.${timestampStr}.${nonce}`;
 
-  // Verify HMAC (Done outside the DB transaction to save resources)
-  const expectedSig = crypto.createHmac('sha256', 'supersecretkeyvaletudo').update(payload).digest('hex');
-  if (expectedSig !== receivedSig) {
+  // 1. Compute expected signature using consistent HMAC secret
+  const expectedSig = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
+
+  // Constant-time signature verification
+  const expectedBuffer = Buffer.from(expectedSig);
+  const receivedBuffer = Buffer.from(receivedSig);
+  if (
+    expectedBuffer.length !== receivedBuffer.length ||
+    !crypto.timingSafeEqual(expectedBuffer, receivedBuffer)
+  ) {
     return res.status(401).json({ error: 'QR verification failed: Invalid signature.' });
   }
 
+  // 2. Expiration check (15 minutes grace window)
   const tokenTime = parseInt(timestampStr, 10);
-  if (Date.now() - tokenTime > 15 * 60 * 1000) {
+  if (isNaN(tokenTime) || Date.now() - tokenTime > 15 * 60 * 1000) {
     return res.status(401).json({ error: 'QR pass expired. Ask student to refresh pass.' });
   }
 
+  // 3. Acquire DB connection and execute queries safely inside try/finally
   const connection = await pool.getConnection();
 
   try {
     await connection.beginTransaction();
 
-    // Retrieve patient medical data
+    // R.A. 10173 Consent check on the scanned patient
+    const [consentRows] = await connection.query(
+      `SELECT is_granted FROM CONSENT_RECORDS 
+       WHERE user_id = ? 
+       ORDER BY consent_id DESC LIMIT 1`,
+      [patientUserId]
+    );
+
+    if (consentRows.length === 0 || !Boolean(consentRows[0].is_granted)) {
+      await connection.rollback();
+      return res.status(403).json({
+        error: 'PRIVACY_CONSENT_REVOKED',
+        message: 'Student has revoked or not granted R.A. 10173 data processing consent. Intake suspended.',
+      });
+    }
+
+    // Retrieve active patient records
     const [patient] = await connection.query(
       `SELECT u.user_id, u.first_name, u.last_name, u.email,
               sp.student_no, sp.course, sp.year_level,
@@ -77,31 +96,35 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
     );
 
     if (patient.length === 0) {
-      throw new Error('Patient not found or deactivated.');
+      await connection.rollback();
+      return res.status(404).json({ error: 'Patient not found or deactivated.' });
     }
 
-// Log specific Protected Health Information (PHI) exposure
+    // Log PHI read access
     logPhiAccess({
       viewerUserId: req.user.user_id,
-      patientUserId: patientUserId,
+      patientUserId: Number(patientUserId),
       table: 'HEALTH_PROFILES',
-      recordId: patientUserId,
+      recordId: Number(patientUserId),
       purpose: 'Touchless Clinic Check-In Scan',
       ipAddress: req.ip,
     });
 
     await connection.commit();
-    
+
+    const patientData = {
+      ...patient[0],
+      allergies: decrypt(patient[0].allergies),
+      chronic_conditions: decrypt(patient[0].chronic_conditions),
+    };
+
     res.json({
       verified: true,
-      patient: patient[0],
+      patient: patientData,
     });
   } catch (error) {
     await connection.rollback();
-    if (error.message === 'Patient not found or deactivated.') {
-      return res.status(404).json({ error: error.message });
-    }
-    console.error('Verification error:', error);
+    console.error('[HealthPass] Verification error:', error);
     res.status(500).json({ error: 'Error during verification.' });
   } finally {
     connection.release();

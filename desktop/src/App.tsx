@@ -1,9 +1,35 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import EmergencyAlertBanner from './components/EmergencyAlertBanner';
 import NurseConsole from './components/NurseConsole';
 import DoctorConsole from './components/DoctorConsole';
 import AdminConsole from './components/AdminConsole';
 import ResponderConsole from './components/ResponderConsole';
+
+export function useSessionTimeout(isActive: boolean, timeoutMinutes = 15) {
+  useEffect(() => {
+    if (!isActive) return;
+
+    let timeoutId: NodeJS.Timeout;
+    const resetTimer = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        localStorage.removeItem('valetudo_token');
+        localStorage.removeItem('token');
+        alert('🔒 Session expired due to inactivity (R.A. 10173 Compliance). Please log in again.');
+        window.location.reload();
+      }, timeoutMinutes * 60 * 1000);
+    };
+
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    events.forEach((event) => window.addEventListener(event, resetTimer));
+    resetTimer();
+
+    return () => {
+      clearTimeout(timeoutId);
+      events.forEach((event) => window.removeEventListener(event, resetTimer));
+    };
+  }, [isActive, timeoutMinutes]);
+}
 
 export default function App() {
   const [email, setEmail] = useState('nurse@psu.edu.ph');
@@ -14,12 +40,15 @@ export default function App() {
   // Allows switching perspectives if the account has multi-roles
   const [activeRoleView, setActiveRoleView] = useState<string>('');
 
+  // Activate the RA 10173 Session Timeout
+  useSessionTimeout(Boolean(user), 15);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
     try {
-      const res = await fetch('http://localhost:5000/api/auth/login', {
+      const res = await fetch('https://localhost:5000/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), password: password.trim() }),
@@ -169,7 +198,7 @@ export default function App() {
   // ---------------------------------------------------------------------------
   return (
     // To a fully fluid, dynamically scalable container:
-<div style={{ padding: 'clamp(14px, 2vw, 28px)', fontFamily: 'sans-serif', width: '100%', boxSizing: 'border-box', maxWidth: '1600px', margin: '0 auto' }}>
+    <div style={{ padding: 'clamp(14px, 2vw, 28px)', fontFamily: 'sans-serif', width: '100%', boxSizing: 'border-box', maxWidth: '1600px', margin: '0 auto' }}>
       {/* Top Header */}
       <header
         style={{

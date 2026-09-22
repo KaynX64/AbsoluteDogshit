@@ -7,10 +7,33 @@ import { logAudit } from '../utils/auditLogger.js';
 
 const router = express.Router();
 
-// All routes require ADMIN role
 router.use(authenticateToken, requireRoles('ADMIN'));
 
-// GET /api/admin/phi-access-logs - Surveillance list of sensitive medical record views
+// 1. GET /api/admin/users - User Accounts & RBAC Roles list
+router.get('/users', async (req, res) => {
+  try {
+    const [users] = await pool.query(
+      `SELECT u.user_id as id,
+              CONCAT(u.first_name, ' ', u.last_name) as name,
+              u.email,
+              u.phone,
+              COALESCE(r.code, 'STUDENT') as role,
+              CASE WHEN u.is_active = TRUE THEN 'Active' ELSE 'Suspended' END as status,
+              u.created_at
+       FROM USERS u
+       LEFT JOIN USER_ROLES ur ON u.user_id = ur.user_id
+       LEFT JOIN ROLES r ON ur.role_id = r.role_id
+       WHERE u.deleted_at IS NULL
+       ORDER BY u.user_id ASC`
+    );
+    res.json(users);
+  } catch (error) {
+    console.error('Failed to retrieve system users:', error);
+    res.status(500).json({ error: 'Failed to retrieve system users.' });
+  }
+});
+
+// 2. GET /api/admin/phi-access-logs - PHI Surveillance Log
 router.get('/phi-access-logs', async (req, res) => {
   try {
     const [logs] = await pool.query(
@@ -40,10 +63,10 @@ router.get('/phi-access-logs', async (req, res) => {
   }
 });
 
-// 2. PATCH /api/admin/users/:id/role - Change or assign an RBAC role
+// 3. PATCH /api/admin/users/:id/role - Role assignment
 router.patch('/users/:id/role', async (req, res) => {
   const targetUserId = req.params.id;
-  const { role_code } = req.body; // e.g. 'DOCTOR', 'NURSE', 'STUDENT'
+  const { role_code } = req.body;
 
   if (!role_code) return res.status(400).json({ error: 'role_code is required.' });
 
@@ -55,7 +78,6 @@ router.patch('/users/:id/role', async (req, res) => {
     if (roleRows.length === 0) throw new Error('Invalid role code specified.');
     const newRoleId = roleRows[0].role_id;
 
-    // Remove existing role & assign new role
     await connection.query('DELETE FROM USER_ROLES WHERE user_id = ?', [targetUserId]);
     await connection.query('INSERT INTO USER_ROLES (user_id, role_id) VALUES (?, ?)', [targetUserId, newRoleId]);
 
@@ -79,7 +101,7 @@ router.patch('/users/:id/role', async (req, res) => {
   }
 });
 
-// 3. GET /api/admin/audit-logs - Live RA 10173 SHA-256 Hash-Chained Audit Trail
+// 4. GET /api/admin/audit-logs - Append-only Hash Chain
 router.get('/audit-logs', async (req, res) => {
   try {
     const [logs] = await pool.query(
@@ -102,11 +124,11 @@ router.get('/audit-logs', async (req, res) => {
   }
 });
 
-// 4. GET /api/admin/telemetry - System Health Status
+// 5. GET /api/admin/telemetry - Health Status
 router.get('/telemetry', async (req, res) => {
   try {
     const [dbTest] = await pool.query('SELECT 1 as isAlive');
-    const [userCount] = await pool.query('SELECT COUNT(*) as total FROM USERS WHERE is_active = TRUE');
+    const [userCount] = await pool.query('SELECT COUNT(*) as total FROM USERS WHERE is_active = TRUE AND deleted_at IS NULL');
     const [auditCount] = await pool.query('SELECT COUNT(*) as total FROM AUDIT_LOGS');
 
     res.json({

@@ -7,12 +7,14 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
+
 import '../config/api_config.dart';
+import '../widgets/session_timeout_listener.dart';
+import '../services/emergency_alert_service.dart';
 import 'login_screen.dart';
 import 'edit_profile_screen.dart';
 import 'consultation_scheduler_screen.dart';
 import 'documents_viewer_screen.dart';
-import '../services/emergency_alert_service.dart';
 
 class PatientPortalScreen extends StatefulWidget {
   final Map<String, dynamic> user;
@@ -26,22 +28,24 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   int _currentIndex = 0;
   final _storage = const FlutterSecureStorage();
 
-  // QR Pass state
+  // QR Pass State
   String _qrToken = '';
   bool _loadingQR = false;
 
-  // Profile state
+  // Profile State
   Map<String, dynamic>? _profileData;
   bool _loadingProfile = false;
 
-  // Live Queue Ticket state
+  // Privacy & Consent State (R.A. 10173)
+  bool _hasConsented = false;
+
+  // Live Queue Ticket State
   Map<String, dynamic>? _activeQueueTicket;
-  bool _loadingQueue = false;
   Timer? _queuePollingTimer;
   io.Socket? _socket;
   String _previousQueueStatus = '';
 
-  // SOS state
+  // Emergency SOS State
   bool _isHolding = false;
   double _holdProgress = 0.0;
   Timer? _holdTimer;
@@ -51,14 +55,18 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   @override
   void initState() {
     super.initState();
+    // 1. Mandatory R.A. 10173 Consent Gatekeeper
+    _checkPrivacyConsent();
+
+    // 2. Fetch Initial Clinical Data
     _fetchQRPass();
     _fetchProfile();
     _fetchActiveQueueTicket();
 
-    // 1. Connect socket to listen for real-time queue advancements
+    // 3. Connect WebSocket for Realtime Queue Events
     _initQueueSocket();
 
-    // 2. Poll every 6 seconds as a resilient backup
+    // 4. Polling Fallback (every 6 seconds)
     _queuePollingTimer = Timer.periodic(
       const Duration(seconds: 6),
       (_) => _fetchActiveQueueTicket(silent: true),
@@ -72,6 +80,181 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     _socket?.disconnect();
     super.dispose();
   }
+
+  // ===========================================================================
+  // 1. DATA PRIVACY (R.A. 10173) CONSENT MANAGEMENT
+  // ===========================================================================
+
+  Future<void> _checkPrivacyConsent() async {
+    final token = await _storage.read(key: 'jwt_token');
+
+    try {
+      final res = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/privacy/status'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final consented = data['hasConsented'] == true;
+
+        if (mounted) {
+          setState(() {
+            _hasConsented = consented;
+          });
+
+          // Gatekeeper: If user has not consented, prompt immediately
+          if (!consented) {
+            _showConsentModal(isMandatory: true);
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _recordConsent() async {
+    final token = await _storage.read(key: 'jwt_token');
+    try {
+      final res = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/api/privacy/consent'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'consent_type': 'PHI_PROCESSING_RA_10173',
+          'is_granted': true,
+        }),
+      );
+
+      if (res.statusCode == 200) {
+        setState(() => _hasConsented = true);
+
+        // Immediately populate clinical data now that consent is recorded
+        await _fetchQRPass();
+        await _fetchProfile();
+        await _fetchActiveQueueTicket();
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Privacy consent recorded under R.A. 10173. Access restored.'),
+              backgroundColor: Color(0xFF0F766E),
+            ),
+          );
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _revokeConsent() async {
+    final token = await _storage.read(key: 'jwt_token');
+    try {
+      final res = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/api/privacy/revoke'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (res.statusCode == 200) {
+        await _storage.deleteAll();
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (_) => const LoginScreen()),
+            (route) => false,
+          );
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _showConsentModal({bool isMandatory = false}) {
+    showDialog(
+      context: context,
+      barrierDismissible: !isMandatory,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.privacy_tip_outlined, color: Color(0xFF0F766E)),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Data Privacy Notice',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: const SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Republic Act No. 10173 (Philippine Data Privacy Act of 2012)',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  color: Color(0xFF0F766E),
+                ),
+              ),
+              SizedBox(height: 10),
+              Text(
+                'Pangasinan State University Infirmary collects, stores, and processes your Protected Health Information (PHI)—including clinical baseline vitals, medical diagnoses, allergies, and real-time emergency coordinates—for the following purposes:\n\n'
+                '1. Clinical consultation booking, triage intake, and EMR documentation.\n'
+                '2. Dispatching university quick-response personnel during SOS emergencies.\n'
+                '3. Issuing tamper-proof e-prescriptions and verifiable clearances.\n\n'
+                'Security Commitments:\n'
+                '• All medical records are encrypted at rest (AES-256-GCM) and in transit (TLS/HSTS).\n'
+                '• Records are subject to a statutory 5-year clinical retention lifecycle.\n'
+                '• Access is monitored through immutable, SHA-256 hash-chained audit trails.',
+                style: TextStyle(fontSize: 12, height: 1.5, color: Colors.black87),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          if (isMandatory)
+            TextButton(
+              onPressed: () async {
+                await _storage.deleteAll();
+                if (mounted) {
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(builder: (_) => const LoginScreen()),
+                    (route) => false,
+                  );
+                }
+              },
+              child: const Text('Decline (Exit)', style: TextStyle(color: Colors.red)),
+            )
+          else
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close'),
+            ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0F766E),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await _recordConsent();
+            },
+            child: const Text('Agree & Consent'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ===========================================================================
+  // 2. REAL-TIME QUEUE & WEBSOCKET ENGINE
+  // ===========================================================================
 
   void _initQueueSocket() {
     try {
@@ -90,7 +273,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   Future<void> _fetchActiveQueueTicket({bool silent = false}) async {
-    if (!silent) setState(() => _loadingQueue = true);
     final token = await _storage.read(key: 'jwt_token');
 
     try {
@@ -106,7 +288,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
             if (data['hasActiveTicket'] == true) {
               _activeQueueTicket = data['ticket'];
 
-              // If doctor/nurse just called patient into room
               final newStatus = _activeQueueTicket?['status'] ?? '';
               if (newStatus == 'in-consultation' && _previousQueueStatus == 'waiting') {
                 EmergencyAlertService().showQueueTurnNotification(
@@ -123,8 +304,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         }
       }
     } catch (_) {}
-
-    if (!silent && mounted) setState(() => _loadingQueue = false);
   }
 
   Future<void> _fetchQRPass() async {
@@ -157,7 +336,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     if (mounted) setState(() => _loadingProfile = false);
   }
 
-  // --- SOS Logic ---
+  // ===========================================================================
+  // 3. CAMPUS EMERGENCY SOS LOGIC (WITH ALARM SOUND + NOTIFICATION)
+  // ===========================================================================
+
   void _startHold() {
     setState(() {
       _isHolding = true;
@@ -236,8 +418,13 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
           _sosStatusMessage = 'EMERGENCY DISPATCHED!\nClinic and Response team alerted.';
         });
 
+        // 1. Play local alarm siren on student's phone
+        EmergencyAlertService().playAlarmSound();
+
+        // 2. Drop Android Notification from the top of the screen
         EmergencyAlertService().showStudentSosSentNotification();
 
+        // 3. Show Active SOS Dialog
         if (mounted) {
           _showEmergencyDialog();
         }
@@ -259,17 +446,36 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         icon: const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 60),
         title: const Text('SOS Alert Active', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
         content: const Text(
-          'Your live GPS coordinates and health profile have been broadcasted to the PSU Infirmary and Response team.',
+          'Your live GPS coordinates and medical profile have been broadcasted to the PSU Infirmary and Quick-Response team.',
           textAlign: TextAlign.center,
         ),
         actions: [
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('I Understand'),
+            onPressed: () {
+              // Silences the audible alarm and dismisses dialog
+              EmergencyAlertService().stopAlarmSound();
+              Navigator.pop(ctx);
+            },
+            child: const Text('I Understand (Silence Siren)'),
           )
         ],
       ),
+    );
+  }
+
+  // ===========================================================================
+  // 4. LOGOUT & MAIN BUILD METHOD (WITH 15-MIN SESSION TIMEOUT LISTENER)
+  // ===========================================================================
+
+  Future<void> _handleSignOut() async {
+    await _storage.delete(key: 'jwt_token');
+    await _storage.delete(key: 'user_data');
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
     );
   }
 
@@ -291,58 +497,57 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
       'My Health Profile',
     ];
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(titles[_currentIndex]),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () async {
-              await _storage.delete(key: 'jwt_token');
-              await _storage.delete(key: 'user_data');
-              if (!context.mounted) return;
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (_) => const LoginScreen()),
-              );
-            },
-          )
-        ],
-      ),
-      body: tabs[_currentIndex],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (idx) => setState(() => _currentIndex = idx),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.qr_code_2),
-            label: 'Health Pass',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.calendar_month_outlined),
-            selectedIcon: Icon(Icons.calendar_month, color: Color(0xFF0F766E)),
-            label: 'Scheduler',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.description_outlined),
-            selectedIcon: Icon(Icons.description, color: Color(0xFF0F766E)),
-            label: 'Documents',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.emergency_share, color: Colors.red),
-            label: 'SOS Panic',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person, color: Color(0xFF0F766E)),
-            label: 'Profile',
-          ),
-        ],
+    return SessionTimeoutListener(
+      timeoutMinutes: 15,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(titles[_currentIndex]),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.logout),
+              tooltip: 'Sign Out',
+              onPressed: _handleSignOut,
+            )
+          ],
+        ),
+        body: tabs[_currentIndex],
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _currentIndex,
+          onDestinationSelected: (idx) => setState(() => _currentIndex = idx),
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.qr_code_2),
+              label: 'Health Pass',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.calendar_month_outlined),
+              selectedIcon: Icon(Icons.calendar_month, color: Color(0xFF0F766E)),
+              label: 'Scheduler',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.description_outlined),
+              selectedIcon: Icon(Icons.description, color: Color(0xFF0F766E)),
+              label: 'Documents',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.emergency_share, color: Colors.red),
+              label: 'SOS Panic',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.person_outline),
+              selectedIcon: Icon(Icons.person, color: Color(0xFF0F766E)),
+              label: 'Profile',
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  // --- TAB 0: QR HEALTH PASS & LIVE QUEUE TICKET TRACKER ---
+  // ===========================================================================
+  // 5. TAB 0: QR HEALTH PASS & ACTIVE CLINIC QUEUE BANNER
+  // ===========================================================================
+
   Widget _buildQRPassTab() {
     return RefreshIndicator(
       onRefresh: () async {
@@ -352,13 +557,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
       child: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         children: [
-          // 1. LIVE QUEUE TICKET BANNER (APPEARS WHEN CHECKED IN)
           if (_activeQueueTicket != null) ...[
             _buildActiveQueueCard(),
             const SizedBox(height: 20),
           ],
-
-          // 2. STANDARD QR HEALTH PASS
           Card(
             elevation: 2,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -416,7 +618,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     );
   }
 
-  // --- LIVE QUEUE CARD WIDGET ---
   Widget _buildActiveQueueCard() {
     final ticket = _activeQueueTicket!;
     final status = ticket['status'] ?? 'waiting';
@@ -446,7 +647,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -488,7 +688,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
           ),
           const Divider(height: 18),
 
-          // Main Ticket Number
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -534,7 +733,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
           ),
           const SizedBox(height: 10),
 
-          // Practitioner Info
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(10),
@@ -586,7 +784,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     );
   }
 
-  // --- TAB 3: SOS PANIC BUTTON ---
+  // ===========================================================================
+  // 6. TAB 3: CAMPUS EMERGENCY SOS
+  // ===========================================================================
+
   Widget _buildSOSTab() {
     return Center(
       child: Padding(
@@ -667,7 +868,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     );
   }
 
-  // --- TAB 4: HEALTH PROFILE ---
+  // ===========================================================================
+  // 7. TAB 4: HEALTH PROFILE & R.A. 10173 COMPLIANCE PANEL
+  // ===========================================================================
+
   Widget _buildProfileTab() {
     if (_loadingProfile) return const Center(child: CircularProgressIndicator());
     if (_profileData == null) {
@@ -700,7 +904,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     }
 
     return RefreshIndicator(
-      onRefresh: _fetchProfile,
+      onRefresh: () async {
+        await _fetchProfile();
+        await _checkPrivacyConsent();
+      },
       child: ListView(
         padding: const EdgeInsets.all(20),
         children: [
@@ -861,6 +1068,115 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
             ),
           ),
           const SizedBox(height: 20),
+
+          // R.A. 10173 DATA PRIVACY & COMPLIANCE SECTION
+          const Text(
+            'Data Privacy & Compliance (R.A. 10173)',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            elevation: 1,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.shield_outlined, color: Color(0xFF0F766E), size: 22),
+                          SizedBox(width: 8),
+                          Text(
+                            'Encrypted at Rest & In Transit',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
+                        ],
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: _hasConsented ? Colors.green.shade50 : Colors.amber.shade50,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: _hasConsented ? Colors.green : Colors.amber.shade800,
+                          ),
+                        ),
+                        child: Text(
+                          _hasConsented ? 'CONSENT ACTIVE' : 'PENDING CONSENT',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: _hasConsented ? Colors.green.shade800 : Colors.amber.shade900,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'All diagnoses, prescriptions, and clinical encounters are protected by AES-256-GCM encryption '
+                    'and adhere to the Philippine Department of Health (DOH) 5-year data retention policy.',
+                    style: TextStyle(fontSize: 12, color: Colors.black54, height: 1.4),
+                  ),
+                  const Divider(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      TextButton.icon(
+                        onPressed: () => _showConsentModal(isMandatory: false),
+                        icon: const Icon(Icons.info_outline, size: 16, color: Color(0xFF0F766E)),
+                        label: const Text(
+                          'View Privacy Terms',
+                          style: TextStyle(fontSize: 12, color: Color(0xFF0F766E)),
+                        ),
+                      ),
+                      if (_hasConsented)
+                        TextButton(
+                          onPressed: () {
+                            showDialog(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text('Revoke Data Processing Consent?'),
+                                content: const Text(
+                                  'Revoking consent will suspend your dynamic QR health pass, digital prescriptions, '
+                                  'and online consultation bookings as mandated by R.A. 10173.',
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(ctx),
+                                    child: const Text('Cancel'),
+                                  ),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.red,
+                                      foregroundColor: Colors.white,
+                                    ),
+                                    onPressed: () {
+                                      Navigator.pop(ctx);
+                                      _revokeConsent();
+                                    },
+                                    child: const Text('Confirm Revocation'),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                          child: const Text(
+                            'Revoke Consent',
+                            style: TextStyle(fontSize: 12, color: Colors.red),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
         ],
       ),
     );

@@ -5,15 +5,16 @@ import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { logAudit } from '../utils/auditLogger.js';
-import { logPhiAccess } from '../utils/phiLogger.js';
+import { encrypt, decrypt } from '../utils/cryptoVault.js';
+import { requirePrivacyConsent } from '../middleware/consent.js';
 
 const router = express.Router();
 
-// -----------------------------------------------------------------------------
-// 1. PRESCRIPTIONS (Features 5 & 8)
-// -----------------------------------------------------------------------------
+// =============================================================================
+// 1. PRESCRIPTIONS
+// =============================================================================
 
-// POST /api/documents/prescriptions - Doctor/Dentist issues a prescription
+// POST /api/documents/prescriptions (Encrypted at rest with AES-256)
 router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST'), async (req, res) => {
   const { emr_id, patient_user_id, items, notes } = req.body;
   const doctorUserId = req.user.user_id;
@@ -27,7 +28,6 @@ router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST
   try {
     await connection.beginTransaction();
 
-    // 1. If emr_id is not passed, auto-create a clinical encounter in EMR_RECORDS
     let targetEmrId = emr_id;
     if (!targetEmrId) {
       const [emrResult] = await connection.query(
@@ -37,16 +37,15 @@ router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST
         [
           patient_user_id,
           doctorUserId,
-          notes ? `Chief Complaint: ${notes}` : 'Prescription Request / Medical Evaluation',
-          'Clinical Medication Order',
-          `Prescribed ${items.length} medication item(s)`,
-          'Issued via Digital Prescription System'
+          encrypt(notes ? `Chief Complaint: ${notes}` : 'Prescription Request / Medical Evaluation'),
+          encrypt('Clinical Medication Order'),
+          encrypt(`Prescribed ${items.length} medication item(s)`),
+          encrypt('Issued via Digital Prescription System'),
         ]
       );
       targetEmrId = emrResult.insertId;
     }
 
-    // 2. Generate signed UUID + HMAC token
     const rxUuid = crypto.randomUUID();
     const hmac = crypto
       .createHmac('sha256', process.env.JWT_SECRET || 'supersecretkeyvaletudo')
@@ -54,17 +53,17 @@ router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST
       .digest('hex');
     const qrToken = `RX.${rxUuid}.${hmac.substring(0, 16)}`;
 
-    // 3. Insert Prescription Header
+    const encryptedNotes = encrypt(notes || '');
+
     const [headerResult] = await connection.query(
       `INSERT INTO PRESCRIPTIONS 
        (emr_id, patient_user_id, doctor_user_id, status, notes, qr_token)
        VALUES (?, ?, ?, 'active', ?, ?)`,
-      [targetEmrId, patient_user_id, doctorUserId, notes || null, qrToken]
+      [targetEmrId, patient_user_id, doctorUserId, encryptedNotes, qrToken]
     );
 
     const prescriptionId = headerResult.insertId;
 
-    // 4. Insert Line Items
     for (const item of items) {
       await connection.query(
         `INSERT INTO PRESCRIPTION_ITEMS 
@@ -78,12 +77,11 @@ router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST
           item.route || 'Oral',
           item.duration_days || 3,
           item.quantity_dispensed || 10,
-          item.instructions || 'Take after meals',
+          encrypt(item.instructions || 'Take after meals'),
         ]
       );
     }
 
-    // 5. Audit Log (RA 10173)
     await logAudit(connection, {
       userId: doctorUserId,
       action: 'CREATE',
@@ -97,7 +95,7 @@ router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST
     await connection.commit();
 
     res.status(201).json({
-      message: 'Prescription issued and stored successfully.',
+      message: 'Prescription issued and stored securely under AES-256 encryption.',
       prescriptionId,
       emrId: targetEmrId,
       qrToken,
@@ -111,8 +109,8 @@ router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST
   }
 });
 
-// GET /api/documents/prescriptions/my - Student fetches their own prescriptions
-router.get('/prescriptions/my', authenticateToken, async (req, res) => {
+// GET /api/documents/prescriptions/my (Decrypted for authorized patient)
+router.get('/prescriptions/my', authenticateToken, requirePrivacyConsent, async (req, res) => {
   try {
     const userId = req.user.user_id;
 
@@ -139,24 +137,36 @@ router.get('/prescriptions/my', authenticateToken, async (req, res) => {
        LEFT JOIN STAFF_PROFILES sp ON doc.user_id = sp.user_id
        LEFT JOIN PRESCRIPTION_ITEMS pi ON p.prescription_id = pi.prescription_id
        LEFT JOIN MEDICINES m ON pi.medicine_id = m.medicine_id
-       WHERE p.patient_user_id = ?
+       WHERE p.patient_user_id = ? AND p.deleted_at IS NULL
        GROUP BY p.prescription_id
        ORDER BY p.issued_at DESC`,
       [userId]
     );
 
-    res.json(rows);
+    const decryptedRows = rows.map((rx) => {
+      const items = (rx.items || []).map((it) => ({
+        ...it,
+        instructions: decrypt(it.instructions),
+      }));
+      return {
+        ...rx,
+        notes: decrypt(rx.notes),
+        items,
+      };
+    });
+
+    res.json(decryptedRows);
   } catch (error) {
     console.error('[Documents] Error fetching prescriptions:', error);
     res.status(500).json({ error: 'Failed to retrieve prescriptions.' });
   }
 });
 
-// -----------------------------------------------------------------------------
-// 2. MEDICAL CLEARANCES (Features 5 & 8)
-// -----------------------------------------------------------------------------
+// =============================================================================
+// 2. MEDICAL CLEARANCES
+// =============================================================================
 
-// POST /api/documents/clearances - Doctor/Dentist/Nurse issues clearance
+// POST /api/documents/clearances
 router.post('/clearances', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE'), async (req, res) => {
   const { user_id, purpose, expires_at, remarks } = req.body;
   const issuerId = req.user.user_id;
@@ -173,7 +183,6 @@ router.post('/clearances', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 
     const clearanceUuid = crypto.randomUUID();
     const token = `CLR.${clearanceUuid}.${Date.now()}`;
 
-    // Cryptographic signature payload
     const signatureMetadata = {
       signer_user_id: issuerId,
       signer_role: req.user.roles[0],
@@ -219,8 +228,8 @@ router.post('/clearances', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 
   }
 });
 
-// GET /api/documents/clearances/my - Student fetches their clearances
-router.get('/clearances/my', authenticateToken, async (req, res) => {
+// GET /api/documents/clearances/my
+router.get('/clearances/my', authenticateToken, requirePrivacyConsent, async (req, res) => {
   try {
     const userId = req.user.user_id;
 
@@ -233,7 +242,7 @@ router.get('/clearances/my', authenticateToken, async (req, res) => {
        FROM MEDICAL_CLEARANCES mc
        JOIN USERS doc ON mc.issued_by = doc.user_id
        LEFT JOIN STAFF_PROFILES sp ON doc.user_id = sp.user_id
-       WHERE mc.user_id = ?
+       WHERE mc.user_id = ? AND mc.deleted_at IS NULL
        ORDER BY mc.issued_at DESC`,
       [userId]
     );
@@ -245,15 +254,13 @@ router.get('/clearances/my', authenticateToken, async (req, res) => {
   }
 });
 
-// -----------------------------------------------------------------------------
-// 3. QR VERIFICATION (Dual Support for both Clearances and Prescriptions)
-// -----------------------------------------------------------------------------
+// =============================================================================
+// 3. UNIVERSAL QR VERIFICATION
+// =============================================================================
 
-// Universal QR verification route (used by employers, tournament screeners, pharmacy)
 router.get('/verify/:qrToken', async (req, res) => {
   const { qrToken } = req.params;
   try {
-    // 1. Check if token matches a Clearance
     const [clearances] = await pool.query(
       `SELECT mc.clearance_id, mc.purpose, mc.status, mc.issued_at, mc.expires_at,
               mc.signature_metadata,
@@ -266,7 +273,7 @@ router.get('/verify/:qrToken', async (req, res) => {
        LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
        JOIN USERS doc ON mc.issued_by = doc.user_id
        LEFT JOIN STAFF_PROFILES staff ON doc.user_id = staff.user_id
-       WHERE mc.qr_token = ?`,
+       WHERE mc.qr_token = ? AND mc.deleted_at IS NULL`,
       [qrToken]
     );
 
@@ -290,7 +297,6 @@ router.get('/verify/:qrToken', async (req, res) => {
       });
     }
 
-    // 2. Check if token matches a Prescription
     const [prescriptions] = await pool.query(
       `SELECT p.prescription_id, p.status, p.issued_at, p.notes,
               u.first_name AS patient_first_name, u.last_name AS patient_last_name,
@@ -302,7 +308,7 @@ router.get('/verify/:qrToken', async (req, res) => {
        LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
        JOIN USERS doc ON p.doctor_user_id = doc.user_id
        LEFT JOIN STAFF_PROFILES staff ON doc.user_id = staff.user_id
-       WHERE p.qr_token = ?`,
+       WHERE p.qr_token = ? AND p.deleted_at IS NULL`,
       [qrToken]
     );
 
@@ -317,7 +323,7 @@ router.get('/verify/:qrToken', async (req, res) => {
         studentNo: p.student_no || 'N/A',
         issuedBy: `Dr. ${p.doc_first_name} ${p.doc_last_name}`,
         issuedAt: p.issued_at,
-        notes: p.notes,
+        notes: decrypt(p.notes),
       });
     }
 
@@ -328,11 +334,9 @@ router.get('/verify/:qrToken', async (req, res) => {
   }
 });
 
-// Alias for /clearances/verify/:token so existing Postman tests and client calls work seamlessly
+// Alias route with retention check (AND mc.deleted_at IS NULL)
 router.get('/clearances/verify/:token', async (req, res) => {
-  req.params.qrToken = req.params.token;
-  // Reuse the universal verification handler
-  const { qrToken } = req.params;
+  const qrToken = req.params.token;
   try {
     const [clearances] = await pool.query(
       `SELECT mc.clearance_id, mc.purpose, mc.status, mc.issued_at, mc.expires_at, mc.signature_metadata,
@@ -343,12 +347,12 @@ router.get('/clearances/verify/:token', async (req, res) => {
        JOIN USERS u ON mc.user_id = u.user_id
        LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
        JOIN USERS doc ON mc.issued_by = doc.user_id
-       WHERE mc.qr_token = ?`,
+       WHERE mc.qr_token = ? AND mc.deleted_at IS NULL`,
       [qrToken]
     );
 
     if (clearances.length === 0) {
-      return res.status(404).json({ verified: false, error: 'Medical certificate record not found.' });
+      return res.status(404).json({ verified: false, error: 'Medical certificate record not found or expired.' });
     }
 
     const c = clearances[0];

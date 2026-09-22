@@ -2,12 +2,12 @@
 import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
-import { requireRoles } from '../middleware/rbac.js';
+import { decrypt } from '../utils/cryptoVault.js';
 
 export default function emergencyRouter(io) {
   const router = express.Router();
 
-  // 1. POST /api/emergency/sos - Triggered by Mobile Student
+  // 1. POST /api/emergency/sos
   router.post('/sos', authenticateToken, async (req, res) => {
     try {
       const userId = req.user.user_id;
@@ -17,7 +17,6 @@ export default function emergencyRouter(io) {
         return res.status(400).json({ error: 'Latitude and Longitude are required coordinates.' });
       }
 
-      // MySQL 8 SRID 4326: POINT(latitude, longitude)
       const [insertResult] = await pool.query(
         `INSERT INTO EMERGENCY_ALERTS (user_id, location, status, notes)
          VALUES (?, ST_SRID(POINT(?, ?), 4326), 'triggered', ?)`,
@@ -26,7 +25,6 @@ export default function emergencyRouter(io) {
 
       const alertId = insertResult.insertId;
 
-      // Fetch student info & medical profile for the emergency dispatch payload
       const [details] = await pool.query(
         `SELECT u.user_id, u.first_name, u.last_name, u.phone, u.email,
                 sp.student_no, sp.course,
@@ -41,6 +39,10 @@ export default function emergencyRouter(io) {
 
       const patientInfo = details[0] || {};
 
+      // Decrypt sensitive medical indicators for responders
+      const decryptedAllergies = decrypt(patientInfo.allergies) || 'None listed';
+      const decryptedConditions = decrypt(patientInfo.chronic_conditions) || 'None listed';
+
       const alertPayload = {
         alertId,
         userId,
@@ -49,8 +51,8 @@ export default function emergencyRouter(io) {
         studentNo: patientInfo.student_no,
         course: patientInfo.course,
         bloodType: patientInfo.blood_type || 'Unknown',
-        allergies: patientInfo.allergies || 'None listed',
-        chronicConditions: patientInfo.chronic_conditions || 'None listed',
+        allergies: decryptedAllergies,
+        chronicConditions: decryptedConditions,
         emergencyContact: `${patientInfo.emergency_contact_name || 'N/A'} (${patientInfo.emergency_contact_phone || 'N/A'})`,
         latitude: Number(latitude),
         longitude: Number(longitude),
@@ -59,8 +61,8 @@ export default function emergencyRouter(io) {
         createdAt: new Date().toISOString(),
       };
 
-      // Broadcast immediately across all connected clinic desktops & responders
-      io.emit('emergency:new_alert', alertPayload);
+      // Replace global broadcast with targeted room emit:
+      io.to('responders').emit('emergency:new_alert', alertPayload);
 
       res.status(201).json({
         message: 'Emergency alert dispatched to PSU Clinic and Quick-Response team.',
@@ -72,7 +74,7 @@ export default function emergencyRouter(io) {
     }
   });
 
-  // 2. GET /api/emergency/active - List all currently active/unresolved alerts
+  // 2. GET /api/emergency/active
   router.get('/active', authenticateToken, async (req, res) => {
     try {
       const [alerts] = await pool.query(
@@ -85,17 +87,24 @@ export default function emergencyRouter(io) {
          WHERE a.status IN ('triggered', 'acknowledged', 'dispatched')
          ORDER BY a.created_at DESC`
       );
-      res.json(alerts);
+
+      // Decrypt allergies so the responder screen and audio alert banners show human-readable text
+      const decryptedAlerts = alerts.map((a) => ({
+        ...a,
+        allergies: decrypt(a.allergies) || 'None',
+      }));
+
+      res.json(decryptedAlerts);
     } catch (error) {
       res.status(500).json({ error: 'Failed to fetch active alerts.' });
     }
   });
 
-  // 3. PATCH /api/emergency/:alertId/status - Update response status (Nurse/Doctor/Responder)
+  // 3. PATCH /api/emergency/:alertId/status
   router.patch('/:alertId/status', authenticateToken, async (req, res) => {
     try {
       const { alertId } = req.params;
-      const { status } = req.body; // 'acknowledged' | 'dispatched' | 'resolved' | 'false_alarm'
+      const { status } = req.body;
       const responderId = req.user.user_id;
 
       if (!['acknowledged', 'dispatched', 'resolved', 'false_alarm'].includes(status)) {
@@ -121,8 +130,8 @@ export default function emergencyRouter(io) {
         params
       );
 
-      // Notify everyone about status update
-      io.emit('emergency:status_change', { alertId: Number(alertId), status, responderId });
+      // Broadcast emergency alert to all connected clinic consoles and responders
+      io.emit('emergency:new_alert', alertPayload);
 
       res.json({ message: `Alert #${alertId} updated to ${status}.` });
     } catch (error) {

@@ -26,6 +26,8 @@ interface AppointmentItem {
   weight: number;
   past_diagnosis?: string;
   past_treatment?: string;
+  queue_ticket?: string;
+  queue_status?: string;
 }
 
 export default function DoctorConsole() {
@@ -33,7 +35,8 @@ export default function DoctorConsole() {
   const [selectedApp, setSelectedApp] = useState<AppointmentItem | null>(null);
   const [loadingAppointments, setLoadingAppointments] = useState(false);
 
-  const [viewMode, setViewMode] = useState<'active' | 'history' | 'analytics'>('active');
+  // 'active' = Triaged & Ready in clinic; 'scheduled' = Booked on app, awaiting nurse intake
+  const [viewMode, setViewMode] = useState<'active' | 'scheduled' | 'history' | 'analytics'>('active');
 
   // Form fields
   const [chiefComplaint, setChiefComplaint] = useState('');
@@ -72,10 +75,12 @@ export default function DoctorConsole() {
     setLoadingAppointments(true);
     const token = localStorage.getItem('valetudo_token');
 
-    const url =
-      mode === 'history'
-        ? 'http://localhost:5000/api/appointments/today?filter=history'
-        : 'http://localhost:5000/api/appointments/today';
+    let url = 'https://localhost:5000/api/appointments/today?filter=active';
+    if (mode === 'history') {
+      url = 'https://localhost:5000/api/appointments/today?filter=history';
+    } else if (mode === 'scheduled') {
+      url = 'https://localhost:5000/api/appointments/today?filter=scheduled';
+    }
 
     try {
       const res = await fetch(url, {
@@ -87,6 +92,10 @@ export default function DoctorConsole() {
         if (data.length > 0) {
           if (!retainSelection || !selectedApp) {
             selectPatient(data[0]);
+          } else {
+            // Keep current selection refreshed
+            const updated = data.find((a) => a.appointment_id === selectedApp.appointment_id);
+            if (updated) selectPatient(updated);
           }
         } else {
           setSelectedApp(null);
@@ -101,28 +110,41 @@ export default function DoctorConsole() {
   };
 
   useEffect(() => {
-    fetchAppointments('active', false);
+    fetchAppointments(viewMode, false);
 
-    const socket = io('http://localhost:5000');
-    socket.on('appointment:booked', (newBooking: any) => {
+    const token = localStorage.getItem('valetudo_token');
+    const socket = io('https://localhost:5000', {
+      auth: { token },
+    });
+
+    socket.on('appointment:booked', () => {
       fetchAppointments(viewMode, true);
-      if (window.electronAPI?.showNotification) {
+    });
+
+    socket.on('appointment:status_changed', (evt: any) => {
+      fetchAppointments(viewMode, true);
+      if (evt?.status === 'checked_in' && window.electronAPI?.showNotification) {
         window.electronAPI.showNotification({
-          title: '📅 New Consultation Booked',
-          body: `${newBooking?.patientName || 'A student'} scheduled a visit.`,
+          title: '🔔 Patient Triaged & Ready',
+          body: 'A student has been checked in by the triage nurse and is waiting in the queue.',
         });
       }
     });
 
-    socket.on('appointment:cancelled', () => fetchAppointments(viewMode, true));
-    socket.on('appointment:status_changed', () => fetchAppointments(viewMode, true));
+    socket.on('queue:updated', () => {
+      fetchAppointments(viewMode, true);
+    });
+
+    socket.on('appointment:cancelled', () => {
+      fetchAppointments(viewMode, true);
+    });
 
     return () => {
       socket.disconnect();
     };
   }, [viewMode]);
 
-  const handleSwitchView = (mode: 'active' | 'history' | 'analytics') => {
+  const handleSwitchView = (mode: 'active' | 'scheduled' | 'history' | 'analytics') => {
     setViewMode(mode);
     if (mode !== 'analytics') {
       fetchAppointments(mode, false);
@@ -145,6 +167,7 @@ export default function DoctorConsole() {
     setClinicalNotes('');
     setFeedbackMsg(null);
 
+    // Auto-populate triage vitals recorded by the nurse
     if (app.notes && app.notes.includes('[TRIAGE VITALS]')) {
       const bpMatch = app.notes.match(/BP:\s*(\d+)\/(\d+)/);
       if (bpMatch) {
@@ -160,9 +183,10 @@ export default function DoctorConsole() {
 
   const handleStartConsultation = async () => {
     if (!selectedApp) return;
+
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`http://localhost:5000/api/appointments/${selectedApp.appointment_id}/status`, {
+      const res = await fetch(`https://localhost:5000/api/appointments/${selectedApp.appointment_id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ status: 'serving' }),
@@ -189,7 +213,7 @@ export default function DoctorConsole() {
     setIsSubmittingEMR(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`http://localhost:5000/api/appointments/${selectedApp.appointment_id}/complete`, {
+      const res = await fetch(`https://localhost:5000/api/appointments/${selectedApp.appointment_id}/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -228,7 +252,7 @@ export default function DoctorConsole() {
     setLoadingHistory(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`http://localhost:5000/api/appointments/patient/${selectedApp.patient_id}/history`, {
+      const res = await fetch(`https://localhost:5000/api/appointments/patient/${selectedApp.patient_id}/history`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
@@ -248,8 +272,7 @@ export default function DoctorConsole() {
     setIsIssuingClearance(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      // Step A: Send custom expiration date to backend
-      const res = await fetch('http://localhost:5000/api/documents/clearances', {
+      const res = await fetch('https://localhost:5000/api/documents/clearances', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -272,7 +295,6 @@ export default function DoctorConsole() {
       const clearanceId = data.clearanceId;
       const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(realQrToken)}`;
 
-      // Step B: Printable HTML displaying the selected expiration date
       const htmlContent = `
         <!DOCTYPE html>
         <html>
@@ -375,18 +397,25 @@ export default function DoctorConsole() {
           <div>
             <h3 style={{ margin: 0, color: '#0284c7' }}>
               {viewMode === 'active'
-                ? "⏳ Doctor's Active Consultation Queue"
+                ? "🩺 Active Consultation Queue (Triaged & Ready)"
+                : viewMode === 'scheduled'
+                ? "📅 Today's Bookings (Awaiting Nurse Intake)"
                 : viewMode === 'history'
                 ? '📜 Consultation History Archive'
                 : '📊 Epidemiological Analytics & Visual Charts'}
             </h3>
             <small style={{ color: '#64748b' }}>
-              {viewMode === 'analytics'
+              {viewMode === 'active'
+                ? 'Students checked in by the triage nurse with vitals recorded'
+                : viewMode === 'scheduled'
+                ? 'Booked on mobile app. Must scan QR pass at the nurse intake desk before entering this room.'
+                : viewMode === 'analytics'
                 ? 'Campus illness trajectories, seasonal spike monitoring & health reports'
-                : 'Scheduled appointments and checked-in walk-in arrivals'}
+                : 'Completed and discharged encounters'}
             </small>
           </div>
 
+          {/* TAB CONTROLS */}
           <div style={{ display: 'flex', gap: 6 }}>
             <button
               onClick={() => handleSwitchView('active')}
@@ -401,7 +430,22 @@ export default function DoctorConsole() {
                 color: viewMode === 'active' ? '#ffffff' : '#0284c7',
               }}
             >
-              ⏳ Active Queue
+              🩺 Active Queue (Triaged)
+            </button>
+            <button
+              onClick={() => handleSwitchView('scheduled')}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 4,
+                fontSize: 12,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                border: '1px solid #d97706',
+                background: viewMode === 'scheduled' ? '#d97706' : '#ffffff',
+                color: viewMode === 'scheduled' ? '#ffffff' : '#d97706',
+              }}
+            >
+              📅 Today's Bookings (Awaiting Nurse)
             </button>
             <button
               onClick={() => handleSwitchView('history')}
@@ -411,9 +455,9 @@ export default function DoctorConsole() {
                 fontSize: 12,
                 fontWeight: 'bold',
                 cursor: 'pointer',
-                border: '1px solid #0284c7',
-                background: viewMode === 'history' ? '#0284c7' : '#ffffff',
-                color: viewMode === 'history' ? '#ffffff' : '#0284c7',
+                border: '1px solid #64748b',
+                background: viewMode === 'history' ? '#64748b' : '#ffffff',
+                color: viewMode === 'history' ? '#ffffff' : '#64748b',
               }}
             >
               📜 History Archive
@@ -442,18 +486,23 @@ export default function DoctorConsole() {
           </div>
         </div>
 
-        {/* Show patient cards only when viewing Active or History tabs */}
+        {/* Patient card grid */}
         {viewMode !== 'analytics' && (
           loadingAppointments ? (
-            <p style={{ color: '#64748b', fontSize: 13 }}>Loading appointments...</p>
+            <p style={{ color: '#64748b', fontSize: 13 }}>Loading roster...</p>
           ) : appointments.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '16px 0', color: '#64748b', fontSize: 13 }}>
-              {viewMode === 'active' ? '🎉 All consultations completed! Active queue is clear.' : 'No archived consultations found.'}
+              {viewMode === 'active'
+                ? 'ℹ️ No patients currently waiting in consultation queue. When the nurse checks in a student, they will appear here automatically.'
+                : viewMode === 'scheduled'
+                ? 'No pending mobile bookings for today.'
+                : 'No archived consultations found.'}
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
               {appointments.map((app) => {
                 const isSelected = selectedApp?.appointment_id === app.appointment_id;
+                const isScheduledOnly = app.status === 'scheduled';
                 return (
                   <div
                     key={app.appointment_id}
@@ -467,11 +516,20 @@ export default function DoctorConsole() {
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontWeight: 'bold', color: '#0284c7', fontSize: 13 }}>
-                        📅 {app.date_str} • ⏰ {app.time_slot}
+                      <span style={{ fontWeight: 'bold', color: isScheduledOnly ? '#d97706' : '#0284c7', fontSize: 13 }}>
+                        🎫 {app.queue_ticket || 'Q-??'} &nbsp;•&nbsp; ⏰ {app.time_slot}
                       </span>
-                      <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: '#f1f5f9', color: '#334155', fontWeight: 'bold' }}>
-                        {app.status.toUpperCase()}
+                      <span
+                        style={{
+                          fontSize: 10,
+                          padding: '2px 8px',
+                          borderRadius: 4,
+                          background: isScheduledOnly ? '#fef3c7' : app.status === 'serving' ? '#dcfce7' : '#e0f2fe',
+                          color: isScheduledOnly ? '#b45309' : app.status === 'serving' ? '#15803d' : '#0369a1',
+                          fontWeight: 'bold',
+                        }}
+                      >
+                        {isScheduledOnly ? 'AWAITING NURSE' : app.status === 'serving' ? 'IN CONSULTATION' : 'TRIAGED / READY'}
                       </span>
                     </div>
                     <p style={{ margin: '6px 0 2px', fontWeight: 'bold', fontSize: 14, color: '#1e293b' }}>
@@ -486,7 +544,7 @@ export default function DoctorConsole() {
         )}
       </div>
 
-      {/* RENDER ANALYTICS DASHBOARD OR CLINICAL CONSULTATION WORKSPACE */}
+      {/* RENDER ANALYTICS OR WORKSPACE */}
       {viewMode === 'analytics' ? (
         <AnalyticsDashboard />
       ) : (
@@ -497,7 +555,7 @@ export default function DoctorConsole() {
               style={{
                 background: '#ffffff',
                 border: '1px solid #cbd5e1',
-                borderLeft: '5px solid #0284c7',
+                borderLeft: `5px solid ${selectedApp.status === 'scheduled' ? '#f59e0b' : '#0284c7'}`,
                 borderRadius: 8,
                 padding: '12px 18px',
                 marginBottom: 20,
@@ -528,7 +586,7 @@ export default function DoctorConsole() {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <button
                   type="button"
                   onClick={handleViewPatientHistory}
@@ -536,7 +594,16 @@ export default function DoctorConsole() {
                 >
                   📜 Past EMR History
                 </button>
-                {selectedApp.status === 'scheduled' || selectedApp.status === 'checked_in' ? (
+
+                {selectedApp.status === 'scheduled' ? (
+                  <span style={{ background: '#fef3c7', color: '#b45309', padding: '8px 14px', borderRadius: 6, fontWeight: 'bold', fontSize: 12, border: '1px solid #fde68a' }}>
+                    ⏳ Awaiting Nurse Triage (Not Checked In)
+                  </span>
+                ) : selectedApp.status === 'serving' ? (
+                  <span style={{ background: '#dcfce7', color: '#15803d', padding: '8px 14px', borderRadius: 6, fontWeight: 'bold', fontSize: 13, border: '1px solid #bbf7d0' }}>
+                    🩺 In Consultation
+                  </span>
+                ) : (
                   <button
                     type="button"
                     onClick={handleStartConsultation}
@@ -544,11 +611,7 @@ export default function DoctorConsole() {
                   >
                     ▶ Begin Consultation
                   </button>
-                ) : selectedApp.status === 'serving' ? (
-                  <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '6px 14px', borderRadius: 6, fontWeight: 'bold', fontSize: 13 }}>
-                    🩺 In Consultation
-                  </span>
-                ) : null}
+                )}
               </div>
             </div>
           )}
@@ -558,6 +621,12 @@ export default function DoctorConsole() {
             {/* LEFT: Clinical Consultation Form */}
             <section style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff', textAlign: 'left' }}>
               <h3 style={{ margin: '0 0 14px 0', color: '#0284c7', fontSize: 16 }}>🩺 Encounter Diagnosis & Vitals Logging</h3>
+
+              {selectedApp?.status === 'scheduled' && (
+                <div style={{ padding: '10px 14px', background: '#fef3c7', color: '#92400e', borderRadius: 6, marginBottom: 14, fontSize: 12, border: '1px solid #fde68a' }}>
+                  ⚠️ <b>Patient Not Yet Triaged:</b> This booking was placed on the mobile app. The student must first present their QR Health Pass at the intake desk for the Clinic Nurse to record initial vitals.
+                </div>
+              )}
 
               <form onSubmit={handleFinishConsultation}>
                 {/* Vitals Input Grid */}
@@ -642,20 +711,24 @@ export default function DoctorConsole() {
 
                 <button
                   type="submit"
-                  disabled={isSubmittingEMR || !selectedApp}
+                  disabled={isSubmittingEMR || !selectedApp || selectedApp.status === 'scheduled'}
                   style={{
                     width: '100%',
                     padding: 12,
-                    background: !selectedApp ? '#94a3b8' : '#059669',
+                    background: (!selectedApp || selectedApp.status === 'scheduled') ? '#94a3b8' : '#059669',
                     color: '#ffffff',
                     border: 'none',
                     borderRadius: 6,
-                    cursor: !selectedApp ? 'not-allowed' : 'pointer',
+                    cursor: (!selectedApp || selectedApp.status === 'scheduled') ? 'not-allowed' : 'pointer',
                     fontWeight: 'bold',
                     fontSize: 14,
                   }}
                 >
-                  {isSubmittingEMR ? 'Finalizing Encounter...' : '✅ Finish Consultation & Discharge'}
+                  {isSubmittingEMR
+                    ? 'Finalizing Encounter...'
+                    : selectedApp?.status === 'scheduled'
+                    ? '⏳ Patient Not Triaged by Nurse'
+                    : '✅ Finish Consultation & Discharge'}
                 </button>
 
                 {feedbackMsg && (
@@ -722,7 +795,6 @@ export default function DoctorConsole() {
                 />
               ) : (
                 <div>
-                  {/* 1. Clearance Purpose Selection */}
                   <div style={{ marginBottom: 12 }}>
                     <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
                       Clearance Purpose:
@@ -739,7 +811,6 @@ export default function DoctorConsole() {
                     </select>
                   </div>
 
-                  {/* 2. Expiration Date Input with Preset Chips */}
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                       <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155' }}>
@@ -754,9 +825,8 @@ export default function DoctorConsole() {
                             setClearanceExpiryDate(d.toISOString().split('T')[0]);
                           }}
                           style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
-                          title="Set validity for 30 days"
                         >
-                          +30 Days (Sports)
+                          +30 Days
                         </button>
                         <button
                           type="button"
@@ -766,9 +836,8 @@ export default function DoctorConsole() {
                             setClearanceExpiryDate(d.toISOString().split('T')[0]);
                           }}
                           style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
-                          title="Set validity for 6 months"
                         >
-                          +6 Months (OJT)
+                          +6 Months
                         </button>
                         <button
                           type="button"
@@ -778,9 +847,8 @@ export default function DoctorConsole() {
                             setClearanceExpiryDate(d.toISOString().split('T')[0]);
                           }}
                           style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
-                          title="Set validity for 1 year"
                         >
-                          +1 Year (Annual)
+                          +1 Year
                         </button>
                       </div>
                     </div>
@@ -793,7 +861,6 @@ export default function DoctorConsole() {
                     />
                   </div>
 
-                  {/* 3. Clinical Remarks */}
                   <div style={{ marginBottom: 16 }}>
                     <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
                       Clinical Fitness Statement:
@@ -806,19 +873,18 @@ export default function DoctorConsole() {
                     />
                   </div>
 
-                  {/* 4. Issue and Print Action Button */}
                   <button
                     type="button"
                     onClick={handlePrintClearance}
-                    disabled={!selectedApp || isIssuingClearance}
+                    disabled={!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled'}
                     style={{
                       width: '100%',
                       padding: 10,
-                      background: !selectedApp || isIssuingClearance ? '#94a3b8' : '#0284c7',
+                      background: (!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled') ? '#94a3b8' : '#0284c7',
                       color: '#fff',
                       border: 'none',
                       borderRadius: 6,
-                      cursor: !selectedApp || isIssuingClearance ? 'not-allowed' : 'pointer',
+                      cursor: (!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled') ? 'not-allowed' : 'pointer',
                       fontWeight: 'bold',
                       fontSize: 14,
                     }}

@@ -44,7 +44,7 @@ export default function EmergencyAlertBanner() {
       const token = localStorage.getItem('valetudo_token');
       if (!token) return;
       try {
-        const res = await fetch('http://localhost:5000/api/emergency/active', {
+        const res = await fetch('https://localhost:5000/api/emergency/active', {
           headers: { Authorization: `Bearer ${token}` },
         });
         const data = await res.json();
@@ -74,7 +74,7 @@ export default function EmergencyAlertBanner() {
     fetchActiveAlerts();
 
     // 2. Connect Socket.IO
-    const socket: Socket = io('http://localhost:5000');
+    const socket: Socket = io('https://localhost:5000');
 
     socket.on('emergency:new_alert', (newAlert: EmergencyAlert) => {
       playEmergencyAlarm();
@@ -93,8 +93,8 @@ export default function EmergencyAlertBanner() {
     socket.on('emergency:status_change', ({ alertId, status }: { alertId: number; status: string }) => {
       setAlerts((prev) =>
         prev
-          .map((a) => (a.alertId === alertId ? { ...a, status } : a))
-          .filter((a) => a.status !== 'resolved' && a.status !== 'false_alarm')
+          .map((a) => (Number(a.alertId) === Number(alertId) ? { ...a, status } : a))
+          .filter((a) => (status !== 'resolved' && status !== 'false_alarm' ? true : Number(a.alertId) !== Number(alertId)))
       );
     });
 
@@ -106,7 +106,7 @@ export default function EmergencyAlertBanner() {
   const updateStatus = async (alertId: number, status: string) => {
     const token = localStorage.getItem('valetudo_token');
     try {
-      await fetch(`http://localhost:5000/api/emergency/${alertId}/status`, {
+      await fetch(`https://localhost:5000/api/emergency/${alertId}/status`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -136,7 +136,7 @@ export default function EmergencyAlertBanner() {
   const handleTestFullStackSOS = async () => {
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('http://localhost:5000/api/emergency/sos', {
+      const res = await fetch('https://localhost:5000/api/emergency/sos', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
