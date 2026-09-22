@@ -103,7 +103,11 @@ export default function DoctorConsole() {
   useEffect(() => {
     fetchAppointments('active', false);
 
-    const socket = io('https://localhost:5000');
+    const token = localStorage.getItem('valetudo_token');
+    const socket = io('https://localhost:5000', {
+      auth: { token },
+      transports: ['websocket', 'polling'],
+    });
     socket.on('appointment:booked', (newBooking: any) => {
       fetchAppointments(viewMode, true);
       if (window.electronAPI?.showNotification) {

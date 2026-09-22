@@ -71,12 +71,25 @@ export default function EmergencyAlertBanner() {
       } catch (_) {}
     };
 
-    fetchActiveAlerts();
+fetchActiveAlerts();
 
-    // 2. Connect Socket.IO
-    const socket: Socket = io('https://localhost:5000');
+    // 2. Connect Socket.IO with token and transport fallbacks
+    const token = localStorage.getItem('valetudo_token');
+    const socket: Socket = io('https://localhost:5000', {
+      auth: { token },
+      transports: ['polling', 'websocket'],
+    });
+
+    socket.on('connect', () => {
+      console.log('✅ [EmergencyAlertBanner] Live Socket connected:', socket.id);
+    });
+
+    socket.on('connect_error', (err) => {
+      console.error('❌ [EmergencyAlertBanner] Socket error:', err.message);
+    });
 
     socket.on('emergency:new_alert', (newAlert: EmergencyAlert) => {
+      console.log('🚨 [EmergencyAlertBanner] New SOS received in real-time:', newAlert);
       playEmergencyAlarm();
 
       // Trigger native OS system tray notification
@@ -87,6 +100,7 @@ export default function EmergencyAlertBanner() {
         });
       }
 
+      // Immediately display the red banner at the top of the UI
       setAlerts((prev) => [newAlert, ...prev.filter((a) => a.alertId !== newAlert.alertId)]);
     });
 

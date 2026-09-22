@@ -73,35 +73,38 @@ export const io = new Server(server, {
   },
 });
 
-io.on('connection', (socket) => {
-  console.log(`[Socket.IO ${isHttps ? 'WSS' : 'WS'}] Client connected: ${socket.id}`);
-  socket.on('disconnect', () => {
-    console.log(`[Socket.IO] Client disconnected: ${socket.id}`);
-  });
-});
-
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
 
 // Add Socket.IO authentication middleware
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.split(' ')[1];
-  if (!token) {
-    return next(new Error('Authentication token required'));
-  }
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return next(new Error('Invalid token'));
-    socket.user = user;
+  if (token) {
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+      if (!err && user) {
+        socket.user = user;
+      }
+      next();
+    });
+  } else {
     next();
-  });
+  }
 });
 
+// 2. Connection Handler & Room Assignment
 io.on('connection', (socket) => {
+  const userEmail = socket.user?.email || 'Anonymous / Kiosk';
   const roles = socket.user?.roles || [];
-  // Join privileged room if clinical staff or emergency responder
+  console.log(`⚡ [Socket.IO] Client connected: ${socket.id} (${userEmail})`);
+
   const authorizedRoles = ['EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'];
   if (roles.some((r) => authorizedRoles.includes(r))) {
     socket.join('responders');
+    console.log(`🛡️ [Socket.IO] Socket ${socket.id} joined 'responders' room`);
   }
+
+  socket.on('disconnect', (reason) => {
+    console.log(`🔌 [Socket.IO] Client disconnected: ${socket.id} (${reason})`);
+  });
 });
 
 // 2. Public Auth Routes

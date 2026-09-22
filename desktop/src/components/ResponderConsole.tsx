@@ -24,12 +24,23 @@ export default function ResponderConsole() {
     }
   };
 
-  useEffect(() => {
+useEffect(() => {
     fetchAlerts();
 
-    const socket = io('https://localhost:5000');
-    socket.on('emergency:new_alert', () => fetchAlerts());
-    socket.on('emergency:status_change', () => fetchAlerts());
+    const token = localStorage.getItem('valetudo_token');
+    const socket = io('https://localhost:5000', {
+      auth: { token },
+      transports: ['polling', 'websocket'],
+    });
+
+    socket.on('emergency:new_alert', () => {
+      console.log('🚨 [ResponderConsole] Auto-refreshing list from real-time alert');
+      fetchAlerts();
+    });
+
+    socket.on('emergency:status_change', () => {
+      fetchAlerts();
+    });
 
     return () => {
       socket.disconnect();

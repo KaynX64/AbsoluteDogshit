@@ -10,6 +10,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/api_config.dart';
 import '../main.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class EmergencyAlertService {
   static final EmergencyAlertService _instance = EmergencyAlertService._internal();
@@ -19,6 +20,7 @@ class EmergencyAlertService {
   io.Socket? _socket;
   final AudioPlayer _audioPlayer = AudioPlayer();
   final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
+  final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
   bool _isAlarmPlaying = false;
   Timer? _vibrationTimer;
@@ -28,7 +30,7 @@ class EmergencyAlertService {
   // Role Guard: ONLY true when actively logged in as an EMERGENCY_RESPONDER
   bool _isResponderActive = false;
 
-  Future<void> initialize() async {
+Future<void> initialize() async {
     if (_isInitialized) return;
     _isInitialized = true;
 
@@ -44,12 +46,22 @@ class EmergencyAlertService {
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
         ?.requestNotificationsPermission();
 
-    // 2. Connect Persistent WebSocket
+    // 2. Connect Persistent WebSocket with stored auth token
+    await connectSocket();
+  }
+
+  Future<void> connectSocket([String? token]) async {
+    final authToken = token ?? await _storage.read(key: 'jwt_token');
+
+    _socket?.disconnect();
+    _socket?.dispose();
+
     try {
       _socket = io.io(
         ApiConfig.socketUrl,
         io.OptionBuilder()
             .setTransports(['websocket', 'polling'])
+            .setAuth({'token': authToken})
             .enableAutoConnect()
             .enableReconnection()
             .setReconnectionDelay(1500)
@@ -57,13 +69,12 @@ class EmergencyAlertService {
       );
 
       _socket!.onConnect((_) {
-        debugPrint('✅ [Socket.IO Mobile] Connected to Emergency Gateway at ${ApiConfig.socketUrl}');
+        debugPrint('✅ [Socket.IO Mobile] Connected to Emergency Gateway');
       });
 
       _socket!.on('emergency:new_alert', (data) {
-        // STRICT ROLE GUARD: Students NEVER receive the responder dispatch siren/alert
         if (!_isResponderActive) {
-          debugPrint('🛡️ [Socket.IO Mobile] Broadcast ignored: Current device is not in Responder mode.');
+          debugPrint('🛡️ [Socket.IO Mobile] Broadcast ignored: Device not in Responder mode.');
           return;
         }
 
@@ -77,9 +88,9 @@ class EmergencyAlertService {
   }
 
   /// Called ONLY by ResponderScreen when a responder logs in
-  void startResponderListener() {
+  void startResponderListener() async {
     _isResponderActive = true;
-    initialize();
+    await connectSocket();
   }
 
   /// Called when a responder logs out or closes the responder screen

@@ -60,8 +60,13 @@ ipcMain.handle('show-notification', (event, { title, body }) => {
 
 // Add before app.whenReady() in desktop/electron/main.cjs
 app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
-  // Allow self-signed certificate for local infirmary backend
-  if (url.startsWith('https://localhost:5000') || url.startsWith('https://127.0.0.1:5000')) {
+  // Allow self-signed certificate for local infirmary backend (HTTPS and WSS)
+  if (
+    url.startsWith('https://localhost:5000') ||
+    url.startsWith('https://127.0.0.1:5000') ||
+    url.startsWith('wss://localhost:5000') ||
+    url.startsWith('wss://127.0.0.1:5000')
+  ) {
     event.preventDefault();
     callback(true); // Trust self-signed cert for dev
   } else {

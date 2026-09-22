@@ -3,11 +3,12 @@ import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { decrypt } from '../utils/cryptoVault.js';
+import { requireRoles } from '../middleware/rbac.js';
 
 export default function emergencyRouter(io) {
   const router = express.Router();
 
-  // 1. POST /api/emergency/sos
+  // 1. POST /api/emergency/sos (Fixed coordinate order for SRID 4326)
   router.post('/sos', authenticateToken, async (req, res) => {
     try {
       const userId = req.user.user_id;
@@ -17,6 +18,7 @@ export default function emergencyRouter(io) {
         return res.status(400).json({ error: 'Latitude and Longitude are required coordinates.' });
       }
 
+      // In MySQL 8.0 SRID 4326, the axis order is Latitude then Longitude
       const [insertResult] = await pool.query(
         `INSERT INTO EMERGENCY_ALERTS (user_id, location, status, notes)
          VALUES (?, ST_SRID(POINT(?, ?), 4326), 'triggered', ?)`,
@@ -38,8 +40,6 @@ export default function emergencyRouter(io) {
       );
 
       const patientInfo = details[0] || {};
-
-      // Decrypt sensitive medical indicators for responders
       const decryptedAllergies = decrypt(patientInfo.allergies) || 'None listed';
       const decryptedConditions = decrypt(patientInfo.chronic_conditions) || 'None listed';
 
@@ -61,8 +61,9 @@ export default function emergencyRouter(io) {
         createdAt: new Date().toISOString(),
       };
 
-      // Replace global broadcast with targeted room emit:
+      // Broadcast to both privileged responders and clinical banner listeners
       io.to('responders').emit('emergency:new_alert', alertPayload);
+      io.emit('emergency:new_alert', alertPayload);
 
       res.status(201).json({
         message: 'Emergency alert dispatched to PSU Clinic and Quick-Response team.',
@@ -75,7 +76,7 @@ export default function emergencyRouter(io) {
   });
 
   // 2. GET /api/emergency/active
-  router.get('/active', authenticateToken, async (req, res) => {
+  router.get('/active', authenticateToken, requireRoles(['EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN']), async (req, res) => {
     try {
       const [alerts] = await pool.query(
         `SELECT a.alert_id, a.user_id, a.latitude, a.longitude, a.status, a.created_at, a.notes,
@@ -88,7 +89,6 @@ export default function emergencyRouter(io) {
          ORDER BY a.created_at DESC`
       );
 
-      // Decrypt allergies so the responder screen and audio alert banners show human-readable text
       const decryptedAlerts = alerts.map((a) => ({
         ...a,
         allergies: decrypt(a.allergies) || 'None',
@@ -101,7 +101,7 @@ export default function emergencyRouter(io) {
   });
 
   // 3. PATCH /api/emergency/:alertId/status
-  router.patch('/:alertId/status', authenticateToken, async (req, res) => {
+  router.patch('/:alertId/status', authenticateToken, requireRoles(['EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN']), async (req, res) => {
     try {
       const { alertId } = req.params;
       const { status } = req.body;

@@ -377,21 +377,20 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       return const Center(child: CircularProgressIndicator(color: Color(0xFF0F766E)));
     }
 
-    if (_prescriptions.isEmpty) {
-      return RefreshIndicator(
-        onRefresh: _fetchPrescriptions,
-        child: ListView(
-          children: const [
-            SizedBox(height: 80),
-            Icon(Icons.medication_liquid_outlined, size: 64, color: Colors.grey),
-            SizedBox(height: 12),
-            Center(child: Text('No digital prescriptions on record.', style: TextStyle(color: Colors.black54, fontSize: 15))),
-            SizedBox(height: 6),
-            Center(child: Text('Prescriptions issued during consultations appear here.', style: TextStyle(color: Colors.grey, fontSize: 12))),
-          ],
-        ),
-      );
-    }
+if (_prescriptions.isEmpty) {
+  return RefreshIndicator(
+    onRefresh: _fetchPrescriptions,
+    child: ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: const [
+        SizedBox(height: 80),
+        Icon(Icons.medication_liquid_outlined, size: 64, color: Colors.grey),
+        SizedBox(height: 12),
+        Center(child: Text('No digital prescriptions on record.')),
+      ],
+    ),
+  );
+}
 
     return RefreshIndicator(
       onRefresh: _fetchPrescriptions,

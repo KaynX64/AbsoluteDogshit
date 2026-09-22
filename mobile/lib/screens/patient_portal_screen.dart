@@ -263,12 +263,14 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   // 2. REAL-TIME QUEUE & WEBSOCKET ENGINE
   // ===========================================================================
 
-  void _initQueueSocket() {
+  Future<void> _initQueueSocket() async {
+    final token = await _storage.read(key: 'jwt_token');
     try {
       _socket = io.io(
         ApiConfig.socketUrl,
         io.OptionBuilder()
             .setTransports(['websocket', 'polling'])
+            .setAuth({'token': token})
             .enableAutoConnect()
             .build(),
       );

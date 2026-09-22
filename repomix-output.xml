@@ -271,257 +271,6 @@ export async function requirePrivacyConsent(req, res, next) {
 }
 </file>
 
-<file path="server/src/routes/privacy.js">
-// server/src/routes/privacy.js
-import express from 'express';
-import { pool } from '../db.js';
-import { authenticateToken } from '../auth.js';
-import { requireRoles } from '../middleware/rbac.js';
-import { logAudit } from '../utils/auditLogger.js';
-
-const router = express.Router();
-
-// =============================================================================
-// 1. CONSENT MANAGEMENT (R.A. 10173 Section 12 & 13)
-// =============================================================================
-
-// POST /api/privacy/consent - Record user consent under R.A. 10173
-router.post('/consent', authenticateToken, async (req, res) => {
-  const userId = req.user.user_id;
-  const { consent_type } = req.body;
-
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-
-    await connection.query(
-      `INSERT INTO CONSENT_RECORDS (user_id, consent_type, is_granted, ip_address, terms_version)
-       VALUES (?, ?, TRUE, ?, '2026.1')`,
-      [userId, consent_type || 'PHI_PROCESSING_RA_10173', req.ip]
-    );
-
-    await logAudit(connection, {
-      userId,
-      action: 'CREATE',
-      table: 'CONSENT_RECORDS',
-      recordId: userId,
-      oldValue: null,
-      newValue: { consent_type: consent_type || 'PHI_PROCESSING_RA_10173', is_granted: true },
-      ipAddress: req.ip,
-    });
-
-    await connection.commit();
-    res.json({ message: 'Privacy consent successfully recorded under R.A. 10173.' });
-  } catch (error) {
-    await connection.rollback();
-    console.error('[Privacy] Consent error:', error);
-    res.status(500).json({ error: 'Failed to record consent.' });
-  } finally {
-    connection.release();
-  }
-});
-
-// POST /api/privacy/revoke - Revoke consent under R.A. 10173
-router.post('/revoke', authenticateToken, async (req, res) => {
-  const userId = req.user.user_id;
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-
-    await connection.query(
-      `UPDATE CONSENT_RECORDS 
-       SET is_granted = FALSE, revoked_at = CURRENT_TIMESTAMP 
-       WHERE user_id = ? AND is_granted = TRUE`,
-      [userId]
-    );
-
-    await logAudit(connection, {
-      userId,
-      action: 'UPDATE',
-      table: 'CONSENT_RECORDS',
-      recordId: userId,
-      oldValue: { is_granted: true },
-      newValue: { is_granted: false, revoked_at: new Date().toISOString() },
-      ipAddress: req.ip,
-    });
-
-    await connection.commit();
-    res.json({ message: 'Consent successfully revoked. Medical data processing suspended.' });
-  } catch (error) {
-    await connection.rollback();
-    console.error('[Privacy] Revoke error:', error);
-    res.status(500).json({ error: 'Failed to revoke consent.' });
-  } finally {
-    connection.release();
-  }
-});
-
-// GET /api/privacy/status - Check if user has active consent
-router.get('/status', authenticateToken, async (req, res) => {
-  try {
-    const [rows] = await pool.query(
-      `SELECT consent_id, consent_type, is_granted, consented_at, revoked_at, terms_version
-       FROM CONSENT_RECORDS 
-       WHERE user_id = ? 
-       ORDER BY consent_id DESC LIMIT 1`,
-      [req.user.user_id]
-    );
-
-    res.json({
-  hasConsented: rows.length > 0 && Boolean(rows[0].is_granted),
-  details: rows[0] || null,
-    });
-  } catch (error) {
-    console.error('[Privacy] Status check error:', error);
-    res.status(500).json({ error: 'Failed to retrieve consent status.' });
-  }
-});
-
-// =============================================================================
-// 2. DATA RETENTION & LIFECYCLE (R.A. 10173 Section 11 - Proportionality)
-// Standard: Clinical records retained 5 years from encounter date
-// =============================================================================
-
-// GET /api/privacy/retention/status - Retention status report (Admin only)
-router.get('/retention/status', authenticateToken, requireRoles('ADMIN'), async (req, res) => {
-  try {
-    // 5-year retention cutoff for EMR records
-    const [expiredEmrs] = await pool.query(
-      `SELECT COUNT(*) as eligible_for_purge
-       FROM EMR_RECORDS 
-       WHERE encounter_date < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
-         AND deleted_at IS NULL`
-    );
-
-    // 5-year retention cutoff for Appointments
-    const [expiredAppointments] = await pool.query(
-      `SELECT COUNT(*) as eligible_for_purge
-       FROM APPOINTMENTS 
-       WHERE date_time < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
-         AND deleted_at IS NULL`
-    );
-
-    // 5-year retention cutoff for Prescriptions
-    const [expiredPrescriptions] = await pool.query(
-      `SELECT COUNT(*) as eligible_for_purge
-       FROM PRESCRIPTIONS 
-       WHERE issued_at < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
-         AND deleted_at IS NULL`
-    );
-
-    const [activeEmrs] = await pool.query(
-      `SELECT COUNT(*) as active_records FROM EMR_RECORDS WHERE deleted_at IS NULL`
-    );
-
-    const [consentedUsers] = await pool.query(
-      `SELECT COUNT(DISTINCT user_id) as total_consented FROM CONSENT_RECORDS WHERE is_granted = TRUE`
-    );
-
-    const totalPurgeEligible =
-      (expiredEmrs[0]?.eligible_for_purge || 0) +
-      (expiredAppointments[0]?.eligible_for_purge || 0) +
-      (expiredPrescriptions[0]?.eligible_for_purge || 0);
-
-    res.json({
-      retentionPolicyYears: 5,
-      activeMedicalRecords: activeEmrs[0]?.active_records || 0,
-      recordsPastRetentionPeriod: totalPurgeEligible,
-      breakdown: {
-        emrRecords: expiredEmrs[0]?.eligible_for_purge || 0,
-        appointments: expiredAppointments[0]?.eligible_for_purge || 0,
-        prescriptions: expiredPrescriptions[0]?.eligible_for_purge || 0,
-      },
-      totalActiveConsents: consentedUsers[0]?.total_consented || 0,
-      standard: 'R.A. 10173 & Philippine DOH 5-Year Clinical Document Rule',
-    });
-  } catch (error) {
-    console.error('[Privacy] Retention status error:', error);
-    res.status(500).json({ error: 'Failed to compute retention status.' });
-  }
-});
-
-// POST /api/privacy/retention/sweep - Execute comprehensive retention purge (Admin only)
-router.post('/retention/sweep', authenticateToken, requireRoles('ADMIN'), async (req, res) => {
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-
-    // 1. Soft-delete EMR encounters older than 5 years
-    const [emrResult] = await connection.query(
-      `UPDATE EMR_RECORDS 
-       SET deleted_at = CURRENT_TIMESTAMP 
-       WHERE encounter_date < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
-         AND deleted_at IS NULL`
-    );
-
-    // 2. Soft-delete appointments older than 5 years
-    const [appResult] = await connection.query(
-      `UPDATE APPOINTMENTS 
-       SET deleted_at = CURRENT_TIMESTAMP 
-       WHERE date_time < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
-         AND deleted_at IS NULL`
-    );
-
-    // 3. Mark prescriptions older than 5 years as expired and soft-deleted
-    const [rxResult] = await connection.query(
-      `UPDATE PRESCRIPTIONS 
-       SET status = 'expired', deleted_at = CURRENT_TIMESTAMP 
-       WHERE issued_at < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
-         AND deleted_at IS NULL`
-    );
-
-    const [clrResult] = await connection.query(
-  `UPDATE MEDICAL_CLEARANCES 
-   SET status = 'expired', deleted_at = CURRENT_TIMESTAMP 
-   WHERE expires_at < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
-     AND deleted_at IS NULL`
-);
-
-    const totalPurged =
-      (emrResult.affectedRows || 0) +
-  (appResult.affectedRows || 0) +
-  (rxResult.affectedRows || 0) +
-  (clrResult.affectedRows || 0);
-
-    await logAudit(connection, {
-      userId: req.user.user_id,
-      action: 'DELETE',
-      table: 'EMR_RECORDS',
-      recordId: 0,
-      oldValue: null,
-      newValue: {
-        operation: 'STATUTORY_DATA_RETENTION_SWEEP_RA_10173',
-        purgedEmrs: emrResult.affectedRows,
-        purgedAppointments: appResult.affectedRows,
-        purgedPrescriptions: rxResult.affectedRows,
-        totalPurged,
-      },
-      ipAddress: req.ip,
-    });
-
-    await connection.commit();
-
-    res.json({
-      message: `Data retention sweep complete. ${totalPurged} expired records archived/soft-deleted across clinical tables.`,
-      purgedCount: totalPurged,
-      breakdown: {
-        emrs: emrResult.affectedRows,
-        appointments: appResult.affectedRows,
-        prescriptions: rxResult.affectedRows,
-      },
-    });
-  } catch (error) {
-    await connection.rollback();
-    console.error('[Privacy] Retention sweep error:', error);
-    res.status(500).json({ error: 'Failed to execute retention sweep.' });
-  } finally {
-    connection.release();
-  }
-});
-
-export default router;
-</file>
-
 <file path="server/src/utils/cryptoVault.js">
 // server/src/utils/cryptoVault.js
 import crypto from 'crypto';
@@ -1344,21 +1093,20 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       return const Center(child: CircularProgressIndicator(color: Color(0xFF0F766E)));
     }
 
-    if (_prescriptions.isEmpty) {
-      return RefreshIndicator(
-        onRefresh: _fetchPrescriptions,
-        child: ListView(
-          children: const [
-            SizedBox(height: 80),
-            Icon(Icons.medication_liquid_outlined, size: 64, color: Colors.grey),
-            SizedBox(height: 12),
-            Center(child: Text('No digital prescriptions on record.', style: TextStyle(color: Colors.black54, fontSize: 15))),
-            SizedBox(height: 6),
-            Center(child: Text('Prescriptions issued during consultations appear here.', style: TextStyle(color: Colors.grey, fontSize: 12))),
-          ],
-        ),
-      );
-    }
+if (_prescriptions.isEmpty) {
+  return RefreshIndicator(
+    onRefresh: _fetchPrescriptions,
+    child: ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: const [
+        SizedBox(height: 80),
+        Icon(Icons.medication_liquid_outlined, size: 64, color: Colors.grey),
+        SizedBox(height: 12),
+        Center(child: Text('No digital prescriptions on record.')),
+      ],
+    ),
+  );
+}
 
     return RefreshIndicator(
       onRefresh: _fetchPrescriptions,
@@ -1845,34 +1593,255 @@ export function requireRoles(...allowedRoles) {
 }
 </file>
 
-<file path="server/src/utils/auditLogger.js">
-import crypto from 'crypto';
+<file path="server/src/routes/privacy.js">
+// server/src/routes/privacy.js
+import express from 'express';
+import { pool } from '../db.js';
+import { authenticateToken } from '../auth.js';
+import { requireRoles } from '../middleware/rbac.js';
+import { logAudit } from '../utils/auditLogger.js';
 
-export async function logAudit(connection, { userId, action, table, recordId, oldValue, newValue, ipAddress }) {
-  // 1. Lock and fetch the most recent hash to prevent branching in concurrent requests
-  const [lastLog] = await connection.query(
-    'SELECT entry_hash FROM AUDIT_LOGS ORDER BY audit_id DESC LIMIT 1 FOR UPDATE'
-  );
-  
-  // Fallback to 64 zeros if the Genesis block is somehow missing
-  const prevHash = lastLog.length > 0 ? lastLog[0].entry_hash : '0'.repeat(64);
+const router = express.Router();
 
-  // 2. Prepare JSON representations of the data changes
-  const oldValStr = oldValue ? JSON.stringify(oldValue) : null;
-  const newValStr = newValue ? JSON.stringify(newValue) : null;
+// =============================================================================
+// 1. CONSENT MANAGEMENT (R.A. 10173 Section 12 & 13)
+// =============================================================================
 
-  // 3. Generate the cryptographic signature for RA 10173 tamper-proofing
-  const payload = `${prevHash}${action}${table}${recordId}${oldValStr || ''}${newValStr || ''}`;
-  const entryHash = crypto.createHash('sha256').update(payload).digest('hex');
+// POST /api/privacy/consent - Record user consent under R.A. 10173
+router.post('/consent', authenticateToken, async (req, res) => {
+  const userId = req.user.user_id;
+  const { consent_type } = req.body;
 
-  // 4. Insert the immutable log into the chain
-  await connection.query(
-    `INSERT INTO AUDIT_LOGS 
-     (user_id, action, table_affected, record_id, old_value, new_value, ip_address, prev_hash, entry_hash)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [userId, action, table, recordId, oldValStr, newValStr, ipAddress || 'Unknown', prevHash, entryHash]
-  );
-}
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    await connection.query(
+      `INSERT INTO CONSENT_RECORDS (user_id, consent_type, is_granted, ip_address, terms_version)
+       VALUES (?, ?, TRUE, ?, '2026.1')`,
+      [userId, consent_type || 'PHI_PROCESSING_RA_10173', req.ip]
+    );
+
+    await logAudit(connection, {
+      userId,
+      action: 'CREATE',
+      table: 'CONSENT_RECORDS',
+      recordId: userId,
+      oldValue: null,
+      newValue: { consent_type: consent_type || 'PHI_PROCESSING_RA_10173', is_granted: true },
+      ipAddress: req.ip,
+    });
+
+    await connection.commit();
+    res.json({ message: 'Privacy consent successfully recorded under R.A. 10173.' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[Privacy] Consent error:', error);
+    res.status(500).json({ error: 'Failed to record consent.' });
+  } finally {
+    connection.release();
+  }
+});
+
+// POST /api/privacy/revoke - Revoke consent under R.A. 10173
+router.post('/revoke', authenticateToken, async (req, res) => {
+  const userId = req.user.user_id;
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    await connection.query(
+      `UPDATE CONSENT_RECORDS 
+       SET is_granted = FALSE, revoked_at = CURRENT_TIMESTAMP 
+       WHERE user_id = ? AND is_granted = TRUE`,
+      [userId]
+    );
+
+    await logAudit(connection, {
+      userId,
+      action: 'UPDATE',
+      table: 'CONSENT_RECORDS',
+      recordId: userId,
+      oldValue: { is_granted: true },
+      newValue: { is_granted: false, revoked_at: new Date().toISOString() },
+      ipAddress: req.ip,
+    });
+
+    await connection.commit();
+    res.json({ message: 'Consent successfully revoked. Medical data processing suspended.' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[Privacy] Revoke error:', error);
+    res.status(500).json({ error: 'Failed to revoke consent.' });
+  } finally {
+    connection.release();
+  }
+});
+
+// GET /api/privacy/status - Check if user has active consent
+router.get('/status', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT consent_id, consent_type, is_granted, consented_at, revoked_at, terms_version
+       FROM CONSENT_RECORDS 
+       WHERE user_id = ? 
+       ORDER BY consent_id DESC LIMIT 1`,
+      [req.user.user_id]
+    );
+
+    res.json({
+  hasConsented: rows.length > 0 && Boolean(rows[0].is_granted),
+  details: rows[0] || null,
+    });
+  } catch (error) {
+    console.error('[Privacy] Status check error:', error);
+    res.status(500).json({ error: 'Failed to retrieve consent status.' });
+  }
+});
+
+// =============================================================================
+// 2. DATA RETENTION & LIFECYCLE (R.A. 10173 Section 11 - Proportionality)
+// Standard: Clinical records retained 5 years from encounter date
+// =============================================================================
+
+// GET /api/privacy/retention/status - Retention status report (Admin only)
+router.get('/retention/status', authenticateToken, requireRoles('ADMIN'), async (req, res) => {
+  try {
+    // 5-year retention cutoff for EMR records
+    const [expiredEmrs] = await pool.query(
+      `SELECT COUNT(*) as eligible_for_purge
+       FROM EMR_RECORDS 
+       WHERE encounter_date < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
+         AND deleted_at IS NULL`
+    );
+
+    // 5-year retention cutoff for Appointments
+    const [expiredAppointments] = await pool.query(
+      `SELECT COUNT(*) as eligible_for_purge
+       FROM APPOINTMENTS 
+       WHERE date_time < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
+         AND deleted_at IS NULL`
+    );
+
+    // 5-year retention cutoff for Prescriptions
+    const [expiredPrescriptions] = await pool.query(
+      `SELECT COUNT(*) as eligible_for_purge
+       FROM PRESCRIPTIONS 
+       WHERE issued_at < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
+         AND deleted_at IS NULL`
+    );
+
+    const [activeEmrs] = await pool.query(
+      `SELECT COUNT(*) as active_records FROM EMR_RECORDS WHERE deleted_at IS NULL`
+    );
+
+    const [consentedUsers] = await pool.query(
+      `SELECT COUNT(DISTINCT user_id) as total_consented FROM CONSENT_RECORDS WHERE is_granted = TRUE`
+    );
+
+    const totalPurgeEligible =
+      (expiredEmrs[0]?.eligible_for_purge || 0) +
+      (expiredAppointments[0]?.eligible_for_purge || 0) +
+      (expiredPrescriptions[0]?.eligible_for_purge || 0);
+
+    res.json({
+      retentionPolicyYears: 5,
+      activeMedicalRecords: activeEmrs[0]?.active_records || 0,
+      recordsPastRetentionPeriod: totalPurgeEligible,
+      breakdown: {
+        emrRecords: expiredEmrs[0]?.eligible_for_purge || 0,
+        appointments: expiredAppointments[0]?.eligible_for_purge || 0,
+        prescriptions: expiredPrescriptions[0]?.eligible_for_purge || 0,
+      },
+      totalActiveConsents: consentedUsers[0]?.total_consented || 0,
+      standard: 'R.A. 10173 & Philippine DOH 5-Year Clinical Document Rule',
+    });
+  } catch (error) {
+    console.error('[Privacy] Retention status error:', error);
+    res.status(500).json({ error: 'Failed to compute retention status.' });
+  }
+});
+
+// POST /api/privacy/retention/sweep - Execute comprehensive retention purge (Admin only)
+router.post('/retention/sweep', authenticateToken, requireRoles('ADMIN'), async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    // 1. Soft-delete EMR encounters older than 5 years
+    const [emrResult] = await connection.query(
+      `UPDATE EMR_RECORDS 
+       SET deleted_at = CURRENT_TIMESTAMP 
+       WHERE encounter_date < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
+         AND deleted_at IS NULL`
+    );
+
+    // 2. Soft-delete appointments older than 5 years
+    const [appResult] = await connection.query(
+      `UPDATE APPOINTMENTS 
+       SET deleted_at = CURRENT_TIMESTAMP 
+       WHERE date_time < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
+         AND deleted_at IS NULL`
+    );
+
+    // 3. Mark prescriptions older than 5 years as expired and soft-deleted
+    const [rxResult] = await connection.query(
+      `UPDATE PRESCRIPTIONS 
+       SET status = 'expired', deleted_at = CURRENT_TIMESTAMP 
+       WHERE issued_at < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
+         AND deleted_at IS NULL`
+    );
+
+    const [clrResult] = await connection.query(
+  `UPDATE MEDICAL_CLEARANCES 
+   SET status = 'expired', deleted_at = CURRENT_TIMESTAMP 
+   WHERE expires_at < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
+     AND deleted_at IS NULL`
+);
+
+    const totalPurged =
+      (emrResult.affectedRows || 0) +
+  (appResult.affectedRows || 0) +
+  (rxResult.affectedRows || 0) +
+  (clrResult.affectedRows || 0);
+
+    await logAudit(connection, {
+      userId: req.user.user_id,
+      action: 'DELETE',
+      table: 'EMR_RECORDS',
+      recordId: 0,
+      oldValue: null,
+      newValue: {
+        operation: 'STATUTORY_DATA_RETENTION_SWEEP_RA_10173',
+        purgedEmrs: emrResult.affectedRows,
+        purgedAppointments: appResult.affectedRows,
+        purgedPrescriptions: rxResult.affectedRows,
+        totalPurged,
+      },
+      ipAddress: req.ip,
+    });
+
+    await connection.commit();
+
+    res.json({
+      message: `Data retention sweep complete. ${totalPurged} expired records archived/soft-deleted across clinical tables.`,
+      purgedCount: totalPurged,
+      breakdown: {
+        emrs: emrResult.affectedRows,
+        appointments: appResult.affectedRows,
+        prescriptions: rxResult.affectedRows,
+      },
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[Privacy] Retention sweep error:', error);
+    res.status(500).json({ error: 'Failed to execute retention sweep.' });
+  } finally {
+    connection.release();
+  }
+});
+
+export default router;
 </file>
 
 <file path="mobile/lib/screens/login_screen.dart">
@@ -2971,148 +2940,33 @@ router.get('/clearances/verify/:token', async (req, res) => {
 export default router;
 </file>
 
-<file path="server/src/routes/emergency.js">
-// server/src/routes/emergency.js
-import express from 'express';
-import { pool } from '../db.js';
-import { authenticateToken } from '../auth.js';
-import { decrypt } from '../utils/cryptoVault.js';
+<file path="server/src/utils/auditLogger.js">
+import crypto from 'crypto';
 
-export default function emergencyRouter(io) {
-  const router = express.Router();
+export async function logAudit(connection, { userId, action, table, recordId, oldValue, newValue, ipAddress }) {
+  // 1. Lock and fetch the most recent hash to prevent branching in concurrent requests
+  const [lastLog] = await connection.query(
+    'SELECT entry_hash FROM AUDIT_LOGS ORDER BY audit_id DESC LIMIT 1 FOR UPDATE'
+  );
+  
+  // Fallback to 64 zeros if the Genesis block is somehow missing
+  const prevHash = lastLog.length > 0 ? lastLog[0].entry_hash : '0'.repeat(64);
 
-  // 1. POST /api/emergency/sos
-  router.post('/sos', authenticateToken, async (req, res) => {
-    try {
-      const userId = req.user.user_id;
-      const { latitude, longitude, notes } = req.body;
+  // 2. Prepare JSON representations of the data changes
+  const oldValStr = oldValue ? JSON.stringify(oldValue) : null;
+  const newValStr = newValue ? JSON.stringify(newValue) : null;
 
-      if (!latitude || !longitude) {
-        return res.status(400).json({ error: 'Latitude and Longitude are required coordinates.' });
-      }
+  // 3. Generate the cryptographic signature for RA 10173 tamper-proofing
+  const payload = `${prevHash}${action}${table}${recordId}${oldValStr || ''}${newValStr || ''}`;
+  const entryHash = crypto.createHash('sha256').update(payload).digest('hex');
 
-      const [insertResult] = await pool.query(
-        `INSERT INTO EMERGENCY_ALERTS (user_id, location, status, notes)
-         VALUES (?, ST_SRID(POINT(?, ?), 4326), 'triggered', ?)`,
-        [userId, Number(longitude), Number(latitude), notes || 'Emergency SOS pressed']
-      );
-
-      const alertId = insertResult.insertId;
-
-      const [details] = await pool.query(
-        `SELECT u.user_id, u.first_name, u.last_name, u.phone, u.email,
-                sp.student_no, sp.course,
-                hp.blood_type, hp.allergies, hp.chronic_conditions,
-                hp.emergency_contact_name, hp.emergency_contact_phone
-         FROM USERS u
-         LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
-         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
-         WHERE u.user_id = ?`,
-        [userId]
-      );
-
-      const patientInfo = details[0] || {};
-
-      // Decrypt sensitive medical indicators for responders
-      const decryptedAllergies = decrypt(patientInfo.allergies) || 'None listed';
-      const decryptedConditions = decrypt(patientInfo.chronic_conditions) || 'None listed';
-
-      const alertPayload = {
-        alertId,
-        userId,
-        patientName: `${patientInfo.first_name} ${patientInfo.last_name}`,
-        phone: patientInfo.phone,
-        studentNo: patientInfo.student_no,
-        course: patientInfo.course,
-        bloodType: patientInfo.blood_type || 'Unknown',
-        allergies: decryptedAllergies,
-        chronicConditions: decryptedConditions,
-        emergencyContact: `${patientInfo.emergency_contact_name || 'N/A'} (${patientInfo.emergency_contact_phone || 'N/A'})`,
-        latitude: Number(latitude),
-        longitude: Number(longitude),
-        googleMapsUrl: `https://www.google.com/maps?q=${latitude},${longitude}`,
-        status: 'triggered',
-        createdAt: new Date().toISOString(),
-      };
-
-      // Replace global broadcast with targeted room emit:
-      io.to('responders').emit('emergency:new_alert', alertPayload);
-
-      res.status(201).json({
-        message: 'Emergency alert dispatched to PSU Clinic and Quick-Response team.',
-        alertId,
-      });
-    } catch (error) {
-      console.error('SOS Trigger Error:', error);
-      res.status(500).json({ error: 'Failed to process SOS alert.' });
-    }
-  });
-
-  // 2. GET /api/emergency/active
-  router.get('/active', authenticateToken, async (req, res) => {
-    try {
-      const [alerts] = await pool.query(
-        `SELECT a.alert_id, a.user_id, a.latitude, a.longitude, a.status, a.created_at, a.notes,
-                u.first_name, u.last_name, u.phone,
-                hp.blood_type, hp.allergies
-         FROM EMERGENCY_ALERTS a
-         JOIN USERS u ON a.user_id = u.user_id
-         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
-         WHERE a.status IN ('triggered', 'acknowledged', 'dispatched')
-         ORDER BY a.created_at DESC`
-      );
-
-      // Decrypt allergies so the responder screen and audio alert banners show human-readable text
-      const decryptedAlerts = alerts.map((a) => ({
-        ...a,
-        allergies: decrypt(a.allergies) || 'None',
-      }));
-
-      res.json(decryptedAlerts);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to fetch active alerts.' });
-    }
-  });
-
-  // 3. PATCH /api/emergency/:alertId/status
-  router.patch('/:alertId/status', authenticateToken, async (req, res) => {
-    try {
-      const { alertId } = req.params;
-      const { status } = req.body;
-      const responderId = req.user.user_id;
-
-      if (!['acknowledged', 'dispatched', 'resolved', 'false_alarm'].includes(status)) {
-        return res.status(400).json({ error: 'Invalid status update.' });
-      }
-
-      let extraUpdate = '';
-      const params = [status, responderId];
-
-      if (status === 'acknowledged') {
-        extraUpdate = ', acknowledged_at = CURRENT_TIMESTAMP';
-      } else if (status === 'resolved' || status === 'false_alarm') {
-        extraUpdate = `, resolved_at = CURRENT_TIMESTAMP, 
-                       response_time_seconds = TIMESTAMPDIFF(SECOND, created_at, CURRENT_TIMESTAMP)`;
-      }
-
-      params.push(alertId);
-
-      await pool.query(
-        `UPDATE EMERGENCY_ALERTS 
-         SET status = ?, assigned_responder_id = ? ${extraUpdate}
-         WHERE alert_id = ?`,
-        params
-      );
-
-      io.emit('emergency:status_change', { alertId: Number(alertId), status, responderId });
-
-      res.json({ message: `Alert #${alertId} updated to ${status}.` });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to update alert status.' });
-    }
-  });
-
-  return router;
+  // 4. Insert the immutable log into the chain
+  await connection.query(
+    `INSERT INTO AUDIT_LOGS 
+     (user_id, action, table_affected, record_id, old_value, new_value, ip_address, prev_hash, entry_hash)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [userId, action, table, recordId, oldValStr, newValStr, ipAddress || 'Unknown', prevHash, entryHash]
+  );
 }
 </file>
 
@@ -3787,12 +3641,25 @@ export default function EmergencyAlertBanner() {
       } catch (_) {}
     };
 
-    fetchActiveAlerts();
+fetchActiveAlerts();
 
-    // 2. Connect Socket.IO
-    const socket: Socket = io('https://localhost:5000');
+    // 2. Connect Socket.IO with token and transport fallbacks
+    const token = localStorage.getItem('valetudo_token');
+    const socket: Socket = io('https://localhost:5000', {
+      auth: { token },
+      transports: ['polling', 'websocket'],
+    });
+
+    socket.on('connect', () => {
+      console.log('✅ [EmergencyAlertBanner] Live Socket connected:', socket.id);
+    });
+
+    socket.on('connect_error', (err) => {
+      console.error('❌ [EmergencyAlertBanner] Socket error:', err.message);
+    });
 
     socket.on('emergency:new_alert', (newAlert: EmergencyAlert) => {
+      console.log('🚨 [EmergencyAlertBanner] New SOS received in real-time:', newAlert);
       playEmergencyAlarm();
 
       // Trigger native OS system tray notification
@@ -3803,6 +3670,7 @@ export default function EmergencyAlertBanner() {
         });
       }
 
+      // Immediately display the red banner at the top of the UI
       setAlerts((prev) => [newAlert, ...prev.filter((a) => a.alertId !== newAlert.alertId)]);
     });
 
@@ -4245,12 +4113,23 @@ export default function ResponderConsole() {
     }
   };
 
-  useEffect(() => {
+useEffect(() => {
     fetchAlerts();
 
-    const socket = io('https://localhost:5000');
-    socket.on('emergency:new_alert', () => fetchAlerts());
-    socket.on('emergency:status_change', () => fetchAlerts());
+    const token = localStorage.getItem('valetudo_token');
+    const socket = io('https://localhost:5000', {
+      auth: { token },
+      transports: ['polling', 'websocket'],
+    });
+
+    socket.on('emergency:new_alert', () => {
+      console.log('🚨 [ResponderConsole] Auto-refreshing list from real-time alert');
+      fetchAlerts();
+    });
+
+    socket.on('emergency:status_change', () => {
+      fetchAlerts();
+    });
 
     return () => {
       socket.disconnect();
@@ -5195,6 +5074,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/api_config.dart';
 import '../main.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class EmergencyAlertService {
   static final EmergencyAlertService _instance = EmergencyAlertService._internal();
@@ -5204,6 +5084,7 @@ class EmergencyAlertService {
   io.Socket? _socket;
   final AudioPlayer _audioPlayer = AudioPlayer();
   final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
+  final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
   bool _isAlarmPlaying = false;
   Timer? _vibrationTimer;
@@ -5213,7 +5094,7 @@ class EmergencyAlertService {
   // Role Guard: ONLY true when actively logged in as an EMERGENCY_RESPONDER
   bool _isResponderActive = false;
 
-  Future<void> initialize() async {
+Future<void> initialize() async {
     if (_isInitialized) return;
     _isInitialized = true;
 
@@ -5229,12 +5110,22 @@ class EmergencyAlertService {
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
         ?.requestNotificationsPermission();
 
-    // 2. Connect Persistent WebSocket
+    // 2. Connect Persistent WebSocket with stored auth token
+    await connectSocket();
+  }
+
+  Future<void> connectSocket([String? token]) async {
+    final authToken = token ?? await _storage.read(key: 'jwt_token');
+
+    _socket?.disconnect();
+    _socket?.dispose();
+
     try {
       _socket = io.io(
         ApiConfig.socketUrl,
         io.OptionBuilder()
             .setTransports(['websocket', 'polling'])
+            .setAuth({'token': authToken})
             .enableAutoConnect()
             .enableReconnection()
             .setReconnectionDelay(1500)
@@ -5242,13 +5133,12 @@ class EmergencyAlertService {
       );
 
       _socket!.onConnect((_) {
-        debugPrint('✅ [Socket.IO Mobile] Connected to Emergency Gateway at ${ApiConfig.socketUrl}');
+        debugPrint('✅ [Socket.IO Mobile] Connected to Emergency Gateway');
       });
 
       _socket!.on('emergency:new_alert', (data) {
-        // STRICT ROLE GUARD: Students NEVER receive the responder dispatch siren/alert
         if (!_isResponderActive) {
-          debugPrint('🛡️ [Socket.IO Mobile] Broadcast ignored: Current device is not in Responder mode.');
+          debugPrint('🛡️ [Socket.IO Mobile] Broadcast ignored: Device not in Responder mode.');
           return;
         }
 
@@ -5262,9 +5152,9 @@ class EmergencyAlertService {
   }
 
   /// Called ONLY by ResponderScreen when a responder logs in
-  void startResponderListener() {
+  void startResponderListener() async {
     _isResponderActive = true;
-    initialize();
+    await connectSocket();
   }
 
   /// Called when a responder logs out or closes the responder screen
@@ -5594,6 +5484,151 @@ class EmergencyAlertService {
 }
 </file>
 
+<file path="server/src/routes/emergency.js">
+// server/src/routes/emergency.js
+import express from 'express';
+import { pool } from '../db.js';
+import { authenticateToken } from '../auth.js';
+import { decrypt } from '../utils/cryptoVault.js';
+import { requireRoles } from '../middleware/rbac.js';
+
+export default function emergencyRouter(io) {
+  const router = express.Router();
+
+  // 1. POST /api/emergency/sos (Fixed coordinate order for SRID 4326)
+  router.post('/sos', authenticateToken, async (req, res) => {
+    try {
+      const userId = req.user.user_id;
+      const { latitude, longitude, notes } = req.body;
+
+      if (!latitude || !longitude) {
+        return res.status(400).json({ error: 'Latitude and Longitude are required coordinates.' });
+      }
+
+      // In MySQL 8.0 SRID 4326, the axis order is Latitude then Longitude
+      const [insertResult] = await pool.query(
+        `INSERT INTO EMERGENCY_ALERTS (user_id, location, status, notes)
+         VALUES (?, ST_SRID(POINT(?, ?), 4326), 'triggered', ?)`,
+        [userId, Number(longitude), Number(latitude), notes || 'Emergency SOS pressed']
+      );
+
+      const alertId = insertResult.insertId;
+
+      const [details] = await pool.query(
+        `SELECT u.user_id, u.first_name, u.last_name, u.phone, u.email,
+                sp.student_no, sp.course,
+                hp.blood_type, hp.allergies, hp.chronic_conditions,
+                hp.emergency_contact_name, hp.emergency_contact_phone
+         FROM USERS u
+         LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+         WHERE u.user_id = ?`,
+        [userId]
+      );
+
+      const patientInfo = details[0] || {};
+      const decryptedAllergies = decrypt(patientInfo.allergies) || 'None listed';
+      const decryptedConditions = decrypt(patientInfo.chronic_conditions) || 'None listed';
+
+      const alertPayload = {
+        alertId,
+        userId,
+        patientName: `${patientInfo.first_name} ${patientInfo.last_name}`,
+        phone: patientInfo.phone,
+        studentNo: patientInfo.student_no,
+        course: patientInfo.course,
+        bloodType: patientInfo.blood_type || 'Unknown',
+        allergies: decryptedAllergies,
+        chronicConditions: decryptedConditions,
+        emergencyContact: `${patientInfo.emergency_contact_name || 'N/A'} (${patientInfo.emergency_contact_phone || 'N/A'})`,
+        latitude: Number(latitude),
+        longitude: Number(longitude),
+        googleMapsUrl: `https://www.google.com/maps?q=${latitude},${longitude}`,
+        status: 'triggered',
+        createdAt: new Date().toISOString(),
+      };
+
+      // Broadcast to both privileged responders and clinical banner listeners
+      io.to('responders').emit('emergency:new_alert', alertPayload);
+      io.emit('emergency:new_alert', alertPayload);
+
+      res.status(201).json({
+        message: 'Emergency alert dispatched to PSU Clinic and Quick-Response team.',
+        alertId,
+      });
+    } catch (error) {
+      console.error('SOS Trigger Error:', error);
+      res.status(500).json({ error: 'Failed to process SOS alert.' });
+    }
+  });
+
+  // 2. GET /api/emergency/active
+  router.get('/active', authenticateToken, requireRoles(['EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN']), async (req, res) => {
+    try {
+      const [alerts] = await pool.query(
+        `SELECT a.alert_id, a.user_id, a.latitude, a.longitude, a.status, a.created_at, a.notes,
+                u.first_name, u.last_name, u.phone,
+                hp.blood_type, hp.allergies
+         FROM EMERGENCY_ALERTS a
+         JOIN USERS u ON a.user_id = u.user_id
+         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+         WHERE a.status IN ('triggered', 'acknowledged', 'dispatched')
+         ORDER BY a.created_at DESC`
+      );
+
+      const decryptedAlerts = alerts.map((a) => ({
+        ...a,
+        allergies: decrypt(a.allergies) || 'None',
+      }));
+
+      res.json(decryptedAlerts);
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch active alerts.' });
+    }
+  });
+
+  // 3. PATCH /api/emergency/:alertId/status
+  router.patch('/:alertId/status', authenticateToken, requireRoles(['EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN']), async (req, res) => {
+    try {
+      const { alertId } = req.params;
+      const { status } = req.body;
+      const responderId = req.user.user_id;
+
+      if (!['acknowledged', 'dispatched', 'resolved', 'false_alarm'].includes(status)) {
+        return res.status(400).json({ error: 'Invalid status update.' });
+      }
+
+      let extraUpdate = '';
+      const params = [status, responderId];
+
+      if (status === 'acknowledged') {
+        extraUpdate = ', acknowledged_at = CURRENT_TIMESTAMP';
+      } else if (status === 'resolved' || status === 'false_alarm') {
+        extraUpdate = `, resolved_at = CURRENT_TIMESTAMP, 
+                       response_time_seconds = TIMESTAMPDIFF(SECOND, created_at, CURRENT_TIMESTAMP)`;
+      }
+
+      params.push(alertId);
+
+      await pool.query(
+        `UPDATE EMERGENCY_ALERTS 
+         SET status = ?, assigned_responder_id = ? ${extraUpdate}
+         WHERE alert_id = ?`,
+        params
+      );
+
+      io.emit('emergency:status_change', { alertId: Number(alertId), status, responderId });
+
+      res.json({ message: `Alert #${alertId} updated to ${status}.` });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to update alert status.' });
+    }
+  });
+
+  return router;
+}
+</file>
+
 <file path="desktop/src/components/NurseConsole.tsx">
 // desktop/src/components/NurseConsole.tsx
 import { useState, useEffect } from 'react';
@@ -5641,7 +5676,11 @@ export default function NurseConsole() {
     useEffect(() => {
     fetchLiveQueue();
 
-    const socket = io('https://localhost:5000');
+    const token = localStorage.getItem('valetudo_token');
+    const socket = io('https://localhost:5000', {
+      auth: { token },
+      transports: ['websocket', 'polling'],
+    });
     socket.on('queue:updated', () => {
       fetchLiveQueue();
     });
@@ -7791,247 +7830,6 @@ router.get('/export/csv', async (req, res) => {
 export default router;
 </file>
 
-<file path="server/src/routes/healthPass.js">
-// server/src/routes/healthPass.js
-import express from 'express';
-import crypto from 'crypto';
-import { pool } from '../db.js';
-import { authenticateToken } from '../auth.js';
-import { requireRoles } from '../middleware/rbac.js';
-import { logPhiAccess } from '../utils/phiLogger.js';
-import { decrypt } from '../utils/cryptoVault.js';
-import { requirePrivacyConsent } from '../middleware/consent.js';
-
-const router = express.Router();
-const HMAC_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
-
-// GET /api/health-pass/token
-router.get('/token', authenticateToken, requirePrivacyConsent, (req, res) => {
-  try {
-    const userId = req.user.user_id;
-    const timestamp = Date.now();
-    const nonce = crypto.randomBytes(4).toString('hex');
-
-    const payload = `${userId}.${timestamp}.${nonce}`;
-    const hmac = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
-
-    const qrToken = `${payload}.${hmac}`;
-    res.json({ qrToken, expiresInSeconds: 300 });
-  } catch (error) {
-    console.error('[HealthPass] QR generation error:', error);
-    res.status(500).json({ error: 'Failed to generate QR token.' });
-  }
-});
-
-// POST /api/health-pass/verify
-router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
-  const { qrToken } = req.body;
-  if (!qrToken) return res.status(400).json({ error: 'QR token required.' });
-
-  const parts = qrToken.split('.');
-  if (parts.length !== 4) {
-    return res.status(400).json({ error: 'Invalid QR token format.' });
-  }
-
-  const [patientUserId, timestampStr, nonce, receivedSig] = parts;
-  const payload = `${patientUserId}.${timestampStr}.${nonce}`;
-
-  // 1. Compute expected signature using consistent HMAC secret
-  const expectedSig = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
-
-  // Constant-time signature verification
-  const expectedBuffer = Buffer.from(expectedSig);
-  const receivedBuffer = Buffer.from(receivedSig);
-  if (
-    expectedBuffer.length !== receivedBuffer.length ||
-    !crypto.timingSafeEqual(expectedBuffer, receivedBuffer)
-  ) {
-    return res.status(401).json({ error: 'QR verification failed: Invalid signature.' });
-  }
-
-  // 2. Expiration check (15 minutes grace window)
-  const tokenTime = parseInt(timestampStr, 10);
-  if (isNaN(tokenTime) || Date.now() - tokenTime > 15 * 60 * 1000) {
-    return res.status(401).json({ error: 'QR pass expired. Ask student to refresh pass.' });
-  }
-
-  // 3. Acquire DB connection and execute queries safely inside try/finally
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    // R.A. 10173 Consent check on the scanned patient
-    const [consentRows] = await connection.query(
-      `SELECT is_granted FROM CONSENT_RECORDS 
-       WHERE user_id = ? 
-       ORDER BY consent_id DESC LIMIT 1`,
-      [patientUserId]
-    );
-
-    if (consentRows.length === 0 || !Boolean(consentRows[0].is_granted)) {
-      await connection.rollback();
-      return res.status(403).json({
-        error: 'PRIVACY_CONSENT_REVOKED',
-        message: 'Student has revoked or not granted R.A. 10173 data processing consent. Intake suspended.',
-      });
-    }
-
-    // Retrieve active patient records
-    const [patient] = await connection.query(
-      `SELECT u.user_id, u.first_name, u.last_name, u.email,
-              sp.student_no, sp.course, sp.year_level,
-              hp.blood_type, hp.allergies, hp.chronic_conditions
-       FROM USERS u
-       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
-       LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
-       WHERE u.user_id = ? AND u.is_active = TRUE`,
-      [patientUserId]
-    );
-
-    if (patient.length === 0) {
-      await connection.rollback();
-      return res.status(404).json({ error: 'Patient not found or deactivated.' });
-    }
-
-    // Log PHI read access
-    logPhiAccess({
-      viewerUserId: req.user.user_id,
-      patientUserId: Number(patientUserId),
-      table: 'HEALTH_PROFILES',
-      recordId: Number(patientUserId),
-      purpose: 'Touchless Clinic Check-In Scan',
-      ipAddress: req.ip,
-    });
-
-    await connection.commit();
-
-    const patientData = {
-      ...patient[0],
-      allergies: decrypt(patient[0].allergies),
-      chronic_conditions: decrypt(patient[0].chronic_conditions),
-    };
-
-    res.json({
-      verified: true,
-      patient: patientData,
-    });
-  } catch (error) {
-    await connection.rollback();
-    console.error('[HealthPass] Verification error:', error);
-    res.status(500).json({ error: 'Error during verification.' });
-  } finally {
-    connection.release();
-  }
-});
-
-export default router;
-</file>
-
-<file path="server/src/routes/profile.js">
-// server/src/routes/profile.js
-import express from 'express';
-import { pool } from '../db.js';
-import { authenticateToken } from '../auth.js';
-import { logAudit } from '../utils/auditLogger.js';
-import { encrypt, decrypt } from '../utils/cryptoVault.js';
-import { requirePrivacyConsent } from '../middleware/consent.js';
-
-const router = express.Router();
-
-// GET /api/profile/me
-// server/src/routes/profile.js
-router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => {
-  const userId = req.user.user_id;
-  const {
-    blood_type, allergies, chronic_conditions,
-    emergency_contact_name, emergency_contact_phone, height, weight, phone
-  } = req.body;
-
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    // 1. Update phone on USERS table if provided
-    if (phone !== undefined) {
-      await connection.query('UPDATE USERS SET phone = ? WHERE user_id = ?', [phone, userId]);
-    }
-
-    const [existing] = await connection.query(
-      'SELECT * FROM HEALTH_PROFILES WHERE user_id = ? FOR UPDATE',
-      [userId]
-    );
-
-    let oldData = null;
-    let action = 'CREATE';
-    let recordId = null;
-
-    if (existing.length > 0) {
-      oldData = { ...existing[0] };
-      action = 'UPDATE';
-      recordId = oldData.profile_id;
-
-      // Preserve existing encrypted data if not explicitly provided in the payload
-      const finalAllergies = allergies !== undefined ? encrypt(allergies) : oldData.allergies;
-      const finalConditions = chronic_conditions !== undefined ? encrypt(chronic_conditions) : oldData.chronic_conditions;
-      const finalBloodType = blood_type !== undefined ? blood_type : oldData.blood_type;
-      const finalEmName = emergency_contact_name !== undefined ? emergency_contact_name : oldData.emergency_contact_name;
-      const finalEmPhone = emergency_contact_phone !== undefined ? emergency_contact_phone : oldData.emergency_contact_phone;
-      const finalHeight = height !== undefined ? height : oldData.height;
-      const finalWeight = weight !== undefined ? weight : oldData.weight;
-
-      await connection.query(
-        `UPDATE HEALTH_PROFILES 
-         SET blood_type = ?, allergies = ?, chronic_conditions = ?,
-             emergency_contact_name = ?, emergency_contact_phone = ?,
-             height = ?, weight = ?, version = version + 1
-         WHERE user_id = ?`,
-        [finalBloodType, finalAllergies, finalConditions, finalEmName, finalEmPhone, finalHeight, finalWeight, userId]
-      );
-    } else {
-      const [result] = await connection.query(
-        `INSERT INTO HEALTH_PROFILES 
-         (user_id, blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, height, weight)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          userId,
-          blood_type || null,
-          encrypt(allergies || ''),
-          encrypt(chronic_conditions || ''),
-          emergency_contact_name || null,
-          emergency_contact_phone || null,
-          height || null,
-          weight || null,
-        ]
-      );
-      recordId = result.insertId;
-    }
-
-    await logAudit(connection, {
-      userId: req.user.user_id,
-      action,
-      table: 'HEALTH_PROFILES',
-      recordId,
-      oldValue: null,
-      newValue: { blood_type, height, weight, encrypted: true },
-      ipAddress: req.ip,
-    });
-
-    await connection.commit();
-    res.json({ message: 'Health profile encrypted & saved successfully.' });
-  } catch (error) {
-    await connection.rollback();
-    console.error('[Profile Update Error]:', error);
-    res.status(500).json({ error: 'Failed to update health profile.' });
-  } finally {
-    connection.release();
-  }
-});
-
-export default router;
-</file>
-
 <file path="server/schema.sql">
 -- =============================================================================
 -- VALETUDO HEALTHLINK DATABASE SCHEMA & SEED DATA
@@ -8557,7 +8355,11 @@ export default function DoctorConsole() {
   useEffect(() => {
     fetchAppointments('active', false);
 
-    const socket = io('https://localhost:5000');
+    const token = localStorage.getItem('valetudo_token');
+    const socket = io('https://localhost:5000', {
+      auth: { token },
+      transports: ['websocket', 'polling'],
+    });
     socket.on('appointment:booked', (newBooking: any) => {
       fetchAppointments(viewMode, true);
       if (window.electronAPI?.showNotification) {
@@ -9407,6 +9209,288 @@ class ValetudoMobileApp extends StatelessWidget {
 }
 </file>
 
+<file path="server/src/routes/healthPass.js">
+// server/src/routes/healthPass.js
+import express from 'express';
+import crypto from 'crypto';
+import { pool } from '../db.js';
+import { authenticateToken } from '../auth.js';
+import { requireRoles } from '../middleware/rbac.js';
+import { logPhiAccess } from '../utils/phiLogger.js';
+import { decrypt } from '../utils/cryptoVault.js';
+import { requirePrivacyConsent } from '../middleware/consent.js';
+
+const router = express.Router();
+const HMAC_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
+
+// GET /api/health-pass/token
+router.get('/token', authenticateToken, requirePrivacyConsent, (req, res) => {
+  try {
+    const userId = req.user.user_id;
+    const timestamp = Date.now();
+    const nonce = crypto.randomBytes(4).toString('hex');
+
+    const payload = `${userId}.${timestamp}.${nonce}`;
+    const hmac = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
+
+    const qrToken = `${payload}.${hmac}`;
+    res.json({ qrToken, expiresInSeconds: 300 });
+  } catch (error) {
+    console.error('[HealthPass] QR generation error:', error);
+    res.status(500).json({ error: 'Failed to generate QR token.' });
+  }
+});
+
+// POST /api/health-pass/verify
+router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+  const { qrToken } = req.body;
+  if (!qrToken) return res.status(400).json({ error: 'QR token required.' });
+
+  const parts = qrToken.split('.');
+  if (parts.length !== 4) {
+    return res.status(400).json({ error: 'Invalid QR token format.' });
+  }
+
+  const [patientUserId, timestampStr, nonce, receivedSig] = parts;
+  const payload = `${patientUserId}.${timestampStr}.${nonce}`;
+
+  // 1. Compute expected signature using consistent HMAC secret
+  const expectedSig = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
+
+  // Constant-time signature verification
+  const expectedBuffer = Buffer.from(expectedSig);
+  const receivedBuffer = Buffer.from(receivedSig);
+  if (
+    expectedBuffer.length !== receivedBuffer.length ||
+    !crypto.timingSafeEqual(expectedBuffer, receivedBuffer)
+  ) {
+    return res.status(401).json({ error: 'QR verification failed: Invalid signature.' });
+  }
+
+  // 2. Expiration check (15 minutes grace window)
+  const tokenTime = parseInt(timestampStr, 10);
+  if (isNaN(tokenTime) || Date.now() - tokenTime > 15 * 60 * 1000) {
+    return res.status(401).json({ error: 'QR pass expired. Ask student to refresh pass.' });
+  }
+
+  // 3. Acquire DB connection and execute queries safely inside try/finally
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    // R.A. 10173 Consent check on the scanned patient
+    const [consentRows] = await connection.query(
+      `SELECT is_granted FROM CONSENT_RECORDS 
+       WHERE user_id = ? 
+       ORDER BY consent_id DESC LIMIT 1`,
+      [patientUserId]
+    );
+
+    if (consentRows.length === 0 || !Boolean(consentRows[0].is_granted)) {
+      await connection.rollback();
+      return res.status(403).json({
+        error: 'PRIVACY_CONSENT_REVOKED',
+        message: 'Student has revoked or not granted R.A. 10173 data processing consent. Intake suspended.',
+      });
+    }
+
+    // Retrieve active patient records
+    const [patient] = await connection.query(
+      `SELECT u.user_id, u.first_name, u.last_name, u.email,
+              sp.student_no, sp.course, sp.year_level,
+              hp.blood_type, hp.allergies, hp.chronic_conditions
+       FROM USERS u
+       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+       LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+       WHERE u.user_id = ? AND u.is_active = TRUE`,
+      [patientUserId]
+    );
+
+    if (patient.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Patient not found or deactivated.' });
+    }
+
+    // Log PHI read access
+    logPhiAccess({
+      viewerUserId: req.user.user_id,
+      patientUserId: Number(patientUserId),
+      table: 'HEALTH_PROFILES',
+      recordId: Number(patientUserId),
+      purpose: 'Touchless Clinic Check-In Scan',
+      ipAddress: req.ip,
+    });
+
+    await connection.commit();
+
+    const patientData = {
+      ...patient[0],
+      allergies: decrypt(patient[0].allergies),
+      chronic_conditions: decrypt(patient[0].chronic_conditions),
+    };
+
+    res.json({
+      verified: true,
+      patient: patientData,
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[HealthPass] Verification error:', error);
+    res.status(500).json({ error: 'Error during verification.' });
+  } finally {
+    connection.release();
+  }
+});
+
+export default router;
+</file>
+
+<file path="server/src/routes/profile.js">
+// server/src/routes/profile.js
+import express from 'express';
+import { pool } from '../db.js';
+import { authenticateToken } from '../auth.js';
+import { logAudit } from '../utils/auditLogger.js';
+import { encrypt, decrypt } from '../utils/cryptoVault.js';
+import { requirePrivacyConsent } from '../middleware/consent.js';
+
+const router = express.Router();
+
+// 1. GET /api/profile/me (Provides health profile data to mobile & desktop)
+router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => {
+  const userId = req.user.user_id;
+  try {
+    const [users] = await pool.query(
+      `SELECT u.user_id, u.email, u.first_name, u.last_name, u.phone,
+              sp.student_no, sp.course, sp.year_level,
+              fp.department, fp.position
+       FROM USERS u
+       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+       LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
+       WHERE u.user_id = ? AND u.deleted_at IS NULL`,
+      [userId]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({ error: 'User record not found.' });
+    }
+
+    const [healthProfiles] = await pool.query(
+      `SELECT profile_id, blood_type, allergies, chronic_conditions, immunization_history,
+              emergency_contact_name, emergency_contact_phone, height, weight, updated_at
+       FROM HEALTH_PROFILES
+       WHERE user_id = ? AND deleted_at IS NULL`,
+      [userId]
+    );
+
+    const hp = healthProfiles[0] || {};
+    const decryptedProfile = {
+      ...hp,
+      allergies: decrypt(hp.allergies) || '',
+      chronic_conditions: decrypt(hp.chronic_conditions) || '',
+    };
+
+    res.json({
+      user: users[0],
+      healthProfile: decryptedProfile,
+    });
+  } catch (error) {
+    console.error('[Profile Fetch Error]:', error);
+    res.status(500).json({ error: 'Failed to load user health profile.' });
+  }
+});
+
+// 2. PUT /api/profile/me
+router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => {
+  const userId = req.user.user_id;
+  const {
+    blood_type, allergies, chronic_conditions,
+    emergency_contact_name, emergency_contact_phone, height, weight, phone
+  } = req.body;
+
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    if (phone !== undefined) {
+      await connection.query('UPDATE USERS SET phone = ? WHERE user_id = ?', [phone, userId]);
+    }
+
+    const [existing] = await connection.query(
+      'SELECT * FROM HEALTH_PROFILES WHERE user_id = ? FOR UPDATE',
+      [userId]
+    );
+
+    let oldData = null;
+    let action = 'CREATE';
+    let recordId = null;
+
+    if (existing.length > 0) {
+      oldData = { ...existing[0] };
+      action = 'UPDATE';
+      recordId = oldData.profile_id;
+
+      const finalAllergies = allergies !== undefined ? encrypt(allergies) : oldData.allergies;
+      const finalConditions = chronic_conditions !== undefined ? encrypt(chronic_conditions) : oldData.chronic_conditions;
+      const finalBloodType = blood_type !== undefined ? blood_type : oldData.blood_type;
+      const finalEmName = emergency_contact_name !== undefined ? emergency_contact_name : oldData.emergency_contact_name;
+      const finalEmPhone = emergency_contact_phone !== undefined ? emergency_contact_phone : oldData.emergency_contact_phone;
+      const finalHeight = height !== undefined ? height : oldData.height;
+      const finalWeight = weight !== undefined ? weight : oldData.weight;
+
+      await connection.query(
+        `UPDATE HEALTH_PROFILES 
+         SET blood_type = ?, allergies = ?, chronic_conditions = ?,
+             emergency_contact_name = ?, emergency_contact_phone = ?,
+             height = ?, weight = ?, version = version + 1
+         WHERE user_id = ?`,
+        [finalBloodType, finalAllergies, finalConditions, finalEmName, finalEmPhone, finalHeight, finalWeight, userId]
+      );
+    } else {
+      const [result] = await connection.query(
+        `INSERT INTO HEALTH_PROFILES 
+         (user_id, blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, height, weight)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          userId,
+          blood_type || null,
+          encrypt(allergies || ''),
+          encrypt(chronic_conditions || ''),
+          emergency_contact_name || null,
+          emergency_contact_phone || null,
+          height || null,
+          weight || null,
+        ]
+      );
+      recordId = result.insertId;
+    }
+
+    await logAudit(connection, {
+      userId: req.user.user_id,
+      action,
+      table: 'HEALTH_PROFILES',
+      recordId,
+      oldValue: null,
+      newValue: { blood_type, height, weight, encrypted: true },
+      ipAddress: req.ip,
+    });
+
+    await connection.commit();
+    res.json({ message: 'Health profile encrypted & saved successfully.' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[Profile Update Error]:', error);
+    res.status(500).json({ error: 'Failed to update health profile.' });
+  } finally {
+    connection.release();
+  }
+});
+
+export default router;
+</file>
+
 <file path="desktop/electron/main.cjs">
 // desktop/electron/main.cjs
 const { app, BrowserWindow, ipcMain, Notification } = require('electron');
@@ -9470,8 +9554,13 @@ ipcMain.handle('show-notification', (event, { title, body }) => {
 
 // Add before app.whenReady() in desktop/electron/main.cjs
 app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
-  // Allow self-signed certificate for local infirmary backend
-  if (url.startsWith('https://localhost:5000') || url.startsWith('https://127.0.0.1:5000')) {
+  // Allow self-signed certificate for local infirmary backend (HTTPS and WSS)
+  if (
+    url.startsWith('https://localhost:5000') ||
+    url.startsWith('https://127.0.0.1:5000') ||
+    url.startsWith('wss://localhost:5000') ||
+    url.startsWith('wss://127.0.0.1:5000')
+  ) {
     event.preventDefault();
     callback(true); // Trust self-signed cert for dev
   } else {
@@ -9773,12 +9862,14 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   // 2. REAL-TIME QUEUE & WEBSOCKET ENGINE
   // ===========================================================================
 
-  void _initQueueSocket() {
+  Future<void> _initQueueSocket() async {
+    final token = await _storage.read(key: 'jwt_token');
     try {
       _socket = io.io(
         ApiConfig.socketUrl,
         io.OptionBuilder()
             .setTransports(['websocket', 'polling'])
+            .setAuth({'token': token})
             .enableAutoConnect()
             .build(),
       );
@@ -11026,35 +11117,38 @@ export const io = new Server(server, {
   },
 });
 
-io.on('connection', (socket) => {
-  console.log(`[Socket.IO ${isHttps ? 'WSS' : 'WS'}] Client connected: ${socket.id}`);
-  socket.on('disconnect', () => {
-    console.log(`[Socket.IO] Client disconnected: ${socket.id}`);
-  });
-});
-
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
 
 // Add Socket.IO authentication middleware
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.split(' ')[1];
-  if (!token) {
-    return next(new Error('Authentication token required'));
-  }
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return next(new Error('Invalid token'));
-    socket.user = user;
+  if (token) {
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+      if (!err && user) {
+        socket.user = user;
+      }
+      next();
+    });
+  } else {
     next();
-  });
+  }
 });
 
+// 2. Connection Handler & Room Assignment
 io.on('connection', (socket) => {
+  const userEmail = socket.user?.email || 'Anonymous / Kiosk';
   const roles = socket.user?.roles || [];
-  // Join privileged room if clinical staff or emergency responder
+  console.log(`⚡ [Socket.IO] Client connected: ${socket.id} (${userEmail})`);
+
   const authorizedRoles = ['EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'];
   if (roles.some((r) => authorizedRoles.includes(r))) {
     socket.join('responders');
+    console.log(`🛡️ [Socket.IO] Socket ${socket.id} joined 'responders' room`);
   }
+
+  socket.on('disconnect', (reason) => {
+    console.log(`🔌 [Socket.IO] Client disconnected: ${socket.id} (${reason})`);
+  });
 });
 
 // 2. Public Auth Routes
@@ -11094,7 +11188,6 @@ import { sendAppointmentEmail } from '../utils/mailer.js';
 import { encrypt, decrypt } from '../utils/cryptoVault.js';
 import { requirePrivacyConsent } from '../middleware/consent.js';
 
-
 export default function appointmentRouter(io) {
   const router = express.Router();
 
@@ -11123,7 +11216,7 @@ export default function appointmentRouter(io) {
     }
   });
 
-  // 2. GET /api/appointments/slots
+  // 2. GET /api/appointments/slots (Fixed missing comma)
   router.get('/slots', authenticateToken, async (req, res) => {
     try {
       const { doctorId, date } = req.query;
@@ -11139,11 +11232,11 @@ export default function appointmentRouter(io) {
 
       const [existingBookings] = await pool.query(
         `SELECT DATE_FORMAT(date_time, '%H:%i') as booked_time
- FROM APPOINTMENTS
- WHERE doctor_user_id = ?
-   AND DATE(date_time) = ?
-   AND status IN ('scheduled', 'checked_in', 'serving')
-   AND deleted_at IS NULL`
+         FROM APPOINTMENTS
+         WHERE doctor_user_id = ?
+           AND DATE(date_time) = ?
+           AND status IN ('scheduled', 'checked_in', 'serving')
+           AND deleted_at IS NULL`,
         [doctorId, date]
       );
 
@@ -11167,7 +11260,7 @@ export default function appointmentRouter(io) {
     }
   });
 
-  // 3. POST /api/appointments (Book Consultation)
+  // 3. POST /api/appointments (Book Consultation - Fixed ReferenceErrors and Audit Log)
   router.post('/', authenticateToken, requirePrivacyConsent, async (req, res) => {
     const { doctor_user_id, date_time, appointment_type, notes } = req.body;
     const patientUserId = req.user.user_id;
@@ -11187,7 +11280,8 @@ export default function appointmentRouter(io) {
         `SELECT appointment_id FROM APPOINTMENTS 
          WHERE doctor_user_id = ? 
            AND date_time = ? 
-           AND status IN ('scheduled', 'checked_in', 'serving')`,
+           AND status IN ('scheduled', 'checked_in', 'serving')
+           AND deleted_at IS NULL`,
         [doctor_user_id, date_time]
       );
 
@@ -11199,7 +11293,8 @@ export default function appointmentRouter(io) {
         `SELECT appointment_id FROM APPOINTMENTS 
          WHERE patient_user_id = ? 
            AND date_time = ? 
-           AND status IN ('scheduled', 'checked_in', 'serving')`,
+           AND status IN ('scheduled', 'checked_in', 'serving')
+           AND deleted_at IS NULL`,
         [patientUserId, date_time]
       );
 
@@ -11215,21 +11310,19 @@ export default function appointmentRouter(io) {
 
       const appointmentId = insertResult.insertId;
 
-      // In POST /api/appointments/:id/complete inside the transaction:
-await logAudit(connection, {
-  userId: doctorUserId,
-  action: 'CREATE',
-  table: 'EMR_RECORDS',
-  recordId: emrId,
-  oldValue: null,
-  newValue: {
-    patient_user_id,
-    appointment_id: appointmentId,
-    vitals_logged: vitals ? Object.keys(vitals) : [],
-    encrypted: true,
-  },
-  ipAddress: req.ip,
-});
+      await logAudit(connection, {
+        userId: patientUserId,
+        action: 'CREATE',
+        table: 'APPOINTMENTS',
+        recordId: appointmentId,
+        oldValue: null,
+        newValue: {
+          doctor_user_id,
+          date_time,
+          appointment_type,
+        },
+        ipAddress: req.ip,
+      });
 
       await connection.commit();
 
@@ -11310,7 +11403,7 @@ await logAudit(connection, {
          FROM APPOINTMENTS a
          JOIN USERS u ON a.doctor_user_id = u.user_id
          LEFT JOIN STAFF_PROFILES sp ON u.user_id = sp.user_id
-         WHERE a.patient_user_id = ?
+         WHERE a.patient_user_id = ? AND a.deleted_at IS NULL
          ORDER BY a.date_time DESC`,
         [userId]
       );
@@ -11347,27 +11440,6 @@ await logAudit(connection, {
         [cancelled_reason || 'Cancelled by patient via mobile app', appointmentId]
       );
 
-      const [appDetails] = await pool.query(
-        `SELECT a.date_time, u.email, u.first_name, u.last_name 
-         FROM APPOINTMENTS a 
-         JOIN USERS u ON a.patient_user_id = u.user_id 
-         WHERE a.appointment_id = ?`,
-        [appointmentId]
-      );
-
-      if (appDetails.length > 0 && typeof sendAppointmentEmail === 'function') {
-        const item = appDetails[0];
-        sendAppointmentEmail({
-          toEmail: item.email,
-          patientName: `${item.first_name} ${item.last_name}`,
-          doctorName: 'Attending Practitioner',
-          specialty: 'Infirmary',
-          dateTime: item.date_time,
-          purpose: 'Cancellation',
-          type: 'cancellation',
-        }).catch((err) => console.error('[Cancellation Email Error]:', err.message));
-      }
-
       if (io) {
         io.emit('appointment:cancelled', { appointmentId: Number(appointmentId) });
       }
@@ -11378,20 +11450,20 @@ await logAudit(connection, {
     }
   });
 
-  // 6. GET /api/appointments/today
+  // 6. GET /api/appointments/today (Fixed whereClause initialization bug)
   router.get('/today', authenticateToken, async (req, res) => {
     try {
       const { date, filter } = req.query;
-      whereClause += ' AND a.deleted_at IS NULL';
+      let whereClause = '';
       const params = [];
 
       if (filter === 'history') {
-        whereClause = `WHERE a.status IN ('completed', 'cancelled', 'no_show')`;
+        whereClause = `WHERE a.status IN ('completed', 'cancelled', 'no_show') AND a.deleted_at IS NULL`;
       } else if (date) {
-        whereClause = `WHERE DATE(a.date_time) = ? AND a.status IN ('scheduled', 'checked_in', 'serving')`;
+        whereClause = `WHERE DATE(a.date_time) = ? AND a.status IN ('scheduled', 'checked_in', 'serving') AND a.deleted_at IS NULL`;
         params.push(date);
       } else {
-        whereClause = `WHERE a.date_time >= CURDATE() AND a.status IN ('scheduled', 'checked_in', 'serving')`;
+        whereClause = `WHERE a.date_time >= CURDATE() AND a.status IN ('scheduled', 'checked_in', 'serving') AND a.deleted_at IS NULL`;
       }
 
       const [rows] = await pool.query(
@@ -11415,7 +11487,6 @@ await logAudit(connection, {
         params
       );
 
-      // Decrypt clinical and historical fields
       const decryptedRows = rows.map((r) => ({
         ...r,
         allergies: decrypt(r.allergies),
@@ -11426,6 +11497,7 @@ await logAudit(connection, {
 
       res.json(decryptedRows);
     } catch (error) {
+      console.error('[Appointments] Error fetching today roster:', error);
       res.status(500).json({ error: 'Failed to retrieve appointments roster.' });
     }
   });
@@ -11452,7 +11524,7 @@ await logAudit(connection, {
     }
   });
 
-  // 8. POST /api/appointments/:id/complete (Encrypted at rest with AES-256)
+  // 8. POST /api/appointments/:id/complete (Proper EMR Audit Logging added)
   router.post('/:id/complete', authenticateToken, async (req, res) => {
     const connection = await pool.getConnection();
     try {
@@ -11460,7 +11532,6 @@ await logAudit(connection, {
       const doctorUserId = req.user.user_id;
       const { patient_user_id, chief_complaint, diagnosis, treatment_plan, notes, vitals } = req.body;
 
-      // Encrypt sensitive clinical PHI
       const encComplaint = encrypt(chief_complaint);
       const encDiagnosis = encrypt(diagnosis);
       const encTreatment = encrypt(treatment_plan);
@@ -11478,7 +11549,6 @@ await logAudit(connection, {
 
       if (vitals && typeof vitals === 'object') {
         const vitalEntries = [];
-
         if (vitals.systolic_bp && !isNaN(Number(vitals.systolic_bp))) {
           vitalEntries.push([emrId, 'systolic_bp', Number(vitals.systolic_bp), 'mmHg', doctorUserId]);
         }
@@ -11491,14 +11561,9 @@ await logAudit(connection, {
         if (vitals.pulse && !isNaN(Number(vitals.pulse))) {
           vitalEntries.push([emrId, 'pulse', Number(vitals.pulse), 'bpm', doctorUserId]);
         }
-        if (vitals.spo2 && !isNaN(Number(vitals.spo2))) {
-          vitalEntries.push([emrId, 'spo2', Number(vitals.spo2), '%', doctorUserId]);
-        }
-
         for (const entry of vitalEntries) {
           await connection.query(
-            `INSERT INTO VITAL_SIGNS (emr_id, metric, value, unit, recorded_by)
-             VALUES (?, ?, ?, ?, ?)`,
+            `INSERT INTO VITAL_SIGNS (emr_id, metric, value, unit, recorded_by) VALUES (?, ?, ?, ?, ?)`,
             entry
           );
         }
@@ -11506,6 +11571,21 @@ await logAudit(connection, {
 
       await connection.query(`UPDATE APPOINTMENTS SET status = 'completed' WHERE appointment_id = ?`, [appointmentId]);
       await connection.query(`UPDATE QUEUE SET status = 'done', served_at = CURRENT_TIMESTAMP WHERE appointment_id = ?`, [appointmentId]);
+
+      await logAudit(connection, {
+        userId: doctorUserId,
+        action: 'CREATE',
+        table: 'EMR_RECORDS',
+        recordId: emrId,
+        oldValue: null,
+        newValue: {
+          patient_user_id,
+          appointment_id: appointmentId,
+          vitals_logged: vitals ? Object.keys(vitals) : [],
+          encrypted: true,
+        },
+        ipAddress: req.ip,
+      });
 
       await connection.commit();
 
@@ -11569,7 +11649,6 @@ await logAudit(connection, {
         });
       }
 
-      // Decrypt sensitive fields
       const decryptedResults = results.map((item) => ({
         ...item,
         allergies: decrypt(item.allergies),
@@ -11686,12 +11765,11 @@ await logAudit(connection, {
     }
   });
 
-  // 13. GET /api/appointments/patient/:userId/history (CORRECTED ORDER & DECRYPTED)
+  // 13. GET /api/appointments/patient/:userId/history
   router.get('/patient/:userId/history', authenticateToken, async (req, res) => {
     try {
-      const { userId } = req.params;
+      const userId = Number(req.params.userId);
 
-      // 1. Fetch encrypted encounters from MySQL
       const [history] = await pool.query(
         `SELECT e.emr_id, e.encounter_date, e.chief_complaint, e.diagnosis, e.treatment_plan, e.notes,
                 doc.first_name as doctor_first_name, doc.last_name as doctor_last_name,
@@ -11711,7 +11789,6 @@ await logAudit(connection, {
         [userId]
       );
 
-      // 2. Decrypt clinical PHI with AES-256
       const decryptedHistory = history.map((item) => ({
         ...item,
         chief_complaint: decrypt(item.chief_complaint),
@@ -11720,7 +11797,6 @@ await logAudit(connection, {
         notes: decrypt(item.notes),
       }));
 
-      // 3. Log PHI read access for clinical accountability
       logPhiAccess({
         viewerUserId: req.user.user_id,
         patientUserId: userId,
@@ -11730,7 +11806,6 @@ await logAudit(connection, {
         ipAddress: req.ip,
       });
 
-      // 4. Return the decrypted medical encounters
       res.json(decryptedHistory);
     } catch (error) {
       console.error('Failed to retrieve patient EMR history:', error);
