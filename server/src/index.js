@@ -9,11 +9,11 @@ import { loginUser, authenticateToken } from './auth.js';
 import profileRoutes from './routes/profile.js';
 import healthPassRoutes from './routes/healthPass.js';
 import appointmentRoutes from './routes/appointments.js';
-import emergencyRouter from './routes/emergency.js'; // Feature 4
-import inventoryRoutes from './routes/inventory.js'; // Feature 9
-import documentRoutes from './routes/documents.js';   // Feature 5 & 8
-import adminRoutes from './routes/admin.js';         // Feature 11 & 12
-import analyticsRoutes from './routes/analytics.js'; // Feature 10
+import emergencyRouter from './routes/emergency.js';
+import inventoryRoutes from './routes/inventory.js';
+import documentRoutes from './routes/documents.js';
+import adminRoutes from './routes/admin.js';
+import analyticsRoutes from './routes/analytics.js';
 import { startReminderScheduler } from './utils/reminderWorker.js';
 
 dotenv.config();
@@ -21,7 +21,7 @@ dotenv.config();
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use('/api/analytics', analyticsRoutes);
+
 // 1. Create HTTP Server & Mount Socket.IO
 const server = http.createServer(app);
 export const io = new Server(server, {
@@ -30,6 +30,9 @@ export const io = new Server(server, {
     methods: ['GET', 'POST', 'PATCH'],
   },
 });
+
+// Store io in express app so routes can access it with req.app.get('io')
+app.set('io', io);
 
 io.on('connection', (socket) => {
   console.log(`[Socket.IO] Client connected: ${socket.id}`);

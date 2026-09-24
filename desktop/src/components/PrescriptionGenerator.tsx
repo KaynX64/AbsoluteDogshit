@@ -1,5 +1,4 @@
 // desktop/src/components/PrescriptionGenerator.tsx
-
 import React, { useState, useEffect } from 'react';
 
 const inputStyle: React.CSSProperties = {
@@ -24,6 +23,7 @@ interface MedicineMaster {
 
 interface PrescriptionGeneratorProps {
   patientUserId: number;
+  emrId?: number; // Linked directly to consultation
   verifiedPatient: {
     first_name: string;
     last_name: string;
@@ -36,6 +36,7 @@ interface PrescriptionGeneratorProps {
 
 export default function PrescriptionGenerator({
   patientUserId,
+  emrId,
   verifiedPatient,
   onPrescriptionIssued,
 }: PrescriptionGeneratorProps) {
@@ -52,7 +53,6 @@ export default function PrescriptionGenerator({
   const [isSaving, setIsSaving] = useState(false);
   const [issuedStatus, setIssuedStatus] = useState<string | null>(null);
 
-  // 1. Fetch live medicine catalogue
   useEffect(() => {
     const fetchCatalog = async () => {
       const token = localStorage.getItem('valetudo_token');
@@ -85,7 +85,6 @@ export default function PrescriptionGenerator({
     }
   };
 
-  // 2. Persist to MySQL and Spool to Printer
   const handleSaveAndPrintPrescription = async () => {
     if (!patientUserId) {
       alert('Error: No patient selected. Please choose a patient from the queue first.');
@@ -97,7 +96,7 @@ export default function PrescriptionGenerator({
     const token = localStorage.getItem('valetudo_token');
 
     try {
-      // Step A: POST to backend
+      // 1. Post directly to backend
       const res = await fetch('http://localhost:5000/api/documents/prescriptions', {
         method: 'POST',
         headers: {
@@ -106,6 +105,7 @@ export default function PrescriptionGenerator({
         },
         body: JSON.stringify({
           patient_user_id: patientUserId,
+          emr_id: emrId || undefined,
           notes: doctorNotes,
           items: [
             {
@@ -129,10 +129,10 @@ export default function PrescriptionGenerator({
       const realQrToken = data.qrToken;
       const prescriptionId = data.prescriptionId;
 
-      setIssuedStatus(`✅ Prescription #${prescriptionId} recorded and signed! Verification Token: ${realQrToken}`);
+      setIssuedStatus(`✅ Prescription #${prescriptionId} recorded in database! Token: ${realQrToken}`);
       if (onPrescriptionIssued) onPrescriptionIssued();
 
-      // Step B: Build official print HTML containing verifiable QR Code image
+      // 2. Spool official document to printer
       const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(realQrToken)}`;
 
       const htmlContent = `
@@ -144,7 +144,6 @@ export default function PrescriptionGenerator({
               body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 40px; color: #1e293b; max-width: 800px; margin: 0 auto; }
               .header { text-align: center; border-bottom: 2px solid #0f766e; padding-bottom: 12px; }
               .header h1 { margin: 0; color: #0f766e; font-size: 20px; }
-              .header p { margin: 4px 0 0 0; font-size: 13px; color: #64748b; }
               .patient-box { margin-top: 20px; padding: 14px; background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 6px; font-size: 13px; line-height: 1.6; }
               .rx-symbol { font-size: 42px; font-weight: 900; color: #0f766e; margin: 16px 0 8px 0; }
               .med-item { margin-bottom: 14px; padding: 12px; background: #f8fafc; border-left: 4px solid #0f766e; border-radius: 4px; }
@@ -160,35 +159,29 @@ export default function PrescriptionGenerator({
               <h1>PANGASINAN STATE UNIVERSITY INFIRMARY</h1>
               <p>Lingayen Campus Medical Services • Republic Act No. 10173 Verified E-Prescription</p>
             </div>
-
             <div class="patient-box">
               <b>Patient:</b> ${verifiedPatient.first_name} ${verifiedPatient.last_name} &nbsp;|&nbsp;
               <b>Student No:</b> ${verifiedPatient.student_no || 'N/A'}<br/>
               <b>Course:</b> ${verifiedPatient.course || 'N/A'} &nbsp;|&nbsp;
               <b>Allergies:</b> <span style="color:red; font-weight:bold;">${verifiedPatient.allergies || 'None recorded'}</span>
             </div>
-
             <div class="rx-symbol">℞</div>
-
             <div class="med-item">
               <div class="med-name">${rxMedName} - ${rxDosage}</div>
               <div class="med-instructions">Sig: ${rxInstructions} • ${rxFrequency}</div>
-              <div style="margin-top: 4px; font-size: 12px;">Duration: <b>${rxDurationDays} days</b> &nbsp;|&nbsp; Quantity Dispensed: <b>${rxQuantity} pcs</b></div>
+              <div style="margin-top: 4px; font-size: 12px;">Duration: <b>${rxDurationDays} days</b> &nbsp;|&nbsp; Quantity: <b>${rxQuantity} pcs</b></div>
             </div>
-
             ${doctorNotes ? `<p style="font-size: 13px; color: #475569;"><b>Physician Notes:</b> ${doctorNotes}</p>` : ''}
-
             <div class="verification-panel">
               <img src="${qrImageUrl}" width="110" height="110" alt="Rx QR Verification" />
               <div>
                 <b style="color: #0f766e;">Digital Prescription Verification</b>
                 <p style="margin: 4px 0; font-size: 11px; color: #64748b;">
-                  Scan using Valetudo mobile scanner or infirmary terminal to confirm valid issuance.
+                  Scan via Valetudo mobile scanner or infirmary terminal to confirm authenticity.
                 </p>
                 <code style="font-size: 10px; background: #eee; padding: 2px 6px; border-radius: 4px;">${realQrToken}</code>
               </div>
             </div>
-
             <div class="footer">
               <div>
                 <p>Issued: ${new Date().toLocaleString()}</p>
@@ -225,7 +218,6 @@ export default function PrescriptionGenerator({
     <section style={{ padding: 16, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff' }}>
       <h3 style={{ marginTop: 0, color: '#0f766e', fontSize: 16 }}>℞ Official Digital Prescription</h3>
 
-      {/* Select Formulary Drug */}
       <div style={{ marginBottom: 10 }}>
         <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Select Medicine (Formulary):</label>
         <select
@@ -251,7 +243,7 @@ export default function PrescriptionGenerator({
           />
         </div>
         <div>
-          <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Quantity (pcs/bottles):</label>
+          <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Quantity (pcs):</label>
           <input
             type="number"
             min="1"
@@ -303,6 +295,7 @@ export default function PrescriptionGenerator({
       </div>
 
       <button
+        type="button"
         onClick={handleSaveAndPrintPrescription}
         disabled={isSaving}
         style={{

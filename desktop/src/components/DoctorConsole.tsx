@@ -32,7 +32,8 @@ export default function DoctorConsole() {
   const [appointments, setAppointments] = useState<AppointmentItem[]>([]);
   const [selectedApp, setSelectedApp] = useState<AppointmentItem | null>(null);
   const [loadingAppointments, setLoadingAppointments] = useState(false);
-
+// Near line 35 of DoctorConsole.tsx
+  const [activeEmrId, setActiveEmrId] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<'active' | 'history' | 'analytics'>('active');
 
   // Form fields
@@ -159,6 +160,14 @@ export default function DoctorConsole() {
   };
 
   const handleStartConsultation = async () => {
+    const data = await res.json();
+      if (res.ok) {
+        if (data.emrId) setActiveEmrId(data.emrId);
+        await fetchAppointments('active', false);
+        resetForm();
+        setFeedbackMsg({ text: '✅ Encounter finalized and patient discharged.', type: 'success' });
+      }
+
     if (!selectedApp) return;
     const token = localStorage.getItem('valetudo_token');
     try {
@@ -707,19 +716,26 @@ export default function DoctorConsole() {
               </div>
 
               {docType === 'rx' ? (
-                <PrescriptionGenerator
-                  patientUserId={selectedApp?.patient_id || 5}
-                  verifiedPatient={{
-                    first_name: selectedApp?.first_name || 'Daniella',
-                    last_name: selectedApp?.last_name || 'Movida',
-                    student_no: selectedApp?.student_no || '22-LN-0123',
-                    course: selectedApp?.course || 'BS Information Technology',
-                    allergies: selectedApp?.allergies || 'None',
-                  }}
-                  onPrescriptionIssued={() => {
-                    setFeedbackMsg({ text: '✅ Prescription successfully issued to patient.', type: 'success' });
-                  }}
-                />
+                selectedApp ? (
+                  <PrescriptionGenerator
+                    patientUserId={selectedApp.patient_id}
+                    emrId={activeEmrId || undefined}
+                    verifiedPatient={{
+                      first_name: selectedApp.first_name,
+                      last_name: selectedApp.last_name,
+                      student_no: selectedApp.student_no,
+                      course: selectedApp.course,
+                      allergies: selectedApp.allergies,
+                    }}
+                    onPrescriptionIssued={() => {
+                      setFeedbackMsg({ text: '✅ Prescription successfully issued to patient.', type: 'success' });
+                    }}
+                  />
+                ) : (
+                  <div style={{ padding: 24, textAlign: 'center', color: '#64748b' }}>
+                    ⚠️ Please select an active patient from the queue above to issue a digital prescription.
+                  </div>
+                )
               ) : (
                 <div>
                   {/* 1. Clearance Purpose Selection */}

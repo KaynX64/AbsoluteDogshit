@@ -5,15 +5,13 @@ import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { logAudit } from '../utils/auditLogger.js';
-import { logPhiAccess } from '../utils/phiLogger.js';
 
 const router = express.Router();
 
 // -----------------------------------------------------------------------------
-// 1. PRESCRIPTIONS (Features 5 & 8)
+// 1. PRESCRIPTIONS (Feature 8: Issuance)
 // -----------------------------------------------------------------------------
 
-// POST /api/documents/prescriptions - Doctor/Dentist issues a prescription
 router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST'), async (req, res) => {
   const { emr_id, patient_user_id, items, notes } = req.body;
   const doctorUserId = req.user.user_id;
@@ -27,7 +25,6 @@ router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST
   try {
     await connection.beginTransaction();
 
-    // 1. If emr_id is not passed, auto-create a clinical encounter in EMR_RECORDS
     let targetEmrId = emr_id;
     if (!targetEmrId) {
       const [emrResult] = await connection.query(
@@ -37,16 +34,15 @@ router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST
         [
           patient_user_id,
           doctorUserId,
-          notes ? `Chief Complaint: ${notes}` : 'Prescription Request / Medical Evaluation',
-          'Clinical Medication Order',
+          notes ? `Complaint: ${notes}` : 'Clinical Evaluation Order',
+          'General Prescription Issuance',
           `Prescribed ${items.length} medication item(s)`,
-          'Issued via Digital Prescription System'
+          'Issued via Digital Prescription Generator'
         ]
       );
       targetEmrId = emrResult.insertId;
     }
 
-    // 2. Generate signed UUID + HMAC token
     const rxUuid = crypto.randomUUID();
     const hmac = crypto
       .createHmac('sha256', process.env.JWT_SECRET || 'supersecretkeyvaletudo')
@@ -54,7 +50,6 @@ router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST
       .digest('hex');
     const qrToken = `RX.${rxUuid}.${hmac.substring(0, 16)}`;
 
-    // 3. Insert Prescription Header
     const [headerResult] = await connection.query(
       `INSERT INTO PRESCRIPTIONS 
        (emr_id, patient_user_id, doctor_user_id, status, notes, qr_token)
@@ -64,7 +59,6 @@ router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST
 
     const prescriptionId = headerResult.insertId;
 
-    // 4. Insert Line Items
     for (const item of items) {
       await connection.query(
         `INSERT INTO PRESCRIPTION_ITEMS 
@@ -83,7 +77,6 @@ router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST
       );
     }
 
-    // 5. Audit Log (RA 10173)
     await logAudit(connection, {
       userId: doctorUserId,
       action: 'CREATE',
@@ -96,6 +89,14 @@ router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST
 
     await connection.commit();
 
+    const socketIo = req.app.get('io');
+    if (socketIo) {
+      socketIo.emit('prescription:issued', {
+        patient_user_id, // ✅ Correct variable
+        prescriptionId,
+        qrToken,
+      });
+    }
     res.status(201).json({
       message: 'Prescription issued and stored successfully.',
       prescriptionId,
@@ -111,7 +112,7 @@ router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST
   }
 });
 
-// GET /api/documents/prescriptions/my - Student fetches their own prescriptions
+// GET /api/documents/prescriptions/my - Patient fetches own prescriptions
 router.get('/prescriptions/my', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.user_id;
@@ -153,10 +154,9 @@ router.get('/prescriptions/my', authenticateToken, async (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
-// 2. MEDICAL CLEARANCES (Features 5 & 8)
+// 2. MEDICAL CLEARANCES (Feature 8: Issuance)
 // -----------------------------------------------------------------------------
 
-// POST /api/documents/clearances - Doctor/Dentist/Nurse issues clearance
 router.post('/clearances', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE'), async (req, res) => {
   const { user_id, purpose, expires_at, remarks } = req.body;
   const issuerId = req.user.user_id;
@@ -173,7 +173,6 @@ router.post('/clearances', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 
     const clearanceUuid = crypto.randomUUID();
     const token = `CLR.${clearanceUuid}.${Date.now()}`;
 
-    // Cryptographic signature payload
     const signatureMetadata = {
       signer_user_id: issuerId,
       signer_role: req.user.roles[0],
@@ -205,6 +204,16 @@ router.post('/clearances', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 
 
     await connection.commit();
 
+    // Broadcast real-time event to Flutter
+    const socketIo = req.app.get('io');
+    if (socketIo) {
+      socketIo.emit('clearance:issued', {
+        user_id, // ✅ Correct variable
+        clearanceId,
+        qrToken: token,
+      });
+    }
+
     res.status(201).json({
       message: 'Medical clearance issued successfully.',
       clearanceId,
@@ -213,13 +222,13 @@ router.post('/clearances', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 
   } catch (error) {
     await connection.rollback();
     console.error('Clearance Issuance Error:', error);
-    res.status(500).json({ error: 'Failed to issue medical clearance.' });
+   res.status(500).json({ error: error.message || 'Failed to issue medical clearance.' });
   } finally {
     connection.release();
   }
 });
 
-// GET /api/documents/clearances/my - Student fetches their clearances
+// GET /api/documents/clearances/my - Patient fetches own clearances
 router.get('/clearances/my', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.user_id;
@@ -246,26 +255,19 @@ router.get('/clearances/my', authenticateToken, async (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
-// 3. QR VERIFICATION (Dual Support for both Clearances and Prescriptions)
+// 3. UNIVERSAL VERIFICATION & PRINTABLE HTML/PDF
 // -----------------------------------------------------------------------------
 
-// Universal QR verification route (used by employers, tournament screeners, pharmacy)
 router.get('/verify/:qrToken', async (req, res) => {
   const { qrToken } = req.params;
   try {
-    // 1. Check if token matches a Clearance
     const [clearances] = await pool.query(
-      `SELECT mc.clearance_id, mc.purpose, mc.status, mc.issued_at, mc.expires_at,
-              mc.signature_metadata,
-              u.first_name AS patient_first_name, u.last_name AS patient_last_name,
-              sp.student_no, sp.course,
-              doc.first_name AS doc_first_name, doc.last_name AS doc_last_name,
-              staff.license_no AS doc_license
+      `SELECT mc.*, u.first_name AS patient_first_name, u.last_name AS patient_last_name,
+              sp.student_no, sp.course, doc.first_name AS doc_first_name, doc.last_name AS doc_last_name
        FROM MEDICAL_CLEARANCES mc
        JOIN USERS u ON mc.user_id = u.user_id
        LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
        JOIN USERS doc ON mc.issued_by = doc.user_id
-       LEFT JOIN STAFF_PROFILES staff ON doc.user_id = staff.user_id
        WHERE mc.qr_token = ?`,
       [qrToken]
     );
@@ -282,26 +284,19 @@ router.get('/verify/:qrToken', async (req, res) => {
         patient: `${c.patient_first_name} ${c.patient_last_name}`,
         studentNo: c.student_no || 'N/A',
         course: c.course || 'N/A',
-        issuedBy: `Dr. ${c.doc_first_name} ${c.doc_last_name} (${c.doc_license || 'PRC Verified'})`,
+        issuedBy: `Dr. ${c.doc_first_name} ${c.doc_last_name}`,
         issuedAt: c.issued_at,
         expiresAt: c.expires_at,
-        metadata: c.signature_metadata,
-        clearance: c,
       });
     }
 
-    // 2. Check if token matches a Prescription
     const [prescriptions] = await pool.query(
-      `SELECT p.prescription_id, p.status, p.issued_at, p.notes,
-              u.first_name AS patient_first_name, u.last_name AS patient_last_name,
-              sp.student_no,
-              doc.first_name AS doc_first_name, doc.last_name AS doc_last_name,
-              staff.license_no AS doc_license
+      `SELECT p.*, u.first_name AS patient_first_name, u.last_name AS patient_last_name,
+              sp.student_no, doc.first_name AS doc_first_name, doc.last_name AS doc_last_name
        FROM PRESCRIPTIONS p
        JOIN USERS u ON p.patient_user_id = u.user_id
        LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
        JOIN USERS doc ON p.doctor_user_id = doc.user_id
-       LEFT JOIN STAFF_PROFILES staff ON doc.user_id = staff.user_id
        WHERE p.qr_token = ?`,
       [qrToken]
     );
@@ -323,42 +318,189 @@ router.get('/verify/:qrToken', async (req, res) => {
 
     return res.status(404).json({ valid: false, verified: false, error: 'Document token not found or invalid.' });
   } catch (error) {
-    console.error('[Documents] Verification error:', error);
     res.status(500).json({ error: 'Verification failed.' });
   }
 });
 
-// Alias for /clearances/verify/:token so existing Postman tests and client calls work seamlessly
-router.get('/clearances/verify/:token', async (req, res) => {
-  req.params.qrToken = req.params.token;
-  // Reuse the universal verification handler
+// Printable HTML / Save-as-PDF service (Feature 5)
+router.get('/print/:qrToken', async (req, res) => {
   const { qrToken } = req.params;
   try {
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(qrToken)}`;
+
+    // 1. Check if Clearance
     const [clearances] = await pool.query(
-      `SELECT mc.clearance_id, mc.purpose, mc.status, mc.issued_at, mc.expires_at, mc.signature_metadata,
-              u.first_name as student_first_name, u.last_name as student_last_name,
-              sp.student_no, sp.course,
-              doc.first_name as doctor_first_name, doc.last_name as doctor_last_name
+      `SELECT mc.*, u.first_name AS patient_first_name, u.last_name AS patient_last_name,
+              sp.student_no, sp.course, doc.first_name AS doc_first_name, doc.last_name AS doc_last_name,
+              staff.license_no
        FROM MEDICAL_CLEARANCES mc
        JOIN USERS u ON mc.user_id = u.user_id
        LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
        JOIN USERS doc ON mc.issued_by = doc.user_id
+       LEFT JOIN STAFF_PROFILES staff ON doc.user_id = staff.user_id
        WHERE mc.qr_token = ?`,
       [qrToken]
     );
 
-    if (clearances.length === 0) {
-      return res.status(404).json({ verified: false, error: 'Medical certificate record not found.' });
+    if (clearances.length > 0) {
+      const c = clearances[0];
+      const meta = typeof c.signature_metadata === 'string' ? JSON.parse(c.signature_metadata) : c.signature_metadata;
+
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <title>PSU Medical Clearance - ${c.patient_last_name}</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 24px; color: #1e293b; max-width: 750px; margin: 0 auto; }
+              .header { text-align: center; border-bottom: 2px solid #0f766e; padding-bottom: 12px; }
+              .header h2 { margin: 0; color: #0f766e; font-size: 18px; }
+              .title { text-align: center; font-size: 16px; font-weight: bold; margin: 20px 0; text-decoration: underline; }
+              .card { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px; margin: 16px 0; font-size: 13px; line-height: 1.6; }
+              .seal { display: flex; align-items: center; gap: 16px; border: 1px solid #99f6e4; background: #f0fdfa; padding: 14px; border-radius: 8px; margin-top: 20px; }
+              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; font-size: 12px; }
+              .sig { border-top: 1px solid #000; width: 220px; text-align: center; font-weight: bold; padding-top: 4px; }
+              .print-bar { margin-bottom: 20px; text-align: right; }
+              .btn { background: #0f766e; color: #fff; padding: 8px 16px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; }
+              @media print { .print-bar { display: none; } body { padding: 0; } }
+            </style>
+          </head>
+          <body>
+            <div class="print-bar">
+              <button class="btn" onclick="window.print()">🖨️ Print / Save as PDF</button>
+            </div>
+            <div class="header">
+              <h2>PANGASINAN STATE UNIVERSITY INFIRMARY</h2>
+              <small>Lingayen Campus Medical Services • Republic Act No. 10173 Verified E-Clearance</small>
+            </div>
+            <div class="title">OFFICIAL MEDICAL CLEARANCE CERTIFICATE</div>
+            <div class="card">
+              <b>Patient:</b> ${c.patient_first_name} ${c.patient_last_name} &nbsp;|&nbsp; <b>ID:</b> ${c.student_no || 'N/A'}<br/>
+              <b>Course / Department:</b> ${c.course || 'PSU Lingayen'}<br/>
+              <b>Issued:</b> ${new Date(c.issued_at).toLocaleDateString()} &nbsp;|&nbsp; <b>Valid Until:</b> <span style="color:#0f766e;font-weight:bold;">${new Date(c.expires_at).toLocaleDateString()}</span>
+            </div>
+            <p style="font-size: 14px; line-height: 1.8;">
+              This certifies that the patient indicated above has undergone clinical evaluation and is declared fit for:
+              <br/><br/>
+              <b>Purpose:</b> ${c.purpose}<br/>
+              <b>Clinical Assessment:</b> ${meta?.clinical_remarks || 'Physically fit.'}
+            </p>
+            <div class="seal">
+              <img src="${qrImageUrl}" width="100" height="100" alt="QR Seal" />
+              <div>
+                <b style="color: #0f766e;">Digital Cryptographic Seal</b>
+                <p style="margin: 2px 0 6px 0; font-size: 11px; color: #64748b;">Scan to verify validity against university health ledger.</p>
+                <code style="font-size: 10px; background: #fff; padding: 2px 6px; border: 1px solid #cbd5e1; border-radius: 4px;">${c.qr_token}</code>
+              </div>
+            </div>
+            <div class="footer">
+              <div><small>Ref: CLR-${c.clearance_id}</small></div>
+              <div class="sig">
+                Dr. ${c.doc_first_name} ${c.doc_last_name}<br/>
+                <small>License: ${c.license_no || 'PRC-MD-VERIFIED'}</small>
+              </div>
+            </div>
+            <script>
+              window.onload = () => { setTimeout(() => window.print(), 400); };
+            </script>
+          </body>
+        </html>
+      `);
     }
 
-    const c = clearances[0];
-    const isExpired = new Date(c.expires_at) < new Date();
-    res.json({
-      verified: !isExpired && c.status === 'approved',
-      clearance: c,
-    });
-  } catch (error) {
-    res.status(500).json({ error: 'Verification failed.' });
+    // 2. Check if Prescription
+    const [prescriptions] = await pool.query(
+      `SELECT p.*, u.first_name AS patient_first_name, u.last_name AS patient_last_name,
+              sp.student_no, sp.course, doc.first_name AS doc_first_name, doc.last_name AS doc_last_name,
+              staff.license_no,
+              JSON_ARRAYAGG(
+                JSON_OBJECT('name', m.name, 'dosage', pi.dosage, 'freq', pi.frequency, 'qty', pi.quantity_dispensed, 'ins', pi.instructions)
+              ) as items
+       FROM PRESCRIPTIONS p
+       JOIN USERS u ON p.patient_user_id = u.user_id
+       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+       JOIN USERS doc ON p.doctor_user_id = doc.user_id
+       LEFT JOIN STAFF_PROFILES staff ON doc.user_id = staff.user_id
+       LEFT JOIN PRESCRIPTION_ITEMS pi ON p.prescription_id = pi.prescription_id
+       LEFT JOIN MEDICINES m ON pi.medicine_id = m.medicine_id
+       WHERE p.qr_token = ?
+       GROUP BY p.prescription_id`,
+      [qrToken]
+    );
+
+    if (prescriptions.length > 0) {
+      const p = prescriptions[0];
+      const items = typeof p.items === 'string' ? JSON.parse(p.items) : p.items;
+
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <title>PSU Prescription - ${p.patient_last_name}</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 24px; color: #1e293b; max-width: 750px; margin: 0 auto; }
+              .header { text-align: center; border-bottom: 2px solid #0f766e; padding-bottom: 12px; }
+              .header h2 { margin: 0; color: #0f766e; font-size: 18px; }
+              .rx { font-size: 36px; font-weight: 900; color: #0f766e; margin: 12px 0 6px; }
+              .card { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px; margin: 16px 0; font-size: 13px; line-height: 1.6; }
+              .item { background: #fff; border-left: 4px solid #0f766e; padding: 10px 14px; margin-bottom: 10px; border-radius: 4px; }
+              .seal { display: flex; align-items: center; gap: 16px; border: 1px solid #cbd5e1; padding: 14px; border-radius: 8px; margin-top: 20px; }
+              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; font-size: 12px; }
+              .sig { border-top: 1px solid #000; width: 220px; text-align: center; font-weight: bold; padding-top: 4px; }
+              .print-bar { margin-bottom: 20px; text-align: right; }
+              .btn { background: #0f766e; color: #fff; padding: 8px 16px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; }
+              @media print { .print-bar { display: none; } body { padding: 0; } }
+            </style>
+          </head>
+          <body>
+            <div class="print-bar">
+              <button class="btn" onclick="window.print()">🖨️ Print / Save as PDF</button>
+            </div>
+            <div class="header">
+              <h2>PANGASINAN STATE UNIVERSITY INFIRMARY</h2>
+              <small>Lingayen Campus Medical Services • Digital Prescription</small>
+            </div>
+            <div class="card">
+              <b>Patient:</b> ${p.patient_first_name} ${p.patient_last_name} &nbsp;|&nbsp; <b>ID:</b> ${p.student_no || 'N/A'}<br/>
+              <b>Issued:</b> ${new Date(p.issued_at).toLocaleString()}
+            </div>
+            <div class="rx">℞</div>
+            ${items.map((i) => `
+              <div class="item">
+                <b>${i.name} - ${i.dosage}</b> &nbsp;|&nbsp; Quantity: <b>${i.qty}</b><br/>
+                <small>Sig: ${i.ins} (${i.freq})</small>
+              </div>
+            `).join('')}
+            ${p.notes ? `<p style="font-size:12px;color:#64748b;"><b>Doctor Notes:</b> ${p.notes}</p>` : ''}
+            <div class="seal">
+              <img src="${qrImageUrl}" width="90" height="90" alt="QR" />
+              <div>
+                <b style="color:#0f766e;">Verifiable Prescription Seal</b><br/>
+                <code style="font-size:10px;">${p.qr_token}</code>
+              </div>
+            </div>
+            <div class="footer">
+              <div><small>Prescription #${p.prescription_id}</small></div>
+              <div class="sig">
+                Dr. ${p.doc_first_name} ${p.doc_last_name}<br/>
+                <small>PRC License: ${p.license_no || 'PRC-MD-VERIFIED'}</small>
+              </div>
+            </div>
+            <script>
+              window.onload = () => { setTimeout(() => window.print(), 400); };
+            </script>
+          </body>
+        </html>
+      `);
+    }
+
+    res.status(404).send('Document not found.');
+  } catch (err) {
+    res.status(500).send('Print generation failed: ' + err.message);
   }
 });
 
