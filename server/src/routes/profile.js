@@ -8,23 +8,28 @@ import { requirePrivacyConsent } from '../middleware/consent.js';
 
 const router = express.Router();
 
-// GET /api/profile/me - Dynamically retrieves patient demographics & clinical profile
+// GET /api/profile/me - Dynamically retrieves role-aware profile & clinical data
 router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => {
   try {
     const userId = req.user.user_id;
 
-    // 1. Fetch user info dynamically joined with role-extension tables
+    // Join identity with role tables (Student, Staff, Faculty, Admin)
     const [userRows] = await pool.query(
       `SELECT u.user_id, u.email, u.first_name, u.last_name, u.phone,
+              COALESCE(r.code, 'STUDENT') AS primary_role,
+              COALESCE(r.name, 'Student Patient') AS role_name,
               sp.student_no, sp.course, sp.year_level,
               st.license_no, st.specialty,
-              COALESCE(st.department, fp.department, sp.course, 'PSU Lingayen Clinic') AS department,
+              COALESCE(st.department, fp.department, sp.course, 'PSU Lingayen Campus') AS department,
               fp.position
        FROM USERS u
+       LEFT JOIN USER_ROLES ur ON u.user_id = ur.user_id
+       LEFT JOIN ROLES r ON ur.role_id = r.role_id
        LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
        LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
        LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
-       WHERE u.user_id = ? AND u.deleted_at IS NULL`,
+       WHERE u.user_id = ? AND u.deleted_at IS NULL
+       LIMIT 1`,
       [userId]
     );
 
@@ -32,7 +37,7 @@ router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
       return res.status(404).json({ error: 'User not found.' });
     }
 
-    // 2. Fetch clinical profile directly from MySQL HEALTH_PROFILES table
+    // Fetch clinical profile from HEALTH_PROFILES
     const [healthRows] = await pool.query(
       `SELECT profile_id, blood_type, allergies, chronic_conditions, immunization_history,
               emergency_contact_name, emergency_contact_phone, height, weight, updated_at
@@ -44,7 +49,6 @@ router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
     let healthProfile = healthRows.length > 0 ? healthRows[0] : null;
 
     if (healthProfile) {
-      // Decrypt sensitive medical indicators stored under AES-256
       healthProfile.allergies = decrypt(healthProfile.allergies);
       healthProfile.chronic_conditions = decrypt(healthProfile.chronic_conditions);
     }
@@ -59,7 +63,7 @@ router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
   }
 });
 
-// PUT /api/profile/me - Dynamically persists updates to MySQL
+// PUT /api/profile/me - Dynamically persists updates to MySQL with AES-256 encryption
 router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => {
   const userId = req.user.user_id;
   const {
@@ -78,12 +82,10 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
   try {
     await connection.beginTransaction();
 
-    // 1. Update personal phone on USERS table if provided
     if (phone !== undefined && phone !== null) {
       await connection.query('UPDATE USERS SET phone = ? WHERE user_id = ?', [phone.trim(), userId]);
     }
 
-    // 2. Fetch current record to prevent wiping untouched fields
     const [existing] = await connection.query(
       'SELECT * FROM HEALTH_PROFILES WHERE user_id = ? FOR UPDATE',
       [userId]
@@ -97,7 +99,6 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
       action = 'UPDATE';
       recordId = old.profile_id;
 
-      // Preserve existing DB values if not supplied in this request
       const updatedBlood = blood_type !== undefined ? blood_type : old.blood_type;
       const updatedAllergies = allergies !== undefined ? encrypt(allergies) : old.allergies;
       const updatedConditions = chronic_conditions !== undefined ? encrypt(chronic_conditions) : old.chronic_conditions;
@@ -133,7 +134,6 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
       recordId = result.insertId;
     }
 
-    // 3. Cryptographic audit log (R.A. 10173 compliance)
     await logAudit(connection, {
       userId: req.user.user_id,
       action,

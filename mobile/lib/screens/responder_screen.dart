@@ -30,7 +30,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
     _fetchActiveAlerts();
 
     EmergencyAlertService().startResponderListener();
-    // Silent background poll to stay synced
+    // Silent background polling to ensure sync
     _pollingTimer = Timer.periodic(const Duration(seconds: 4), (_) => _fetchActiveAlerts(silent: true));
   }
 
@@ -69,7 +69,6 @@ class _ResponderScreenState extends State<ResponderScreen> {
   Future<void> _updateAlertStatus(int alertId, String status) async {
     EmergencyAlertService().stopAlarmSound();
 
-    // 1. Immediately update UI with zero latency
     setState(() {
       if (status == 'resolved' || status == 'false_alarm') {
         _activeAlerts.removeWhere((a) => a['alert_id'] == alertId);

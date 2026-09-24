@@ -1,7 +1,7 @@
 // mobile/lib/services/emergency_alert_service.dart
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -30,7 +30,7 @@ class EmergencyAlertService {
 
   bool _isResponderActive = false;
 
-  // New channel ID forces Android to create a high-priority heads-up notification channel
+  // High-priority notification channel forces Android to create a heads-up banner
   static const AndroidNotificationChannel _criticalChannel = AndroidNotificationChannel(
     'emergency_sos_channel_v3',
     '🚨 Critical Emergency SOS',
@@ -53,7 +53,6 @@ class EmergencyAlertService {
 
     await _localNotifications.initialize(initializationSettings);
 
-    // Register high-priority channel on Android
     final androidImplementation = _localNotifications
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
 
@@ -93,16 +92,30 @@ class EmergencyAlertService {
         debugPrint('✅ [Socket.IO Mobile] Connected to Emergency Gateway at ${ApiConfig.socketUrl}');
       });
 
-      _socket!.on('emergency:new_alert', (data) {
+      _socket!.on('emergency:new_alert', (data) async {
         debugPrint('🚨 [Socket.IO Mobile] SOS Alert Broadcast: $data');
         final alertMap = data is Map<String, dynamic> ? data : Map<String, dynamic>.from(data);
 
-        final isSimulated = alertMap['notes']?.toString().contains('SIMULATED') ?? false;
-
-        // Sound alert if in responder mode, debug mode, or simulated test
-        if (_isResponderActive || kDebugMode || isSimulated) {
-          triggerEmergencyBroadcast(alertMap);
+        // 1. GUARD: Only trigger siren & red alert if device is logged in as an active responder
+        if (!_isResponderActive) {
+          debugPrint('🛡️ [Socket.IO Mobile] Ignored: Device is in Student/User mode.');
+          return;
         }
+
+        // 2. Prevent self-echoing if the alert originated from this account
+        final userDataStr = await _storage.read(key: 'user_data');
+        if (userDataStr != null) {
+          try {
+            final currentUser = jsonDecode(userDataStr);
+            if (currentUser['user_id'] == alertMap['userId']) {
+              debugPrint('🛡️ [Socket.IO Mobile] Ignored: Alert originated from this user.');
+              return;
+            }
+          } catch (_) {}
+        }
+
+        // 3. Trigger emergency broadcast for responders only
+        triggerEmergencyBroadcast(alertMap);
       });
     } catch (e) {
       debugPrint('[Socket.IO Mobile] Error: $e');
@@ -119,7 +132,7 @@ class EmergencyAlertService {
     stopAlarmSound();
   }
 
-  // --- 1. STUDENT CONFIRMATION NOTIFICATION DROP ---
+  // --- 1. STUDENT CONFIRMATION NOTIFICATION ---
   Future<void> showStudentSosSentNotification() async {
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'emergency_sos_channel_v3',
@@ -168,7 +181,7 @@ class EmergencyAlertService {
     );
   }
 
-  // --- 3. CLINIC QUEUE TURN NOTIFICATION DROP ---
+  // --- 3. CLINIC QUEUE TURN NOTIFICATION ---
   Future<void> showQueueTurnNotification({
     required String ticketNo,
     required String doctorName,
@@ -194,7 +207,7 @@ class EmergencyAlertService {
     );
   }
 
-  // In-memory dual-tone EAS Siren (853Hz + 960Hz) WAV Generator
+  // Procedural dual-tone EAS Siren (853Hz + 960Hz) in-memory WAV Generator
   Uint8List _generateEasSirenWav({double durationSeconds = 3.0, int sampleRate = 22050}) {
     if (_cachedWavBytes != null) return _cachedWavBytes!;
 
@@ -246,15 +259,12 @@ class EmergencyAlertService {
       await _audioPlayer.setVolume(1.0);
       await _audioPlayer.setReleaseMode(ReleaseMode.loop);
 
-      // Audio Cascade: Try both asset key formats; if missing, use procedural EAS siren
       try {
         await _audioPlayer.play(AssetSource('emr_sound.ogg'));
       } catch (e1) {
-        debugPrint('[AudioPlayer] AssetSource("emr_sound.ogg") error: $e1. Trying "assets/emr_sound.ogg"...');
         try {
           await _audioPlayer.play(AssetSource('assets/emr_sound.ogg'));
         } catch (e2) {
-          debugPrint('[AudioPlayer] Falling back to procedural in-memory EAS siren: $e2');
           final wav = _generateEasSirenWav();
           await _audioPlayer.play(BytesSource(wav));
         }
@@ -292,7 +302,7 @@ class EmergencyAlertService {
     final lng = double.tryParse(alertData['longitude'].toString()) ?? 0.0;
     final googleMapsUrl = alertData['googleMapsUrl'] ?? 'https://www.google.com/maps?q=$lat,$lng';
 
-    // 1. DROP HEADS-UP NOTIFICATION FROM TOP OF SCREEN
+    // Drop heads-up notification from top of screen
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'emergency_sos_channel_v3',
       '🚨 Critical Emergency SOS',
@@ -315,7 +325,6 @@ class EmergencyAlertService {
       platformDetails,
     );
 
-    // 2. DISPLAY FULL-SCREEN RED ALERT DIALOG
     final context = navigatorKey.currentContext;
     if (context == null || !context.mounted) return;
 

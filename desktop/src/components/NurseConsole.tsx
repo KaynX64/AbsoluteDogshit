@@ -41,10 +41,15 @@ export default function NurseConsole() {
     }
   };
 
-    useEffect(() => {
+  useEffect(() => {
     fetchLiveQueue();
 
-    const socket = io('https://localhost:5000');
+    const token = localStorage.getItem('valetudo_token');
+    const socket = io('https://localhost:5000', {
+      auth: { token },
+      transports: ['websocket', 'polling'],
+    });
+
     socket.on('queue:updated', () => {
       fetchLiveQueue();
     });

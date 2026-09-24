@@ -287,7 +287,7 @@ export default function appointmentRouter(io) {
     }
   });
 
-// 6. GET /api/appointments/today
+  // 6. GET /api/appointments/today
   router.get('/today', authenticateToken, async (req, res) => {
     try {
       const { date, filter } = req.query;
@@ -295,10 +295,8 @@ export default function appointmentRouter(io) {
       const params = [];
 
       if (filter === 'history') {
-        // Archived completed, cancelled, or no-show consultations
         whereClause = `WHERE a.status IN ('completed', 'cancelled', 'no_show')`;
       } else if (filter === 'scheduled') {
-        // Booked on app, but NOT yet checked in or triaged by clinic nurse
         whereClause = `WHERE a.status = 'scheduled' AND a.date_time >= CURDATE()`;
       } else if (filter === 'all') {
         whereClause = `WHERE a.status IN ('scheduled', 'checked_in', 'serving')`;
@@ -306,7 +304,6 @@ export default function appointmentRouter(io) {
         whereClause = `WHERE DATE(a.date_time) = ? AND a.status IN ('checked_in', 'serving')`;
         params.push(date);
       } else {
-        // Default Active Queue: All patients currently triaged & admitted to clinic
         whereClause = `WHERE a.status IN ('checked_in', 'serving')`;
       }
 
@@ -336,7 +333,6 @@ export default function appointmentRouter(io) {
         params
       );
 
-      // Decrypt clinical and historical fields
       const decryptedRows = rows.map((r) => ({
         ...r,
         allergies: decrypt(r.allergies),
@@ -382,7 +378,6 @@ export default function appointmentRouter(io) {
       const doctorUserId = req.user.user_id;
       const { patient_user_id, chief_complaint, diagnosis, treatment_plan, notes, vitals } = req.body;
 
-      // Encrypt sensitive clinical PHI
       const encComplaint = encrypt(chief_complaint);
       const encDiagnosis = encrypt(diagnosis);
       const encTreatment = encrypt(treatment_plan);
@@ -506,7 +501,6 @@ export default function appointmentRouter(io) {
         });
       }
 
-      // Decrypt sensitive fields
       const decryptedResults = results.map((item) => ({
         ...item,
         allergies: decrypt(item.allergies),
@@ -605,7 +599,7 @@ export default function appointmentRouter(io) {
     }
   });
 
-// 12. PATCH /api/appointments/queue/:id/status
+  // 12. PATCH /api/appointments/queue/:id/status
   router.patch('/queue/:id/status', authenticateToken, async (req, res) => {
     try {
       const queueId = req.params.id;
@@ -637,7 +631,7 @@ export default function appointmentRouter(io) {
   // 13. GET /api/appointments/patient/:userId/history
   router.get('/patient/:userId/history', authenticateToken, async (req, res) => {
     try {
-      const { userId } = req.params;
+      const userId = Number(req.params.userId);
 
       const [history] = await pool.query(
         `SELECT e.emr_id, e.encounter_date, e.chief_complaint, e.diagnosis, e.treatment_plan, e.notes,
@@ -668,9 +662,9 @@ export default function appointmentRouter(io) {
 
       logPhiAccess({
         viewerUserId: req.user.user_id,
-        patientUserId: Number(userId),
+        patientUserId: userId,
         table: 'EMR_RECORDS',
-        recordId: Number(userId),
+        recordId: userId,
         purpose: 'Clinical Encounter History Review',
         ipAddress: req.ip,
       });

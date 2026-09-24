@@ -72,7 +72,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     }
   }
 
-  // --- Modal: Prescription QR Verification Details (Fixed with Dialog) ---
+  // --- Modal: Prescription QR Verification Details ---
   void _showPrescriptionQrModal(Map<String, dynamic> rx) {
     final qrToken = rx['qr_token'] ?? '';
     showDialog(
@@ -88,11 +88,11 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Row(
+                  const Row(
                     children: [
-                      const Icon(Icons.qr_code_scanner, color: Color(0xFF0F766E)),
-                      const SizedBox(width: 8),
-                      const Text(
+                      Icon(Icons.qr_code_scanner, color: Color(0xFF0F766E)),
+                      SizedBox(width: 8),
+                      Text(
                         'Digital Rx Verification',
                         style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                       ),
@@ -169,7 +169,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     );
   }
 
-  // --- Modal: Official Clearance Certificate & Digital Seal (Fixed with Dialog) ---
+  // --- Modal: Official Clearance Certificate & Digital Seal ---
   void _showClearanceCertificateModal(Map<String, dynamic> clearance) {
     final qrToken = clearance['qr_token'] ?? '';
     final rawExpiry = clearance['expires_at'];
@@ -195,7 +195,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // PSU Infirmary Header
                   const Text(
                     'PANGASINAN STATE UNIVERSITY',
                     style: TextStyle(
@@ -253,7 +252,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                   ),
                   const SizedBox(height: 14),
 
-                  // Cryptographic QR Seal
                   Container(
                     width: 180,
                     height: 180,
@@ -277,7 +275,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                   ),
                   const SizedBox(height: 12),
 
-                  // Signer Metadata Block
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(8),
@@ -330,7 +327,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Sub-Tab Switcher
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           color: Colors.white,
@@ -363,7 +359,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
         ),
         const Divider(height: 1),
 
-        // Sub-Tab Body
         Expanded(
           child: _selectedSubTab == 0 ? _buildPrescriptionsList() : _buildClearancesList(),
         ),
@@ -381,6 +376,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       return RefreshIndicator(
         onRefresh: _fetchPrescriptions,
         child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
           children: const [
             SizedBox(height: 80),
             Icon(Icons.medication_liquid_outlined, size: 64, color: Colors.grey),
@@ -419,7 +415,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Card Header
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -462,7 +457,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                   ),
                   const Divider(height: 18),
 
-                  // Prescribed Medication Line Items
                   const Text('Prescribed Medications:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F766E))),
                   const SizedBox(height: 6),
                   if (items.isEmpty)
@@ -519,7 +513,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                   ],
                   const SizedBox(height: 10),
 
-                  // Verification Button
                   Align(
                     alignment: Alignment.centerRight,
                     child: OutlinedButton.icon(
@@ -551,6 +544,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       return RefreshIndicator(
         onRefresh: _fetchClearances,
         child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
           children: const [
             SizedBox(height: 80),
             Icon(Icons.verified_user_outlined, size: 64, color: Colors.grey),
@@ -601,7 +595,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Clearance Header & Expiry Tracker
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
