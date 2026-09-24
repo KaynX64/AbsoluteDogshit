@@ -18,11 +18,11 @@ export default function emergencyRouter(io) {
         return res.status(400).json({ error: 'Latitude and Longitude are required coordinates.' });
       }
 
-      // In MySQL 8.0 SRID 4326, the axis order is Latitude then Longitude
+      // In MySQL 8.0 SRID 4326, the axis order is Long then Lat, so we use POINT(longitude, latitude)
       const [insertResult] = await pool.query(
-        `INSERT INTO EMERGENCY_ALERTS (user_id, location, status, notes)
-         VALUES (?, ST_SRID(POINT(?, ?), 4326), 'triggered', ?)`,
-        [userId, Number(longitude), Number(latitude), notes || 'Emergency SOS pressed']
+      `INSERT INTO EMERGENCY_ALERTS (user_id, location, status, notes)
+      VALUES (?, ST_SRID(POINT(?, ?), 4326), 'triggered', ?)`,
+      [userId, Number(longitude), Number(latitude), notes || 'Emergency SOS pressed']
       );
 
       const alertId = insertResult.insertId;
@@ -76,7 +76,7 @@ export default function emergencyRouter(io) {
   });
 
   // 2. GET /api/emergency/active
-  router.get('/active', authenticateToken, requireRoles(['EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN']), async (req, res) => {
+  router.get('/active', authenticateToken, requireRoles('EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'), async (req, res) => {
     try {
       const [alerts] = await pool.query(
         `SELECT a.alert_id, a.user_id, a.latitude, a.longitude, a.status, a.created_at, a.notes,
@@ -101,7 +101,7 @@ export default function emergencyRouter(io) {
   });
 
   // 3. PATCH /api/emergency/:alertId/status
-  router.patch('/:alertId/status', authenticateToken, requireRoles(['EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN']), async (req, res) => {
+  router.patch('/:alertId/status', authenticateToken, requireRoles('EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'), async (req, res) => {
     try {
       const { alertId } = req.params;
       const { status } = req.body;

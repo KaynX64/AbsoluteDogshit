@@ -713,6 +713,459 @@ createRoot(document.getElementById('root')!).render(
 
 </file>
 
+<file path="mobile/lib/screens/edit_profile_screen.dart">
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
+import '../config/api_config.dart';
+
+class EditProfileScreen extends StatefulWidget {
+  final Map<String, dynamic> user;
+  final Map<String, dynamic>? healthProfile;
+
+  const EditProfileScreen({
+    super.key,
+    required this.user,
+    required this.healthProfile,
+  });
+
+  @override
+  State<EditProfileScreen> createState() => _EditProfileScreenState();
+}
+
+class _EditProfileScreenState extends State<EditProfileScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _storage = const FlutterSecureStorage();
+
+  late TextEditingController _phoneController;
+  late TextEditingController _emContactNameController;
+  late TextEditingController _emContactPhoneController;
+
+  bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final u = widget.user;
+    final hp = widget.healthProfile ?? {};
+
+    _phoneController = TextEditingController(text: u['phone'] ?? '');
+    _emContactNameController = TextEditingController(text: hp['emergency_contact_name'] ?? '');
+    _emContactPhoneController = TextEditingController(text: hp['emergency_contact_phone'] ?? '');
+  }
+
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    _emContactNameController.dispose();
+    _emContactPhoneController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveProfile() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isSaving = true);
+    final token = await _storage.read(key: 'jwt_token');
+
+    final payload = {
+      'phone': _phoneController.text.trim(),
+      'emergency_contact_name': _emContactNameController.text.trim(),
+      'emergency_contact_phone': _emContactPhoneController.text.trim(),
+    };
+
+    try {
+      final res = await http.put(
+        Uri.parse('${ApiConfig.baseUrl}/api/profile/me'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(payload),
+      );
+
+      if (res.statusCode == 200) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Contact and emergency info updated successfully!'),
+            backgroundColor: Colors.teal,
+          ),
+        );
+        Navigator.pop(context, true);
+      } else {
+        final err = jsonDecode(res.body)['error'] ?? 'Update failed.';
+        _showError(err);
+      }
+    } catch (e) {
+      _showError('Network error: $e');
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.red),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Edit Emergency Contacts'),
+      ),
+      body: _isSaving
+          ? const Center(child: CircularProgressIndicator())
+          : Form(
+              key: _formKey,
+              child: ListView(
+                padding: const EdgeInsets.all(20),
+                children: [
+                  const Card(
+                    color: Color(0xFFF0FDFA),
+                    child: Padding(
+                      padding: EdgeInsets.all(12.0),
+                      child: Text(
+                        'Clinical data (Blood type, Allergies, Vaccines) must be verified and updated in-person by PSU Clinic Staff.',
+                        style: TextStyle(color: Colors.teal, fontSize: 13),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Personal Contact',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.teal),
+                  ),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _phoneController,
+                    decoration: const InputDecoration(
+                      labelText: 'My Contact Phone Number',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.phone),
+                    ),
+                    keyboardType: TextInputType.phone,
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Designated Emergency Contact',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.teal),
+                  ),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _emContactNameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Emergency Contact Person',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.person_pin),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _emContactPhoneController,
+                    decoration: const InputDecoration(
+                      labelText: 'Emergency Contact Phone Number',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.phone_in_talk),
+                    ),
+                    keyboardType: TextInputType.phone,
+                  ),
+                  const SizedBox(height: 28),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.teal,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(50),
+                    ),
+                    onPressed: _saveProfile,
+                    icon: const Icon(Icons.save),
+                    label: const Text('Save Changes', style: TextStyle(fontSize: 16)),
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
+}
+</file>
+
+<file path="mobile/lib/services/.gitkeep">
+
+</file>
+
+<file path="mobile/lib/widgets/.gitkeep">
+
+</file>
+
+<file path="server/src/middleware/rbac.js">
+export function requireRoles(...allowedRoles) {
+  return (req, res, next) => {
+    if (!req.user || !req.user.roles) {
+      return res.status(403).json({ error: 'Access forbidden: No roles assigned.' });
+    }
+    const hasRole = req.user.roles.some((role) => allowedRoles.includes(role));
+    if (!hasRole) {
+      return res.status(403).json({ error: 'Access forbidden: Insufficient permissions.' });
+    }
+    next();
+  };
+}
+</file>
+
+<file path="server/src/routes/privacy.js">
+// server/src/routes/privacy.js
+import express from 'express';
+import { pool } from '../db.js';
+import { authenticateToken } from '../auth.js';
+import { requireRoles } from '../middleware/rbac.js';
+import { logAudit } from '../utils/auditLogger.js';
+
+const router = express.Router();
+
+// =============================================================================
+// 1. CONSENT MANAGEMENT (R.A. 10173 Section 12 & 13)
+// =============================================================================
+
+// POST /api/privacy/consent - Record user consent under R.A. 10173
+router.post('/consent', authenticateToken, async (req, res) => {
+  const userId = req.user.user_id;
+  const { consent_type } = req.body;
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    await connection.query(
+      `INSERT INTO CONSENT_RECORDS (user_id, consent_type, is_granted, ip_address, terms_version)
+       VALUES (?, ?, TRUE, ?, '2026.1')`,
+      [userId, consent_type || 'PHI_PROCESSING_RA_10173', req.ip]
+    );
+
+    await logAudit(connection, {
+      userId,
+      action: 'CREATE',
+      table: 'CONSENT_RECORDS',
+      recordId: userId,
+      oldValue: null,
+      newValue: { consent_type: consent_type || 'PHI_PROCESSING_RA_10173', is_granted: true },
+      ipAddress: req.ip,
+    });
+
+    await connection.commit();
+    res.json({ message: 'Privacy consent successfully recorded under R.A. 10173.' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[Privacy] Consent error:', error);
+    res.status(500).json({ error: 'Failed to record consent.' });
+  } finally {
+    connection.release();
+  }
+});
+
+// POST /api/privacy/revoke - Revoke consent under R.A. 10173
+router.post('/revoke', authenticateToken, async (req, res) => {
+  const userId = req.user.user_id;
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    await connection.query(
+      `UPDATE CONSENT_RECORDS 
+       SET is_granted = FALSE, revoked_at = CURRENT_TIMESTAMP 
+       WHERE user_id = ? AND is_granted = TRUE`,
+      [userId]
+    );
+
+    await logAudit(connection, {
+      userId,
+      action: 'UPDATE',
+      table: 'CONSENT_RECORDS',
+      recordId: userId,
+      oldValue: { is_granted: true },
+      newValue: { is_granted: false, revoked_at: new Date().toISOString() },
+      ipAddress: req.ip,
+    });
+
+    await connection.commit();
+    res.json({ message: 'Consent successfully revoked. Medical data processing suspended.' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[Privacy] Revoke error:', error);
+    res.status(500).json({ error: 'Failed to revoke consent.' });
+  } finally {
+    connection.release();
+  }
+});
+
+// GET /api/privacy/status - Check if user has active consent
+router.get('/status', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT consent_id, consent_type, is_granted, consented_at, revoked_at, terms_version
+       FROM CONSENT_RECORDS 
+       WHERE user_id = ? 
+       ORDER BY consent_id DESC LIMIT 1`,
+      [req.user.user_id]
+    );
+
+    res.json({
+  hasConsented: rows.length > 0 && Boolean(rows[0].is_granted),
+  details: rows[0] || null,
+    });
+  } catch (error) {
+    console.error('[Privacy] Status check error:', error);
+    res.status(500).json({ error: 'Failed to retrieve consent status.' });
+  }
+});
+
+// =============================================================================
+// 2. DATA RETENTION & LIFECYCLE (R.A. 10173 Section 11 - Proportionality)
+// Standard: Clinical records retained 5 years from encounter date
+// =============================================================================
+
+// GET /api/privacy/retention/status - Retention status report (Admin only)
+router.get('/retention/status', authenticateToken, requireRoles('ADMIN'), async (req, res) => {
+  try {
+    // 5-year retention cutoff for EMR records
+    const [expiredEmrs] = await pool.query(
+      `SELECT COUNT(*) as eligible_for_purge
+       FROM EMR_RECORDS 
+       WHERE encounter_date < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
+         AND deleted_at IS NULL`
+    );
+
+    // 5-year retention cutoff for Appointments
+    const [expiredAppointments] = await pool.query(
+      `SELECT COUNT(*) as eligible_for_purge
+       FROM APPOINTMENTS 
+       WHERE date_time < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
+         AND deleted_at IS NULL`
+    );
+
+    // 5-year retention cutoff for Prescriptions
+    const [expiredPrescriptions] = await pool.query(
+      `SELECT COUNT(*) as eligible_for_purge
+       FROM PRESCRIPTIONS 
+       WHERE issued_at < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
+         AND deleted_at IS NULL`
+    );
+
+    const [activeEmrs] = await pool.query(
+      `SELECT COUNT(*) as active_records FROM EMR_RECORDS WHERE deleted_at IS NULL`
+    );
+
+    const [consentedUsers] = await pool.query(
+      `SELECT COUNT(DISTINCT user_id) as total_consented FROM CONSENT_RECORDS WHERE is_granted = TRUE`
+    );
+
+    const totalPurgeEligible =
+      (expiredEmrs[0]?.eligible_for_purge || 0) +
+      (expiredAppointments[0]?.eligible_for_purge || 0) +
+      (expiredPrescriptions[0]?.eligible_for_purge || 0);
+
+    res.json({
+      retentionPolicyYears: 5,
+      activeMedicalRecords: activeEmrs[0]?.active_records || 0,
+      recordsPastRetentionPeriod: totalPurgeEligible,
+      breakdown: {
+        emrRecords: expiredEmrs[0]?.eligible_for_purge || 0,
+        appointments: expiredAppointments[0]?.eligible_for_purge || 0,
+        prescriptions: expiredPrescriptions[0]?.eligible_for_purge || 0,
+      },
+      totalActiveConsents: consentedUsers[0]?.total_consented || 0,
+      standard: 'R.A. 10173 & Philippine DOH 5-Year Clinical Document Rule',
+    });
+  } catch (error) {
+    console.error('[Privacy] Retention status error:', error);
+    res.status(500).json({ error: 'Failed to compute retention status.' });
+  }
+});
+
+// POST /api/privacy/retention/sweep - Execute comprehensive retention purge (Admin only)
+router.post('/retention/sweep', authenticateToken, requireRoles('ADMIN'), async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    // 1. Soft-delete EMR encounters older than 5 years
+    const [emrResult] = await connection.query(
+      `UPDATE EMR_RECORDS 
+       SET deleted_at = CURRENT_TIMESTAMP 
+       WHERE encounter_date < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
+         AND deleted_at IS NULL`
+    );
+
+    // 2. Soft-delete appointments older than 5 years
+    const [appResult] = await connection.query(
+      `UPDATE APPOINTMENTS 
+       SET deleted_at = CURRENT_TIMESTAMP 
+       WHERE date_time < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
+         AND deleted_at IS NULL`
+    );
+
+    // 3. Mark prescriptions older than 5 years as expired and soft-deleted
+    const [rxResult] = await connection.query(
+      `UPDATE PRESCRIPTIONS 
+       SET status = 'expired', deleted_at = CURRENT_TIMESTAMP 
+       WHERE issued_at < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
+         AND deleted_at IS NULL`
+    );
+
+    const [clrResult] = await connection.query(
+  `UPDATE MEDICAL_CLEARANCES 
+   SET status = 'expired', deleted_at = CURRENT_TIMESTAMP 
+   WHERE expires_at < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
+     AND deleted_at IS NULL`
+);
+
+    const totalPurged =
+      (emrResult.affectedRows || 0) +
+  (appResult.affectedRows || 0) +
+  (rxResult.affectedRows || 0) +
+  (clrResult.affectedRows || 0);
+
+    await logAudit(connection, {
+      userId: req.user.user_id,
+      action: 'DELETE',
+      table: 'EMR_RECORDS',
+      recordId: 0,
+      oldValue: null,
+      newValue: {
+        operation: 'STATUTORY_DATA_RETENTION_SWEEP_RA_10173',
+        purgedEmrs: emrResult.affectedRows,
+        purgedAppointments: appResult.affectedRows,
+        purgedPrescriptions: rxResult.affectedRows,
+        totalPurged,
+      },
+      ipAddress: req.ip,
+    });
+
+    await connection.commit();
+
+    res.json({
+      message: `Data retention sweep complete. ${totalPurged} expired records archived/soft-deleted across clinical tables.`,
+      purgedCount: totalPurged,
+      breakdown: {
+        emrs: emrResult.affectedRows,
+        appointments: appResult.affectedRows,
+        prescriptions: rxResult.affectedRows,
+      },
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[Privacy] Retention sweep error:', error);
+    res.status(500).json({ error: 'Failed to execute retention sweep.' });
+  } finally {
+    connection.release();
+  }
+});
+
+export default router;
+</file>
+
 <file path="mobile/lib/screens/documents_viewer_screen.dart">
 // mobile/lib/screens/documents_viewer_screen.dart
 import 'dart:convert';
@@ -1389,459 +1842,6 @@ if (_prescriptions.isEmpty) {
     );
   }
 }
-</file>
-
-<file path="mobile/lib/screens/edit_profile_screen.dart">
-import 'dart:convert';
-import 'package:flutter/material.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:http/http.dart' as http;
-import '../config/api_config.dart';
-
-class EditProfileScreen extends StatefulWidget {
-  final Map<String, dynamic> user;
-  final Map<String, dynamic>? healthProfile;
-
-  const EditProfileScreen({
-    super.key,
-    required this.user,
-    required this.healthProfile,
-  });
-
-  @override
-  State<EditProfileScreen> createState() => _EditProfileScreenState();
-}
-
-class _EditProfileScreenState extends State<EditProfileScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _storage = const FlutterSecureStorage();
-
-  late TextEditingController _phoneController;
-  late TextEditingController _emContactNameController;
-  late TextEditingController _emContactPhoneController;
-
-  bool _isSaving = false;
-
-  @override
-  void initState() {
-    super.initState();
-    final u = widget.user;
-    final hp = widget.healthProfile ?? {};
-
-    _phoneController = TextEditingController(text: u['phone'] ?? '');
-    _emContactNameController = TextEditingController(text: hp['emergency_contact_name'] ?? '');
-    _emContactPhoneController = TextEditingController(text: hp['emergency_contact_phone'] ?? '');
-  }
-
-  @override
-  void dispose() {
-    _phoneController.dispose();
-    _emContactNameController.dispose();
-    _emContactPhoneController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _saveProfile() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() => _isSaving = true);
-    final token = await _storage.read(key: 'jwt_token');
-
-    final payload = {
-      'phone': _phoneController.text.trim(),
-      'emergency_contact_name': _emContactNameController.text.trim(),
-      'emergency_contact_phone': _emContactPhoneController.text.trim(),
-    };
-
-    try {
-      final res = await http.put(
-        Uri.parse('${ApiConfig.baseUrl}/api/profile/me'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(payload),
-      );
-
-      if (res.statusCode == 200) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Contact and emergency info updated successfully!'),
-            backgroundColor: Colors.teal,
-          ),
-        );
-        Navigator.pop(context, true);
-      } else {
-        final err = jsonDecode(res.body)['error'] ?? 'Update failed.';
-        _showError(err);
-      }
-    } catch (e) {
-      _showError('Network error: $e');
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
-    }
-  }
-
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.red),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Edit Emergency Contacts'),
-      ),
-      body: _isSaving
-          ? const Center(child: CircularProgressIndicator())
-          : Form(
-              key: _formKey,
-              child: ListView(
-                padding: const EdgeInsets.all(20),
-                children: [
-                  const Card(
-                    color: Color(0xFFF0FDFA),
-                    child: Padding(
-                      padding: EdgeInsets.all(12.0),
-                      child: Text(
-                        'Clinical data (Blood type, Allergies, Vaccines) must be verified and updated in-person by PSU Clinic Staff.',
-                        style: TextStyle(color: Colors.teal, fontSize: 13),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Personal Contact',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.teal),
-                  ),
-                  const SizedBox(height: 8),
-                  TextFormField(
-                    controller: _phoneController,
-                    decoration: const InputDecoration(
-                      labelText: 'My Contact Phone Number',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.phone),
-                    ),
-                    keyboardType: TextInputType.phone,
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Designated Emergency Contact',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.teal),
-                  ),
-                  const SizedBox(height: 8),
-                  TextFormField(
-                    controller: _emContactNameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Emergency Contact Person',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.person_pin),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _emContactPhoneController,
-                    decoration: const InputDecoration(
-                      labelText: 'Emergency Contact Phone Number',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.phone_in_talk),
-                    ),
-                    keyboardType: TextInputType.phone,
-                  ),
-                  const SizedBox(height: 28),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.teal,
-                      foregroundColor: Colors.white,
-                      minimumSize: const Size.fromHeight(50),
-                    ),
-                    onPressed: _saveProfile,
-                    icon: const Icon(Icons.save),
-                    label: const Text('Save Changes', style: TextStyle(fontSize: 16)),
-                  ),
-                ],
-              ),
-            ),
-    );
-  }
-}
-</file>
-
-<file path="mobile/lib/services/.gitkeep">
-
-</file>
-
-<file path="mobile/lib/widgets/.gitkeep">
-
-</file>
-
-<file path="server/src/middleware/rbac.js">
-export function requireRoles(...allowedRoles) {
-  return (req, res, next) => {
-    if (!req.user || !req.user.roles) {
-      return res.status(403).json({ error: 'Access forbidden: No roles assigned.' });
-    }
-    const hasRole = req.user.roles.some((role) => allowedRoles.includes(role));
-    if (!hasRole) {
-      return res.status(403).json({ error: 'Access forbidden: Insufficient permissions.' });
-    }
-    next();
-  };
-}
-</file>
-
-<file path="server/src/routes/privacy.js">
-// server/src/routes/privacy.js
-import express from 'express';
-import { pool } from '../db.js';
-import { authenticateToken } from '../auth.js';
-import { requireRoles } from '../middleware/rbac.js';
-import { logAudit } from '../utils/auditLogger.js';
-
-const router = express.Router();
-
-// =============================================================================
-// 1. CONSENT MANAGEMENT (R.A. 10173 Section 12 & 13)
-// =============================================================================
-
-// POST /api/privacy/consent - Record user consent under R.A. 10173
-router.post('/consent', authenticateToken, async (req, res) => {
-  const userId = req.user.user_id;
-  const { consent_type } = req.body;
-
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-
-    await connection.query(
-      `INSERT INTO CONSENT_RECORDS (user_id, consent_type, is_granted, ip_address, terms_version)
-       VALUES (?, ?, TRUE, ?, '2026.1')`,
-      [userId, consent_type || 'PHI_PROCESSING_RA_10173', req.ip]
-    );
-
-    await logAudit(connection, {
-      userId,
-      action: 'CREATE',
-      table: 'CONSENT_RECORDS',
-      recordId: userId,
-      oldValue: null,
-      newValue: { consent_type: consent_type || 'PHI_PROCESSING_RA_10173', is_granted: true },
-      ipAddress: req.ip,
-    });
-
-    await connection.commit();
-    res.json({ message: 'Privacy consent successfully recorded under R.A. 10173.' });
-  } catch (error) {
-    await connection.rollback();
-    console.error('[Privacy] Consent error:', error);
-    res.status(500).json({ error: 'Failed to record consent.' });
-  } finally {
-    connection.release();
-  }
-});
-
-// POST /api/privacy/revoke - Revoke consent under R.A. 10173
-router.post('/revoke', authenticateToken, async (req, res) => {
-  const userId = req.user.user_id;
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-
-    await connection.query(
-      `UPDATE CONSENT_RECORDS 
-       SET is_granted = FALSE, revoked_at = CURRENT_TIMESTAMP 
-       WHERE user_id = ? AND is_granted = TRUE`,
-      [userId]
-    );
-
-    await logAudit(connection, {
-      userId,
-      action: 'UPDATE',
-      table: 'CONSENT_RECORDS',
-      recordId: userId,
-      oldValue: { is_granted: true },
-      newValue: { is_granted: false, revoked_at: new Date().toISOString() },
-      ipAddress: req.ip,
-    });
-
-    await connection.commit();
-    res.json({ message: 'Consent successfully revoked. Medical data processing suspended.' });
-  } catch (error) {
-    await connection.rollback();
-    console.error('[Privacy] Revoke error:', error);
-    res.status(500).json({ error: 'Failed to revoke consent.' });
-  } finally {
-    connection.release();
-  }
-});
-
-// GET /api/privacy/status - Check if user has active consent
-router.get('/status', authenticateToken, async (req, res) => {
-  try {
-    const [rows] = await pool.query(
-      `SELECT consent_id, consent_type, is_granted, consented_at, revoked_at, terms_version
-       FROM CONSENT_RECORDS 
-       WHERE user_id = ? 
-       ORDER BY consent_id DESC LIMIT 1`,
-      [req.user.user_id]
-    );
-
-    res.json({
-  hasConsented: rows.length > 0 && Boolean(rows[0].is_granted),
-  details: rows[0] || null,
-    });
-  } catch (error) {
-    console.error('[Privacy] Status check error:', error);
-    res.status(500).json({ error: 'Failed to retrieve consent status.' });
-  }
-});
-
-// =============================================================================
-// 2. DATA RETENTION & LIFECYCLE (R.A. 10173 Section 11 - Proportionality)
-// Standard: Clinical records retained 5 years from encounter date
-// =============================================================================
-
-// GET /api/privacy/retention/status - Retention status report (Admin only)
-router.get('/retention/status', authenticateToken, requireRoles('ADMIN'), async (req, res) => {
-  try {
-    // 5-year retention cutoff for EMR records
-    const [expiredEmrs] = await pool.query(
-      `SELECT COUNT(*) as eligible_for_purge
-       FROM EMR_RECORDS 
-       WHERE encounter_date < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
-         AND deleted_at IS NULL`
-    );
-
-    // 5-year retention cutoff for Appointments
-    const [expiredAppointments] = await pool.query(
-      `SELECT COUNT(*) as eligible_for_purge
-       FROM APPOINTMENTS 
-       WHERE date_time < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
-         AND deleted_at IS NULL`
-    );
-
-    // 5-year retention cutoff for Prescriptions
-    const [expiredPrescriptions] = await pool.query(
-      `SELECT COUNT(*) as eligible_for_purge
-       FROM PRESCRIPTIONS 
-       WHERE issued_at < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
-         AND deleted_at IS NULL`
-    );
-
-    const [activeEmrs] = await pool.query(
-      `SELECT COUNT(*) as active_records FROM EMR_RECORDS WHERE deleted_at IS NULL`
-    );
-
-    const [consentedUsers] = await pool.query(
-      `SELECT COUNT(DISTINCT user_id) as total_consented FROM CONSENT_RECORDS WHERE is_granted = TRUE`
-    );
-
-    const totalPurgeEligible =
-      (expiredEmrs[0]?.eligible_for_purge || 0) +
-      (expiredAppointments[0]?.eligible_for_purge || 0) +
-      (expiredPrescriptions[0]?.eligible_for_purge || 0);
-
-    res.json({
-      retentionPolicyYears: 5,
-      activeMedicalRecords: activeEmrs[0]?.active_records || 0,
-      recordsPastRetentionPeriod: totalPurgeEligible,
-      breakdown: {
-        emrRecords: expiredEmrs[0]?.eligible_for_purge || 0,
-        appointments: expiredAppointments[0]?.eligible_for_purge || 0,
-        prescriptions: expiredPrescriptions[0]?.eligible_for_purge || 0,
-      },
-      totalActiveConsents: consentedUsers[0]?.total_consented || 0,
-      standard: 'R.A. 10173 & Philippine DOH 5-Year Clinical Document Rule',
-    });
-  } catch (error) {
-    console.error('[Privacy] Retention status error:', error);
-    res.status(500).json({ error: 'Failed to compute retention status.' });
-  }
-});
-
-// POST /api/privacy/retention/sweep - Execute comprehensive retention purge (Admin only)
-router.post('/retention/sweep', authenticateToken, requireRoles('ADMIN'), async (req, res) => {
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-
-    // 1. Soft-delete EMR encounters older than 5 years
-    const [emrResult] = await connection.query(
-      `UPDATE EMR_RECORDS 
-       SET deleted_at = CURRENT_TIMESTAMP 
-       WHERE encounter_date < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
-         AND deleted_at IS NULL`
-    );
-
-    // 2. Soft-delete appointments older than 5 years
-    const [appResult] = await connection.query(
-      `UPDATE APPOINTMENTS 
-       SET deleted_at = CURRENT_TIMESTAMP 
-       WHERE date_time < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
-         AND deleted_at IS NULL`
-    );
-
-    // 3. Mark prescriptions older than 5 years as expired and soft-deleted
-    const [rxResult] = await connection.query(
-      `UPDATE PRESCRIPTIONS 
-       SET status = 'expired', deleted_at = CURRENT_TIMESTAMP 
-       WHERE issued_at < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
-         AND deleted_at IS NULL`
-    );
-
-    const [clrResult] = await connection.query(
-  `UPDATE MEDICAL_CLEARANCES 
-   SET status = 'expired', deleted_at = CURRENT_TIMESTAMP 
-   WHERE expires_at < DATE_SUB(NOW(), INTERVAL 5 YEAR) 
-     AND deleted_at IS NULL`
-);
-
-    const totalPurged =
-      (emrResult.affectedRows || 0) +
-  (appResult.affectedRows || 0) +
-  (rxResult.affectedRows || 0) +
-  (clrResult.affectedRows || 0);
-
-    await logAudit(connection, {
-      userId: req.user.user_id,
-      action: 'DELETE',
-      table: 'EMR_RECORDS',
-      recordId: 0,
-      oldValue: null,
-      newValue: {
-        operation: 'STATUTORY_DATA_RETENTION_SWEEP_RA_10173',
-        purgedEmrs: emrResult.affectedRows,
-        purgedAppointments: appResult.affectedRows,
-        purgedPrescriptions: rxResult.affectedRows,
-        totalPurged,
-      },
-      ipAddress: req.ip,
-    });
-
-    await connection.commit();
-
-    res.json({
-      message: `Data retention sweep complete. ${totalPurged} expired records archived/soft-deleted across clinical tables.`,
-      purgedCount: totalPurged,
-      breakdown: {
-        emrs: emrResult.affectedRows,
-        appointments: appResult.affectedRows,
-        prescriptions: rxResult.affectedRows,
-      },
-    });
-  } catch (error) {
-    await connection.rollback();
-    console.error('[Privacy] Retention sweep error:', error);
-    res.status(500).json({ error: 'Failed to execute retention sweep.' });
-  } finally {
-    connection.release();
-  }
-});
-
-export default router;
 </file>
 
 <file path="mobile/lib/screens/login_screen.dart">
@@ -3567,343 +3567,6 @@ export default function AnalyticsDashboard() {
 }
 </file>
 
-<file path="desktop/src/components/EmergencyAlertBanner.tsx">
-// desktop/src/components/EmergencyAlertBanner.tsx
-import React, { useEffect, useState } from 'react';
-import { io, Socket } from 'socket.io-client';
-
-interface EmergencyAlert {
-  alertId: number;
-  userId: number;
-  patientName: string;
-  phone: string;
-  studentNo: string;
-  course: string;
-  bloodType: string;
-  allergies: string;
-  chronicConditions: string;
-  emergencyContact: string;
-  latitude: number;
-  longitude: number;
-  googleMapsUrl: string;
-  status: string;
-  createdAt: string;
-}
-
-export default function EmergencyAlertBanner() {
-  const [alerts, setAlerts] = useState<EmergencyAlert[]>([]);
-
-  // Synthesize an audible emergency alert beep using Web Audio API
-  const playEmergencyAlarm = () => {
-    try {
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(850, audioCtx.currentTime); // 850 Hz alarm tone
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.start();
-      osc.stop(audioCtx.currentTime + 0.6); // 600ms chime
-    } catch (_) {}
-  };
-
-  useEffect(() => {
-    // 1. Fetch initial active alerts from DB
-    const fetchActiveAlerts = async () => {
-      const token = localStorage.getItem('valetudo_token');
-      if (!token) return;
-      try {
-        const res = await fetch('https://localhost:5000/api/emergency/active', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json();
-        if (Array.isArray(data)) {
-          const mapped: EmergencyAlert[] = data.map((a: any) => ({
-            alertId: a.alert_id,
-            userId: a.user_id,
-            patientName: `${a.first_name} ${a.last_name}`,
-            phone: a.phone,
-            studentNo: 'Verified',
-            course: 'PSU Student',
-            bloodType: a.blood_type || 'Unknown',
-            allergies: a.allergies || 'None',
-            chronicConditions: 'N/A',
-            emergencyContact: 'Check Profile',
-            latitude: Number(a.latitude),
-            longitude: Number(a.longitude),
-            googleMapsUrl: `https://www.google.com/maps?q=${a.latitude},${a.longitude}`,
-            status: a.status,
-            createdAt: a.created_at,
-          }));
-          setAlerts(mapped);
-        }
-      } catch (_) {}
-    };
-
-fetchActiveAlerts();
-
-    // 2. Connect Socket.IO with token and transport fallbacks
-    const token = localStorage.getItem('valetudo_token');
-    const socket: Socket = io('https://localhost:5000', {
-      auth: { token },
-      transports: ['polling', 'websocket'],
-    });
-
-    socket.on('connect', () => {
-      console.log('✅ [EmergencyAlertBanner] Live Socket connected:', socket.id);
-    });
-
-    socket.on('connect_error', (err) => {
-      console.error('❌ [EmergencyAlertBanner] Socket error:', err.message);
-    });
-
-    socket.on('emergency:new_alert', (newAlert: EmergencyAlert) => {
-      console.log('🚨 [EmergencyAlertBanner] New SOS received in real-time:', newAlert);
-      playEmergencyAlarm();
-
-      // Trigger native OS system tray notification
-      if ((window as any).electronAPI?.showNotification) {
-        (window as any).electronAPI.showNotification({
-          title: `🚨 SOS EMERGENCY: ${newAlert.patientName}`,
-          body: `Location: ${newAlert.latitude.toFixed(5)}, ${newAlert.longitude.toFixed(5)}. Blood: ${newAlert.bloodType}. Allergies: ${newAlert.allergies}`,
-        });
-      }
-
-      // Immediately display the red banner at the top of the UI
-      setAlerts((prev) => [newAlert, ...prev.filter((a) => a.alertId !== newAlert.alertId)]);
-    });
-
-    socket.on('emergency:status_change', ({ alertId, status }: { alertId: number; status: string }) => {
-      setAlerts((prev) =>
-        prev
-          .map((a) => (a.alertId === alertId ? { ...a, status } : a))
-          .filter((a) => a.status !== 'resolved' && a.status !== 'false_alarm')
-      );
-    });
-
-    return () => {
-      socket.disconnect();
-    };
-  }, []);
-
-  const updateStatus = async (alertId: number, status: string) => {
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      await fetch(`https://localhost:5000/api/emergency/${alertId}/status`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ status }),
-      });
-    } catch (err: any) {
-      alert('Failed to update status: ' + err.message);
-    }
-  };
-
-  // --- TEST BUTTON HANDLER 1: INSTANT NATIVE OS NOTIFICATION ---
-  const handleTestDirectNotification = () => {
-    playEmergencyAlarm();
-    if ((window as any).electronAPI?.showNotification) {
-      (window as any).electronAPI.showNotification({
-        title: '🚨 Valetudo HealthLink — SOS Alert Test',
-        body: 'Daniella Movida (BSIT) reported a medical emergency at PSU Lingayen Library. Allergies: Penicillin.',
-      });
-    } else {
-      alert('electronAPI.showNotification not detected. Ensure preload.cjs is configured.');
-    }
-  };
-
-  // --- TEST BUTTON HANDLER 2: FULL STACK REAL-TIME SOS TRIGGER ---
-  const handleTestFullStackSOS = async () => {
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch('https://localhost:5000/api/emergency/sos', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          latitude: 16.029851,
-          longitude: 120.228543,
-          notes: 'SIMULATED SOS: PSU Lingayen Administration Building',
-        }),
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        alert('Server SOS error: ' + (data.error || 'Check server connection'));
-      }
-    } catch (err: any) {
-      alert('Could not trigger backend test SOS: ' + err.message);
-    }
-  };
-
-  return (
-    <div style={{ marginBottom: 20 }}>
-      {/* TEST TRIGGER TOOLBAR */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          gap: 8,
-          marginBottom: alerts.length > 0 ? 12 : 0,
-        }}
-      >
-        <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 'bold' }}>TEST HARNESS:</span>
-        <button
-          type="button"
-          onClick={handleTestDirectNotification}
-          style={{
-            padding: '4px 10px',
-            fontSize: 12,
-            borderRadius: 4,
-            border: '1px solid #cbd5e1',
-            background: '#f8fafc',
-            color: '#334155',
-            cursor: 'pointer',
-            fontWeight: 'bold',
-          }}
-          title="Directly test the OS banner without server"
-        >
-          🧪 Test OS Notification (Instant)
-        </button>
-
-        <button
-          type="button"
-          onClick={handleTestFullStackSOS}
-          style={{
-            padding: '4px 10px',
-            fontSize: 12,
-            borderRadius: 4,
-            border: '1px solid #fca5a5',
-            background: '#fef2f2',
-            color: '#dc2626',
-            cursor: 'pointer',
-            fontWeight: 'bold',
-          }}
-          title="Sends real SOS request to backend and broadcasts over Socket.IO"
-        >
-          🚨 Trigger Live SOS (Full System Test)
-        </button>
-      </div>
-
-      {/* ACTIVE EMERGENCY ALERTS BANNER */}
-      {alerts.map((alert) => (
-        <div
-          key={alert.alertId}
-          style={{
-            background: '#fee2e2',
-            border: '2px solid #ef4444',
-            borderRadius: 8,
-            padding: 16,
-            marginBottom: 12,
-            boxShadow: '0 4px 6px -1px rgba(239, 68, 68, 0.2)',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 24 }}>🚨</span>
-              <h3 style={{ margin: 0, color: '#b91c1c' }}>
-                ACTIVE SOS ALERT: {alert.patientName} ({alert.studentNo || 'Student'})
-              </h3>
-            </div>
-            <span
-              style={{
-                background: '#ef4444',
-                color: '#fff',
-                padding: '4px 10px',
-                borderRadius: 4,
-                fontSize: 12,
-                fontWeight: 'bold',
-                textTransform: 'uppercase',
-              }}
-            >
-              Status: {alert.status}
-            </span>
-          </div>
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(4, 1fr)',
-              gap: 12,
-              marginTop: 12,
-              fontSize: 13,
-              background: '#fff',
-              padding: 12,
-              borderRadius: 6,
-            }}
-          >
-            <div>
-              <b>Contact:</b> {alert.phone || 'N/A'}<br />
-              <b>Blood Type:</b> {alert.bloodType}
-            </div>
-            <div>
-              <b>Allergies:</b> <span style={{ color: 'red' }}>{alert.allergies}</span><br />
-              <b>Conditions:</b> {alert.chronicConditions}
-            </div>
-            <div>
-              <b>Emergency Contact:</b><br />
-              {alert.emergencyContact}
-            </div>
-            <div>
-              <b>GPS Coordinates:</b><br />
-              <code>{alert.latitude.toFixed(6)}, {alert.longitude.toFixed(6)}</code>
-              <div style={{ marginTop: 4 }}>
-                <a
-                  href={alert.googleMapsUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: '#2563eb', fontWeight: 'bold', textDecoration: 'underline' }}
-                >
-                  📍 Open in Google Maps
-                </a>
-              </div>
-            </div>
-          </div>
-
-          {/* Action dispatch buttons */}
-          <div style={{ display: 'flex', gap: 10, marginTop: 12, justifyContent: 'flex-end' }}>
-            {alert.status === 'triggered' && (
-              <button
-                onClick={() => updateStatus(alert.alertId, 'acknowledged')}
-                style={{ background: '#f59e0b', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                Acknowledge Alert
-              </button>
-            )}
-            {alert.status !== 'dispatched' && (
-              <button
-                onClick={() => updateStatus(alert.alertId, 'dispatched')}
-                style={{ background: '#0284c7', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                Dispatch Response Team
-              </button>
-            )}
-            <button
-              onClick={() => updateStatus(alert.alertId, 'resolved')}
-              style={{ background: '#10b981', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
-            >
-              Mark Resolved
-            </button>
-            <button
-              onClick={() => updateStatus(alert.alertId, 'false_alarm')}
-              style={{ background: '#6b7280', color: '#fff', border: 'none', padding: '6px 10px', borderRadius: 4, cursor: 'pointer' }}
-            >
-              False Alarm
-            </button>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-</file>
-
 <file path="desktop/src/components/InventoryManager.tsx">
 import React, { useState, useEffect } from 'react';
 
@@ -4082,173 +3745,6 @@ export default function InventoryManager() {
       </div>
 
     </section>
-  );
-}
-</file>
-
-<file path="desktop/src/components/ResponderConsole.tsx">
-// desktop/src/components/ResponderConsole.tsx
-import React, { useEffect, useState } from 'react';
-import { io } from 'socket.io-client';
-
-export default function ResponderConsole() {
-  const [activeAlerts, setActiveAlerts] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  const fetchAlerts = async () => {
-    setLoading(true);
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch('https://localhost:5000/api/emergency/active', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        setActiveAlerts(data);
-      }
-    } catch (err) {
-      console.error('Failed to fetch alerts:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-useEffect(() => {
-    fetchAlerts();
-
-    const token = localStorage.getItem('valetudo_token');
-    const socket = io('https://localhost:5000', {
-      auth: { token },
-      transports: ['polling', 'websocket'],
-    });
-
-    socket.on('emergency:new_alert', () => {
-      console.log('🚨 [ResponderConsole] Auto-refreshing list from real-time alert');
-      fetchAlerts();
-    });
-
-    socket.on('emergency:status_change', () => {
-      fetchAlerts();
-    });
-
-    return () => {
-      socket.disconnect();
-    };
-  }, []);
-
-  const updateStatus = async (alertId: number, status: string) => {
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      await fetch(`https://localhost:5000/api/emergency/${alertId}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ status }),
-      });
-      fetchAlerts();
-    } catch (err) {
-      alert('Failed to update status');
-    }
-  };
-
-  return (
-    <div style={{ background: '#ffffff', padding: 20, borderRadius: 8, border: '1px solid #cbd5e1' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <div>
-          <h3 style={{ margin: 0, color: '#dc2626' }}>🚨 Campus Emergency Quick-Response Dispatch</h3>
-          <small style={{ color: '#64748b' }}>PSU Lingayen Campus Security & Medical Quick-Response Unit</small>
-        </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <span style={{ background: '#fee2e2', color: '#dc2626', padding: '4px 10px', borderRadius: 4, fontWeight: 'bold', fontSize: 12 }}>
-            Dispatch: LIVE ON-DUTY
-          </span>
-          <button
-            onClick={fetchAlerts}
-            style={{ padding: '4px 10px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
-          >
-            🔄 Refresh
-          </button>
-        </div>
-      </div>
-
-      {loading ? (
-        <p style={{ color: '#64748b', fontSize: 13 }}>Checking dispatch telemetry...</p>
-      ) : activeAlerts.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '30px 0', color: '#16a34a', background: '#f0fdf4', borderRadius: 6 }}>
-          <b>🛡️ All Clear. No Active SOS Emergencies across PSU Lingayen Campus.</b>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {activeAlerts.map((a) => (
-            <div
-              key={a.alert_id}
-              style={{
-                border: '1px solid #f87171',
-                borderRadius: 6,
-                padding: 14,
-                background: '#fff5f5',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-              }}
-            >
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <b style={{ color: '#b91c1c', fontSize: 15 }}>
-                    {a.first_name} {a.last_name} ({a.phone || 'No phone'})
-                  </b>
-                  <span style={{ fontSize: 11, background: '#ef4444', color: '#fff', padding: '2px 8px', borderRadius: 4, fontWeight: 'bold', textTransform: 'uppercase' }}>
-                    {a.status}
-                  </span>
-                </div>
-                <div style={{ fontSize: 13, color: '#334155', marginTop: 4 }}>
-                  <b>Blood Type:</b> {a.blood_type || 'Unknown'} | <b>Allergies:</b>{' '}
-                  <span style={{ color: a.allergies ? '#dc2626' : '#16a34a', fontWeight: 'bold' }}>
-                    {a.allergies || 'None listed'}
-                  </span>
-                </div>
-                <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
-                  📍 Coordinates: <code>{Number(a.latitude).toFixed(6)}, {Number(a.longitude).toFixed(6)}</code>
-                  &nbsp;•&nbsp;
-                  <a
-                    href={`https://www.google.com/maps?q=${a.latitude},${a.longitude}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ color: '#0284c7', fontWeight: 'bold' }}
-                  >
-                    Open Live Pin
-                  </a>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: 8 }}>
-                {a.status === 'triggered' && (
-                  <button
-                    onClick={() => updateStatus(a.alert_id, 'acknowledged')}
-                    style={{ background: '#f59e0b', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
-                  >
-                    Acknowledge
-                  </button>
-                )}
-                {a.status !== 'dispatched' && (
-                  <button
-                    onClick={() => updateStatus(a.alert_id, 'dispatched')}
-                    style={{ background: '#0284c7', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
-                  >
-                    Dispatch Team
-                  </button>
-                )}
-                <button
-                  onClick={() => updateStatus(a.alert_id, 'resolved')}
-                  style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
-                >
-                  Resolve
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
   );
 }
 </file>
@@ -5061,638 +4557,119 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
 }
 </file>
 
-<file path="mobile/lib/services/emergency_alert_service.dart">
-// mobile/lib/services/emergency_alert_service.dart
-import 'dart:async';
-import 'dart:math' as math;
-import 'dart:typed_data';
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:socket_io_client/socket_io_client.dart' as io;
-import 'package:audioplayers/audioplayers.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:url_launcher/url_launcher.dart';
-import '../config/api_config.dart';
-import '../main.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-
-class EmergencyAlertService {
-  static final EmergencyAlertService _instance = EmergencyAlertService._internal();
-  factory EmergencyAlertService() => _instance;
-  EmergencyAlertService._internal();
-
-  io.Socket? _socket;
-  final AudioPlayer _audioPlayer = AudioPlayer();
-  final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
-  final FlutterSecureStorage _storage = const FlutterSecureStorage();
-
-  bool _isAlarmPlaying = false;
-  Timer? _vibrationTimer;
-  Uint8List? _cachedWavBytes;
-  bool _isInitialized = false;
-
-  // Role Guard: ONLY true when actively logged in as an EMERGENCY_RESPONDER
-  bool _isResponderActive = false;
-
-Future<void> initialize() async {
-    if (_isInitialized) return;
-    _isInitialized = true;
-
-    // 1. Initialize Android System Notification Channels
-    const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
-    const InitializationSettings initializationSettings =
-        InitializationSettings(android: initializationSettingsAndroid);
-
-    await _localNotifications.initialize(initializationSettings);
-
-    _localNotifications
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
-
-    // 2. Connect Persistent WebSocket with stored auth token
-    await connectSocket();
-  }
-
-  Future<void> connectSocket([String? token]) async {
-    final authToken = token ?? await _storage.read(key: 'jwt_token');
-
-    _socket?.disconnect();
-    _socket?.dispose();
-
-    try {
-      _socket = io.io(
-        ApiConfig.socketUrl,
-        io.OptionBuilder()
-            .setTransports(['websocket', 'polling'])
-            .setAuth({'token': authToken})
-            .enableAutoConnect()
-            .enableReconnection()
-            .setReconnectionDelay(1500)
-            .build(),
-      );
-
-      _socket!.onConnect((_) {
-        debugPrint('✅ [Socket.IO Mobile] Connected to Emergency Gateway');
-      });
-
-      _socket!.on('emergency:new_alert', (data) {
-        if (!_isResponderActive) {
-          debugPrint('🛡️ [Socket.IO Mobile] Broadcast ignored: Device not in Responder mode.');
-          return;
-        }
-
-        debugPrint('🚨 [Socket.IO Mobile] DISPATCHING TO ACTIVE RESPONDER: $data');
-        final alertMap = data is Map<String, dynamic> ? data : Map<String, dynamic>.from(data);
-        triggerEmergencyBroadcast(alertMap);
-      });
-    } catch (e) {
-      debugPrint('[Socket.IO Mobile] Error: $e');
-    }
-  }
-
-  /// Called ONLY by ResponderScreen when a responder logs in
-  void startResponderListener() async {
-    _isResponderActive = true;
-    await connectSocket();
-  }
-
-  /// Called when a responder logs out or closes the responder screen
-  void stopResponderListener() {
-    _isResponderActive = false;
-    stopAlarmSound();
-  }
-
-  // --- 1. STUDENT CONFIRMATION NOTIFICATION DROP ---
-  Future<void> showStudentSosSentNotification() async {
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'student_sos_confirm_channel',
-      'SOS Transmission Status',
-      channelDescription: 'Confirms that your SOS emergency alert was sent',
-      importance: Importance.max, // Forces Android to drop down from top of screen
-      priority: Priority.high,
-      ticker: 'SOS Sent',
-      playSound: true,
-      enableVibration: true,
-    );
-
-    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
-
-    await _localNotifications.show(
-      101,
-      '🚨 SOS Alert Sent',
-      'Your SOS has been sent. Campus responders have your GPS location and medical profile.',
-      platformDetails,
-    );
-  }
-
-  // --- 2. APPOINTMENT CONFIRMATION NOTIFICATION ---
-  Future<void> showAppointmentConfirmedNotification([
-    String? title,
-    String? body,
-  ]) async {
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'appointment_channel',
-      'Consultation Appointments',
-      channelDescription: 'Appointment booking confirmations and reminders',
-      importance: Importance.high,
-      priority: Priority.high,
-      ticker: 'Appointment Confirmed',
-      playSound: true,
-    );
-
-    const NotificationDetails platformDetails =
-        NotificationDetails(android: androidDetails);
-
-    await _localNotifications.show(
-      102,
-      title ?? '📅 Consultation Confirmed',
-      body ?? 'Your consultation appointment has been scheduled successfully.',
-      platformDetails,
-    );
-  }
-
-  // --- 3. RESPONDER SIREN & NOTIFICATION ENGINE ---
-  Uint8List _generateEasSirenWav({double durationSeconds = 3.0, int sampleRate = 22050}) {
-    if (_cachedWavBytes != null) return _cachedWavBytes!;
-
-    final int numSamples = (durationSeconds * sampleRate).toInt();
-    final int dataSize = numSamples * 2;
-    final int fileSize = 36 + dataSize;
-    final ByteData byteData = ByteData(44 + dataSize);
-
-    // RIFF Header
-    byteData.setUint8(0, 0x52); byteData.setUint8(1, 0x49); byteData.setUint8(2, 0x46); byteData.setUint8(3, 0x46);
-    byteData.setUint32(4, fileSize, Endian.little);
-    byteData.setUint8(8, 0x57); byteData.setUint8(9, 0x41); byteData.setUint8(10, 0x56); byteData.setUint8(11, 0x45);
-
-    // fmt chunk
-    byteData.setUint8(12, 0x66); byteData.setUint8(13, 0x6D); byteData.setUint8(14, 0x74); byteData.setUint8(15, 0x20);
-    byteData.setUint32(16, 16, Endian.little);
-    byteData.setUint16(20, 1, Endian.little);
-    byteData.setUint16(22, 1, Endian.little);
-    byteData.setUint32(24, sampleRate, Endian.little);
-    byteData.setUint32(28, sampleRate * 2, Endian.little);
-    byteData.setUint16(32, 2, Endian.little);
-    byteData.setUint16(34, 16, Endian.little);
-
-    // data chunk
-    byteData.setUint8(36, 0x64); byteData.setUint8(37, 0x61); byteData.setUint8(38, 0x74); byteData.setUint8(39, 0x61);
-    byteData.setUint32(40, dataSize, Endian.little);
-
-    int offset = 44;
-    const double f1 = 853.0;
-    const double f2 = 960.0;
-    const double twoPi = 2.0 * math.pi;
-
-    for (int i = 0; i < numSamples; i++) {
-      final double t = i / sampleRate;
-      final double sampleValue = 0.5 * (math.sin(twoPi * f1 * t) + math.sin(twoPi * f2 * t));
-      final int sample16 = (sampleValue * 28000).toInt().clamp(-32768, 32767);
-      byteData.setInt16(offset, sample16, Endian.little);
-      offset += 2;
-    }
-
-    _cachedWavBytes = byteData.buffer.asUint8List();
-    return _cachedWavBytes!;
-  }
-
-// --- 4. CLINIC QUEUE TURN NOTIFICATION DROP ---
-  Future<void> showQueueTurnNotification({
-    required String ticketNo,
-    required String doctorName,
-  }) async {
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'clinic_queue_turn_channel',
-      'Infirmary Queue Alerts',
-      channelDescription: 'Alerts when it is your turn for consultation',
-      importance: Importance.max,
-      priority: Priority.high,
-      ticker: 'Your Turn!',
-      playSound: true,
-      enableVibration: true,
-    );
-
-    const NotificationDetails platformDetails =
-        NotificationDetails(android: androidDetails);
-
-    await _localNotifications.show(
-      103,
-      '🔔 It\'s Your Turn! ($ticketNo)',
-      'Please proceed to the consultation room with $doctorName.',
-      platformDetails,
-    );
-  }
-
-  void playAlarmSound() async {
-    try {
-      _isAlarmPlaying = true;
-      await _audioPlayer.stop();
-      await _audioPlayer.setVolume(1.0);
-      await _audioPlayer.setReleaseMode(ReleaseMode.loop);
-
-      try {
-        await _audioPlayer.play(AssetSource('emr_sound.ogg'));
-      } catch (_) {
-        final wav = _generateEasSirenWav();
-        await _audioPlayer.play(BytesSource(wav));
-      }
-
-      _vibrationTimer?.cancel();
-      _vibrationTimer = Timer.periodic(const Duration(milliseconds: 600), (timer) {
-        if (!_isAlarmPlaying) {
-          timer.cancel();
-        } else {
-          HapticFeedback.heavyImpact();
-        }
-      });
-    } catch (e) {
-      debugPrint('Audio alarm error: $e');
-    }
-  }
-
-  void stopAlarmSound() async {
-    _isAlarmPlaying = false;
-    _vibrationTimer?.cancel();
-    try {
-      await _audioPlayer.stop();
-    } catch (_) {}
-  }
-
-  /// Triggers the Android System Notification Drop and the Full-Screen NDRRMC Red Alert (RESPONDER ONLY)
-  Future<void> triggerEmergencyBroadcast(Map<String, dynamic> alertData) async {
-    playAlarmSound();
-
-    final patientName = alertData['patientName'] ?? 'Unknown Student/Staff';
-    final studentNo = alertData['studentNo'] ?? 'Verified User';
-    final bloodType = alertData['bloodType'] ?? 'Unknown';
-    final allergies = alertData['allergies'] ?? 'None recorded';
-    final lat = double.tryParse(alertData['latitude'].toString()) ?? 0.0;
-    final lng = double.tryParse(alertData['longitude'].toString()) ?? 0.0;
-    final googleMapsUrl = alertData['googleMapsUrl'] ?? 'https://www.google.com/maps?q=$lat,$lng';
-
-    // 1. DROP ANDROID HEADS-UP NOTIFICATION (FROM TOP OF SCREEN)
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'emergency_sos_channel',
-      '🚨 Emergency SOS Alerts',
-      channelDescription: 'High priority campus emergency alerts',
-      importance: Importance.max,
-      priority: Priority.high,
-      ticker: 'EMERGENCY SOS',
-      fullScreenIntent: true,
-      category: AndroidNotificationCategory.alarm,
-      enableVibration: true,
-      playSound: true,
-    );
-
-    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
-
-    await _localNotifications.show(
-      999,
-      '🚨 EMERGENCY SOS: $patientName',
-      'Location: ${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)} | Blood: $bloodType | Allergies: $allergies',
-      platformDetails,
-    );
-
-    // 2. DISPLAY FULL-SCREEN NDRRMC RED DIALOG
-    final context = navigatorKey.currentContext;
-    if (context == null || !context.mounted) return;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF7F1D1D),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: Colors.amber, width: 3),
-          ),
-          contentPadding: const EdgeInsets.all(16),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.amber,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.warning_rounded, color: Colors.black, size: 26),
-                      SizedBox(width: 8),
-                      Text(
-                        'EMERGENCY ALERT (CRITICAL)',
-                        style: TextStyle(
-                          color: Colors.black,
-                          fontWeight: FontWeight.w900,
-                          fontSize: 14,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'PSU DISASTER RISK REDUCTION & INFIRMARY PROTOCOL',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold),
-                ),
-                const Divider(color: Colors.white24, height: 20),
-
-                Text(
-                  patientName,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                Text('ID: $studentNo', style: const TextStyle(color: Colors.white70, fontSize: 13)),
-                const SizedBox(height: 14),
-
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.black45,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.red.shade400),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('🩸 Blood Type: $bloodType',
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                      const SizedBox(height: 4),
-                      Text('⚠️ Allergies: $allergies',
-                          style: const TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 13)),
-                      const SizedBox(height: 4),
-                      Text('📍 Coordinates: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
-                          style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue.shade700,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size.fromHeight(42),
-                  ),
-                  onPressed: () async {
-                    final uri = Uri.parse(googleMapsUrl);
-                    try {
-                      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-                      if (!launched) {
-                        await launchUrl(uri, mode: LaunchMode.platformDefault);
-                      }
-                    } catch (_) {}
-                  },
-                  icon: const Icon(Icons.navigation, size: 18),
-                  label: const Text('Open in Google Maps', style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
-                const SizedBox(height: 10),
-
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: Colors.red.shade900,
-                    minimumSize: const Size.fromHeight(46),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                  onPressed: () {
-                    stopAlarmSound();
-                    if (ctx.mounted) {
-                      Navigator.pop(ctx);
-                    }
-                  },
-                  child: const Text(
-                    'SILENCE & ACKNOWLEDGE ALARM',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-</file>
-
-<file path="server/src/routes/emergency.js">
-// server/src/routes/emergency.js
-import express from 'express';
-import { pool } from '../db.js';
-import { authenticateToken } from '../auth.js';
-import { decrypt } from '../utils/cryptoVault.js';
-import { requireRoles } from '../middleware/rbac.js';
-
-export default function emergencyRouter(io) {
-  const router = express.Router();
-
-  // 1. POST /api/emergency/sos (Fixed coordinate order for SRID 4326)
-  router.post('/sos', authenticateToken, async (req, res) => {
-    try {
-      const userId = req.user.user_id;
-      const { latitude, longitude, notes } = req.body;
-
-      if (!latitude || !longitude) {
-        return res.status(400).json({ error: 'Latitude and Longitude are required coordinates.' });
-      }
-
-      // In MySQL 8.0 SRID 4326, the axis order is Latitude then Longitude
-      const [insertResult] = await pool.query(
-        `INSERT INTO EMERGENCY_ALERTS (user_id, location, status, notes)
-         VALUES (?, ST_SRID(POINT(?, ?), 4326), 'triggered', ?)`,
-        [userId, Number(longitude), Number(latitude), notes || 'Emergency SOS pressed']
-      );
-
-      const alertId = insertResult.insertId;
-
-      const [details] = await pool.query(
-        `SELECT u.user_id, u.first_name, u.last_name, u.phone, u.email,
-                sp.student_no, sp.course,
-                hp.blood_type, hp.allergies, hp.chronic_conditions,
-                hp.emergency_contact_name, hp.emergency_contact_phone
-         FROM USERS u
-         LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
-         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
-         WHERE u.user_id = ?`,
-        [userId]
-      );
-
-      const patientInfo = details[0] || {};
-      const decryptedAllergies = decrypt(patientInfo.allergies) || 'None listed';
-      const decryptedConditions = decrypt(patientInfo.chronic_conditions) || 'None listed';
-
-      const alertPayload = {
-        alertId,
-        userId,
-        patientName: `${patientInfo.first_name} ${patientInfo.last_name}`,
-        phone: patientInfo.phone,
-        studentNo: patientInfo.student_no,
-        course: patientInfo.course,
-        bloodType: patientInfo.blood_type || 'Unknown',
-        allergies: decryptedAllergies,
-        chronicConditions: decryptedConditions,
-        emergencyContact: `${patientInfo.emergency_contact_name || 'N/A'} (${patientInfo.emergency_contact_phone || 'N/A'})`,
-        latitude: Number(latitude),
-        longitude: Number(longitude),
-        googleMapsUrl: `https://www.google.com/maps?q=${latitude},${longitude}`,
-        status: 'triggered',
-        createdAt: new Date().toISOString(),
-      };
-
-      // Broadcast to both privileged responders and clinical banner listeners
-      io.to('responders').emit('emergency:new_alert', alertPayload);
-      io.emit('emergency:new_alert', alertPayload);
-
-      res.status(201).json({
-        message: 'Emergency alert dispatched to PSU Clinic and Quick-Response team.',
-        alertId,
-      });
-    } catch (error) {
-      console.error('SOS Trigger Error:', error);
-      res.status(500).json({ error: 'Failed to process SOS alert.' });
-    }
-  });
-
-  // 2. GET /api/emergency/active
-  router.get('/active', authenticateToken, requireRoles(['EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN']), async (req, res) => {
-    try {
-      const [alerts] = await pool.query(
-        `SELECT a.alert_id, a.user_id, a.latitude, a.longitude, a.status, a.created_at, a.notes,
-                u.first_name, u.last_name, u.phone,
-                hp.blood_type, hp.allergies
-         FROM EMERGENCY_ALERTS a
-         JOIN USERS u ON a.user_id = u.user_id
-         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
-         WHERE a.status IN ('triggered', 'acknowledged', 'dispatched')
-         ORDER BY a.created_at DESC`
-      );
-
-      const decryptedAlerts = alerts.map((a) => ({
-        ...a,
-        allergies: decrypt(a.allergies) || 'None',
-      }));
-
-      res.json(decryptedAlerts);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to fetch active alerts.' });
-    }
-  });
-
-  // 3. PATCH /api/emergency/:alertId/status
-  router.patch('/:alertId/status', authenticateToken, requireRoles(['EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN']), async (req, res) => {
-    try {
-      const { alertId } = req.params;
-      const { status } = req.body;
-      const responderId = req.user.user_id;
-
-      if (!['acknowledged', 'dispatched', 'resolved', 'false_alarm'].includes(status)) {
-        return res.status(400).json({ error: 'Invalid status update.' });
-      }
-
-      let extraUpdate = '';
-      const params = [status, responderId];
-
-      if (status === 'acknowledged') {
-        extraUpdate = ', acknowledged_at = CURRENT_TIMESTAMP';
-      } else if (status === 'resolved' || status === 'false_alarm') {
-        extraUpdate = `, resolved_at = CURRENT_TIMESTAMP, 
-                       response_time_seconds = TIMESTAMPDIFF(SECOND, created_at, CURRENT_TIMESTAMP)`;
-      }
-
-      params.push(alertId);
-
-      await pool.query(
-        `UPDATE EMERGENCY_ALERTS 
-         SET status = ?, assigned_responder_id = ? ${extraUpdate}
-         WHERE alert_id = ?`,
-        params
-      );
-
-      io.emit('emergency:status_change', { alertId: Number(alertId), status, responderId });
-
-      res.json({ message: `Alert #${alertId} updated to ${status}.` });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to update alert status.' });
-    }
-  });
-
-  return router;
-}
-</file>
-
-<file path="desktop/src/components/NurseConsole.tsx">
-// desktop/src/components/NurseConsole.tsx
-import { useState, useEffect } from 'react';
-import QrIntakeScanner from './QrIntakeScanner';
-import InventoryManager from './InventoryManager';
-import { io } from 'socket.io-client';
-
-interface QueueItem {
-  queue_id: number;
-  ticket_no: string;
-  first_name: string;
-  last_name: string;
-  student_no?: string;
-  visit_type: string;
+<file path="desktop/src/components/EmergencyAlertBanner.tsx">
+// desktop/src/components/EmergencyAlertBanner.tsx
+import React, { useEffect, useState } from 'react';
+import { io, Socket } from 'socket.io-client';
+
+interface EmergencyAlert {
+  alertId: number;
+  userId: number;
+  patientName: string;
+  phone: string;
+  studentNo: string;
+  course: string;
+  bloodType: string;
+  allergies: string;
+  chronicConditions: string;
+  emergencyContact: string;
+  latitude: number;
+  longitude: number;
+  googleMapsUrl: string;
   status: string;
-  arrival_time: string;
+  createdAt: string;
 }
 
-export default function NurseConsole() {
-  const [, setVerifiedPatient] = useState<any>(null);
-  const [, setScannedToken] = useState('');
+export default function EmergencyAlertBanner() {
+  const [alerts, setAlerts] = useState<EmergencyAlert[]>([]);
 
-  // Live database queue state
-  const [queue, setQueue] = useState<QueueItem[]>([]);
-  const [loadingQueue, setLoadingQueue] = useState(false);
-
-  const fetchLiveQueue = async () => {
-    setLoadingQueue(true);
-    const token = localStorage.getItem('valetudo_token');
+  // Synthesize an audible emergency alert beep using Web Audio API
+  const playEmergencyAlarm = () => {
     try {
-      const res = await fetch('https://localhost:5000/api/appointments/queue/today', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        setQueue(data);
-      }
-    } catch (err) {
-      console.error('Error loading live queue:', err);
-    } finally {
-      setLoadingQueue(false);
-    }
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(850, audioCtx.currentTime); // 850 Hz alarm tone
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.6); // 600ms chime
+    } catch (_) {}
   };
 
-    useEffect(() => {
-    fetchLiveQueue();
+  useEffect(() => {
+    // 1. Fetch initial active alerts from DB
+    const fetchActiveAlerts = async () => {
+      const token = localStorage.getItem('valetudo_token');
+      if (!token) return;
+      try {
+        const res = await fetch('https://localhost:5000/api/emergency/active', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          const mapped: EmergencyAlert[] = data.map((a: any) => ({
+            alertId: a.alert_id,
+            userId: a.user_id,
+            patientName: `${a.first_name} ${a.last_name}`,
+            phone: a.phone,
+            studentNo: 'Verified',
+            course: 'PSU Student',
+            bloodType: a.blood_type || 'Unknown',
+            allergies: a.allergies || 'None',
+            chronicConditions: 'N/A',
+            emergencyContact: 'Check Profile',
+            latitude: Number(a.latitude),
+            longitude: Number(a.longitude),
+            googleMapsUrl: `https://www.google.com/maps?q=${a.latitude},${a.longitude}`,
+            status: a.status,
+            createdAt: a.created_at,
+          }));
+          setAlerts(mapped);
+        }
+      } catch (_) {}
+    };
 
+fetchActiveAlerts();
+
+    // 2. Connect Socket.IO with token and transport fallbacks
     const token = localStorage.getItem('valetudo_token');
-    const socket = io('https://localhost:5000', {
+    const socket: Socket = io('https://localhost:5000', {
       auth: { token },
-      transports: ['websocket', 'polling'],
-    });
-    socket.on('queue:updated', () => {
-      fetchLiveQueue();
+      transports: ['polling', 'websocket'],
     });
 
-    // 🔔 Notify Clinic Nurse of new bookings
-    socket.on('appointment:booked', (newBooking: any) => {
-      if (window.electronAPI?.showNotification) {
-        window.electronAPI.showNotification({
-          title: '📋 New Appointment in System',
-          body: `${newBooking.patientName || 'Student'} booked for ${newBooking.date_time}.`,
+    socket.on('connect', () => {
+      console.log('✅ [EmergencyAlertBanner] Live Socket connected:', socket.id);
+    });
+
+    socket.on('connect_error', (err) => {
+      console.error('❌ [EmergencyAlertBanner] Socket error:', err.message);
+    });
+
+    socket.on('emergency:new_alert', (newAlert: EmergencyAlert) => {
+      console.log('🚨 [EmergencyAlertBanner] New SOS received in real-time:', newAlert);
+      playEmergencyAlarm();
+
+      // Trigger native OS system tray notification
+      if ((window as any).electronAPI?.showNotification) {
+        (window as any).electronAPI.showNotification({
+          title: `🚨 SOS EMERGENCY: ${newAlert.patientName}`,
+          body: `Location: ${newAlert.latitude.toFixed(5)}, ${newAlert.longitude.toFixed(5)}. Blood: ${newAlert.bloodType}. Allergies: ${newAlert.allergies}`,
         });
       }
+
+      // Immediately display the red banner at the top of the UI
+      setAlerts((prev) => [newAlert, ...prev.filter((a) => a.alertId !== newAlert.alertId)]);
+    });
+
+    socket.on('emergency:status_change', ({ alertId, status }: { alertId: number; status: string }) => {
+      setAlerts((prev) =>
+        prev
+          .map((a) => (a.alertId === alertId ? { ...a, status } : a))
+          .filter((a) => a.status !== 'resolved' && a.status !== 'false_alarm')
+      );
     });
 
     return () => {
@@ -5700,126 +4677,218 @@ export default function NurseConsole() {
     };
   }, []);
 
-  // Nurse advances the queue: calls the next 'waiting' patient
-  const callNextPatient = async () => {
-    const nextPatient = queue.find((p) => p.status === 'waiting');
-    if (!nextPatient) {
-      alert('No more waiting patients in the queue!');
-      return;
-    }
-
+  const updateStatus = async (alertId: number, status: string) => {
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`https://localhost:5000/api/appointments/queue/${nextPatient.queue_id}/status`, {
+      await fetch(`https://localhost:5000/api/emergency/${alertId}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ status: 'in-consultation' }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status }),
       });
+    } catch (err: any) {
+      alert('Failed to update status: ' + err.message);
+    }
+  };
 
-      if (res.ok) {
-        fetchLiveQueue();
+  // --- TEST BUTTON HANDLER 1: INSTANT NATIVE OS NOTIFICATION ---
+  const handleTestDirectNotification = () => {
+    playEmergencyAlarm();
+    if ((window as any).electronAPI?.showNotification) {
+      (window as any).electronAPI.showNotification({
+        title: '🚨 Valetudo HealthLink — SOS Alert Test',
+        body: 'Daniella Movida (BSIT) reported a medical emergency at PSU Lingayen Library. Allergies: Penicillin.',
+      });
+    } else {
+      alert('electronAPI.showNotification not detected. Ensure preload.cjs is configured.');
+    }
+  };
+
+  // --- TEST BUTTON HANDLER 2: FULL STACK REAL-TIME SOS TRIGGER ---
+  const handleTestFullStackSOS = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('https://localhost:5000/api/emergency/sos', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          latitude: 16.029851,
+          longitude: 120.228543,
+          notes: 'SIMULATED SOS: PSU Lingayen Administration Building',
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        alert('Server SOS error: ' + (data.error || 'Check server connection'));
       }
-    } catch (err) {
-      alert('Failed to update queue ticket.');
+    } catch (err: any) {
+      alert('Could not trigger backend test SOS: ' + err.message);
     }
   };
 
   return (
-    <div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 20, marginBottom: 24 }}>
-        {/* 1. QR Health Pass Scanner & Vitals Verification */}
-        <QrIntakeScanner
-          onPatientVerified={(patient, token) => {
-            setVerifiedPatient(patient);
-            setScannedToken(token);
-            // Auto refresh queue when a patient is checked in
-            fetchLiveQueue();
+    <div style={{ marginBottom: 20 }}>
+      {/* TEST TRIGGER TOOLBAR */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: alerts.length > 0 ? 12 : 0,
+        }}
+      >
+        <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 'bold' }}>TEST HARNESS:</span>
+        <button
+          type="button"
+          onClick={handleTestDirectNotification}
+          style={{
+            padding: '4px 10px',
+            fontSize: 12,
+            borderRadius: 4,
+            border: '1px solid #cbd5e1',
+            background: '#f8fafc',
+            color: '#334155',
+            cursor: 'pointer',
+            fontWeight: 'bold',
           }}
-        />
+          title="Directly test the OS banner without server"
+        >
+          🧪 Test OS Notification (Instant)
+        </button>
 
-        {/* 2. Live Triage Queue (Feature 7 connected to MySQL QUEUE table) */}
-        <section style={{ padding: 16, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <div>
-              <h3 style={{ margin: 0, color: '#0f766e' }}>2. Live Triage Queue (Feature 7)</h3>
-              <small style={{ color: '#64748b' }}>Active daily clinic queue tickets</small>
+        <button
+          type="button"
+          onClick={handleTestFullStackSOS}
+          style={{
+            padding: '4px 10px',
+            fontSize: 12,
+            borderRadius: 4,
+            border: '1px solid #fca5a5',
+            background: '#fef2f2',
+            color: '#dc2626',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+          }}
+          title="Sends real SOS request to backend and broadcasts over Socket.IO"
+        >
+          🚨 Trigger Live SOS (Full System Test)
+        </button>
+      </div>
+
+      {/* ACTIVE EMERGENCY ALERTS BANNER */}
+      {alerts.map((alert) => (
+        <div
+          key={alert.alertId}
+          style={{
+            background: '#fee2e2',
+            border: '2px solid #ef4444',
+            borderRadius: 8,
+            padding: 16,
+            marginBottom: 12,
+            boxShadow: '0 4px 6px -1px rgba(239, 68, 68, 0.2)',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 24 }}>🚨</span>
+              <h3 style={{ margin: 0, color: '#b91c1c' }}>
+                ACTIVE SOS ALERT: {alert.patientName} ({alert.studentNo || 'Student'})
+              </h3>
             </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button
-                onClick={callNextPatient}
-                style={{ padding: '6px 12px', background: '#0f766e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
-              >
-                📢 Call Next
-              </button>
-              <button
-                onClick={fetchLiveQueue}
-                style={{ padding: '6px 10px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
-              >
-                🔄
-              </button>
+            <span
+              style={{
+                background: '#ef4444',
+                color: '#fff',
+                padding: '4px 10px',
+                borderRadius: 4,
+                fontSize: 12,
+                fontWeight: 'bold',
+                textTransform: 'uppercase',
+              }}
+            >
+              Status: {alert.status}
+            </span>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(4, 1fr)',
+              gap: 12,
+              marginTop: 12,
+              fontSize: 13,
+              background: '#fff',
+              padding: 12,
+              borderRadius: 6,
+            }}
+          >
+            <div>
+              <b>Contact:</b> {alert.phone || 'N/A'}<br />
+              <b>Blood Type:</b> {alert.bloodType}
+            </div>
+            <div>
+              <b>Allergies:</b> <span style={{ color: 'red' }}>{alert.allergies}</span><br />
+              <b>Conditions:</b> {alert.chronicConditions}
+            </div>
+            <div>
+              <b>Emergency Contact:</b><br />
+              {alert.emergencyContact}
+            </div>
+            <div>
+              <b>GPS Coordinates:</b><br />
+              <code>{alert.latitude.toFixed(6)}, {alert.longitude.toFixed(6)}</code>
+              <div style={{ marginTop: 4 }}>
+                <a
+                  href={alert.googleMapsUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: '#2563eb', fontWeight: 'bold', textDecoration: 'underline' }}
+                >
+                  📍 Open in Google Maps
+                </a>
+              </div>
             </div>
           </div>
 
-          {loadingQueue ? (
-            <p style={{ color: '#64748b', fontSize: 13 }}>Updating queue...</p>
-          ) : queue.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '24px 0', color: '#94a3b8', fontSize: 13 }}>
-              No patients currently waiting in the infirmary queue.
-            </div>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, textAlign: 'left' }}>
-              <thead>
-                <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#64748b' }}>
-                  <th style={{ padding: '6px' }}>Ticket</th>
-                  <th style={{ padding: '6px' }}>Patient Name</th>
-                  <th style={{ padding: '6px' }}>Arrival</th>
-                  <th style={{ padding: '6px' }}>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {queue.map((q) => {
-                  let badgeBg = '#fef3c7';
-                  let badgeColor = '#b45309';
-
-                  if (q.status === 'in-consultation') {
-                    badgeBg = '#dcfce7';
-                    badgeColor = '#15803d';
-                  }
-
-                  return (
-                    <tr key={q.queue_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '8px 6px', fontWeight: 'bold', color: '#0f766e' }}>{q.ticket_no}</td>
-                      <td style={{ padding: '8px 6px' }}>
-                        <b>{q.first_name} {q.last_name}</b>
-                        <div style={{ fontSize: 11, color: '#64748b' }}>{q.visit_type}</div>
-                      </td>
-                      <td style={{ padding: '8px 6px', fontSize: 12, color: '#64748b' }}>{q.arrival_time}</td>
-                      <td style={{ padding: '8px 6px' }}>
-                        <span
-                          style={{
-                            padding: '2px 8px',
-                            borderRadius: 4,
-                            fontSize: 11,
-                            fontWeight: 'bold',
-                            background: badgeBg,
-                            color: badgeColor,
-                            textTransform: 'capitalize',
-                          }}
-                        >
-                          {q.status}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </section>
-      </div>
-
-      {/* 3. Medicine Inventory Management */}
-      <InventoryManager />
+          {/* Action dispatch buttons */}
+          <div style={{ display: 'flex', gap: 10, marginTop: 12, justifyContent: 'flex-end' }}>
+            {alert.status === 'triggered' && (
+              <button
+                onClick={() => updateStatus(alert.alertId, 'acknowledged')}
+                style={{ background: '#f59e0b', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Acknowledge Alert
+              </button>
+            )}
+            {alert.status !== 'dispatched' && (
+              <button
+                onClick={() => updateStatus(alert.alertId, 'dispatched')}
+                style={{ background: '#0284c7', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Dispatch Response Team
+              </button>
+            )}
+            <button
+              onClick={() => updateStatus(alert.alertId, 'resolved')}
+              style={{ background: '#10b981', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
+            >
+              Mark Resolved
+            </button>
+            <button
+              onClick={() => updateStatus(alert.alertId, 'false_alarm')}
+              style={{ background: '#6b7280', color: '#fff', border: 'none', padding: '6px 10px', borderRadius: 4, cursor: 'pointer' }}
+            >
+              False Alarm
+            </button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -6553,6 +5622,741 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
       )}
     </section>
   );
+}
+</file>
+
+<file path="desktop/src/components/ResponderConsole.tsx">
+// desktop/src/components/ResponderConsole.tsx
+import React, { useEffect, useState } from 'react';
+import { io } from 'socket.io-client';
+
+export default function ResponderConsole() {
+  const [activeAlerts, setActiveAlerts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const fetchAlerts = async () => {
+    setLoading(true);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('https://localhost:5000/api/emergency/active', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setActiveAlerts(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch alerts:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+useEffect(() => {
+    fetchAlerts();
+
+    const token = localStorage.getItem('valetudo_token');
+    const socket = io('https://localhost:5000', {
+      auth: { token },
+      transports: ['polling', 'websocket'],
+    });
+
+    socket.on('emergency:new_alert', () => {
+      console.log('🚨 [ResponderConsole] Auto-refreshing list from real-time alert');
+      fetchAlerts();
+    });
+
+    socket.on('emergency:status_change', () => {
+      fetchAlerts();
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
+
+  const updateStatus = async (alertId: number, status: string) => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      await fetch(`https://localhost:5000/api/emergency/${alertId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status }),
+      });
+      fetchAlerts();
+    } catch (err) {
+      alert('Failed to update status');
+    }
+  };
+
+  return (
+    <div style={{ background: '#ffffff', padding: 20, borderRadius: 8, border: '1px solid #cbd5e1' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div>
+          <h3 style={{ margin: 0, color: '#dc2626' }}>🚨 Campus Emergency Quick-Response Dispatch</h3>
+          <small style={{ color: '#64748b' }}>PSU Lingayen Campus Security & Medical Quick-Response Unit</small>
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <span style={{ background: '#fee2e2', color: '#dc2626', padding: '4px 10px', borderRadius: 4, fontWeight: 'bold', fontSize: 12 }}>
+            Dispatch: LIVE ON-DUTY
+          </span>
+          <button
+            onClick={fetchAlerts}
+            style={{ padding: '4px 10px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
+          >
+            🔄 Refresh
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <p style={{ color: '#64748b', fontSize: 13 }}>Checking dispatch telemetry...</p>
+      ) : activeAlerts.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '30px 0', color: '#16a34a', background: '#f0fdf4', borderRadius: 6 }}>
+          <b>🛡️ All Clear. No Active SOS Emergencies across PSU Lingayen Campus.</b>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {activeAlerts.map((a) => (
+            <div
+              key={a.alert_id}
+              style={{
+                border: '1px solid #f87171',
+                borderRadius: 6,
+                padding: 14,
+                background: '#fff5f5',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <b style={{ color: '#b91c1c', fontSize: 15 }}>
+                    {a.first_name} {a.last_name} ({a.phone || 'No phone'})
+                  </b>
+                  <span style={{ fontSize: 11, background: '#ef4444', color: '#fff', padding: '2px 8px', borderRadius: 4, fontWeight: 'bold', textTransform: 'uppercase' }}>
+                    {a.status}
+                  </span>
+                </div>
+                <div style={{ fontSize: 13, color: '#334155', marginTop: 4 }}>
+                  <b>Blood Type:</b> {a.blood_type || 'Unknown'} | <b>Allergies:</b>{' '}
+                  <span style={{ color: a.allergies ? '#dc2626' : '#16a34a', fontWeight: 'bold' }}>
+                    {a.allergies || 'None listed'}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+                  📍 Coordinates: <code>{Number(a.latitude).toFixed(6)}, {Number(a.longitude).toFixed(6)}</code>
+                  &nbsp;•&nbsp;
+                  <a
+                    href={`https://www.google.com/maps?q=${a.latitude},${a.longitude}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: '#0284c7', fontWeight: 'bold' }}
+                  >
+                    Open Live Pin
+                  </a>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                {a.status === 'triggered' && (
+                  <button
+                    onClick={() => updateStatus(a.alert_id, 'acknowledged')}
+                    style={{ background: '#f59e0b', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
+                  >
+                    Acknowledge
+                  </button>
+                )}
+                {a.status !== 'dispatched' && (
+                  <button
+                    onClick={() => updateStatus(a.alert_id, 'dispatched')}
+                    style={{ background: '#0284c7', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
+                  >
+                    Dispatch Team
+                  </button>
+                )}
+                <button
+                  onClick={() => updateStatus(a.alert_id, 'resolved')}
+                  style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
+                >
+                  Resolve
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+</file>
+
+<file path="mobile/lib/services/emergency_alert_service.dart">
+// mobile/lib/services/emergency_alert_service.dart
+import 'dart:async';
+import 'dart:math' as math;
+import 'dart:typed_data';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:socket_io_client/socket_io_client.dart' as io;
+import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../config/api_config.dart';
+import '../main.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+class EmergencyAlertService {
+  static final EmergencyAlertService _instance = EmergencyAlertService._internal();
+  factory EmergencyAlertService() => _instance;
+  EmergencyAlertService._internal();
+
+  io.Socket? _socket;
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
+  final FlutterSecureStorage _storage = const FlutterSecureStorage();
+
+  bool _isAlarmPlaying = false;
+  Timer? _vibrationTimer;
+  Uint8List? _cachedWavBytes;
+  bool _isInitialized = false;
+
+  // Role Guard: ONLY true when actively logged in as an EMERGENCY_RESPONDER
+  bool _isResponderActive = false;
+
+Future<void> initialize() async {
+    if (_isInitialized) return;
+    _isInitialized = true;
+
+    // 1. Initialize Android System Notification Channels
+    const AndroidInitializationSettings initializationSettingsAndroid =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+    const InitializationSettings initializationSettings =
+        InitializationSettings(android: initializationSettingsAndroid);
+
+    await _localNotifications.initialize(initializationSettings);
+
+    _localNotifications
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.requestNotificationsPermission();
+
+    // 2. Connect Persistent WebSocket with stored auth token
+    await connectSocket();
+  }
+
+  Future<void> connectSocket([String? token]) async {
+    final authToken = token ?? await _storage.read(key: 'jwt_token');
+
+    _socket?.disconnect();
+    _socket?.dispose();
+
+    try {
+      _socket = io.io(
+        ApiConfig.socketUrl,
+        io.OptionBuilder()
+            .setTransports(['websocket', 'polling'])
+            .setAuth({'token': authToken})
+            .enableAutoConnect()
+            .enableReconnection()
+            .setReconnectionDelay(1500)
+            .build(),
+      );
+
+      _socket!.onConnect((_) {
+        debugPrint('✅ [Socket.IO Mobile] Connected to Emergency Gateway');
+      });
+
+      _socket!.on('emergency:new_alert', (data) {
+        if (!_isResponderActive) {
+          debugPrint('🛡️ [Socket.IO Mobile] Broadcast ignored: Device not in Responder mode.');
+          return;
+        }
+
+        debugPrint('🚨 [Socket.IO Mobile] DISPATCHING TO ACTIVE RESPONDER: $data');
+        final alertMap = data is Map<String, dynamic> ? data : Map<String, dynamic>.from(data);
+        triggerEmergencyBroadcast(alertMap);
+      });
+    } catch (e) {
+      debugPrint('[Socket.IO Mobile] Error: $e');
+    }
+  }
+
+  /// Called ONLY by ResponderScreen when a responder logs in
+  void startResponderListener() async {
+    _isResponderActive = true;
+    await connectSocket();
+  }
+
+  /// Called when a responder logs out or closes the responder screen
+  void stopResponderListener() {
+    _isResponderActive = false;
+    stopAlarmSound();
+  }
+
+  // --- 1. STUDENT CONFIRMATION NOTIFICATION DROP ---
+  Future<void> showStudentSosSentNotification() async {
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'student_sos_confirm_channel',
+      'SOS Transmission Status',
+      channelDescription: 'Confirms that your SOS emergency alert was sent',
+      importance: Importance.max, // Forces Android to drop down from top of screen
+      priority: Priority.high,
+      ticker: 'SOS Sent',
+      playSound: true,
+      enableVibration: true,
+    );
+
+    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
+
+    await _localNotifications.show(
+      101,
+      '🚨 SOS Alert Sent',
+      'Your SOS has been sent. Campus responders have your GPS location and medical profile.',
+      platformDetails,
+    );
+  }
+
+  // --- 2. APPOINTMENT CONFIRMATION NOTIFICATION ---
+  Future<void> showAppointmentConfirmedNotification([
+    String? title,
+    String? body,
+  ]) async {
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'appointment_channel',
+      'Consultation Appointments',
+      channelDescription: 'Appointment booking confirmations and reminders',
+      importance: Importance.high,
+      priority: Priority.high,
+      ticker: 'Appointment Confirmed',
+      playSound: true,
+    );
+
+    const NotificationDetails platformDetails =
+        NotificationDetails(android: androidDetails);
+
+    await _localNotifications.show(
+      102,
+      title ?? '📅 Consultation Confirmed',
+      body ?? 'Your consultation appointment has been scheduled successfully.',
+      platformDetails,
+    );
+  }
+
+  // --- 3. RESPONDER SIREN & NOTIFICATION ENGINE ---
+  Uint8List _generateEasSirenWav({double durationSeconds = 3.0, int sampleRate = 22050}) {
+    if (_cachedWavBytes != null) return _cachedWavBytes!;
+
+    final int numSamples = (durationSeconds * sampleRate).toInt();
+    final int dataSize = numSamples * 2;
+    final int fileSize = 36 + dataSize;
+    final ByteData byteData = ByteData(44 + dataSize);
+
+    // RIFF Header
+    byteData.setUint8(0, 0x52); byteData.setUint8(1, 0x49); byteData.setUint8(2, 0x46); byteData.setUint8(3, 0x46);
+    byteData.setUint32(4, fileSize, Endian.little);
+    byteData.setUint8(8, 0x57); byteData.setUint8(9, 0x41); byteData.setUint8(10, 0x56); byteData.setUint8(11, 0x45);
+
+    // fmt chunk
+    byteData.setUint8(12, 0x66); byteData.setUint8(13, 0x6D); byteData.setUint8(14, 0x74); byteData.setUint8(15, 0x20);
+    byteData.setUint32(16, 16, Endian.little);
+    byteData.setUint16(20, 1, Endian.little);
+    byteData.setUint16(22, 1, Endian.little);
+    byteData.setUint32(24, sampleRate, Endian.little);
+    byteData.setUint32(28, sampleRate * 2, Endian.little);
+    byteData.setUint16(32, 2, Endian.little);
+    byteData.setUint16(34, 16, Endian.little);
+
+    // data chunk
+    byteData.setUint8(36, 0x64); byteData.setUint8(37, 0x61); byteData.setUint8(38, 0x74); byteData.setUint8(39, 0x61);
+    byteData.setUint32(40, dataSize, Endian.little);
+
+    int offset = 44;
+    const double f1 = 853.0;
+    const double f2 = 960.0;
+    const double twoPi = 2.0 * math.pi;
+
+    for (int i = 0; i < numSamples; i++) {
+      final double t = i / sampleRate;
+      final double sampleValue = 0.5 * (math.sin(twoPi * f1 * t) + math.sin(twoPi * f2 * t));
+      final int sample16 = (sampleValue * 28000).toInt().clamp(-32768, 32767);
+      byteData.setInt16(offset, sample16, Endian.little);
+      offset += 2;
+    }
+
+    _cachedWavBytes = byteData.buffer.asUint8List();
+    return _cachedWavBytes!;
+  }
+
+// --- 4. CLINIC QUEUE TURN NOTIFICATION DROP ---
+  Future<void> showQueueTurnNotification({
+    required String ticketNo,
+    required String doctorName,
+  }) async {
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'clinic_queue_turn_channel',
+      'Infirmary Queue Alerts',
+      channelDescription: 'Alerts when it is your turn for consultation',
+      importance: Importance.max,
+      priority: Priority.high,
+      ticker: 'Your Turn!',
+      playSound: true,
+      enableVibration: true,
+    );
+
+    const NotificationDetails platformDetails =
+        NotificationDetails(android: androidDetails);
+
+    await _localNotifications.show(
+      103,
+      '🔔 It\'s Your Turn! ($ticketNo)',
+      'Please proceed to the consultation room with $doctorName.',
+      platformDetails,
+    );
+  }
+
+  void playAlarmSound() async {
+    try {
+      _isAlarmPlaying = true;
+      await _audioPlayer.stop();
+      await _audioPlayer.setVolume(1.0);
+      await _audioPlayer.setReleaseMode(ReleaseMode.loop);
+
+      try {
+        await _audioPlayer.play(AssetSource('emr_sound.ogg'));
+      } catch (_) {
+        final wav = _generateEasSirenWav();
+        await _audioPlayer.play(BytesSource(wav));
+      }
+
+      _vibrationTimer?.cancel();
+      _vibrationTimer = Timer.periodic(const Duration(milliseconds: 600), (timer) {
+        if (!_isAlarmPlaying) {
+          timer.cancel();
+        } else {
+          HapticFeedback.heavyImpact();
+        }
+      });
+    } catch (e) {
+      debugPrint('Audio alarm error: $e');
+    }
+  }
+
+  void stopAlarmSound() async {
+    _isAlarmPlaying = false;
+    _vibrationTimer?.cancel();
+    try {
+      await _audioPlayer.stop();
+    } catch (_) {}
+  }
+
+  /// Triggers the Android System Notification Drop and the Full-Screen NDRRMC Red Alert (RESPONDER ONLY)
+  Future<void> triggerEmergencyBroadcast(Map<String, dynamic> alertData) async {
+    playAlarmSound();
+
+    final patientName = alertData['patientName'] ?? 'Unknown Student/Staff';
+    final studentNo = alertData['studentNo'] ?? 'Verified User';
+    final bloodType = alertData['bloodType'] ?? 'Unknown';
+    final allergies = alertData['allergies'] ?? 'None recorded';
+    final lat = double.tryParse(alertData['latitude'].toString()) ?? 0.0;
+    final lng = double.tryParse(alertData['longitude'].toString()) ?? 0.0;
+    final googleMapsUrl = alertData['googleMapsUrl'] ?? 'https://www.google.com/maps?q=$lat,$lng';
+
+    // 1. DROP ANDROID HEADS-UP NOTIFICATION (FROM TOP OF SCREEN)
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'emergency_sos_channel',
+      '🚨 Emergency SOS Alerts',
+      channelDescription: 'High priority campus emergency alerts',
+      importance: Importance.max,
+      priority: Priority.high,
+      ticker: 'EMERGENCY SOS',
+      fullScreenIntent: true,
+      category: AndroidNotificationCategory.alarm,
+      enableVibration: true,
+      playSound: true,
+    );
+
+    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
+
+    await _localNotifications.show(
+      999,
+      '🚨 EMERGENCY SOS: $patientName',
+      'Location: ${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)} | Blood: $bloodType | Allergies: $allergies',
+      platformDetails,
+    );
+
+    // 2. DISPLAY FULL-SCREEN NDRRMC RED DIALOG
+    final context = navigatorKey.currentContext;
+    if (context == null || !context.mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF7F1D1D),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: Colors.amber, width: 3),
+          ),
+          contentPadding: const EdgeInsets.all(16),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.amber,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.warning_rounded, color: Colors.black, size: 26),
+                      SizedBox(width: 8),
+                      Text(
+                        'EMERGENCY ALERT (CRITICAL)',
+                        style: TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 14,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'PSU DISASTER RISK REDUCTION & INFIRMARY PROTOCOL',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold),
+                ),
+                const Divider(color: Colors.white24, height: 20),
+
+                Text(
+                  patientName,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                Text('ID: $studentNo', style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                const SizedBox(height: 14),
+
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.black45,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red.shade400),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('🩸 Blood Type: $bloodType',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 4),
+                      Text('⚠️ Allergies: $allergies',
+                          style: const TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 4),
+                      Text('📍 Coordinates: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
+                          style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue.shade700,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(42),
+                  ),
+                  onPressed: () async {
+                    final uri = Uri.parse(googleMapsUrl);
+                    try {
+                      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      if (!launched) {
+                        await launchUrl(uri, mode: LaunchMode.platformDefault);
+                      }
+                    } catch (_) {}
+                  },
+                  icon: const Icon(Icons.navigation, size: 18),
+                  label: const Text('Open in Google Maps', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+                const SizedBox(height: 10),
+
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.red.shade900,
+                    minimumSize: const Size.fromHeight(46),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () {
+                    stopAlarmSound();
+                    if (ctx.mounted) {
+                      Navigator.pop(ctx);
+                    }
+                  },
+                  child: const Text(
+                    'SILENCE & ACKNOWLEDGE ALARM',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+</file>
+
+<file path="server/src/routes/emergency.js">
+// server/src/routes/emergency.js
+import express from 'express';
+import { pool } from '../db.js';
+import { authenticateToken } from '../auth.js';
+import { decrypt } from '../utils/cryptoVault.js';
+import { requireRoles } from '../middleware/rbac.js';
+
+export default function emergencyRouter(io) {
+  const router = express.Router();
+
+  // 1. POST /api/emergency/sos (Fixed coordinate order for SRID 4326)
+  router.post('/sos', authenticateToken, async (req, res) => {
+    try {
+      const userId = req.user.user_id;
+      const { latitude, longitude, notes } = req.body;
+
+      if (!latitude || !longitude) {
+        return res.status(400).json({ error: 'Latitude and Longitude are required coordinates.' });
+      }
+
+      // In MySQL 8.0 SRID 4326, the axis order is Latitude then Longitude
+      const [insertResult] = await pool.query(
+        `INSERT INTO EMERGENCY_ALERTS (user_id, location, status, notes)
+         VALUES (?, ST_SRID(POINT(?, ?), 4326), 'triggered', ?)`,
+        [userId, Number(longitude), Number(latitude), notes || 'Emergency SOS pressed']
+      );
+
+      const alertId = insertResult.insertId;
+
+      const [details] = await pool.query(
+        `SELECT u.user_id, u.first_name, u.last_name, u.phone, u.email,
+                sp.student_no, sp.course,
+                hp.blood_type, hp.allergies, hp.chronic_conditions,
+                hp.emergency_contact_name, hp.emergency_contact_phone
+         FROM USERS u
+         LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+         WHERE u.user_id = ?`,
+        [userId]
+      );
+
+      const patientInfo = details[0] || {};
+      const decryptedAllergies = decrypt(patientInfo.allergies) || 'None listed';
+      const decryptedConditions = decrypt(patientInfo.chronic_conditions) || 'None listed';
+
+      const alertPayload = {
+        alertId,
+        userId,
+        patientName: `${patientInfo.first_name} ${patientInfo.last_name}`,
+        phone: patientInfo.phone,
+        studentNo: patientInfo.student_no,
+        course: patientInfo.course,
+        bloodType: patientInfo.blood_type || 'Unknown',
+        allergies: decryptedAllergies,
+        chronicConditions: decryptedConditions,
+        emergencyContact: `${patientInfo.emergency_contact_name || 'N/A'} (${patientInfo.emergency_contact_phone || 'N/A'})`,
+        latitude: Number(latitude),
+        longitude: Number(longitude),
+        googleMapsUrl: `https://www.google.com/maps?q=${latitude},${longitude}`,
+        status: 'triggered',
+        createdAt: new Date().toISOString(),
+      };
+
+      // Broadcast to both privileged responders and clinical banner listeners
+      io.to('responders').emit('emergency:new_alert', alertPayload);
+      io.emit('emergency:new_alert', alertPayload);
+
+      res.status(201).json({
+        message: 'Emergency alert dispatched to PSU Clinic and Quick-Response team.',
+        alertId,
+      });
+    } catch (error) {
+      console.error('SOS Trigger Error:', error);
+      res.status(500).json({ error: 'Failed to process SOS alert.' });
+    }
+  });
+
+  // 2. GET /api/emergency/active
+  router.get('/active', authenticateToken, requireRoles('EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'), async (req, res) => {
+    try {
+      const [alerts] = await pool.query(
+        `SELECT a.alert_id, a.user_id, a.latitude, a.longitude, a.status, a.created_at, a.notes,
+                u.first_name, u.last_name, u.phone,
+                hp.blood_type, hp.allergies
+         FROM EMERGENCY_ALERTS a
+         JOIN USERS u ON a.user_id = u.user_id
+         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+         WHERE a.status IN ('triggered', 'acknowledged', 'dispatched')
+         ORDER BY a.created_at DESC`
+      );
+
+      const decryptedAlerts = alerts.map((a) => ({
+        ...a,
+        allergies: decrypt(a.allergies) || 'None',
+      }));
+
+      res.json(decryptedAlerts);
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch active alerts.' });
+    }
+  });
+
+  // 3. PATCH /api/emergency/:alertId/status
+  router.patch('/:alertId/status', authenticateToken, requireRoles('EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'), async (req, res) => {
+    try {
+      const { alertId } = req.params;
+      const { status } = req.body;
+      const responderId = req.user.user_id;
+
+      if (!['acknowledged', 'dispatched', 'resolved', 'false_alarm'].includes(status)) {
+        return res.status(400).json({ error: 'Invalid status update.' });
+      }
+
+      let extraUpdate = '';
+      const params = [status, responderId];
+
+      if (status === 'acknowledged') {
+        extraUpdate = ', acknowledged_at = CURRENT_TIMESTAMP';
+      } else if (status === 'resolved' || status === 'false_alarm') {
+        extraUpdate = `, resolved_at = CURRENT_TIMESTAMP, 
+                       response_time_seconds = TIMESTAMPDIFF(SECOND, created_at, CURRENT_TIMESTAMP)`;
+      }
+
+      params.push(alertId);
+
+      await pool.query(
+        `UPDATE EMERGENCY_ALERTS 
+         SET status = ?, assigned_responder_id = ? ${extraUpdate}
+         WHERE alert_id = ?`,
+        params
+      );
+
+      io.emit('emergency:status_change', { alertId: Number(alertId), status, responderId });
+
+      res.json({ message: `Alert #${alertId} updated to ${status}.` });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to update alert status.' });
+    }
+  });
+
+  return router;
 }
 </file>
 
@@ -7563,6 +7367,202 @@ export default function AdminConsole() {
 }
 </file>
 
+<file path="desktop/src/components/NurseConsole.tsx">
+// desktop/src/components/NurseConsole.tsx
+import { useState, useEffect } from 'react';
+import QrIntakeScanner from './QrIntakeScanner';
+import InventoryManager from './InventoryManager';
+import { io } from 'socket.io-client';
+
+interface QueueItem {
+  queue_id: number;
+  ticket_no: string;
+  first_name: string;
+  last_name: string;
+  student_no?: string;
+  visit_type: string;
+  status: string;
+  arrival_time: string;
+}
+
+export default function NurseConsole() {
+  const [, setVerifiedPatient] = useState<any>(null);
+  const [, setScannedToken] = useState('');
+
+  // Live database queue state
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [loadingQueue, setLoadingQueue] = useState(false);
+
+  const fetchLiveQueue = async () => {
+    setLoadingQueue(true);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('https://localhost:5000/api/appointments/queue/today', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setQueue(data);
+      }
+    } catch (err) {
+      console.error('Error loading live queue:', err);
+    } finally {
+      setLoadingQueue(false);
+    }
+  };
+
+    useEffect(() => {
+    fetchLiveQueue();
+
+    const token = localStorage.getItem('valetudo_token');
+    const socket = io('https://localhost:5000', {
+      auth: { token },
+      transports: ['websocket', 'polling'],
+    });
+    socket.on('queue:updated', () => {
+      fetchLiveQueue();
+    });
+
+    // 🔔 Notify Clinic Nurse of new bookings
+    socket.on('appointment:booked', (newBooking: any) => {
+      if (window.electronAPI?.showNotification) {
+        window.electronAPI.showNotification({
+          title: '📋 New Appointment in System',
+          body: `${newBooking.patientName || 'Student'} booked for ${newBooking.date_time}.`,
+        });
+      }
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
+
+  // Nurse advances the queue: calls the next 'waiting' patient
+  const callNextPatient = async () => {
+    const nextPatient = queue.find((p) => p.status === 'waiting');
+    if (!nextPatient) {
+      alert('No more waiting patients in the queue!');
+      return;
+    }
+
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`https://localhost:5000/api/appointments/queue/${nextPatient.queue_id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: 'in-consultation' }),
+      });
+
+      if (res.ok) {
+        fetchLiveQueue();
+      }
+    } catch (err) {
+      alert('Failed to update queue ticket.');
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 20, marginBottom: 24 }}>
+        {/* 1. QR Health Pass Scanner & Vitals Verification */}
+        <QrIntakeScanner
+          onPatientVerified={(patient, token) => {
+            setVerifiedPatient(patient);
+            setScannedToken(token);
+            // Auto refresh queue when a patient is checked in
+            fetchLiveQueue();
+          }}
+        />
+
+        {/* 2. Live Triage Queue (Feature 7 connected to MySQL QUEUE table) */}
+        <section style={{ padding: 16, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div>
+              <h3 style={{ margin: 0, color: '#0f766e' }}>2. Live Triage Queue (Feature 7)</h3>
+              <small style={{ color: '#64748b' }}>Active daily clinic queue tickets</small>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                onClick={callNextPatient}
+                style={{ padding: '6px 12px', background: '#0f766e', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
+              >
+                📢 Call Next
+              </button>
+              <button
+                onClick={fetchLiveQueue}
+                style={{ padding: '6px 10px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
+              >
+                🔄
+              </button>
+            </div>
+          </div>
+
+          {loadingQueue ? (
+            <p style={{ color: '#64748b', fontSize: 13 }}>Updating queue...</p>
+          ) : queue.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '24px 0', color: '#94a3b8', fontSize: 13 }}>
+              No patients currently waiting in the infirmary queue.
+            </div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, textAlign: 'left' }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#64748b' }}>
+                  <th style={{ padding: '6px' }}>Ticket</th>
+                  <th style={{ padding: '6px' }}>Patient Name</th>
+                  <th style={{ padding: '6px' }}>Arrival</th>
+                  <th style={{ padding: '6px' }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {queue.map((q) => {
+                  let badgeBg = '#fef3c7';
+                  let badgeColor = '#b45309';
+
+                  if (q.status === 'in-consultation') {
+                    badgeBg = '#dcfce7';
+                    badgeColor = '#15803d';
+                  }
+
+                  return (
+                    <tr key={q.queue_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '8px 6px', fontWeight: 'bold', color: '#0f766e' }}>{q.ticket_no}</td>
+                      <td style={{ padding: '8px 6px' }}>
+                        <b>{q.first_name} {q.last_name}</b>
+                        <div style={{ fontSize: 11, color: '#64748b' }}>{q.visit_type}</div>
+                      </td>
+                      <td style={{ padding: '8px 6px', fontSize: 12, color: '#64748b' }}>{q.arrival_time}</td>
+                      <td style={{ padding: '8px 6px' }}>
+                        <span
+                          style={{
+                            padding: '2px 8px',
+                            borderRadius: 4,
+                            fontSize: 11,
+                            fontWeight: 'bold',
+                            background: badgeBg,
+                            color: badgeColor,
+                            textTransform: 'capitalize',
+                          }}
+                        >
+                          {q.status}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </section>
+      </div>
+
+      {/* 3. Medicine Inventory Management */}
+      <InventoryManager />
+    </div>
+  );
+}
+</file>
+
 <file path="server/src/routes/analytics.js">
 // server/src/routes/analytics.js
 import express from 'express';
@@ -8247,6 +8247,191 @@ INSERT INTO `MEDICINE_BATCHES` (`batch_id`, `medicine_id`, `batch_no`, `manufact
 INSERT INTO `CONSENT_RECORDS` (`user_id`, `consent_type`, `is_granted`, `ip_address`)
 VALUES (5, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1')
 ON DUPLICATE KEY UPDATE `is_granted` = TRUE;
+</file>
+
+<file path="mobile/lib/main.dart">
+// mobile/lib/main.dart
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'screens/splash_screen.dart';
+import 'services/emergency_alert_service.dart';
+
+class DevHttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    return super.createHttpClient(context)
+      ..badCertificateCallback = (X509Certificate cert, String host, int port) {
+        // Accept self-signed certificates during local development
+        return kDebugMode;
+      };
+  }
+}
+
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Allow self-signed development certificates in debug mode
+  if (kDebugMode) {
+    HttpOverrides.global = DevHttpOverrides();
+  }
+
+  await EmergencyAlertService().initialize();
+  runApp(const ValetudoMobileApp());
+}
+
+class ValetudoMobileApp extends StatelessWidget {
+  const ValetudoMobileApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      navigatorKey: navigatorKey,
+      title: 'Valetudo HealthLink',
+      theme: ThemeData(primarySwatch: Colors.teal, useMaterial3: true),
+      home: const SplashScreen(),
+    );
+  }
+}
+</file>
+
+<file path="server/src/routes/healthPass.js">
+// server/src/routes/healthPass.js
+import express from 'express';
+import crypto from 'crypto';
+import { pool } from '../db.js';
+import { authenticateToken } from '../auth.js';
+import { requireRoles } from '../middleware/rbac.js';
+import { logPhiAccess } from '../utils/phiLogger.js';
+import { decrypt } from '../utils/cryptoVault.js';
+import { requirePrivacyConsent } from '../middleware/consent.js';
+
+const router = express.Router();
+const HMAC_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
+
+// GET /api/health-pass/token
+router.get('/token', authenticateToken, requirePrivacyConsent, (req, res) => {
+  try {
+    const userId = req.user.user_id;
+    const timestamp = Date.now();
+    const nonce = crypto.randomBytes(4).toString('hex');
+
+    const payload = `${userId}.${timestamp}.${nonce}`;
+    const hmac = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
+
+    const qrToken = `${payload}.${hmac}`;
+    res.json({ qrToken, expiresInSeconds: 300 });
+  } catch (error) {
+    console.error('[HealthPass] QR generation error:', error);
+    res.status(500).json({ error: 'Failed to generate QR token.' });
+  }
+});
+
+// POST /api/health-pass/verify
+router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+  const { qrToken } = req.body;
+  if (!qrToken) return res.status(400).json({ error: 'QR token required.' });
+
+  const parts = qrToken.split('.');
+  if (parts.length !== 4) {
+    return res.status(400).json({ error: 'Invalid QR token format.' });
+  }
+
+  const [patientUserId, timestampStr, nonce, receivedSig] = parts;
+  const payload = `${patientUserId}.${timestampStr}.${nonce}`;
+
+  // 1. Compute expected signature using consistent HMAC secret
+  const expectedSig = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
+
+  // Constant-time signature verification
+  const expectedBuffer = Buffer.from(expectedSig);
+  const receivedBuffer = Buffer.from(receivedSig);
+  if (
+    expectedBuffer.length !== receivedBuffer.length ||
+    !crypto.timingSafeEqual(expectedBuffer, receivedBuffer)
+  ) {
+    return res.status(401).json({ error: 'QR verification failed: Invalid signature.' });
+  }
+
+  // 2. Expiration check (15 minutes grace window)
+  const tokenTime = parseInt(timestampStr, 10);
+  if (isNaN(tokenTime) || Date.now() - tokenTime > 15 * 60 * 1000) {
+    return res.status(401).json({ error: 'QR pass expired. Ask student to refresh pass.' });
+  }
+
+  // 3. Acquire DB connection and execute queries safely inside try/finally
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    // R.A. 10173 Consent check on the scanned patient
+    const [consentRows] = await connection.query(
+      `SELECT is_granted FROM CONSENT_RECORDS 
+       WHERE user_id = ? 
+       ORDER BY consent_id DESC LIMIT 1`,
+      [patientUserId]
+    );
+
+    if (consentRows.length === 0 || !Boolean(consentRows[0].is_granted)) {
+      await connection.rollback();
+      return res.status(403).json({
+        error: 'PRIVACY_CONSENT_REVOKED',
+        message: 'Student has revoked or not granted R.A. 10173 data processing consent. Intake suspended.',
+      });
+    }
+
+    // Retrieve active patient records
+    const [patient] = await connection.query(
+      `SELECT u.user_id, u.first_name, u.last_name, u.email,
+              sp.student_no, sp.course, sp.year_level,
+              hp.blood_type, hp.allergies, hp.chronic_conditions
+       FROM USERS u
+       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+       LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+       WHERE u.user_id = ? AND u.is_active = TRUE`,
+      [patientUserId]
+    );
+
+    if (patient.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Patient not found or deactivated.' });
+    }
+
+    // Log PHI read access
+    logPhiAccess({
+      viewerUserId: req.user.user_id,
+      patientUserId: Number(patientUserId),
+      table: 'HEALTH_PROFILES',
+      recordId: Number(patientUserId),
+      purpose: 'Touchless Clinic Check-In Scan',
+      ipAddress: req.ip,
+    });
+
+    await connection.commit();
+
+    const patientData = {
+      ...patient[0],
+      allergies: decrypt(patient[0].allergies),
+      chronic_conditions: decrypt(patient[0].chronic_conditions),
+    };
+
+    res.json({
+      verified: true,
+      patient: patientData,
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[HealthPass] Verification error:', error);
+    res.status(500).json({ error: 'Error during verification.' });
+  } finally {
+    connection.release();
+  }
+});
+
+export default router;
 </file>
 
 <file path="desktop/src/components/DoctorConsole.tsx">
@@ -9161,189 +9346,25 @@ export default function DoctorConsole() {
 }
 </file>
 
-<file path="mobile/lib/main.dart">
-// mobile/lib/main.dart
-import 'dart:io';
-import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
-import 'screens/splash_screen.dart';
-import 'services/emergency_alert_service.dart';
+<file path="mobile/lib/config/api_config.dart">
+// mobile/lib/config/api_config.dart
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:io' show Platform;
 
-class DevHttpOverrides extends HttpOverrides {
-  @override
-  HttpClient createHttpClient(SecurityContext? context) {
-    return super.createHttpClient(context)
-      ..badCertificateCallback = (X509Certificate cert, String host, int port) {
-        // Accept self-signed certificates during local development
-        return kDebugMode;
-      };
+class ApiConfig {
+  static String get baseUrl {
+    if (kIsWeb) return 'https://localhost:5000';
+    try {
+      if (Platform.isAndroid) {
+        // Use HTTPS
+        return 'https://192.168.18.116:5000';
+      }
+    } catch (_) {}
+    return 'https://localhost:5000';
   }
+
+  static String get socketUrl => baseUrl;
 }
-
-final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
-
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  // Allow self-signed development certificates in debug mode
-  if (kDebugMode) {
-    HttpOverrides.global = DevHttpOverrides();
-  }
-
-  await EmergencyAlertService().initialize();
-  runApp(const ValetudoMobileApp());
-}
-
-class ValetudoMobileApp extends StatelessWidget {
-  const ValetudoMobileApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      navigatorKey: navigatorKey,
-      title: 'Valetudo HealthLink',
-      theme: ThemeData(primarySwatch: Colors.teal, useMaterial3: true),
-      home: const SplashScreen(),
-    );
-  }
-}
-</file>
-
-<file path="server/src/routes/healthPass.js">
-// server/src/routes/healthPass.js
-import express from 'express';
-import crypto from 'crypto';
-import { pool } from '../db.js';
-import { authenticateToken } from '../auth.js';
-import { requireRoles } from '../middleware/rbac.js';
-import { logPhiAccess } from '../utils/phiLogger.js';
-import { decrypt } from '../utils/cryptoVault.js';
-import { requirePrivacyConsent } from '../middleware/consent.js';
-
-const router = express.Router();
-const HMAC_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
-
-// GET /api/health-pass/token
-router.get('/token', authenticateToken, requirePrivacyConsent, (req, res) => {
-  try {
-    const userId = req.user.user_id;
-    const timestamp = Date.now();
-    const nonce = crypto.randomBytes(4).toString('hex');
-
-    const payload = `${userId}.${timestamp}.${nonce}`;
-    const hmac = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
-
-    const qrToken = `${payload}.${hmac}`;
-    res.json({ qrToken, expiresInSeconds: 300 });
-  } catch (error) {
-    console.error('[HealthPass] QR generation error:', error);
-    res.status(500).json({ error: 'Failed to generate QR token.' });
-  }
-});
-
-// POST /api/health-pass/verify
-router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
-  const { qrToken } = req.body;
-  if (!qrToken) return res.status(400).json({ error: 'QR token required.' });
-
-  const parts = qrToken.split('.');
-  if (parts.length !== 4) {
-    return res.status(400).json({ error: 'Invalid QR token format.' });
-  }
-
-  const [patientUserId, timestampStr, nonce, receivedSig] = parts;
-  const payload = `${patientUserId}.${timestampStr}.${nonce}`;
-
-  // 1. Compute expected signature using consistent HMAC secret
-  const expectedSig = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
-
-  // Constant-time signature verification
-  const expectedBuffer = Buffer.from(expectedSig);
-  const receivedBuffer = Buffer.from(receivedSig);
-  if (
-    expectedBuffer.length !== receivedBuffer.length ||
-    !crypto.timingSafeEqual(expectedBuffer, receivedBuffer)
-  ) {
-    return res.status(401).json({ error: 'QR verification failed: Invalid signature.' });
-  }
-
-  // 2. Expiration check (15 minutes grace window)
-  const tokenTime = parseInt(timestampStr, 10);
-  if (isNaN(tokenTime) || Date.now() - tokenTime > 15 * 60 * 1000) {
-    return res.status(401).json({ error: 'QR pass expired. Ask student to refresh pass.' });
-  }
-
-  // 3. Acquire DB connection and execute queries safely inside try/finally
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    // R.A. 10173 Consent check on the scanned patient
-    const [consentRows] = await connection.query(
-      `SELECT is_granted FROM CONSENT_RECORDS 
-       WHERE user_id = ? 
-       ORDER BY consent_id DESC LIMIT 1`,
-      [patientUserId]
-    );
-
-    if (consentRows.length === 0 || !Boolean(consentRows[0].is_granted)) {
-      await connection.rollback();
-      return res.status(403).json({
-        error: 'PRIVACY_CONSENT_REVOKED',
-        message: 'Student has revoked or not granted R.A. 10173 data processing consent. Intake suspended.',
-      });
-    }
-
-    // Retrieve active patient records
-    const [patient] = await connection.query(
-      `SELECT u.user_id, u.first_name, u.last_name, u.email,
-              sp.student_no, sp.course, sp.year_level,
-              hp.blood_type, hp.allergies, hp.chronic_conditions
-       FROM USERS u
-       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
-       LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
-       WHERE u.user_id = ? AND u.is_active = TRUE`,
-      [patientUserId]
-    );
-
-    if (patient.length === 0) {
-      await connection.rollback();
-      return res.status(404).json({ error: 'Patient not found or deactivated.' });
-    }
-
-    // Log PHI read access
-    logPhiAccess({
-      viewerUserId: req.user.user_id,
-      patientUserId: Number(patientUserId),
-      table: 'HEALTH_PROFILES',
-      recordId: Number(patientUserId),
-      purpose: 'Touchless Clinic Check-In Scan',
-      ipAddress: req.ip,
-    });
-
-    await connection.commit();
-
-    const patientData = {
-      ...patient[0],
-      allergies: decrypt(patient[0].allergies),
-      chronic_conditions: decrypt(patient[0].chronic_conditions),
-    };
-
-    res.json({
-      verified: true,
-      patient: patientData,
-    });
-  } catch (error) {
-    await connection.rollback();
-    console.error('[HealthPass] Verification error:', error);
-    res.status(500).json({ error: 'Error during verification.' });
-  } finally {
-    connection.release();
-  }
-});
-
-export default router;
 </file>
 
 <file path="server/src/routes/profile.js">
@@ -9573,27 +9594,6 @@ app.whenReady().then(createWindow);
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
-</file>
-
-<file path="mobile/lib/config/api_config.dart">
-// mobile/lib/config/api_config.dart
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'dart:io' show Platform;
-
-class ApiConfig {
-  static String get baseUrl {
-    if (kIsWeb) return 'https://localhost:5000';
-    try {
-      if (Platform.isAndroid) {
-        // Use HTTPS
-        return 'https://192.168.18.116:5000';
-      }
-    } catch (_) {}
-    return 'https://localhost:5000';
-  }
-
-  static String get socketUrl => baseUrl;
-}
 </file>
 
 <file path="mobile/lib/screens/patient_portal_screen.dart">
