@@ -1256,13 +1256,30 @@ export default defineConfig([
 </file>
 
 <file path="desktop/vite.config.mts">
-import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+// desktop/vite.config.mts
+import react from '@vitejs/plugin-react';
+import { defineConfig } from 'vite';
+import fs from 'fs';
+import path from 'path';
 
-// https://vite.dev/config/
+const certPath = path.resolve(__dirname, '../server/certs/cert.pem');
+const keyPath = path.resolve(__dirname, '../server/certs/key.pem');
+
+const hasCerts = fs.existsSync(certPath) && fs.existsSync(keyPath);
+
 export default defineConfig({
   plugins: [react()],
-})
+  server: {
+    host: '127.0.0.1',
+    port: 5173,
+    https: hasCerts
+      ? {
+          cert: fs.readFileSync(certPath),
+          key: fs.readFileSync(keyPath),
+        }
+      : undefined,
+  },
+});
 </file>
 
 <file path="mobile/android/app/src/debug/AndroidManifest.xml">
@@ -2681,7 +2698,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     }
   }
 
-  // --- Modal: Prescription QR Verification Details (Fixed with Dialog) ---
+  // --- Modal: Prescription QR Verification Details ---
   void _showPrescriptionQrModal(Map<String, dynamic> rx) {
     final qrToken = rx['qr_token'] ?? '';
     showDialog(
@@ -2697,11 +2714,11 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Row(
+                  const Row(
                     children: [
-                      const Icon(Icons.qr_code_scanner, color: Color(0xFF0F766E)),
-                      const SizedBox(width: 8),
-                      const Text(
+                      Icon(Icons.qr_code_scanner, color: Color(0xFF0F766E)),
+                      SizedBox(width: 8),
+                      Text(
                         'Digital Rx Verification',
                         style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                       ),
@@ -2778,7 +2795,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     );
   }
 
-  // --- Modal: Official Clearance Certificate & Digital Seal (Fixed with Dialog) ---
+  // --- Modal: Official Clearance Certificate & Digital Seal ---
   void _showClearanceCertificateModal(Map<String, dynamic> clearance) {
     final qrToken = clearance['qr_token'] ?? '';
     final rawExpiry = clearance['expires_at'];
@@ -2804,7 +2821,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // PSU Infirmary Header
                   const Text(
                     'PANGASINAN STATE UNIVERSITY',
                     style: TextStyle(
@@ -2862,7 +2878,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                   ),
                   const SizedBox(height: 14),
 
-                  // Cryptographic QR Seal
                   Container(
                     width: 180,
                     height: 180,
@@ -2886,7 +2901,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                   ),
                   const SizedBox(height: 12),
 
-                  // Signer Metadata Block
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(8),
@@ -2939,7 +2953,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Sub-Tab Switcher
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           color: Colors.white,
@@ -2972,7 +2985,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
         ),
         const Divider(height: 1),
 
-        // Sub-Tab Body
         Expanded(
           child: _selectedSubTab == 0 ? _buildPrescriptionsList() : _buildClearancesList(),
         ),
@@ -2990,6 +3002,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       return RefreshIndicator(
         onRefresh: _fetchPrescriptions,
         child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
           children: const [
             SizedBox(height: 80),
             Icon(Icons.medication_liquid_outlined, size: 64, color: Colors.grey),
@@ -3028,7 +3041,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Card Header
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -3071,7 +3083,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                   ),
                   const Divider(height: 18),
 
-                  // Prescribed Medication Line Items
                   const Text('Prescribed Medications:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F766E))),
                   const SizedBox(height: 6),
                   if (items.isEmpty)
@@ -3128,7 +3139,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                   ],
                   const SizedBox(height: 10),
 
-                  // Verification Button
                   Align(
                     alignment: Alignment.centerRight,
                     child: OutlinedButton.icon(
@@ -3160,6 +3170,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       return RefreshIndicator(
         onRefresh: _fetchClearances,
         child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
           children: const [
             SizedBox(height: 80),
             Icon(Icons.verified_user_outlined, size: 64, color: Colors.grey),
@@ -3210,7 +3221,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Clearance Header & Expiry Tracker
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -7691,352 +7701,6 @@ class _LoginScreenState extends State<LoginScreen> {
 }
 </file>
 
-<file path="mobile/lib/screens/responder_screen.dart">
-// mobile/lib/screens/responder_screen.dart
-import 'dart:async';
-import 'dart:convert';
-import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:url_launcher/url_launcher.dart';
-import '../config/api_config.dart';
-import '../services/emergency_alert_service.dart';
-import '../widgets/session_timeout_listener.dart';
-import 'login_screen.dart';
-
-class ResponderScreen extends StatefulWidget {
-  final Map<String, dynamic> user;
-  const ResponderScreen({super.key, required this.user});
-
-  @override
-  State<ResponderScreen> createState() => _ResponderScreenState();
-}
-
-class _ResponderScreenState extends State<ResponderScreen> {
-  final _storage = const FlutterSecureStorage();
-  List<dynamic> _activeAlerts = [];
-  bool _isLoading = false;
-  Timer? _pollingTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    _fetchActiveAlerts();
-
-    EmergencyAlertService().startResponderListener();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 4), (_) => _fetchActiveAlerts(silent: true));
-  }
-
-  @override
-  void dispose() {
-    _pollingTimer?.cancel();
-    EmergencyAlertService().stopResponderListener();
-    super.dispose();
-  }
-
-  Future<void> _fetchActiveAlerts({bool silent = false}) async {
-    if (!silent) setState(() => _isLoading = true);
-    final token = await _storage.read(key: 'jwt_token');
-
-    try {
-      final res = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/emergency/active'),
-        headers: {'Authorization': 'Bearer $token'},
-      );
-
-      if (res.statusCode == 200) {
-        if (mounted) {
-          setState(() {
-            _activeAlerts = jsonDecode(res.body);
-          });
-        }
-      }
-    } catch (_) {}
-
-    if (!silent && mounted) {
-      setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _updateAlertStatus(int alertId, String status) async {
-    EmergencyAlertService().stopAlarmSound();
-
-    final token = await _storage.read(key: 'jwt_token');
-    try {
-      final res = await http.patch(
-        Uri.parse('${ApiConfig.baseUrl}/api/emergency/$alertId/status'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({'status': status}),
-      );
-
-      if (res.statusCode == 200) {
-        _fetchActiveAlerts(silent: true);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Incident #$alertId marked as $status.'),
-              backgroundColor: const Color(0xFF0F766E),
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Update failed: $e'), backgroundColor: Colors.red),
-        );
-      }
-    }
-  }
-
-  Future<void> _openGoogleMaps(double lat, double lng) async {
-    final uri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open map provider.')),
-        );
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SessionTimeoutListener(
-      timeoutMinutes: 15,
-      child: Scaffold(
-        appBar: AppBar(
-          backgroundColor: Colors.red.shade800,
-          foregroundColor: Colors.white,
-          title: const Text('PSU Quick-Response Unit'),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              onPressed: () => _fetchActiveAlerts(),
-            ),
-            IconButton(
-              icon: const Icon(Icons.logout),
-              onPressed: () async {
-                EmergencyAlertService().stopResponderListener();
-                await _storage.delete(key: 'jwt_token');
-                await _storage.delete(key: 'user_data');
-                if (!context.mounted) return;
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (_) => const LoginScreen()),
-                );
-              },
-            )
-          ],
-        ),
-        body: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              color: Colors.red.shade50,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.shield_outlined, color: Colors.red, size: 22),
-                      const SizedBox(width: 8),
-                      Text(
-                        "Responder: ${widget.user['first_name']} ${widget.user['last_name']}",
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.red),
-                      ),
-                    ],
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.red,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: const Text('ON CALL',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator(color: Colors.red))
-                  : _activeAlerts.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.check_circle_outline, size: 70, color: Colors.green.shade400),
-                              const SizedBox(height: 12),
-                              const Text(
-                                'No Active Campus Emergencies',
-                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black54),
-                              ),
-                              const SizedBox(height: 6),
-                              const Text('Infirmary and Campus Security on standby.',
-                                  style: TextStyle(color: Colors.grey, fontSize: 13)),
-                            ],
-                          ),
-                        )
-                      : RefreshIndicator(
-                          onRefresh: () => _fetchActiveAlerts(),
-                          child: ListView.builder(
-                            padding: const EdgeInsets.all(12),
-                            itemCount: _activeAlerts.length,
-                            itemBuilder: (context, index) {
-                              final alert = _activeAlerts[index];
-                              final status = alert['status'] ?? 'triggered';
-                              final lat = double.tryParse(alert['latitude'].toString()) ?? 0.0;
-                              final lng = double.tryParse(alert['longitude'].toString()) ?? 0.0;
-
-                              return Card(
-                                elevation: 3,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                  side: BorderSide(color: Colors.red.shade400, width: 1.5),
-                                ),
-                                margin: const EdgeInsets.only(bottom: 14),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(14.0),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 24),
-                                              const SizedBox(width: 8),
-                                              Text(
-                                                "${alert['first_name']} ${alert['last_name']}",
-                                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                                              ),
-                                            ],
-                                          ),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                            decoration: BoxDecoration(
-                                              color: status == 'dispatched' ? Colors.blue : Colors.red,
-                                              borderRadius: BorderRadius.circular(6),
-                                            ),
-                                            child: Text(
-                                              status.toString().toUpperCase(),
-                                              style: const TextStyle(
-                                                  color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text("Contact: ${alert['phone'] ?? 'N/A'}", style: const TextStyle(fontSize: 13)),
-                                      const SizedBox(height: 4),
-                                      Row(
-                                        children: [
-                                          Text("Blood: ${alert['blood_type'] ?? 'Unknown'}",
-                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                                          const SizedBox(width: 14),
-                                          Text(
-                                            "Allergies: ${alert['allergies'] ?? 'None'}",
-                                            style: TextStyle(
-                                              color: (alert['allergies'] != null && alert['allergies'] != 'None')
-                                                  ? Colors.red
-                                                  : Colors.green.shade700,
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Container(
-                                        padding: const EdgeInsets.all(10),
-                                        decoration: BoxDecoration(
-                                          color: Colors.grey.shade100,
-                                          borderRadius: BorderRadius.circular(6),
-                                        ),
-                                        child: Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                const Text('GPS Coordinates:',
-                                                    style: TextStyle(fontSize: 11, color: Colors.black54)),
-                                                Text("${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}",
-                                                    style: const TextStyle(
-                                                        fontWeight: FontWeight.bold, fontSize: 13)),
-                                              ],
-                                            ),
-                                            ElevatedButton.icon(
-                                              style: ElevatedButton.styleFrom(
-                                                backgroundColor: Colors.blue.shade700,
-                                                foregroundColor: Colors.white,
-                                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                              ),
-                                              onPressed: () => _openGoogleMaps(lat, lng),
-                                              icon: const Icon(Icons.navigation_outlined, size: 16),
-                                              label: const Text('Open Maps',
-                                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      const SizedBox(height: 12),
-                                      Wrap(
-                                        spacing: 8,
-                                        runSpacing: 6,
-                                        children: [
-                                          if (status == 'triggered')
-                                            ElevatedButton(
-                                              style: ElevatedButton.styleFrom(
-                                                  backgroundColor: Colors.amber.shade700, foregroundColor: Colors.white),
-                                              onPressed: () => _updateAlertStatus(alert['alert_id'], 'acknowledged'),
-                                              child: const Text('Acknowledge'),
-                                            ),
-                                          if (status != 'dispatched')
-                                            ElevatedButton(
-                                              style: ElevatedButton.styleFrom(
-                                                  backgroundColor: Colors.blue.shade700, foregroundColor: Colors.white),
-                                              onPressed: () => _updateAlertStatus(alert['alert_id'], 'dispatched'),
-                                              child: const Text('Dispatch Unit'),
-                                            ),
-                                          ElevatedButton(
-                                            style: ElevatedButton.styleFrom(
-                                                backgroundColor: Colors.green.shade700, foregroundColor: Colors.white),
-                                            onPressed: () => _updateAlertStatus(alert['alert_id'], 'resolved'),
-                                            child: const Text('Mark Resolved'),
-                                          ),
-                                          OutlinedButton(
-                                            style: OutlinedButton.styleFrom(foregroundColor: Colors.grey.shade700),
-                                            onPressed: () => _updateAlertStatus(alert['alert_id'], 'false_alarm'),
-                                            child: const Text('False Alarm'),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-</file>
-
 <file path="mobile/lib/screens/splash_screen.dart">
 // mobile/lib/screens/splash_screen.dart
 import 'dart:convert';
@@ -9382,329 +9046,6 @@ export default function AnalyticsDashboard() {
 }
 </file>
 
-<file path="desktop/src/components/EmergencyAlertBanner.tsx">
-// desktop/src/components/EmergencyAlertBanner.tsx
-import React, { useEffect, useState } from 'react';
-import { io, Socket } from 'socket.io-client';
-
-interface EmergencyAlert {
-  alertId: number;
-  userId: number;
-  patientName: string;
-  phone: string;
-  studentNo: string;
-  course: string;
-  bloodType: string;
-  allergies: string;
-  chronicConditions: string;
-  emergencyContact: string;
-  latitude: number;
-  longitude: number;
-  googleMapsUrl: string;
-  status: string;
-  createdAt: string;
-}
-
-export default function EmergencyAlertBanner() {
-  const [alerts, setAlerts] = useState<EmergencyAlert[]>([]);
-
-  // Synthesize an audible emergency alert beep using Web Audio API
-  const playEmergencyAlarm = () => {
-    try {
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(850, audioCtx.currentTime); // 850 Hz alarm tone
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.start();
-      osc.stop(audioCtx.currentTime + 0.6); // 600ms chime
-    } catch (_) {}
-  };
-
-  useEffect(() => {
-    // 1. Fetch initial active alerts from DB
-    const fetchActiveAlerts = async () => {
-      const token = localStorage.getItem('valetudo_token');
-      if (!token) return;
-      try {
-        const res = await fetch('https://localhost:5000/api/emergency/active', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json();
-        if (Array.isArray(data)) {
-          const mapped: EmergencyAlert[] = data.map((a: any) => ({
-            alertId: a.alert_id,
-            userId: a.user_id,
-            patientName: `${a.first_name} ${a.last_name}`,
-            phone: a.phone,
-            studentNo: 'Verified',
-            course: 'PSU Student',
-            bloodType: a.blood_type || 'Unknown',
-            allergies: a.allergies || 'None',
-            chronicConditions: 'N/A',
-            emergencyContact: 'Check Profile',
-            latitude: Number(a.latitude),
-            longitude: Number(a.longitude),
-            googleMapsUrl: `https://www.google.com/maps?q=${a.latitude},${a.longitude}`,
-            status: a.status,
-            createdAt: a.created_at,
-          }));
-          setAlerts(mapped);
-        }
-      } catch (_) {}
-    };
-
-    fetchActiveAlerts();
-
-    // 2. Connect Socket.IO
-    const socket: Socket = io('https://localhost:5000');
-
-    socket.on('emergency:new_alert', (newAlert: EmergencyAlert) => {
-      playEmergencyAlarm();
-
-      // Trigger native OS system tray notification
-      if ((window as any).electronAPI?.showNotification) {
-        (window as any).electronAPI.showNotification({
-          title: `🚨 SOS EMERGENCY: ${newAlert.patientName}`,
-          body: `Location: ${newAlert.latitude.toFixed(5)}, ${newAlert.longitude.toFixed(5)}. Blood: ${newAlert.bloodType}. Allergies: ${newAlert.allergies}`,
-        });
-      }
-
-      setAlerts((prev) => [newAlert, ...prev.filter((a) => a.alertId !== newAlert.alertId)]);
-    });
-
-    socket.on('emergency:status_change', ({ alertId, status }: { alertId: number; status: string }) => {
-      setAlerts((prev) =>
-        prev
-          .map((a) => (a.alertId === alertId ? { ...a, status } : a))
-          .filter((a) => a.status !== 'resolved' && a.status !== 'false_alarm')
-      );
-    });
-
-    return () => {
-      socket.disconnect();
-    };
-  }, []);
-
-  const updateStatus = async (alertId: number, status: string) => {
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      await fetch(`https://localhost:5000/api/emergency/${alertId}/status`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ status }),
-      });
-    } catch (err: any) {
-      alert('Failed to update status: ' + err.message);
-    }
-  };
-
-  // --- TEST BUTTON HANDLER 1: INSTANT NATIVE OS NOTIFICATION ---
-  const handleTestDirectNotification = () => {
-    playEmergencyAlarm();
-    if ((window as any).electronAPI?.showNotification) {
-      (window as any).electronAPI.showNotification({
-        title: '🚨 Valetudo HealthLink — SOS Alert Test',
-        body: 'Daniella Movida (BSIT) reported a medical emergency at PSU Lingayen Library. Allergies: Penicillin.',
-      });
-    } else {
-      alert('electronAPI.showNotification not detected. Ensure preload.cjs is configured.');
-    }
-  };
-
-  // --- TEST BUTTON HANDLER 2: FULL STACK REAL-TIME SOS TRIGGER ---
-  const handleTestFullStackSOS = async () => {
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch('https://localhost:5000/api/emergency/sos', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          latitude: 16.029851,
-          longitude: 120.228543,
-          notes: 'SIMULATED SOS: PSU Lingayen Administration Building',
-        }),
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        alert('Server SOS error: ' + (data.error || 'Check server connection'));
-      }
-    } catch (err: any) {
-      alert('Could not trigger backend test SOS: ' + err.message);
-    }
-  };
-
-  return (
-    <div style={{ marginBottom: 20 }}>
-      {/* TEST TRIGGER TOOLBAR */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          gap: 8,
-          marginBottom: alerts.length > 0 ? 12 : 0,
-        }}
-      >
-        <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 'bold' }}>TEST HARNESS:</span>
-        <button
-          type="button"
-          onClick={handleTestDirectNotification}
-          style={{
-            padding: '4px 10px',
-            fontSize: 12,
-            borderRadius: 4,
-            border: '1px solid #cbd5e1',
-            background: '#f8fafc',
-            color: '#334155',
-            cursor: 'pointer',
-            fontWeight: 'bold',
-          }}
-          title="Directly test the OS banner without server"
-        >
-          🧪 Test OS Notification (Instant)
-        </button>
-
-        <button
-          type="button"
-          onClick={handleTestFullStackSOS}
-          style={{
-            padding: '4px 10px',
-            fontSize: 12,
-            borderRadius: 4,
-            border: '1px solid #fca5a5',
-            background: '#fef2f2',
-            color: '#dc2626',
-            cursor: 'pointer',
-            fontWeight: 'bold',
-          }}
-          title="Sends real SOS request to backend and broadcasts over Socket.IO"
-        >
-          🚨 Trigger Live SOS (Full System Test)
-        </button>
-      </div>
-
-      {/* ACTIVE EMERGENCY ALERTS BANNER */}
-      {alerts.map((alert) => (
-        <div
-          key={alert.alertId}
-          style={{
-            background: '#fee2e2',
-            border: '2px solid #ef4444',
-            borderRadius: 8,
-            padding: 16,
-            marginBottom: 12,
-            boxShadow: '0 4px 6px -1px rgba(239, 68, 68, 0.2)',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 24 }}>🚨</span>
-              <h3 style={{ margin: 0, color: '#b91c1c' }}>
-                ACTIVE SOS ALERT: {alert.patientName} ({alert.studentNo || 'Student'})
-              </h3>
-            </div>
-            <span
-              style={{
-                background: '#ef4444',
-                color: '#fff',
-                padding: '4px 10px',
-                borderRadius: 4,
-                fontSize: 12,
-                fontWeight: 'bold',
-                textTransform: 'uppercase',
-              }}
-            >
-              Status: {alert.status}
-            </span>
-          </div>
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(4, 1fr)',
-              gap: 12,
-              marginTop: 12,
-              fontSize: 13,
-              background: '#fff',
-              padding: 12,
-              borderRadius: 6,
-            }}
-          >
-            <div>
-              <b>Contact:</b> {alert.phone || 'N/A'}<br />
-              <b>Blood Type:</b> {alert.bloodType}
-            </div>
-            <div>
-              <b>Allergies:</b> <span style={{ color: 'red' }}>{alert.allergies}</span><br />
-              <b>Conditions:</b> {alert.chronicConditions}
-            </div>
-            <div>
-              <b>Emergency Contact:</b><br />
-              {alert.emergencyContact}
-            </div>
-            <div>
-              <b>GPS Coordinates:</b><br />
-              <code>{alert.latitude.toFixed(6)}, {alert.longitude.toFixed(6)}</code>
-              <div style={{ marginTop: 4 }}>
-                <a
-                  href={alert.googleMapsUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: '#2563eb', fontWeight: 'bold', textDecoration: 'underline' }}
-                >
-                  📍 Open in Google Maps
-                </a>
-              </div>
-            </div>
-          </div>
-
-          {/* Action dispatch buttons */}
-          <div style={{ display: 'flex', gap: 10, marginTop: 12, justifyContent: 'flex-end' }}>
-            {alert.status === 'triggered' && (
-              <button
-                onClick={() => updateStatus(alert.alertId, 'acknowledged')}
-                style={{ background: '#f59e0b', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                Acknowledge Alert
-              </button>
-            )}
-            {alert.status !== 'dispatched' && (
-              <button
-                onClick={() => updateStatus(alert.alertId, 'dispatched')}
-                style={{ background: '#0284c7', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                Dispatch Response Team
-              </button>
-            )}
-            <button
-              onClick={() => updateStatus(alert.alertId, 'resolved')}
-              style={{ background: '#10b981', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
-            >
-              Mark Resolved
-            </button>
-            <button
-              onClick={() => updateStatus(alert.alertId, 'false_alarm')}
-              style={{ background: '#6b7280', color: '#fff', border: 'none', padding: '6px 10px', borderRadius: 4, cursor: 'pointer' }}
-            >
-              False Alarm
-            </button>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-</file>
-
 <file path="desktop/src/components/InventoryManager.tsx">
 import React, { useState, useEffect } from 'react';
 
@@ -9883,162 +9224,6 @@ export default function InventoryManager() {
       </div>
 
     </section>
-  );
-}
-</file>
-
-<file path="desktop/src/components/ResponderConsole.tsx">
-// desktop/src/components/ResponderConsole.tsx
-import React, { useEffect, useState } from 'react';
-import { io } from 'socket.io-client';
-
-export default function ResponderConsole() {
-  const [activeAlerts, setActiveAlerts] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  const fetchAlerts = async () => {
-    setLoading(true);
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch('https://localhost:5000/api/emergency/active', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        setActiveAlerts(data);
-      }
-    } catch (err) {
-      console.error('Failed to fetch alerts:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchAlerts();
-
-    const socket = io('https://localhost:5000');
-    socket.on('emergency:new_alert', () => fetchAlerts());
-    socket.on('emergency:status_change', () => fetchAlerts());
-
-    return () => {
-      socket.disconnect();
-    };
-  }, []);
-
-  const updateStatus = async (alertId: number, status: string) => {
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      await fetch(`https://localhost:5000/api/emergency/${alertId}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ status }),
-      });
-      fetchAlerts();
-    } catch (err) {
-      alert('Failed to update status');
-    }
-  };
-
-  return (
-    <div style={{ background: '#ffffff', padding: 20, borderRadius: 8, border: '1px solid #cbd5e1' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <div>
-          <h3 style={{ margin: 0, color: '#dc2626' }}>🚨 Campus Emergency Quick-Response Dispatch</h3>
-          <small style={{ color: '#64748b' }}>PSU Lingayen Campus Security & Medical Quick-Response Unit</small>
-        </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <span style={{ background: '#fee2e2', color: '#dc2626', padding: '4px 10px', borderRadius: 4, fontWeight: 'bold', fontSize: 12 }}>
-            Dispatch: LIVE ON-DUTY
-          </span>
-          <button
-            onClick={fetchAlerts}
-            style={{ padding: '4px 10px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
-          >
-            🔄 Refresh
-          </button>
-        </div>
-      </div>
-
-      {loading ? (
-        <p style={{ color: '#64748b', fontSize: 13 }}>Checking dispatch telemetry...</p>
-      ) : activeAlerts.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '30px 0', color: '#16a34a', background: '#f0fdf4', borderRadius: 6 }}>
-          <b>🛡️ All Clear. No Active SOS Emergencies across PSU Lingayen Campus.</b>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {activeAlerts.map((a) => (
-            <div
-              key={a.alert_id}
-              style={{
-                border: '1px solid #f87171',
-                borderRadius: 6,
-                padding: 14,
-                background: '#fff5f5',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-              }}
-            >
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <b style={{ color: '#b91c1c', fontSize: 15 }}>
-                    {a.first_name} {a.last_name} ({a.phone || 'No phone'})
-                  </b>
-                  <span style={{ fontSize: 11, background: '#ef4444', color: '#fff', padding: '2px 8px', borderRadius: 4, fontWeight: 'bold', textTransform: 'uppercase' }}>
-                    {a.status}
-                  </span>
-                </div>
-                <div style={{ fontSize: 13, color: '#334155', marginTop: 4 }}>
-                  <b>Blood Type:</b> {a.blood_type || 'Unknown'} | <b>Allergies:</b>{' '}
-                  <span style={{ color: a.allergies ? '#dc2626' : '#16a34a', fontWeight: 'bold' }}>
-                    {a.allergies || 'None listed'}
-                  </span>
-                </div>
-                <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
-                  📍 Coordinates: <code>{Number(a.latitude).toFixed(6)}, {Number(a.longitude).toFixed(6)}</code>
-                  &nbsp;•&nbsp;
-                  <a
-                    href={`https://www.google.com/maps?q=${a.latitude},${a.longitude}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ color: '#0284c7', fontWeight: 'bold' }}
-                  >
-                    Open Live Pin
-                  </a>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: 8 }}>
-                {a.status === 'triggered' && (
-                  <button
-                    onClick={() => updateStatus(a.alert_id, 'acknowledged')}
-                    style={{ background: '#f59e0b', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
-                  >
-                    Acknowledge
-                  </button>
-                )}
-                {a.status !== 'dispatched' && (
-                  <button
-                    onClick={() => updateStatus(a.alert_id, 'dispatched')}
-                    style={{ background: '#0284c7', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
-                  >
-                    Dispatch Team
-                  </button>
-                )}
-                <button
-                  onClick={() => updateStatus(a.alert_id, 'resolved')}
-                  style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
-                >
-                  Resolve
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
   );
 }
 </file>
@@ -10916,413 +10101,351 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
 }
 </file>
 
-<file path="mobile/lib/services/emergency_alert_service.dart">
-// mobile/lib/services/emergency_alert_service.dart
+<file path="mobile/lib/screens/responder_screen.dart">
+// mobile/lib/screens/responder_screen.dart
 import 'dart:async';
-import 'dart:math' as math;
-import 'dart:typed_data';
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:socket_io_client/socket_io_client.dart' as io;
-import 'package:audioplayers/audioplayers.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:http/http.dart' as http;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/api_config.dart';
-import '../main.dart';
+import '../services/emergency_alert_service.dart';
+import '../widgets/session_timeout_listener.dart';
+import 'login_screen.dart';
 
-class EmergencyAlertService {
-  static final EmergencyAlertService _instance = EmergencyAlertService._internal();
-  factory EmergencyAlertService() => _instance;
-  EmergencyAlertService._internal();
+class ResponderScreen extends StatefulWidget {
+  final Map<String, dynamic> user;
+  const ResponderScreen({super.key, required this.user});
 
-  io.Socket? _socket;
-  final AudioPlayer _audioPlayer = AudioPlayer();
-  final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
+  @override
+  State<ResponderScreen> createState() => _ResponderScreenState();
+}
 
-  bool _isAlarmPlaying = false;
-  Timer? _vibrationTimer;
-  Uint8List? _cachedWavBytes;
-  bool _isInitialized = false;
+class _ResponderScreenState extends State<ResponderScreen> {
+  final _storage = const FlutterSecureStorage();
+  List<dynamic> _activeAlerts = [];
+  bool _isLoading = false;
+  Timer? _pollingTimer;
 
-  // Role Guard: ONLY true when actively logged in as an EMERGENCY_RESPONDER
-  bool _isResponderActive = false;
+  @override
+  void initState() {
+    super.initState();
+    _fetchActiveAlerts();
 
-  Future<void> initialize() async {
-    if (_isInitialized) return;
-    _isInitialized = true;
+    EmergencyAlertService().startResponderListener();
+    // Silent background polling to ensure sync
+    _pollingTimer = Timer.periodic(const Duration(seconds: 4), (_) => _fetchActiveAlerts(silent: true));
+  }
 
-    // 1. Initialize Android System Notification Channels
-    const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
-    const InitializationSettings initializationSettings =
-        InitializationSettings(android: initializationSettingsAndroid);
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    EmergencyAlertService().stopResponderListener();
+    super.dispose();
+  }
 
-    await _localNotifications.initialize(initializationSettings);
+  Future<void> _fetchActiveAlerts({bool silent = false}) async {
+    if (!silent) setState(() => _isLoading = true);
+    final token = await _storage.read(key: 'jwt_token');
 
-    _localNotifications
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
-
-    // 2. Connect Persistent WebSocket
     try {
-      _socket = io.io(
-        ApiConfig.socketUrl,
-        io.OptionBuilder()
-            .setTransports(['websocket', 'polling'])
-            .enableAutoConnect()
-            .enableReconnection()
-            .setReconnectionDelay(1500)
-            .build(),
+      final res = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/emergency/active'),
+        headers: {'Authorization': 'Bearer $token'},
       );
 
-      _socket!.onConnect((_) {
-        debugPrint('✅ [Socket.IO Mobile] Connected to Emergency Gateway at ${ApiConfig.socketUrl}');
-      });
-
-      _socket!.on('emergency:new_alert', (data) {
-        // STRICT ROLE GUARD: Students NEVER receive the responder dispatch siren/alert
-        if (!_isResponderActive) {
-          debugPrint('🛡️ [Socket.IO Mobile] Broadcast ignored: Current device is not in Responder mode.');
-          return;
+      if (res.statusCode == 200) {
+        if (mounted) {
+          setState(() {
+            _activeAlerts = jsonDecode(res.body);
+          });
         }
-
-        debugPrint('🚨 [Socket.IO Mobile] DISPATCHING TO ACTIVE RESPONDER: $data');
-        final alertMap = data is Map<String, dynamic> ? data : Map<String, dynamic>.from(data);
-        triggerEmergencyBroadcast(alertMap);
-      });
-    } catch (e) {
-      debugPrint('[Socket.IO Mobile] Error: $e');
-    }
-  }
-
-  /// Called ONLY by ResponderScreen when a responder logs in
-  void startResponderListener() {
-    _isResponderActive = true;
-    initialize();
-  }
-
-  /// Called when a responder logs out or closes the responder screen
-  void stopResponderListener() {
-    _isResponderActive = false;
-    stopAlarmSound();
-  }
-
-  // --- 1. STUDENT CONFIRMATION NOTIFICATION DROP ---
-  Future<void> showStudentSosSentNotification() async {
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'student_sos_confirm_channel',
-      'SOS Transmission Status',
-      channelDescription: 'Confirms that your SOS emergency alert was sent',
-      importance: Importance.max, // Forces Android to drop down from top of screen
-      priority: Priority.high,
-      ticker: 'SOS Sent',
-      playSound: true,
-      enableVibration: true,
-    );
-
-    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
-
-    await _localNotifications.show(
-      101,
-      '🚨 SOS Alert Sent',
-      'Your SOS has been sent. Campus responders have your GPS location and medical profile.',
-      platformDetails,
-    );
-  }
-
-  // --- 2. APPOINTMENT CONFIRMATION NOTIFICATION ---
-  Future<void> showAppointmentConfirmedNotification([
-    String? title,
-    String? body,
-  ]) async {
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'appointment_channel',
-      'Consultation Appointments',
-      channelDescription: 'Appointment booking confirmations and reminders',
-      importance: Importance.high,
-      priority: Priority.high,
-      ticker: 'Appointment Confirmed',
-      playSound: true,
-    );
-
-    const NotificationDetails platformDetails =
-        NotificationDetails(android: androidDetails);
-
-    await _localNotifications.show(
-      102,
-      title ?? '📅 Consultation Confirmed',
-      body ?? 'Your consultation appointment has been scheduled successfully.',
-      platformDetails,
-    );
-  }
-
-  // --- 3. RESPONDER SIREN & NOTIFICATION ENGINE ---
-  Uint8List _generateEasSirenWav({double durationSeconds = 3.0, int sampleRate = 22050}) {
-    if (_cachedWavBytes != null) return _cachedWavBytes!;
-
-    final int numSamples = (durationSeconds * sampleRate).toInt();
-    final int dataSize = numSamples * 2;
-    final int fileSize = 36 + dataSize;
-    final ByteData byteData = ByteData(44 + dataSize);
-
-    // RIFF Header
-    byteData.setUint8(0, 0x52); byteData.setUint8(1, 0x49); byteData.setUint8(2, 0x46); byteData.setUint8(3, 0x46);
-    byteData.setUint32(4, fileSize, Endian.little);
-    byteData.setUint8(8, 0x57); byteData.setUint8(9, 0x41); byteData.setUint8(10, 0x56); byteData.setUint8(11, 0x45);
-
-    // fmt chunk
-    byteData.setUint8(12, 0x66); byteData.setUint8(13, 0x6D); byteData.setUint8(14, 0x74); byteData.setUint8(15, 0x20);
-    byteData.setUint32(16, 16, Endian.little);
-    byteData.setUint16(20, 1, Endian.little);
-    byteData.setUint16(22, 1, Endian.little);
-    byteData.setUint32(24, sampleRate, Endian.little);
-    byteData.setUint32(28, sampleRate * 2, Endian.little);
-    byteData.setUint16(32, 2, Endian.little);
-    byteData.setUint16(34, 16, Endian.little);
-
-    // data chunk
-    byteData.setUint8(36, 0x64); byteData.setUint8(37, 0x61); byteData.setUint8(38, 0x74); byteData.setUint8(39, 0x61);
-    byteData.setUint32(40, dataSize, Endian.little);
-
-    int offset = 44;
-    const double f1 = 853.0;
-    const double f2 = 960.0;
-    const double twoPi = 2.0 * math.pi;
-
-    for (int i = 0; i < numSamples; i++) {
-      final double t = i / sampleRate;
-      final double sampleValue = 0.5 * (math.sin(twoPi * f1 * t) + math.sin(twoPi * f2 * t));
-      final int sample16 = (sampleValue * 28000).toInt().clamp(-32768, 32767);
-      byteData.setInt16(offset, sample16, Endian.little);
-      offset += 2;
-    }
-
-    _cachedWavBytes = byteData.buffer.asUint8List();
-    return _cachedWavBytes!;
-  }
-
-// --- 4. CLINIC QUEUE TURN NOTIFICATION DROP ---
-  Future<void> showQueueTurnNotification({
-    required String ticketNo,
-    required String doctorName,
-  }) async {
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'clinic_queue_turn_channel',
-      'Infirmary Queue Alerts',
-      channelDescription: 'Alerts when it is your turn for consultation',
-      importance: Importance.max,
-      priority: Priority.high,
-      ticker: 'Your Turn!',
-      playSound: true,
-      enableVibration: true,
-    );
-
-    const NotificationDetails platformDetails =
-        NotificationDetails(android: androidDetails);
-
-    await _localNotifications.show(
-      103,
-      '🔔 It\'s Your Turn! ($ticketNo)',
-      'Please proceed to the consultation room with $doctorName.',
-      platformDetails,
-    );
-  }
-
-  void playAlarmSound() async {
-    try {
-      _isAlarmPlaying = true;
-      await _audioPlayer.stop();
-      await _audioPlayer.setVolume(1.0);
-      await _audioPlayer.setReleaseMode(ReleaseMode.loop);
-
-      try {
-        await _audioPlayer.play(AssetSource('emr_sound.ogg'));
-      } catch (_) {
-        final wav = _generateEasSirenWav();
-        await _audioPlayer.play(BytesSource(wav));
       }
+    } catch (_) {}
 
-      _vibrationTimer?.cancel();
-      _vibrationTimer = Timer.periodic(const Duration(milliseconds: 600), (timer) {
-        if (!_isAlarmPlaying) {
-          timer.cancel();
-        } else {
-          HapticFeedback.heavyImpact();
-        }
-      });
-    } catch (e) {
-      debugPrint('Audio alarm error: $e');
+    if (!silent && mounted) {
+      setState(() => _isLoading = false);
     }
   }
 
-  void stopAlarmSound() async {
-    _isAlarmPlaying = false;
-    _vibrationTimer?.cancel();
+  // Instant optimistic update on mobile
+  Future<void> _updateAlertStatus(int alertId, String status) async {
+    EmergencyAlertService().stopAlarmSound();
+
+    setState(() {
+      if (status == 'resolved' || status == 'false_alarm') {
+        _activeAlerts.removeWhere((a) => a['alert_id'] == alertId);
+      } else {
+        for (var a in _activeAlerts) {
+          if (a['alert_id'] == alertId) {
+            a['status'] = status;
+          }
+        }
+      }
+    });
+
+    final token = await _storage.read(key: 'jwt_token');
     try {
-      await _audioPlayer.stop();
-    } catch (_) {}
+      await http.patch(
+        Uri.parse('${ApiConfig.baseUrl}/api/emergency/$alertId/status'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({'status': status}),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Update failed: $e'), backgroundColor: Colors.red),
+        );
+      }
+      _fetchActiveAlerts(silent: true);
+    }
   }
 
-  /// Triggers the Android System Notification Drop and the Full-Screen NDRRMC Red Alert (RESPONDER ONLY)
-  Future<void> triggerEmergencyBroadcast(Map<String, dynamic> alertData) async {
-    playAlarmSound();
+  Future<void> _openGoogleMaps(double lat, double lng) async {
+    final uri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open map provider.')),
+        );
+      }
+    }
+  }
 
-    final patientName = alertData['patientName'] ?? 'Unknown Student/Staff';
-    final studentNo = alertData['studentNo'] ?? 'Verified User';
-    final bloodType = alertData['bloodType'] ?? 'Unknown';
-    final allergies = alertData['allergies'] ?? 'None recorded';
-    final lat = double.tryParse(alertData['latitude'].toString()) ?? 0.0;
-    final lng = double.tryParse(alertData['longitude'].toString()) ?? 0.0;
-    final googleMapsUrl = alertData['googleMapsUrl'] ?? 'https://www.google.com/maps?q=$lat,$lng';
-
-    // 1. DROP ANDROID HEADS-UP NOTIFICATION (FROM TOP OF SCREEN)
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'emergency_sos_channel',
-      '🚨 Emergency SOS Alerts',
-      channelDescription: 'High priority campus emergency alerts',
-      importance: Importance.max,
-      priority: Priority.high,
-      ticker: 'EMERGENCY SOS',
-      fullScreenIntent: true,
-      category: AndroidNotificationCategory.alarm,
-      enableVibration: true,
-      playSound: true,
-    );
-
-    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
-
-    await _localNotifications.show(
-      999,
-      '🚨 EMERGENCY SOS: $patientName',
-      'Location: ${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)} | Blood: $bloodType | Allergies: $allergies',
-      platformDetails,
-    );
-
-    // 2. DISPLAY FULL-SCREEN NDRRMC RED DIALOG
-    final context = navigatorKey.currentContext;
-    if (context == null || !context.mounted) return;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF7F1D1D),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: Colors.amber, width: 3),
-          ),
-          contentPadding: const EdgeInsets.all(16),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.amber,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+  @override
+  Widget build(BuildContext context) {
+    return SessionTimeoutListener(
+      timeoutMinutes: 15,
+      child: Scaffold(
+        appBar: AppBar(
+          backgroundColor: Colors.red.shade800,
+          foregroundColor: Colors.white,
+          title: const Text('PSU Quick-Response Unit'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: () => _fetchActiveAlerts(),
+            ),
+            IconButton(
+              icon: const Icon(Icons.logout),
+              onPressed: () async {
+                EmergencyAlertService().stopResponderListener();
+                await _storage.delete(key: 'jwt_token');
+                await _storage.delete(key: 'user_data');
+                if (!context.mounted) return;
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LoginScreen()),
+                  (route) => false,
+                );
+              },
+            )
+          ],
+        ),
+        body: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              color: Colors.red.shade50,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
                     children: [
-                      Icon(Icons.warning_rounded, color: Colors.black, size: 26),
-                      SizedBox(width: 8),
+                      const Icon(Icons.shield_outlined, color: Colors.red, size: 22),
+                      const SizedBox(width: 8),
                       Text(
-                        'EMERGENCY ALERT (CRITICAL)',
-                        style: TextStyle(
-                          color: Colors.black,
-                          fontWeight: FontWeight.w900,
-                          fontSize: 14,
-                          letterSpacing: 0.5,
-                        ),
+                        "Responder: ${widget.user['first_name']} ${widget.user['last_name']}",
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.red),
                       ),
                     ],
                   ),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'PSU DISASTER RISK REDUCTION & INFIRMARY PROTOCOL',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold),
-                ),
-                const Divider(color: Colors.white24, height: 20),
-
-                Text(
-                  patientName,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                Text('ID: $studentNo', style: const TextStyle(color: Colors.white70, fontSize: 13)),
-                const SizedBox(height: 14),
-
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.black45,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.red.shade400),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text('ON CALL',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('🩸 Blood Type: $bloodType',
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                      const SizedBox(height: 4),
-                      Text('⚠️ Allergies: $allergies',
-                          style: const TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 13)),
-                      const SizedBox(height: 4),
-                      Text('📍 Coordinates: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
-                          style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue.shade700,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size.fromHeight(42),
-                  ),
-                  onPressed: () async {
-                    final uri = Uri.parse(googleMapsUrl);
-                    try {
-                      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-                      if (!launched) {
-                        await launchUrl(uri, mode: LaunchMode.platformDefault);
-                      }
-                    } catch (_) {}
-                  },
-                  icon: const Icon(Icons.navigation, size: 18),
-                  label: const Text('Open in Google Maps', style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
-                const SizedBox(height: 10),
-
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: Colors.red.shade900,
-                    minimumSize: const Size.fromHeight(46),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                  onPressed: () {
-                    stopAlarmSound();
-                    if (ctx.mounted) {
-                      Navigator.pop(ctx);
-                    }
-                  },
-                  child: const Text(
-                    'SILENCE & ACKNOWLEDGE ALARM',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        );
-      },
+            const Divider(height: 1),
+            Expanded(
+              child: _isLoading && _activeAlerts.isEmpty
+                  ? const Center(child: CircularProgressIndicator(color: Colors.red))
+                  : _activeAlerts.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.check_circle_outline, size: 70, color: Colors.green.shade400),
+                              const SizedBox(height: 12),
+                              const Text(
+                                'No Active Campus Emergencies',
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black54),
+                              ),
+                              const SizedBox(height: 6),
+                              const Text('Infirmary and Campus Security on standby.',
+                                  style: TextStyle(color: Colors.grey, fontSize: 13)),
+                            ],
+                          ),
+                        )
+                      : RefreshIndicator(
+                          onRefresh: () => _fetchActiveAlerts(),
+                          child: ListView.builder(
+                            padding: const EdgeInsets.all(12),
+                            itemCount: _activeAlerts.length,
+                            itemBuilder: (context, index) {
+                              final alert = _activeAlerts[index];
+                              final status = alert['status'] ?? 'triggered';
+                              final lat = double.tryParse(alert['latitude'].toString()) ?? 0.0;
+                              final lng = double.tryParse(alert['longitude'].toString()) ?? 0.0;
+
+                              return Card(
+                                elevation: 3,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  side: BorderSide(color: Colors.red.shade400, width: 1.5),
+                                ),
+                                margin: const EdgeInsets.only(bottom: 14),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(14.0),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 24),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                "${alert['first_name']} ${alert['last_name']}",
+                                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                              ),
+                                            ],
+                                          ),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: status == 'dispatched' ? Colors.blue : Colors.red,
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: Text(
+                                              status.toString().toUpperCase(),
+                                              style: const TextStyle(
+                                                  color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text("Contact: ${alert['phone'] ?? 'N/A'}", style: const TextStyle(fontSize: 13)),
+                                      const SizedBox(height: 4),
+                                      Row(
+                                        children: [
+                                          Text("Blood: ${alert['blood_type'] ?? 'Unknown'}",
+                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                          const SizedBox(width: 14),
+                                          Text(
+                                            "Allergies: ${alert['allergies'] ?? 'None'}",
+                                            style: TextStyle(
+                                              color: (alert['allergies'] != null && alert['allergies'] != 'None')
+                                                  ? Colors.red
+                                                  : Colors.green.shade700,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Container(
+                                        padding: const EdgeInsets.all(10),
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.shade100,
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                const Text('GPS Coordinates:',
+                                                    style: TextStyle(fontSize: 11, color: Colors.black54)),
+                                                Text("${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}",
+                                                    style: const TextStyle(
+                                                        fontWeight: FontWeight.bold, fontSize: 13)),
+                                              ],
+                                            ),
+                                            ElevatedButton.icon(
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: Colors.blue.shade700,
+                                                foregroundColor: Colors.white,
+                                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                              ),
+                                              onPressed: () => _openGoogleMaps(lat, lng),
+                                              icon: const Icon(Icons.navigation_outlined, size: 16),
+                                              label: const Text('Open Maps',
+                                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Wrap(
+                                        spacing: 8,
+                                        runSpacing: 6,
+                                        children: [
+                                          if (status == 'triggered')
+                                            ElevatedButton(
+                                              style: ElevatedButton.styleFrom(
+                                                  backgroundColor: Colors.amber.shade700, foregroundColor: Colors.white),
+                                              onPressed: () => _updateAlertStatus(alert['alert_id'], 'acknowledged'),
+                                              child: const Text('Acknowledge'),
+                                            ),
+                                          if (status != 'dispatched')
+                                            ElevatedButton(
+                                              style: ElevatedButton.styleFrom(
+                                                  backgroundColor: Colors.blue.shade700, foregroundColor: Colors.white),
+                                              onPressed: () => _updateAlertStatus(alert['alert_id'], 'dispatched'),
+                                              child: const Text('Dispatch Unit'),
+                                            ),
+                                          ElevatedButton(
+                                            style: ElevatedButton.styleFrom(
+                                                backgroundColor: Colors.green.shade700, foregroundColor: Colors.white),
+                                            onPressed: () => _updateAlertStatus(alert['alert_id'], 'resolved'),
+                                            child: const Text('Mark Resolved'),
+                                          ),
+                                          OutlinedButton(
+                                            style: OutlinedButton.styleFrom(foregroundColor: Colors.grey.shade700),
+                                            onPressed: () => _updateAlertStatus(alert['alert_id'], 'false_alarm'),
+                                            child: const Text('False Alarm'),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -11408,151 +10531,6 @@ foreach(ffi_plugin ${FLUTTER_FFI_PLUGIN_LIST})
 endforeach(ffi_plugin)
 </file>
 
-<file path="server/src/routes/emergency.js">
-// server/src/routes/emergency.js
-import express from 'express';
-import { pool } from '../db.js';
-import { authenticateToken } from '../auth.js';
-import { decrypt } from '../utils/cryptoVault.js';
-
-export default function emergencyRouter(io) {
-  const router = express.Router();
-
-  // 1. POST /api/emergency/sos
-  router.post('/sos', authenticateToken, async (req, res) => {
-    try {
-      const userId = req.user.user_id;
-      const { latitude, longitude, notes } = req.body;
-
-      if (!latitude || !longitude) {
-        return res.status(400).json({ error: 'Latitude and Longitude are required coordinates.' });
-      }
-
-      const [insertResult] = await pool.query(
-        `INSERT INTO EMERGENCY_ALERTS (user_id, location, status, notes)
-         VALUES (?, ST_SRID(POINT(?, ?), 4326), 'triggered', ?)`,
-        [userId, Number(longitude), Number(latitude), notes || 'Emergency SOS pressed']
-      );
-
-      const alertId = insertResult.insertId;
-
-      const [details] = await pool.query(
-        `SELECT u.user_id, u.first_name, u.last_name, u.phone, u.email,
-                sp.student_no, sp.course,
-                hp.blood_type, hp.allergies, hp.chronic_conditions,
-                hp.emergency_contact_name, hp.emergency_contact_phone
-         FROM USERS u
-         LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
-         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
-         WHERE u.user_id = ?`,
-        [userId]
-      );
-
-      const patientInfo = details[0] || {};
-
-      // Decrypt sensitive medical indicators for responders
-      const decryptedAllergies = decrypt(patientInfo.allergies) || 'None listed';
-      const decryptedConditions = decrypt(patientInfo.chronic_conditions) || 'None listed';
-
-      const alertPayload = {
-        alertId,
-        userId,
-        patientName: `${patientInfo.first_name} ${patientInfo.last_name}`,
-        phone: patientInfo.phone,
-        studentNo: patientInfo.student_no,
-        course: patientInfo.course,
-        bloodType: patientInfo.blood_type || 'Unknown',
-        allergies: decryptedAllergies,
-        chronicConditions: decryptedConditions,
-        emergencyContact: `${patientInfo.emergency_contact_name || 'N/A'} (${patientInfo.emergency_contact_phone || 'N/A'})`,
-        latitude: Number(latitude),
-        longitude: Number(longitude),
-        googleMapsUrl: `https://www.google.com/maps?q=${latitude},${longitude}`,
-        status: 'triggered',
-        createdAt: new Date().toISOString(),
-      };
-
-      // Replace global broadcast with targeted room emit:
-      io.to('responders').emit('emergency:new_alert', alertPayload);
-
-      res.status(201).json({
-        message: 'Emergency alert dispatched to PSU Clinic and Quick-Response team.',
-        alertId,
-      });
-    } catch (error) {
-      console.error('SOS Trigger Error:', error);
-      res.status(500).json({ error: 'Failed to process SOS alert.' });
-    }
-  });
-
-  // 2. GET /api/emergency/active
-  router.get('/active', authenticateToken, async (req, res) => {
-    try {
-      const [alerts] = await pool.query(
-        `SELECT a.alert_id, a.user_id, a.latitude, a.longitude, a.status, a.created_at, a.notes,
-                u.first_name, u.last_name, u.phone,
-                hp.blood_type, hp.allergies
-         FROM EMERGENCY_ALERTS a
-         JOIN USERS u ON a.user_id = u.user_id
-         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
-         WHERE a.status IN ('triggered', 'acknowledged', 'dispatched')
-         ORDER BY a.created_at DESC`
-      );
-
-      // Decrypt allergies so the responder screen and audio alert banners show human-readable text
-      const decryptedAlerts = alerts.map((a) => ({
-        ...a,
-        allergies: decrypt(a.allergies) || 'None',
-      }));
-
-      res.json(decryptedAlerts);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to fetch active alerts.' });
-    }
-  });
-
-  // 3. PATCH /api/emergency/:alertId/status
-  router.patch('/:alertId/status', authenticateToken, async (req, res) => {
-    try {
-      const { alertId } = req.params;
-      const { status } = req.body;
-      const responderId = req.user.user_id;
-
-      if (!['acknowledged', 'dispatched', 'resolved', 'false_alarm'].includes(status)) {
-        return res.status(400).json({ error: 'Invalid status update.' });
-      }
-
-      let extraUpdate = '';
-      const params = [status, responderId];
-
-      if (status === 'acknowledged') {
-        extraUpdate = ', acknowledged_at = CURRENT_TIMESTAMP';
-      } else if (status === 'resolved' || status === 'false_alarm') {
-        extraUpdate = `, resolved_at = CURRENT_TIMESTAMP, 
-                       response_time_seconds = TIMESTAMPDIFF(SECOND, created_at, CURRENT_TIMESTAMP)`;
-      }
-
-      params.push(alertId);
-
-      await pool.query(
-        `UPDATE EMERGENCY_ALERTS 
-         SET status = ?, assigned_responder_id = ? ${extraUpdate}
-         WHERE alert_id = ?`,
-        params
-      );
-
-      io.emit('emergency:status_change', { alertId: Number(alertId), status, responderId });
-
-      res.json({ message: `Alert #${alertId} updated to ${status}.` });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to update alert status.' });
-    }
-  });
-
-  return router;
-}
-</file>
-
 <file path="server/package.json">
 {
   "name": "valetudo-backend",
@@ -11577,6 +10555,347 @@ export default function emergencyRouter(io) {
   "devDependencies": {
     "nodemon": "^3.1.14"
   }
+}
+</file>
+
+<file path="desktop/src/components/EmergencyAlertBanner.tsx">
+// desktop/src/components/EmergencyAlertBanner.tsx
+import React, { useEffect, useState } from 'react';
+import { io, Socket } from 'socket.io-client';
+
+interface EmergencyAlert {
+  alertId: number;
+  userId: number;
+  patientName: string;
+  phone: string;
+  role?: string;
+  roleLabel?: string;
+  studentNo: string;
+  course: string;
+  bloodType: string;
+  allergies: string;
+  chronicConditions: string;
+  emergencyContact: string;
+  latitude: number;
+  longitude: number;
+  googleMapsUrl: string;
+  status: string;
+  createdAt: string;
+}
+
+export default function EmergencyAlertBanner() {
+  const [alerts, setAlerts] = useState<EmergencyAlert[]>([]);
+
+  // Synthesize an audible emergency alert chime using Web Audio API
+  const playEmergencyAlarm = () => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(850, audioCtx.currentTime); // 850 Hz alarm tone
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.6); // 600ms chime
+    } catch (_) {}
+  };
+
+  useEffect(() => {
+    // 1. Fetch initial active alerts from DB
+    const fetchActiveAlerts = async () => {
+      const token = localStorage.getItem('valetudo_token');
+      if (!token) return;
+      try {
+        const res = await fetch('https://localhost:5000/api/emergency/active', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          const mapped: EmergencyAlert[] = data.map((a: any) => {
+            let roleLabel = 'Student';
+            if (a.primary_role === 'ADMIN') roleLabel = 'System Administrator';
+            else if (a.primary_role === 'DOCTOR') roleLabel = 'Campus Physician';
+            else if (a.primary_role === 'DENTIST') roleLabel = 'Campus Dentist';
+            else if (a.primary_role === 'NURSE') roleLabel = 'Clinic Nurse';
+            else if (a.primary_role === 'FACULTY') roleLabel = 'Faculty / Staff';
+            else if (a.primary_role === 'EMERGENCY_RESPONDER') roleLabel = 'Emergency Responder';
+
+            return {
+              alertId: a.alert_id,
+              userId: a.user_id,
+              patientName: `${a.first_name} ${a.last_name}`,
+              phone: a.phone,
+              role: a.primary_role,
+              roleLabel: roleLabel,
+              studentNo: a.studentNo || a.identifier_no || 'Verified',
+              course: a.course || a.affiliation || 'PSU Lingayen',
+              bloodType: a.blood_type || 'Unknown',
+              allergies: a.allergies || 'None',
+              chronicConditions: 'N/A',
+              emergencyContact: 'Check Profile',
+              latitude: Number(a.latitude),
+              longitude: Number(a.longitude),
+              googleMapsUrl: `https://www.google.com/maps?q=${a.latitude},${a.longitude}`,
+              status: a.status,
+              createdAt: a.created_at,
+            };
+          });
+          setAlerts(mapped);
+        }
+      } catch (_) {}
+    };
+
+    fetchActiveAlerts();
+
+    // 2. Connect Socket.IO with token authentication
+    const token = localStorage.getItem('valetudo_token');
+    const socket: Socket = io('https://localhost:5000', {
+      auth: { token },
+      transports: ['websocket', 'polling'],
+    });
+
+    socket.on('emergency:new_alert', (newAlert: EmergencyAlert) => {
+      playEmergencyAlarm();
+
+      // Trigger native OS system tray notification
+      if ((window as any).electronAPI?.showNotification) {
+        (window as any).electronAPI.showNotification({
+          title: `🚨 SOS: ${newAlert.patientName} (${newAlert.roleLabel || 'PSU Member'})`,
+          body: `Location: ${newAlert.latitude.toFixed(5)}, ${newAlert.longitude.toFixed(5)}. Blood: ${newAlert.bloodType}. Allergies: ${newAlert.allergies}`,
+        });
+      }
+
+      setAlerts((prev) => [newAlert, ...prev.filter((a) => a.alertId !== newAlert.alertId)]);
+    });
+
+    socket.on('emergency:status_change', ({ alertId, status }: { alertId: number; status: string }) => {
+      setAlerts((prev) =>
+        prev
+          .map((a) => (Number(a.alertId) === Number(alertId) ? { ...a, status } : a))
+          .filter((a) => (status !== 'resolved' && status !== 'false_alarm' ? true : Number(a.alertId) !== Number(alertId)))
+      );
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
+
+  const updateStatus = async (alertId: number, status: string) => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      await fetch(`https://localhost:5000/api/emergency/${alertId}/status`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status }),
+      });
+    } catch (err: any) {
+      alert('Failed to update status: ' + err.message);
+    }
+  };
+
+  // Test OS notification
+  const handleTestDirectNotification = () => {
+    playEmergencyAlarm();
+    if ((window as any).electronAPI?.showNotification) {
+      (window as any).electronAPI.showNotification({
+        title: '🚨 Valetudo HealthLink — SOS Alert Test',
+        body: 'Daniella Movida (BSIT) reported a medical emergency at PSU Lingayen Library. Allergies: Penicillin.',
+      });
+    } else {
+      alert('electronAPI.showNotification not detected. Ensure preload.cjs is configured.');
+    }
+  };
+
+  // Full stack SOS test
+  const handleTestFullStackSOS = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('https://localhost:5000/api/emergency/sos', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          latitude: 16.029851,
+          longitude: 120.228543,
+          notes: 'SIMULATED SOS: PSU Lingayen Administration Building',
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        alert('Server SOS error: ' + (data.error || 'Check server connection'));
+      }
+    } catch (err: any) {
+      alert('Could not trigger backend test SOS: ' + err.message);
+    }
+  };
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      {/* TEST TRIGGER TOOLBAR */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: alerts.length > 0 ? 12 : 0,
+        }}
+      >
+        <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 'bold' }}>TEST HARNESS:</span>
+        <button
+          type="button"
+          onClick={handleTestDirectNotification}
+          style={{
+            padding: '4px 10px',
+            fontSize: 12,
+            borderRadius: 4,
+            border: '1px solid #cbd5e1',
+            background: '#f8fafc',
+            color: '#334155',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+          }}
+          title="Directly test the OS banner without server"
+        >
+          🧪 Test OS Notification (Instant)
+        </button>
+
+        <button
+          type="button"
+          onClick={handleTestFullStackSOS}
+          style={{
+            padding: '4px 10px',
+            fontSize: 12,
+            borderRadius: 4,
+            border: '1px solid #fca5a5',
+            background: '#fef2f2',
+            color: '#dc2626',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+          }}
+          title="Sends real SOS request to backend and broadcasts over Socket.IO"
+        >
+          🚨 Trigger Live SOS (Full System Test)
+        </button>
+      </div>
+
+      {/* ACTIVE EMERGENCY ALERTS BANNER */}
+      {alerts.map((alert) => (
+        <div
+          key={alert.alertId}
+          style={{
+            background: '#fee2e2',
+            border: '2px solid #ef4444',
+            borderRadius: 8,
+            padding: 16,
+            marginBottom: 12,
+            boxShadow: '0 4px 6px -1px rgba(239, 68, 68, 0.2)',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 24 }}>🚨</span>
+              <h3 style={{ margin: 0, color: '#b91c1c' }}>
+                ACTIVE SOS ALERT: {alert.patientName} ({alert.roleLabel || alert.studentNo || 'Campus Personnel'})
+              </h3>
+            </div>
+            <span
+              style={{
+                background: '#ef4444',
+                color: '#fff',
+                padding: '4px 10px',
+                borderRadius: 4,
+                fontSize: 12,
+                fontWeight: 'bold',
+                textTransform: 'uppercase',
+              }}
+            >
+              Status: {alert.status}
+            </span>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(4, 1fr)',
+              gap: 12,
+              marginTop: 12,
+              fontSize: 13,
+              background: '#fff',
+              padding: 12,
+              borderRadius: 6,
+            }}
+          >
+            <div>
+              <b>Contact:</b> {alert.phone || 'N/A'}<br />
+              <b>Blood Type:</b> {alert.bloodType}
+            </div>
+            <div>
+              <b>Allergies:</b> <span style={{ color: 'red' }}>{alert.allergies}</span><br />
+              <b>Role / Unit:</b> {alert.roleLabel || alert.course || 'PSU Personnel'}
+            </div>
+            <div>
+              <b>Emergency Contact:</b><br />
+              {alert.emergencyContact}
+            </div>
+            <div>
+              <b>GPS Coordinates:</b><br />
+              <code>{alert.latitude.toFixed(6)}, {alert.longitude.toFixed(6)}</code>
+              <div style={{ marginTop: 4 }}>
+                <a
+                  href={alert.googleMapsUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: '#2563eb', fontWeight: 'bold', textDecoration: 'underline' }}
+                >
+                  📍 Open in Google Maps
+                </a>
+              </div>
+            </div>
+          </div>
+
+          {/* Action dispatch buttons */}
+          <div style={{ display: 'flex', gap: 10, marginTop: 12, justifyContent: 'flex-end' }}>
+            {alert.status === 'triggered' && (
+              <button
+                onClick={() => updateStatus(alert.alertId, 'acknowledged')}
+                style={{ background: '#f59e0b', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Acknowledge Alert
+              </button>
+            )}
+            {alert.status !== 'dispatched' && (
+              <button
+                onClick={() => updateStatus(alert.alertId, 'dispatched')}
+                style={{ background: '#0284c7', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Dispatch Response Team
+              </button>
+            )}
+            <button
+              onClick={() => updateStatus(alert.alertId, 'resolved')}
+              style={{ background: '#10b981', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
+            >
+              Mark Resolved
+            </button>
+            <button
+              onClick={() => updateStatus(alert.alertId, 'false_alarm')}
+              style={{ background: '#6b7280', color: '#fff', border: 'none', padding: '6px 10px', borderRadius: 4, cursor: 'pointer' }}
+            >
+              False Alarm
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 </file>
 
@@ -11624,10 +10943,15 @@ export default function NurseConsole() {
     }
   };
 
-    useEffect(() => {
+  useEffect(() => {
     fetchLiveQueue();
 
-    const socket = io('https://localhost:5000');
+    const token = localStorage.getItem('valetudo_token');
+    const socket = io('https://localhost:5000', {
+      auth: { token },
+      transports: ['websocket', 'polling'],
+    });
+
     socket.on('queue:updated', () => {
       fetchLiveQueue();
     });
@@ -12503,6 +11827,206 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
 }
 </file>
 
+<file path="desktop/src/components/ResponderConsole.tsx">
+// desktop/src/components/ResponderConsole.tsx
+import React, { useEffect, useState } from 'react';
+import { io } from 'socket.io-client';
+
+export default function ResponderConsole() {
+  const [activeAlerts, setActiveAlerts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const fetchAlerts = async (silent = false) => {
+    if (!silent) setLoading(true);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('https://localhost:5000/api/emergency/active', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setActiveAlerts(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch alerts:', err);
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAlerts(false);
+
+    const token = localStorage.getItem('valetudo_token');
+    const socket = io('https://localhost:5000', {
+      auth: { token },
+      transports: ['websocket', 'polling'],
+    });
+
+    // 1. Listen for new emergencies in real time
+    socket.on('emergency:new_alert', () => {
+      fetchAlerts(true);
+    });
+
+    // 2. Real-time update when status is changed from mobile (or another console)
+    socket.on('emergency:status_change', (data: { alertId: number; status: string }) => {
+      setActiveAlerts((prev) => {
+        if (data.status === 'resolved' || data.status === 'false_alarm') {
+          // Instantly remove resolved/false alarm incidents
+          return prev.filter((a) => Number(a.alert_id) !== Number(data.alertId));
+        } else {
+          // Update status in place
+          return prev.map((a) =>
+            Number(a.alert_id) === Number(data.alertId) ? { ...a, status: data.status } : a
+          );
+        }
+      });
+      // Silent sync from server
+      fetchAlerts(true);
+    });
+
+    // 3. Silent 3-second heartbeat to guarantee zero-refresh sync under all conditions
+    const interval = setInterval(() => {
+      fetchAlerts(true);
+    }, 3000);
+
+    return () => {
+      clearInterval(interval);
+      socket.disconnect();
+    };
+  }, []);
+
+  // Instant optimistic update for clicks directly on this console
+  const updateStatus = async (alertId: number, status: string) => {
+    setActiveAlerts((prev) =>
+      prev
+        .map((a) => (Number(a.alert_id) === Number(alertId) ? { ...a, status } : a))
+        .filter((a) => (status === 'resolved' || status === 'false_alarm' ? Number(a.alert_id) !== Number(alertId) : true))
+    );
+
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      await fetch(`https://localhost:5000/api/emergency/${alertId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status }),
+      });
+      fetchAlerts(true);
+    } catch (err) {
+      alert('Failed to update status');
+      fetchAlerts(true);
+    }
+  };
+
+  return (
+    <div style={{ background: '#ffffff', padding: 20, borderRadius: 8, border: '1px solid #cbd5e1' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div>
+          <h3 style={{ margin: 0, color: '#dc2626' }}>🚨 Campus Emergency Quick-Response Dispatch</h3>
+          <small style={{ color: '#64748b' }}>PSU Lingayen Campus Security & Medical Quick-Response Unit</small>
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <span style={{ background: '#fee2e2', color: '#dc2626', padding: '4px 10px', borderRadius: 4, fontWeight: 'bold', fontSize: 12 }}>
+            Dispatch: LIVE ON-DUTY (AUTO-SYNCING)
+          </span>
+          <button
+            onClick={() => fetchAlerts(false)}
+            style={{ padding: '4px 10px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
+          >
+            🔄 Manual Refresh
+          </button>
+        </div>
+      </div>
+
+      {loading && activeAlerts.length === 0 ? (
+        <p style={{ color: '#64748b', fontSize: 13 }}>Checking dispatch telemetry...</p>
+      ) : activeAlerts.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '30px 0', color: '#16a34a', background: '#f0fdf4', borderRadius: 6 }}>
+          <b>🛡️ All Clear. No Active SOS Emergencies across PSU Lingayen Campus.</b>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {activeAlerts.map((a) => (
+            <div
+              key={a.alert_id}
+              style={{
+                border: '1px solid #f87171',
+                borderRadius: 6,
+                padding: 14,
+                background: '#fff5f5',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <b style={{ color: '#b91c1c', fontSize: 15 }}>
+                    {a.first_name} {a.last_name} ({a.phone || 'No phone'})
+                  </b>
+                  <span style={{ fontSize: 11, background: '#ef4444', color: '#fff', padding: '2px 8px', borderRadius: 4, fontWeight: 'bold', textTransform: 'uppercase' }}>
+                    {a.status}
+                  </span>
+                </div>
+                <div style={{ fontSize: 13, color: '#334155', marginTop: 4 }}>
+                  <b>Blood Type:</b> {a.blood_type || 'Unknown'} | <b>Allergies:</b>{' '}
+                  <span style={{ color: a.allergies && a.allergies !== 'None' ? '#dc2626' : '#16a34a', fontWeight: 'bold' }}>
+                    {a.allergies || 'None listed'}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+                  📍 Coordinates: <code>{Number(a.latitude).toFixed(6)}, {Number(a.longitude).toFixed(6)}</code>
+                  &nbsp;•&nbsp;
+                  <a
+                    href={`https://www.google.com/maps?q=${a.latitude},${a.longitude}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: '#0284c7', fontWeight: 'bold' }}
+                  >
+                    Open Live Pin
+                  </a>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                {a.status === 'triggered' && (
+                  <button
+                    onClick={() => updateStatus(a.alert_id, 'acknowledged')}
+                    style={{ background: '#f59e0b', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
+                  >
+                    Acknowledge
+                  </button>
+                )}
+                {a.status !== 'dispatched' && (
+                  <button
+                    onClick={() => updateStatus(a.alert_id, 'dispatched')}
+                    style={{ background: '#0284c7', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
+                  >
+                    Dispatch Team
+                  </button>
+                )}
+                <button
+                  onClick={() => updateStatus(a.alert_id, 'resolved')}
+                  style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
+                >
+                  Resolve
+                </button>
+                <button
+                  onClick={() => updateStatus(a.alert_id, 'false_alarm')}
+                  style={{ background: '#6b7280', color: '#fff', border: 'none', padding: '6px 10px', borderRadius: 4, cursor: 'pointer' }}
+                >
+                  False Alarm
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+</file>
+
 <file path="desktop/package.json">
 {
   "name": "valetudo-desktop",
@@ -12534,6 +12058,460 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
   "allowScripts": {
     "electron@33.4.11": true,
     "esbuild@0.25.12": true
+  }
+}
+</file>
+
+<file path="mobile/lib/services/emergency_alert_service.dart">
+// mobile/lib/services/emergency_alert_service.dart
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:socket_io_client/socket_io_client.dart' as io;
+import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../config/api_config.dart';
+import '../main.dart';
+
+class EmergencyAlertService {
+  static final EmergencyAlertService _instance = EmergencyAlertService._internal();
+  factory EmergencyAlertService() => _instance;
+  EmergencyAlertService._internal();
+
+  io.Socket? _socket;
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
+  final _storage = const FlutterSecureStorage();
+
+  bool _isAlarmPlaying = false;
+  Timer? _vibrationTimer;
+  Uint8List? _cachedWavBytes;
+  bool _isInitialized = false;
+
+  bool _isResponderActive = false;
+
+  // High-priority notification channel forces Android to create a heads-up banner
+  static const AndroidNotificationChannel _criticalChannel = AndroidNotificationChannel(
+    'emergency_sos_channel_v3',
+    '🚨 Critical Emergency SOS',
+    description: 'High-priority campus emergency dispatch alerts with heads-up banners',
+    importance: Importance.max,
+    playSound: true,
+    enableVibration: true,
+    enableLights: true,
+  );
+
+  Future<void> initialize() async {
+    if (_isInitialized) return;
+    _isInitialized = true;
+
+    // 1. Initialize Android System Notification Channels
+    const AndroidInitializationSettings initializationSettingsAndroid =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+    const InitializationSettings initializationSettings =
+        InitializationSettings(android: initializationSettingsAndroid);
+
+    await _localNotifications.initialize(initializationSettings);
+
+    final androidImplementation = _localNotifications
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+
+    await androidImplementation?.createNotificationChannel(_criticalChannel);
+    await androidImplementation?.requestNotificationsPermission();
+
+    // 2. Configure audio player with safe alarm context
+    try {
+      await _audioPlayer.setAudioContext(
+        AudioContext(
+          android: AudioContextAndroid(
+            stayAwake: true,
+            contentType: AndroidContentType.sonification,
+            usageType: AndroidUsageType.alarm,
+            audioFocus: AndroidAudioFocus.gainTransientExclusive,
+          ),
+        ),
+      );
+    } catch (_) {}
+
+    // 3. Connect Persistent WebSocket with Auth
+    try {
+      final token = await _storage.read(key: 'jwt_token');
+
+      _socket = io.io(
+        ApiConfig.socketUrl,
+        io.OptionBuilder()
+            .setTransports(['websocket', 'polling'])
+            .setAuth({'token': token})
+            .enableAutoConnect()
+            .enableReconnection()
+            .setReconnectionDelay(1500)
+            .build(),
+      );
+
+      _socket!.onConnect((_) {
+        debugPrint('✅ [Socket.IO Mobile] Connected to Emergency Gateway at ${ApiConfig.socketUrl}');
+      });
+
+      _socket!.on('emergency:new_alert', (data) async {
+        debugPrint('🚨 [Socket.IO Mobile] SOS Alert Broadcast: $data');
+        final alertMap = data is Map<String, dynamic> ? data : Map<String, dynamic>.from(data);
+
+        // 1. GUARD: Only trigger siren & red alert if device is logged in as an active responder
+        if (!_isResponderActive) {
+          debugPrint('🛡️ [Socket.IO Mobile] Ignored: Device is in Student/User mode.');
+          return;
+        }
+
+        // 2. Prevent self-echoing if the alert originated from this account
+        final userDataStr = await _storage.read(key: 'user_data');
+        if (userDataStr != null) {
+          try {
+            final currentUser = jsonDecode(userDataStr);
+            if (currentUser['user_id'] == alertMap['userId']) {
+              debugPrint('🛡️ [Socket.IO Mobile] Ignored: Alert originated from this user.');
+              return;
+            }
+          } catch (_) {}
+        }
+
+        // 3. Trigger emergency broadcast for responders only
+        triggerEmergencyBroadcast(alertMap);
+      });
+    } catch (e) {
+      debugPrint('[Socket.IO Mobile] Error: $e');
+    }
+  }
+
+  void startResponderListener() {
+    _isResponderActive = true;
+    initialize();
+  }
+
+  void stopResponderListener() {
+    _isResponderActive = false;
+    stopAlarmSound();
+  }
+
+  // --- 1. STUDENT CONFIRMATION NOTIFICATION ---
+  Future<void> showStudentSosSentNotification() async {
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'emergency_sos_channel_v3',
+      '🚨 Critical Emergency SOS',
+      channelDescription: 'Emergency dispatch confirmation',
+      importance: Importance.max,
+      priority: Priority.high,
+      ticker: 'SOS Dispatched',
+      playSound: true,
+      enableVibration: true,
+      fullScreenIntent: true,
+    );
+
+    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
+
+    await _localNotifications.show(
+      101,
+      '🚨 SOS Alert Dispatched',
+      'Your SOS has been broadcasted. Responders have your GPS coordinates and medical profile.',
+      platformDetails,
+    );
+  }
+
+  // --- 2. APPOINTMENT CONFIRMATION NOTIFICATION ---
+  Future<void> showAppointmentConfirmedNotification([
+    String? title,
+    String? body,
+  ]) async {
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'appointment_channel',
+      'Consultation Appointments',
+      channelDescription: 'Appointment booking confirmations and reminders',
+      importance: Importance.high,
+      priority: Priority.high,
+      ticker: 'Appointment Confirmed',
+      playSound: true,
+    );
+
+    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
+
+    await _localNotifications.show(
+      102,
+      title ?? '📅 Consultation Confirmed',
+      body ?? 'Your consultation appointment has been scheduled successfully.',
+      platformDetails,
+    );
+  }
+
+  // --- 3. CLINIC QUEUE TURN NOTIFICATION ---
+  Future<void> showQueueTurnNotification({
+    required String ticketNo,
+    required String doctorName,
+  }) async {
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'emergency_sos_channel_v3',
+      '🚨 Critical Emergency SOS',
+      channelDescription: 'Alerts when it is your turn for consultation',
+      importance: Importance.max,
+      priority: Priority.high,
+      ticker: 'Your Turn!',
+      playSound: true,
+      enableVibration: true,
+    );
+
+    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
+
+    await _localNotifications.show(
+      103,
+      '🔔 It\'s Your Turn! ($ticketNo)',
+      'Please proceed to the consultation room with $doctorName.',
+      platformDetails,
+    );
+  }
+
+  // Procedural dual-tone EAS Siren (853Hz + 960Hz) in-memory WAV Generator
+  Uint8List _generateEasSirenWav({double durationSeconds = 3.0, int sampleRate = 22050}) {
+    if (_cachedWavBytes != null) return _cachedWavBytes!;
+
+    final int numSamples = (durationSeconds * sampleRate).toInt();
+    final int dataSize = numSamples * 2;
+    final int fileSize = 36 + dataSize;
+    final ByteData byteData = ByteData(44 + dataSize);
+
+    // RIFF Header
+    byteData.setUint8(0, 0x52); byteData.setUint8(1, 0x49); byteData.setUint8(2, 0x46); byteData.setUint8(3, 0x46);
+    byteData.setUint32(4, fileSize, Endian.little);
+    byteData.setUint8(8, 0x57); byteData.setUint8(9, 0x41); byteData.setUint8(10, 0x56); byteData.setUint8(11, 0x45);
+
+    // fmt chunk
+    byteData.setUint8(12, 0x66); byteData.setUint8(13, 0x6D); byteData.setUint8(14, 0x74); byteData.setUint8(15, 0x20);
+    byteData.setUint32(16, 16, Endian.little);
+    byteData.setUint16(20, 1, Endian.little);
+    byteData.setUint16(22, 1, Endian.little);
+    byteData.setUint32(24, sampleRate, Endian.little);
+    byteData.setUint32(28, sampleRate * 2, Endian.little);
+    byteData.setUint16(32, 2, Endian.little);
+    byteData.setUint16(34, 16, Endian.little);
+
+    // data chunk
+    byteData.setUint8(36, 0x64); byteData.setUint8(37, 0x61); byteData.setUint8(38, 0x74); byteData.setUint8(39, 0x61);
+    byteData.setUint32(40, dataSize, Endian.little);
+
+    int offset = 44;
+    const double f1 = 853.0;
+    const double f2 = 960.0;
+    const double twoPi = 2.0 * math.pi;
+
+    for (int i = 0; i < numSamples; i++) {
+      final double t = i / sampleRate;
+      final double sampleValue = 0.5 * (math.sin(twoPi * f1 * t) + math.sin(twoPi * f2 * t));
+      final int sample16 = (sampleValue * 28000).toInt().clamp(-32768, 32767);
+      byteData.setInt16(offset, sample16, Endian.little);
+      offset += 2;
+    }
+
+    _cachedWavBytes = byteData.buffer.asUint8List();
+    return _cachedWavBytes!;
+  }
+
+  void playAlarmSound() async {
+    try {
+      _isAlarmPlaying = true;
+      await _audioPlayer.stop();
+      await _audioPlayer.setVolume(1.0);
+      await _audioPlayer.setReleaseMode(ReleaseMode.loop);
+
+      try {
+        await _audioPlayer.play(AssetSource('emr_sound.ogg'));
+      } catch (e1) {
+        try {
+          await _audioPlayer.play(AssetSource('assets/emr_sound.ogg'));
+        } catch (e2) {
+          final wav = _generateEasSirenWav();
+          await _audioPlayer.play(BytesSource(wav));
+        }
+      }
+
+      _vibrationTimer?.cancel();
+      _vibrationTimer = Timer.periodic(const Duration(milliseconds: 600), (timer) {
+        if (!_isAlarmPlaying) {
+          timer.cancel();
+        } else {
+          HapticFeedback.heavyImpact();
+        }
+      });
+    } catch (e) {
+      debugPrint('[Audio alarm error]: $e');
+    }
+  }
+
+  void stopAlarmSound() async {
+    _isAlarmPlaying = false;
+    _vibrationTimer?.cancel();
+    try {
+      await _audioPlayer.stop();
+    } catch (_) {}
+  }
+
+  Future<void> triggerEmergencyBroadcast(Map<String, dynamic> alertData) async {
+    playAlarmSound();
+
+    final patientName = alertData['patientName'] ?? 'Unknown Student/Staff';
+    final studentNo = alertData['studentNo'] ?? 'Verified User';
+    final bloodType = alertData['bloodType'] ?? 'Unknown';
+    final allergies = alertData['allergies'] ?? 'None recorded';
+    final lat = double.tryParse(alertData['latitude'].toString()) ?? 0.0;
+    final lng = double.tryParse(alertData['longitude'].toString()) ?? 0.0;
+    final googleMapsUrl = alertData['googleMapsUrl'] ?? 'https://www.google.com/maps?q=$lat,$lng';
+
+    // Drop heads-up notification from top of screen
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'emergency_sos_channel_v3',
+      '🚨 Critical Emergency SOS',
+      channelDescription: 'High-priority campus emergency dispatch alerts',
+      importance: Importance.max,
+      priority: Priority.high,
+      ticker: 'EMERGENCY SOS',
+      fullScreenIntent: true,
+      enableVibration: true,
+      playSound: true,
+      category: AndroidNotificationCategory.alarm,
+    );
+
+    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
+
+    await _localNotifications.show(
+      999,
+      '🚨 EMERGENCY SOS: $patientName',
+      'Location: ${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)} | Blood: $bloodType | Allergies: $allergies',
+      platformDetails,
+    );
+
+    final context = navigatorKey.currentContext;
+    if (context == null || !context.mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF7F1D1D),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: Colors.amber, width: 3),
+          ),
+          contentPadding: const EdgeInsets.all(16),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.amber,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.warning_rounded, color: Colors.black, size: 26),
+                      SizedBox(width: 8),
+                      Text(
+                        'EMERGENCY ALERT (CRITICAL)',
+                        style: TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 14,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'PSU DISASTER RISK REDUCTION & INFIRMARY PROTOCOL',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold),
+                ),
+                const Divider(color: Colors.white24, height: 20),
+
+                Text(
+                  patientName,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                Text('ID: $studentNo', style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                const SizedBox(height: 14),
+
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.black45,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red.shade400),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('🩸 Blood Type: $bloodType',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 4),
+                      Text('⚠️ Allergies: $allergies',
+                          style: const TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 4),
+                      Text('📍 Coordinates: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
+                          style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue.shade700,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(42),
+                  ),
+                  onPressed: () async {
+                    final uri = Uri.parse(googleMapsUrl);
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    }
+                  },
+                  icon: const Icon(Icons.navigation, size: 18),
+                  label: const Text('Open in Google Maps', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+                const SizedBox(height: 10),
+
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.red.shade900,
+                    minimumSize: const Size.fromHeight(46),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () {
+                    stopAlarmSound();
+                    if (ctx.mounted) {
+                      Navigator.pop(ctx);
+                    }
+                  },
+                  child: const Text(
+                    'SILENCE & ACKNOWLEDGE ALARM',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 }
 </file>
@@ -13436,6 +13414,177 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+</file>
+
+<file path="server/src/routes/emergency.js">
+// server/src/routes/emergency.js
+import express from 'express';
+import { pool } from '../db.js';
+import { authenticateToken } from '../auth.js';
+import { decrypt } from '../utils/cryptoVault.js';
+import { requireRoles } from '../middleware/rbac.js';
+
+export default function emergencyRouter(io) {
+  const router = express.Router();
+
+  // 1. POST /api/emergency/sos (Accurate Role & Identification Mapping)
+  router.post('/sos', authenticateToken, async (req, res) => {
+    try {
+      const userId = req.user.user_id;
+      const { latitude, longitude, notes } = req.body;
+
+      if (!latitude || !longitude) {
+        return res.status(400).json({ error: 'Latitude and Longitude are required coordinates.' });
+      }
+
+      const [insertResult] = await pool.query(
+        `INSERT INTO EMERGENCY_ALERTS (user_id, location, status, notes)
+         VALUES (?, ST_SRID(POINT(?, ?), 4326), 'triggered', ?)`,
+        [userId, Number(longitude), Number(latitude), notes || 'Emergency SOS pressed']
+      );
+
+      const alertId = insertResult.insertId;
+
+      const [details] = await pool.query(
+        `SELECT u.user_id, u.first_name, u.last_name, u.phone, u.email,
+                COALESCE(r.code, 'STUDENT') AS primary_role,
+                COALESCE(r.name, 'Student Patient') AS role_name,
+                COALESCE(sp.student_no, st.license_no, fp.position, 'PSU Member') AS identifier_no,
+                COALESCE(sp.course, st.department, fp.department, 'PSU Lingayen') AS affiliation,
+                hp.blood_type, hp.allergies, hp.chronic_conditions,
+                hp.emergency_contact_name, hp.emergency_contact_phone
+         FROM USERS u
+         LEFT JOIN USER_ROLES ur ON u.user_id = ur.user_id
+         LEFT JOIN ROLES r ON ur.role_id = r.role_id
+         LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+         LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
+         LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
+         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+         WHERE u.user_id = ?
+         LIMIT 1`,
+        [userId]
+      );
+
+      const patientInfo = details[0] || {};
+      const decryptedAllergies = decrypt(patientInfo.allergies) || 'None listed';
+      const decryptedConditions = decrypt(patientInfo.chronic_conditions) || 'None listed';
+
+      let roleLabel = 'Student';
+      if (patientInfo.primary_role === 'ADMIN') roleLabel = 'System Administrator';
+      else if (patientInfo.primary_role === 'DOCTOR') roleLabel = 'Campus Physician';
+      else if (patientInfo.primary_role === 'DENTIST') roleLabel = 'Campus Dentist';
+      else if (patientInfo.primary_role === 'NURSE') roleLabel = 'Clinic Nurse';
+      else if (patientInfo.primary_role === 'FACULTY') roleLabel = 'Faculty / Staff';
+      else if (patientInfo.primary_role === 'EMERGENCY_RESPONDER') roleLabel = 'Emergency Responder';
+
+      const alertPayload = {
+        alertId,
+        userId,
+        patientName: `${patientInfo.first_name} ${patientInfo.last_name}`,
+        phone: patientInfo.phone,
+        role: patientInfo.primary_role,
+        roleLabel: roleLabel,
+        studentNo: patientInfo.identifier_no,
+        course: patientInfo.affiliation,
+        bloodType: patientInfo.blood_type || 'Unknown',
+        allergies: decryptedAllergies,
+        chronicConditions: decryptedConditions,
+        emergencyContact: `${patientInfo.emergency_contact_name || 'N/A'} (${patientInfo.emergency_contact_phone || 'N/A'})`,
+        latitude: Number(latitude),
+        longitude: Number(longitude),
+        googleMapsUrl: `https://www.google.com/maps?q=${latitude},${longitude}`,
+        status: 'triggered',
+        createdAt: new Date().toISOString(),
+      };
+
+      // Broadcast ONLY to authenticated responders and clinic consoles
+      io.to('responders').emit('emergency:new_alert', alertPayload);
+
+      res.status(201).json({
+        message: 'Emergency alert dispatched to PSU Clinic and Quick-Response team.',
+        alertId,
+      });
+    } catch (error) {
+      console.error('SOS Trigger Error:', error);
+      res.status(500).json({ error: 'Failed to process SOS alert.' });
+    }
+  });
+
+  // 2. GET /api/emergency/active
+  router.get('/active', authenticateToken, requireRoles('EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'), async (req, res) => {
+    try {
+      const [alerts] = await pool.query(
+        `SELECT a.alert_id, a.user_id, a.latitude, a.longitude, a.status, a.created_at, a.notes,
+                u.first_name, u.last_name, u.phone,
+                COALESCE(r.code, 'STUDENT') AS primary_role,
+                COALESCE(sp.student_no, st.license_no, fp.position, 'PSU Member') AS identifier_no,
+                COALESCE(sp.course, st.department, fp.department, 'PSU Lingayen') AS affiliation,
+                hp.blood_type, hp.allergies
+         FROM EMERGENCY_ALERTS a
+         JOIN USERS u ON a.user_id = u.user_id
+         LEFT JOIN USER_ROLES ur ON u.user_id = ur.user_id
+         LEFT JOIN ROLES r ON ur.role_id = r.role_id
+         LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+         LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
+         LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
+         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+         WHERE a.status IN ('triggered', 'acknowledged', 'dispatched')
+         ORDER BY a.created_at DESC`
+      );
+
+      const decryptedAlerts = alerts.map((a) => ({
+        ...a,
+        studentNo: a.identifier_no,
+        course: a.affiliation,
+        allergies: decrypt(a.allergies) || 'None',
+      }));
+
+      res.json(decryptedAlerts);
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch active alerts.' });
+    }
+  });
+
+  // 3. PATCH /api/emergency/:alertId/status
+  router.patch('/:alertId/status', authenticateToken, requireRoles('EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'), async (req, res) => {
+    try {
+      const { alertId } = req.params;
+      const { status } = req.body;
+      const responderId = req.user.user_id;
+
+      if (!['acknowledged', 'dispatched', 'resolved', 'false_alarm'].includes(status)) {
+        return res.status(400).json({ error: 'Invalid status update.' });
+      }
+
+      let extraUpdate = '';
+      const params = [status, responderId];
+
+      if (status === 'acknowledged') {
+        extraUpdate = ', acknowledged_at = CURRENT_TIMESTAMP';
+      } else if (status === 'resolved' || status === 'false_alarm') {
+        extraUpdate = `, resolved_at = CURRENT_TIMESTAMP, 
+                       response_time_seconds = TIMESTAMPDIFF(SECOND, created_at, CURRENT_TIMESTAMP)`;
+      }
+
+      params.push(alertId);
+
+      await pool.query(
+        `UPDATE EMERGENCY_ALERTS 
+         SET status = ?, assigned_responder_id = ? ${extraUpdate}
+         WHERE alert_id = ?`,
+        params
+      );
+
+      io.emit('emergency:status_change', { alertId: Number(alertId), status, responderId });
+
+      res.json({ message: `Alert #${alertId} updated to ${status}.` });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to update alert status.' });
+    }
+  });
+
+  return router;
+}
 </file>
 
 <file path="server/src/routes/inventory.js">
@@ -14712,6 +14861,191 @@ router.get('/export/csv', async (req, res) => {
 export default router;
 </file>
 
+<file path="mobile/lib/main.dart">
+// mobile/lib/main.dart
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'screens/splash_screen.dart';
+import 'services/emergency_alert_service.dart';
+
+class DevHttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    return super.createHttpClient(context)
+      ..badCertificateCallback = (X509Certificate cert, String host, int port) {
+        // Accept self-signed certificates during local development
+        return kDebugMode;
+      };
+  }
+}
+
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Allow self-signed development certificates in debug mode
+  if (kDebugMode) {
+    HttpOverrides.global = DevHttpOverrides();
+  }
+
+  await EmergencyAlertService().initialize();
+  runApp(const ValetudoMobileApp());
+}
+
+class ValetudoMobileApp extends StatelessWidget {
+  const ValetudoMobileApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      navigatorKey: navigatorKey,
+      title: 'Valetudo HealthLink',
+      theme: ThemeData(primarySwatch: Colors.teal, useMaterial3: true),
+      home: const SplashScreen(),
+    );
+  }
+}
+</file>
+
+<file path="server/src/routes/healthPass.js">
+// server/src/routes/healthPass.js
+import express from 'express';
+import crypto from 'crypto';
+import { pool } from '../db.js';
+import { authenticateToken } from '../auth.js';
+import { requireRoles } from '../middleware/rbac.js';
+import { logPhiAccess } from '../utils/phiLogger.js';
+import { decrypt } from '../utils/cryptoVault.js';
+import { requirePrivacyConsent } from '../middleware/consent.js';
+
+const router = express.Router();
+const HMAC_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
+
+// GET /api/health-pass/token
+router.get('/token', authenticateToken, requirePrivacyConsent, (req, res) => {
+  try {
+    const userId = req.user.user_id;
+    const timestamp = Date.now();
+    const nonce = crypto.randomBytes(4).toString('hex');
+
+    const payload = `${userId}.${timestamp}.${nonce}`;
+    const hmac = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
+
+    const qrToken = `${payload}.${hmac}`;
+    res.json({ qrToken, expiresInSeconds: 300 });
+  } catch (error) {
+    console.error('[HealthPass] QR generation error:', error);
+    res.status(500).json({ error: 'Failed to generate QR token.' });
+  }
+});
+
+// POST /api/health-pass/verify
+router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+  const { qrToken } = req.body;
+  if (!qrToken) return res.status(400).json({ error: 'QR token required.' });
+
+  const parts = qrToken.split('.');
+  if (parts.length !== 4) {
+    return res.status(400).json({ error: 'Invalid QR token format.' });
+  }
+
+  const [patientUserId, timestampStr, nonce, receivedSig] = parts;
+  const payload = `${patientUserId}.${timestampStr}.${nonce}`;
+
+  // 1. Compute expected signature using consistent HMAC secret
+  const expectedSig = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
+
+  // Constant-time signature verification
+  const expectedBuffer = Buffer.from(expectedSig);
+  const receivedBuffer = Buffer.from(receivedSig);
+  if (
+    expectedBuffer.length !== receivedBuffer.length ||
+    !crypto.timingSafeEqual(expectedBuffer, receivedBuffer)
+  ) {
+    return res.status(401).json({ error: 'QR verification failed: Invalid signature.' });
+  }
+
+  // 2. Expiration check (15 minutes grace window)
+  const tokenTime = parseInt(timestampStr, 10);
+  if (isNaN(tokenTime) || Date.now() - tokenTime > 15 * 60 * 1000) {
+    return res.status(401).json({ error: 'QR pass expired. Ask student to refresh pass.' });
+  }
+
+  // 3. Acquire DB connection and execute queries safely inside try/finally
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    // R.A. 10173 Consent check on the scanned patient
+    const [consentRows] = await connection.query(
+      `SELECT is_granted FROM CONSENT_RECORDS 
+       WHERE user_id = ? 
+       ORDER BY consent_id DESC LIMIT 1`,
+      [patientUserId]
+    );
+
+    if (consentRows.length === 0 || !Boolean(consentRows[0].is_granted)) {
+      await connection.rollback();
+      return res.status(403).json({
+        error: 'PRIVACY_CONSENT_REVOKED',
+        message: 'Student has revoked or not granted R.A. 10173 data processing consent. Intake suspended.',
+      });
+    }
+
+    // Retrieve active patient records
+    const [patient] = await connection.query(
+      `SELECT u.user_id, u.first_name, u.last_name, u.email,
+              sp.student_no, sp.course, sp.year_level,
+              hp.blood_type, hp.allergies, hp.chronic_conditions
+       FROM USERS u
+       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+       LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+       WHERE u.user_id = ? AND u.is_active = TRUE`,
+      [patientUserId]
+    );
+
+    if (patient.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Patient not found or deactivated.' });
+    }
+
+    // Log PHI read access
+    logPhiAccess({
+      viewerUserId: req.user.user_id,
+      patientUserId: Number(patientUserId),
+      table: 'HEALTH_PROFILES',
+      recordId: Number(patientUserId),
+      purpose: 'Touchless Clinic Check-In Scan',
+      ipAddress: req.ip,
+    });
+
+    await connection.commit();
+
+    const patientData = {
+      ...patient[0],
+      allergies: decrypt(patient[0].allergies),
+      chronic_conditions: decrypt(patient[0].chronic_conditions),
+    };
+
+    res.json({
+      verified: true,
+      patient: patientData,
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[HealthPass] Verification error:', error);
+    res.status(500).json({ error: 'Error during verification.' });
+  } finally {
+    connection.release();
+  }
+});
+
+export default router;
+</file>
+
 <file path="server/schema.sql">
 -- =============================================================================
 -- VALETUDO HEALTHLINK DATABASE SCHEMA & SEED DATA
@@ -15102,13 +15436,22 @@ INSERT INTO `USER_ROLES` (`user_id`, `role_id`) VALUES
 INSERT INTO `STUDENT_PROFILES` (`user_id`, `student_no`, `course`, `year_level`) VALUES
 (5, '22-LN-0123', 'BS Information Technology', 3);
 
+-- Staff profiles for Admin, Doctor, Nurse, Responder, and Dentist
 INSERT INTO `STAFF_PROFILES` (`user_id`, `license_no`, `specialty`, `department`) VALUES
+(1, 'PSU-IT-ADMIN', 'Systems & Database Administration', 'PSU Management Information Systems'),
 (2, 'PRC-MD-098765', 'General Medicine', 'PSU Lingayen Clinic'),
 (3, 'PRC-RN-054321', 'Emergency & Triage Nursing', 'PSU Lingayen Clinic'),
+(4, 'PSU-SEC-0042', 'Campus Security & Disaster Quick-Response', 'Campus Safety & Emergency Unit'),
 (6, 'PRC-DDS-045678', 'Dentistry & Oral Health', 'PSU Lingayen Clinic');
 
-INSERT INTO `HEALTH_PROFILES` (`user_id`, `blood_type`, `allergies`, `chronic_conditions`, `emergency_contact_name`, `emergency_contact_phone`, `height`, `weight`) VALUES
-(5, 'O+', 'Penicillin', 'Mild Asthma', 'Maria Movida', '09299876543', 162.50, 54.00);
+-- Complete health profiles for all accounts (Admin, Doctor, Nurse, Responder, Student, Dentist)
+INSERT INTO `HEALTH_PROFILES` (`user_id`, `blood_type`, `allergies`, `chronic_conditions`, `emergency_contact_name`, `emergency_contact_phone`, `height`, `weight`, `immunization_history`) VALUES
+(1, 'O+', 'None', 'None', 'Maria Castro', '09171112233', 175.00, 72.00, '["COVID-19 Booster", "Hepatitis B"]'),
+(2, 'A+', 'None', 'Hypertension (Controlled)', 'Elena Mata', '09182223344', 170.00, 68.00, '["COVID-19 Booster", "Influenza 2026", "Hepatitis B"]'),
+(3, 'B+', 'Aspirin', 'None', 'Grace Arenas', '09193334455', 160.00, 52.00, '["COVID-19 Booster", "Tetanus Toxoid"]'),
+(4, 'O-', 'None', 'None', 'Mark Cerezo', '09204445566', 178.00, 75.00, '["COVID-19 Booster", "Rabies", "Hepatitis B"]'),
+(5, 'O+', 'Penicillin', 'Mild Asthma', 'Maria Movida', '09299876543', 162.50, 54.00, '["COVID-19 Primary & Booster", "Tetanus Toxoid"]'),
+(6, 'AB+', 'None', 'None', 'Jose Reyes', '09225556677', 165.00, 58.00, '["COVID-19 Booster", "Hepatitis B"]');
 
 INSERT INTO `AUDIT_LOGS` (`user_id`, `action`, `table_affected`, `record_id`, `prev_hash`, `entry_hash`, `ip_address`) VALUES
 (1, 'CREATE', 'SYSTEM_INITIALIZATION', 1, 
@@ -15126,9 +15469,105 @@ INSERT INTO `MEDICINE_BATCHES` (`batch_id`, `medicine_id`, `batch_no`, `manufact
 (2, 2, 'BATCH-NZP-2026B', '2026-02-15', '2027-08-15', 'Unilab Philippines', 150),
 (3, 3, 'BATCH-SLB-2025X', '2025-06-01', '2027-06-01', 'GlaxoSmithKline', 15);
 
-INSERT INTO `CONSENT_RECORDS` (`user_id`, `consent_type`, `is_granted`, `ip_address`)
-VALUES (5, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1')
+-- Pre-seed R.A. 10173 statutory consent for all system users
+INSERT INTO `CONSENT_RECORDS` (`user_id`, `consent_type`, `is_granted`, `ip_address`) VALUES
+(1, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
+(2, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
+(3, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
+(4, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
+(5, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
+(6, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1')
 ON DUPLICATE KEY UPDATE `is_granted` = TRUE;
+</file>
+
+<file path="desktop/electron/main.cjs">
+// desktop/electron/main.cjs
+const { app, BrowserWindow, ipcMain, Notification } = require('electron');
+const path = require('path');
+
+function createWindow() {
+  const win = new BrowserWindow({
+    width: 1300,
+    height: 880,
+    minWidth: 1024,
+    minHeight: 720,
+    show: false, // Prevent white flash before content loads
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.cjs'),
+    },
+  });
+
+  // Use HTTPS on 127.0.0.1 to match Vite's host
+  const devUrl = 'https://127.0.0.1:5173';
+  win.loadURL(devUrl);
+
+  // Focus window on startup to ensure input fields capture keystrokes
+  win.once('ready-to-show', () => {
+    win.show();
+    win.focus();
+  });
+}
+
+// 1. PRINT HANDLER (Native OS Print Spooler)
+ipcMain.handle('print-document', async (event, { htmlContent }) => {
+  let workerWin = new BrowserWindow({ show: false });
+  await workerWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+
+  return new Promise((resolve) => {
+    workerWin.webContents.print({ silent: false }, (success, failureReason) => {
+      if (!success) {
+        resolve({ success: false, error: failureReason });
+      } else {
+        resolve({ success: true });
+      }
+      setTimeout(() => {
+        if (!workerWin.isDestroyed()) workerWin.close();
+      }, 500);
+    });
+  });
+});
+
+// 2. NATIVE OS NOTIFICATION HANDLER
+ipcMain.handle('show-notification', (event, { title, body }) => {
+  if (Notification.isSupported()) {
+    new Notification({
+      title: title || 'Valetudo Alert',
+      body: body || 'Notification from Valetudo HealthLink',
+      urgency: 'critical',
+    }).show();
+    return { success: true };
+  }
+  return { success: false, error: 'Notifications not supported on this OS' };
+});
+
+// 3. ALLOW SELF-SIGNED CERTIFICATES (Backend Port 5000 & Vite Dev Port 5173)
+app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
+  if (
+    // Backend API (Express & Socket.IO)
+    url.startsWith('https://localhost:5000') ||
+    url.startsWith('https://127.0.0.1:5000') ||
+    url.startsWith('wss://localhost:5000') ||
+    url.startsWith('wss://127.0.0.1:5000') ||
+    // Frontend Dev Server (Vite & HMR WebSocket)
+    url.startsWith('https://localhost:5173') ||
+    url.startsWith('https://127.0.0.1:5173') ||
+    url.startsWith('wss://localhost:5173') ||
+    url.startsWith('wss://127.0.0.1:5173')
+  ) {
+    event.preventDefault();
+    callback(true); // Trust self-signed cert for development
+  } else {
+    callback(false);
+  }
+});
+
+app.whenReady().then(createWindow);
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
 </file>
 
 <file path="desktop/src/components/DoctorConsole.tsx">
@@ -15160,6 +15599,8 @@ interface AppointmentItem {
   weight: number;
   past_diagnosis?: string;
   past_treatment?: string;
+  queue_ticket?: string;
+  queue_status?: string;
 }
 
 export default function DoctorConsole() {
@@ -15167,7 +15608,8 @@ export default function DoctorConsole() {
   const [selectedApp, setSelectedApp] = useState<AppointmentItem | null>(null);
   const [loadingAppointments, setLoadingAppointments] = useState(false);
 
-  const [viewMode, setViewMode] = useState<'active' | 'history' | 'analytics'>('active');
+  // 'active' = Triaged & Ready in clinic; 'scheduled' = Booked on app, awaiting nurse intake
+  const [viewMode, setViewMode] = useState<'active' | 'scheduled' | 'history' | 'analytics'>('active');
 
   // Form fields
   const [chiefComplaint, setChiefComplaint] = useState('');
@@ -15206,10 +15648,12 @@ export default function DoctorConsole() {
     setLoadingAppointments(true);
     const token = localStorage.getItem('valetudo_token');
 
-    const url =
-      mode === 'history'
-        ? 'https://localhost:5000/api/appointments/today?filter=history'
-        : 'https://localhost:5000/api/appointments/today';
+    let url = 'https://localhost:5000/api/appointments/today?filter=active';
+    if (mode === 'history') {
+      url = 'https://localhost:5000/api/appointments/today?filter=history';
+    } else if (mode === 'scheduled') {
+      url = 'https://localhost:5000/api/appointments/today?filter=scheduled';
+    }
 
     try {
       const res = await fetch(url, {
@@ -15221,6 +15665,9 @@ export default function DoctorConsole() {
         if (data.length > 0) {
           if (!retainSelection || !selectedApp) {
             selectPatient(data[0]);
+          } else {
+            const updated = data.find((a) => a.appointment_id === selectedApp.appointment_id);
+            if (updated) selectPatient(updated);
           }
         } else {
           setSelectedApp(null);
@@ -15235,28 +15682,42 @@ export default function DoctorConsole() {
   };
 
   useEffect(() => {
-    fetchAppointments('active', false);
+    fetchAppointments(viewMode, false);
 
-    const socket = io('https://localhost:5000');
-    socket.on('appointment:booked', (newBooking: any) => {
+    const token = localStorage.getItem('valetudo_token');
+    const socket = io('https://localhost:5000', {
+      auth: { token },
+      transports: ['websocket', 'polling'],
+    });
+
+    socket.on('appointment:booked', () => {
       fetchAppointments(viewMode, true);
-      if (window.electronAPI?.showNotification) {
+    });
+
+    socket.on('appointment:status_changed', (evt: any) => {
+      fetchAppointments(viewMode, true);
+      if (evt?.status === 'checked_in' && window.electronAPI?.showNotification) {
         window.electronAPI.showNotification({
-          title: '📅 New Consultation Booked',
-          body: `${newBooking?.patientName || 'A student'} scheduled a visit.`,
+          title: '🔔 Patient Triaged & Ready',
+          body: 'A student has been checked in by the triage nurse and is waiting in the queue.',
         });
       }
     });
 
-    socket.on('appointment:cancelled', () => fetchAppointments(viewMode, true));
-    socket.on('appointment:status_changed', () => fetchAppointments(viewMode, true));
+    socket.on('queue:updated', () => {
+      fetchAppointments(viewMode, true);
+    });
+
+    socket.on('appointment:cancelled', () => {
+      fetchAppointments(viewMode, true);
+    });
 
     return () => {
       socket.disconnect();
     };
   }, [viewMode]);
 
-  const handleSwitchView = (mode: 'active' | 'history' | 'analytics') => {
+  const handleSwitchView = (mode: 'active' | 'scheduled' | 'history' | 'analytics') => {
     setViewMode(mode);
     if (mode !== 'analytics') {
       fetchAppointments(mode, false);
@@ -15279,6 +15740,7 @@ export default function DoctorConsole() {
     setClinicalNotes('');
     setFeedbackMsg(null);
 
+    // Auto-populate triage vitals recorded by the nurse
     if (app.notes && app.notes.includes('[TRIAGE VITALS]')) {
       const bpMatch = app.notes.match(/BP:\s*(\d+)\/(\d+)/);
       if (bpMatch) {
@@ -15294,6 +15756,7 @@ export default function DoctorConsole() {
 
   const handleStartConsultation = async () => {
     if (!selectedApp) return;
+
     const token = localStorage.getItem('valetudo_token');
     try {
       const res = await fetch(`https://localhost:5000/api/appointments/${selectedApp.appointment_id}/status`, {
@@ -15382,7 +15845,6 @@ export default function DoctorConsole() {
     setIsIssuingClearance(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      // Step A: Send custom expiration date to backend
       const res = await fetch('https://localhost:5000/api/documents/clearances', {
         method: 'POST',
         headers: {
@@ -15406,7 +15868,6 @@ export default function DoctorConsole() {
       const clearanceId = data.clearanceId;
       const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(realQrToken)}`;
 
-      // Step B: Printable HTML displaying the selected expiration date
       const htmlContent = `
         <!DOCTYPE html>
         <html>
@@ -15509,18 +15970,25 @@ export default function DoctorConsole() {
           <div>
             <h3 style={{ margin: 0, color: '#0284c7' }}>
               {viewMode === 'active'
-                ? "⏳ Doctor's Active Consultation Queue"
+                ? "🩺 Active Consultation Queue (Triaged & Ready)"
+                : viewMode === 'scheduled'
+                ? "📅 Today's Bookings (Awaiting Nurse Intake)"
                 : viewMode === 'history'
                 ? '📜 Consultation History Archive'
                 : '📊 Epidemiological Analytics & Visual Charts'}
             </h3>
             <small style={{ color: '#64748b' }}>
-              {viewMode === 'analytics'
+              {viewMode === 'active'
+                ? 'Students checked in by the triage nurse with vitals recorded'
+                : viewMode === 'scheduled'
+                ? 'Booked on mobile app. Must scan QR pass at the nurse intake desk before entering this room.'
+                : viewMode === 'analytics'
                 ? 'Campus illness trajectories, seasonal spike monitoring & health reports'
-                : 'Scheduled appointments and checked-in walk-in arrivals'}
+                : 'Completed and discharged encounters'}
             </small>
           </div>
 
+          {/* TAB CONTROLS */}
           <div style={{ display: 'flex', gap: 6 }}>
             <button
               onClick={() => handleSwitchView('active')}
@@ -15535,7 +16003,22 @@ export default function DoctorConsole() {
                 color: viewMode === 'active' ? '#ffffff' : '#0284c7',
               }}
             >
-              ⏳ Active Queue
+              🩺 Active Queue (Triaged)
+            </button>
+            <button
+              onClick={() => handleSwitchView('scheduled')}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 4,
+                fontSize: 12,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                border: '1px solid #d97706',
+                background: viewMode === 'scheduled' ? '#d97706' : '#ffffff',
+                color: viewMode === 'scheduled' ? '#ffffff' : '#d97706',
+              }}
+            >
+              📅 Today's Bookings (Awaiting Nurse)
             </button>
             <button
               onClick={() => handleSwitchView('history')}
@@ -15545,9 +16028,9 @@ export default function DoctorConsole() {
                 fontSize: 12,
                 fontWeight: 'bold',
                 cursor: 'pointer',
-                border: '1px solid #0284c7',
-                background: viewMode === 'history' ? '#0284c7' : '#ffffff',
-                color: viewMode === 'history' ? '#ffffff' : '#0284c7',
+                border: '1px solid #64748b',
+                background: viewMode === 'history' ? '#64748b' : '#ffffff',
+                color: viewMode === 'history' ? '#ffffff' : '#64748b',
               }}
             >
               📜 History Archive
@@ -15576,18 +16059,23 @@ export default function DoctorConsole() {
           </div>
         </div>
 
-        {/* Show patient cards only when viewing Active or History tabs */}
+        {/* Patient card grid */}
         {viewMode !== 'analytics' && (
           loadingAppointments ? (
-            <p style={{ color: '#64748b', fontSize: 13 }}>Loading appointments...</p>
+            <p style={{ color: '#64748b', fontSize: 13 }}>Loading roster...</p>
           ) : appointments.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '16px 0', color: '#64748b', fontSize: 13 }}>
-              {viewMode === 'active' ? '🎉 All consultations completed! Active queue is clear.' : 'No archived consultations found.'}
+              {viewMode === 'active'
+                ? 'ℹ️ No patients currently waiting in consultation queue. When the nurse checks in a student, they will appear here automatically.'
+                : viewMode === 'scheduled'
+                ? 'No pending mobile bookings for today.'
+                : 'No archived consultations found.'}
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
               {appointments.map((app) => {
                 const isSelected = selectedApp?.appointment_id === app.appointment_id;
+                const isScheduledOnly = app.status === 'scheduled';
                 return (
                   <div
                     key={app.appointment_id}
@@ -15601,11 +16089,20 @@ export default function DoctorConsole() {
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontWeight: 'bold', color: '#0284c7', fontSize: 13 }}>
-                        📅 {app.date_str} • ⏰ {app.time_slot}
+                      <span style={{ fontWeight: 'bold', color: isScheduledOnly ? '#d97706' : '#0284c7', fontSize: 13 }}>
+                        🎫 {app.queue_ticket || 'Q-??'} &nbsp;•&nbsp; ⏰ {app.time_slot}
                       </span>
-                      <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: '#f1f5f9', color: '#334155', fontWeight: 'bold' }}>
-                        {app.status.toUpperCase()}
+                      <span
+                        style={{
+                          fontSize: 10,
+                          padding: '2px 8px',
+                          borderRadius: 4,
+                          background: isScheduledOnly ? '#fef3c7' : app.status === 'serving' ? '#dcfce7' : '#e0f2fe',
+                          color: isScheduledOnly ? '#b45309' : app.status === 'serving' ? '#15803d' : '#0369a1',
+                          fontWeight: 'bold',
+                        }}
+                      >
+                        {isScheduledOnly ? 'AWAITING NURSE' : app.status === 'serving' ? 'IN CONSULTATION' : 'TRIAGED / READY'}
                       </span>
                     </div>
                     <p style={{ margin: '6px 0 2px', fontWeight: 'bold', fontSize: 14, color: '#1e293b' }}>
@@ -15620,7 +16117,7 @@ export default function DoctorConsole() {
         )}
       </div>
 
-      {/* RENDER ANALYTICS DASHBOARD OR CLINICAL CONSULTATION WORKSPACE */}
+      {/* RENDER ANALYTICS OR WORKSPACE */}
       {viewMode === 'analytics' ? (
         <AnalyticsDashboard />
       ) : (
@@ -15631,7 +16128,7 @@ export default function DoctorConsole() {
               style={{
                 background: '#ffffff',
                 border: '1px solid #cbd5e1',
-                borderLeft: '5px solid #0284c7',
+                borderLeft: `5px solid ${selectedApp.status === 'scheduled' ? '#f59e0b' : '#0284c7'}`,
                 borderRadius: 8,
                 padding: '12px 18px',
                 marginBottom: 20,
@@ -15662,7 +16159,7 @@ export default function DoctorConsole() {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <button
                   type="button"
                   onClick={handleViewPatientHistory}
@@ -15670,7 +16167,16 @@ export default function DoctorConsole() {
                 >
                   📜 Past EMR History
                 </button>
-                {selectedApp.status === 'scheduled' || selectedApp.status === 'checked_in' ? (
+
+                {selectedApp.status === 'scheduled' ? (
+                  <span style={{ background: '#fef3c7', color: '#b45309', padding: '8px 14px', borderRadius: 6, fontWeight: 'bold', fontSize: 12, border: '1px solid #fde68a' }}>
+                    ⏳ Awaiting Nurse Triage (Not Checked In)
+                  </span>
+                ) : selectedApp.status === 'serving' ? (
+                  <span style={{ background: '#dcfce7', color: '#15803d', padding: '8px 14px', borderRadius: 6, fontWeight: 'bold', fontSize: 13, border: '1px solid #bbf7d0' }}>
+                    🩺 In Consultation
+                  </span>
+                ) : (
                   <button
                     type="button"
                     onClick={handleStartConsultation}
@@ -15678,11 +16184,7 @@ export default function DoctorConsole() {
                   >
                     ▶ Begin Consultation
                   </button>
-                ) : selectedApp.status === 'serving' ? (
-                  <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '6px 14px', borderRadius: 6, fontWeight: 'bold', fontSize: 13 }}>
-                    🩺 In Consultation
-                  </span>
-                ) : null}
+                )}
               </div>
             </div>
           )}
@@ -15692,6 +16194,12 @@ export default function DoctorConsole() {
             {/* LEFT: Clinical Consultation Form */}
             <section style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff', textAlign: 'left' }}>
               <h3 style={{ margin: '0 0 14px 0', color: '#0284c7', fontSize: 16 }}>🩺 Encounter Diagnosis & Vitals Logging</h3>
+
+              {selectedApp?.status === 'scheduled' && (
+                <div style={{ padding: '10px 14px', background: '#fef3c7', color: '#92400e', borderRadius: 6, marginBottom: 14, fontSize: 12, border: '1px solid #fde68a' }}>
+                  ⚠️ <b>Patient Not Yet Triaged:</b> This booking was placed on the mobile app. The student must first present their QR Health Pass at the intake desk for the Clinic Nurse to record initial vitals.
+                </div>
+              )}
 
               <form onSubmit={handleFinishConsultation}>
                 {/* Vitals Input Grid */}
@@ -15776,20 +16284,24 @@ export default function DoctorConsole() {
 
                 <button
                   type="submit"
-                  disabled={isSubmittingEMR || !selectedApp}
+                  disabled={isSubmittingEMR || !selectedApp || selectedApp.status === 'scheduled'}
                   style={{
                     width: '100%',
                     padding: 12,
-                    background: !selectedApp ? '#94a3b8' : '#059669',
+                    background: (!selectedApp || selectedApp.status === 'scheduled') ? '#94a3b8' : '#059669',
                     color: '#ffffff',
                     border: 'none',
                     borderRadius: 6,
-                    cursor: !selectedApp ? 'not-allowed' : 'pointer',
+                    cursor: (!selectedApp || selectedApp.status === 'scheduled') ? 'not-allowed' : 'pointer',
                     fontWeight: 'bold',
                     fontSize: 14,
                   }}
                 >
-                  {isSubmittingEMR ? 'Finalizing Encounter...' : '✅ Finish Consultation & Discharge'}
+                  {isSubmittingEMR
+                    ? 'Finalizing Encounter...'
+                    : selectedApp?.status === 'scheduled'
+                    ? '⏳ Patient Not Triaged by Nurse'
+                    : '✅ Finish Consultation & Discharge'}
                 </button>
 
                 {feedbackMsg && (
@@ -15856,7 +16368,6 @@ export default function DoctorConsole() {
                 />
               ) : (
                 <div>
-                  {/* 1. Clearance Purpose Selection */}
                   <div style={{ marginBottom: 12 }}>
                     <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
                       Clearance Purpose:
@@ -15873,7 +16384,6 @@ export default function DoctorConsole() {
                     </select>
                   </div>
 
-                  {/* 2. Expiration Date Input with Preset Chips */}
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                       <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155' }}>
@@ -15888,9 +16398,8 @@ export default function DoctorConsole() {
                             setClearanceExpiryDate(d.toISOString().split('T')[0]);
                           }}
                           style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
-                          title="Set validity for 30 days"
                         >
-                          +30 Days (Sports)
+                          +30 Days
                         </button>
                         <button
                           type="button"
@@ -15900,9 +16409,8 @@ export default function DoctorConsole() {
                             setClearanceExpiryDate(d.toISOString().split('T')[0]);
                           }}
                           style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
-                          title="Set validity for 6 months"
                         >
-                          +6 Months (OJT)
+                          +6 Months
                         </button>
                         <button
                           type="button"
@@ -15912,9 +16420,8 @@ export default function DoctorConsole() {
                             setClearanceExpiryDate(d.toISOString().split('T')[0]);
                           }}
                           style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
-                          title="Set validity for 1 year"
                         >
-                          +1 Year (Annual)
+                          +1 Year
                         </button>
                       </div>
                     </div>
@@ -15927,7 +16434,6 @@ export default function DoctorConsole() {
                     />
                   </div>
 
-                  {/* 3. Clinical Remarks */}
                   <div style={{ marginBottom: 16 }}>
                     <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
                       Clinical Fitness Statement:
@@ -15940,19 +16446,18 @@ export default function DoctorConsole() {
                     />
                   </div>
 
-                  {/* 4. Issue and Print Action Button */}
                   <button
                     type="button"
                     onClick={handlePrintClearance}
-                    disabled={!selectedApp || isIssuingClearance}
+                    disabled={!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled'}
                     style={{
                       width: '100%',
                       padding: 10,
-                      background: !selectedApp || isIssuingClearance ? '#94a3b8' : '#0284c7',
+                      background: (!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled') ? '#94a3b8' : '#0284c7',
                       color: '#fff',
                       border: 'none',
                       borderRadius: 6,
-                      cursor: !selectedApp || isIssuingClearance ? 'not-allowed' : 'pointer',
+                      cursor: (!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled') ? 'not-allowed' : 'pointer',
                       fontWeight: 'bold',
                       fontSize: 14,
                     }}
@@ -16039,189 +16544,25 @@ export default function DoctorConsole() {
 }
 </file>
 
-<file path="mobile/lib/main.dart">
-// mobile/lib/main.dart
-import 'dart:io';
-import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
-import 'screens/splash_screen.dart';
-import 'services/emergency_alert_service.dart';
+<file path="mobile/lib/config/api_config.dart">
+// mobile/lib/config/api_config.dart
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:io' show Platform;
 
-class DevHttpOverrides extends HttpOverrides {
-  @override
-  HttpClient createHttpClient(SecurityContext? context) {
-    return super.createHttpClient(context)
-      ..badCertificateCallback = (X509Certificate cert, String host, int port) {
-        // Accept self-signed certificates during local development
-        return kDebugMode;
-      };
+class ApiConfig {
+  static String get baseUrl {
+    if (kIsWeb) return 'https://localhost:5000';
+    try {
+      if (Platform.isAndroid) {
+        // Use HTTPS
+        return 'https://192.168.18.116:5000';
+      }
+    } catch (_) {}
+    return 'https://localhost:5000';
   }
+
+  static String get socketUrl => baseUrl;
 }
-
-final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
-
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  // Allow self-signed development certificates in debug mode
-  if (kDebugMode) {
-    HttpOverrides.global = DevHttpOverrides();
-  }
-
-  await EmergencyAlertService().initialize();
-  runApp(const ValetudoMobileApp());
-}
-
-class ValetudoMobileApp extends StatelessWidget {
-  const ValetudoMobileApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      navigatorKey: navigatorKey,
-      title: 'Valetudo HealthLink',
-      theme: ThemeData(primarySwatch: Colors.teal, useMaterial3: true),
-      home: const SplashScreen(),
-    );
-  }
-}
-</file>
-
-<file path="server/src/routes/healthPass.js">
-// server/src/routes/healthPass.js
-import express from 'express';
-import crypto from 'crypto';
-import { pool } from '../db.js';
-import { authenticateToken } from '../auth.js';
-import { requireRoles } from '../middleware/rbac.js';
-import { logPhiAccess } from '../utils/phiLogger.js';
-import { decrypt } from '../utils/cryptoVault.js';
-import { requirePrivacyConsent } from '../middleware/consent.js';
-
-const router = express.Router();
-const HMAC_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
-
-// GET /api/health-pass/token
-router.get('/token', authenticateToken, requirePrivacyConsent, (req, res) => {
-  try {
-    const userId = req.user.user_id;
-    const timestamp = Date.now();
-    const nonce = crypto.randomBytes(4).toString('hex');
-
-    const payload = `${userId}.${timestamp}.${nonce}`;
-    const hmac = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
-
-    const qrToken = `${payload}.${hmac}`;
-    res.json({ qrToken, expiresInSeconds: 300 });
-  } catch (error) {
-    console.error('[HealthPass] QR generation error:', error);
-    res.status(500).json({ error: 'Failed to generate QR token.' });
-  }
-});
-
-// POST /api/health-pass/verify
-router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
-  const { qrToken } = req.body;
-  if (!qrToken) return res.status(400).json({ error: 'QR token required.' });
-
-  const parts = qrToken.split('.');
-  if (parts.length !== 4) {
-    return res.status(400).json({ error: 'Invalid QR token format.' });
-  }
-
-  const [patientUserId, timestampStr, nonce, receivedSig] = parts;
-  const payload = `${patientUserId}.${timestampStr}.${nonce}`;
-
-  // 1. Compute expected signature using consistent HMAC secret
-  const expectedSig = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
-
-  // Constant-time signature verification
-  const expectedBuffer = Buffer.from(expectedSig);
-  const receivedBuffer = Buffer.from(receivedSig);
-  if (
-    expectedBuffer.length !== receivedBuffer.length ||
-    !crypto.timingSafeEqual(expectedBuffer, receivedBuffer)
-  ) {
-    return res.status(401).json({ error: 'QR verification failed: Invalid signature.' });
-  }
-
-  // 2. Expiration check (15 minutes grace window)
-  const tokenTime = parseInt(timestampStr, 10);
-  if (isNaN(tokenTime) || Date.now() - tokenTime > 15 * 60 * 1000) {
-    return res.status(401).json({ error: 'QR pass expired. Ask student to refresh pass.' });
-  }
-
-  // 3. Acquire DB connection and execute queries safely inside try/finally
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    // R.A. 10173 Consent check on the scanned patient
-    const [consentRows] = await connection.query(
-      `SELECT is_granted FROM CONSENT_RECORDS 
-       WHERE user_id = ? 
-       ORDER BY consent_id DESC LIMIT 1`,
-      [patientUserId]
-    );
-
-    if (consentRows.length === 0 || !Boolean(consentRows[0].is_granted)) {
-      await connection.rollback();
-      return res.status(403).json({
-        error: 'PRIVACY_CONSENT_REVOKED',
-        message: 'Student has revoked or not granted R.A. 10173 data processing consent. Intake suspended.',
-      });
-    }
-
-    // Retrieve active patient records
-    const [patient] = await connection.query(
-      `SELECT u.user_id, u.first_name, u.last_name, u.email,
-              sp.student_no, sp.course, sp.year_level,
-              hp.blood_type, hp.allergies, hp.chronic_conditions
-       FROM USERS u
-       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
-       LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
-       WHERE u.user_id = ? AND u.is_active = TRUE`,
-      [patientUserId]
-    );
-
-    if (patient.length === 0) {
-      await connection.rollback();
-      return res.status(404).json({ error: 'Patient not found or deactivated.' });
-    }
-
-    // Log PHI read access
-    logPhiAccess({
-      viewerUserId: req.user.user_id,
-      patientUserId: Number(patientUserId),
-      table: 'HEALTH_PROFILES',
-      recordId: Number(patientUserId),
-      purpose: 'Touchless Clinic Check-In Scan',
-      ipAddress: req.ip,
-    });
-
-    await connection.commit();
-
-    const patientData = {
-      ...patient[0],
-      allergies: decrypt(patient[0].allergies),
-      chronic_conditions: decrypt(patient[0].chronic_conditions),
-    };
-
-    res.json({
-      verified: true,
-      patient: patientData,
-    });
-  } catch (error) {
-    await connection.rollback();
-    console.error('[HealthPass] Verification error:', error);
-    res.status(500).json({ error: 'Error during verification.' });
-  } finally {
-    connection.release();
-  }
-});
-
-export default router;
 </file>
 
 <file path="server/src/routes/profile.js">
@@ -16235,23 +16576,28 @@ import { requirePrivacyConsent } from '../middleware/consent.js';
 
 const router = express.Router();
 
-// GET /api/profile/me - Dynamically retrieves patient demographics & clinical profile
+// GET /api/profile/me - Dynamically retrieves role-aware profile & clinical data
 router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => {
   try {
     const userId = req.user.user_id;
 
-    // 1. Fetch user info dynamically joined with role-extension tables
+    // Join identity with role tables (Student, Staff, Faculty, Admin)
     const [userRows] = await pool.query(
       `SELECT u.user_id, u.email, u.first_name, u.last_name, u.phone,
+              COALESCE(r.code, 'STUDENT') AS primary_role,
+              COALESCE(r.name, 'Student Patient') AS role_name,
               sp.student_no, sp.course, sp.year_level,
               st.license_no, st.specialty,
-              COALESCE(st.department, fp.department, sp.course, 'PSU Lingayen Clinic') AS department,
+              COALESCE(st.department, fp.department, sp.course, 'PSU Lingayen Campus') AS department,
               fp.position
        FROM USERS u
+       LEFT JOIN USER_ROLES ur ON u.user_id = ur.user_id
+       LEFT JOIN ROLES r ON ur.role_id = r.role_id
        LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
        LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
        LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
-       WHERE u.user_id = ? AND u.deleted_at IS NULL`,
+       WHERE u.user_id = ? AND u.deleted_at IS NULL
+       LIMIT 1`,
       [userId]
     );
 
@@ -16259,7 +16605,7 @@ router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
       return res.status(404).json({ error: 'User not found.' });
     }
 
-    // 2. Fetch clinical profile directly from MySQL HEALTH_PROFILES table
+    // Fetch clinical profile from HEALTH_PROFILES
     const [healthRows] = await pool.query(
       `SELECT profile_id, blood_type, allergies, chronic_conditions, immunization_history,
               emergency_contact_name, emergency_contact_phone, height, weight, updated_at
@@ -16271,7 +16617,6 @@ router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
     let healthProfile = healthRows.length > 0 ? healthRows[0] : null;
 
     if (healthProfile) {
-      // Decrypt sensitive medical indicators stored under AES-256
       healthProfile.allergies = decrypt(healthProfile.allergies);
       healthProfile.chronic_conditions = decrypt(healthProfile.chronic_conditions);
     }
@@ -16286,7 +16631,7 @@ router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
   }
 });
 
-// PUT /api/profile/me - Dynamically persists updates to MySQL
+// PUT /api/profile/me - Dynamically persists updates to MySQL with AES-256 encryption
 router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => {
   const userId = req.user.user_id;
   const {
@@ -16305,12 +16650,10 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
   try {
     await connection.beginTransaction();
 
-    // 1. Update personal phone on USERS table if provided
     if (phone !== undefined && phone !== null) {
       await connection.query('UPDATE USERS SET phone = ? WHERE user_id = ?', [phone.trim(), userId]);
     }
 
-    // 2. Fetch current record to prevent wiping untouched fields
     const [existing] = await connection.query(
       'SELECT * FROM HEALTH_PROFILES WHERE user_id = ? FOR UPDATE',
       [userId]
@@ -16324,7 +16667,6 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
       action = 'UPDATE';
       recordId = old.profile_id;
 
-      // Preserve existing DB values if not supplied in this request
       const updatedBlood = blood_type !== undefined ? blood_type : old.blood_type;
       const updatedAllergies = allergies !== undefined ? encrypt(allergies) : old.allergies;
       const updatedConditions = chronic_conditions !== undefined ? encrypt(chronic_conditions) : old.chronic_conditions;
@@ -16360,7 +16702,6 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
       recordId = result.insertId;
     }
 
-    // 3. Cryptographic audit log (R.A. 10173 compliance)
     await logAudit(connection, {
       userId: req.user.user_id,
       action,
@@ -16383,106 +16724,6 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
 });
 
 export default router;
-</file>
-
-<file path="desktop/electron/main.cjs">
-// desktop/electron/main.cjs
-const { app, BrowserWindow, ipcMain, Notification } = require('electron');
-const path = require('path');
-
-function createWindow() {
-  const win = new BrowserWindow({
-    width: 1300,
-    height: 880,
-    minWidth: 1024,
-    minHeight: 720,
-    show: false, // Don't show until ready to prevent white flash
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: path.join(__dirname, 'preload.cjs'),
-    },
-  });
-
-  const devUrl = 'http://localhost:5173';
-  win.loadURL(devUrl);
-
-  // Force focus onto the window so input fields immediately capture keystrokes
-  win.once('ready-to-show', () => {
-    win.show();
-    win.focus();
-  });
-}
-
-// 1. PRINT HANDLER (Native OS Print Spooler)
-ipcMain.handle('print-document', async (event, { htmlContent }) => {
-  let workerWin = new BrowserWindow({ show: false });
-  await workerWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
-
-  return new Promise((resolve) => {
-    workerWin.webContents.print({ silent: false }, (success, failureReason) => {
-      if (!success) {
-        resolve({ success: false, error: failureReason });
-      } else {
-        resolve({ success: true });
-      }
-      setTimeout(() => {
-        if (!workerWin.isDestroyed()) workerWin.close();
-      }, 500);
-    });
-  });
-});
-
-// 2. NATIVE OS NOTIFICATION HANDLER
-ipcMain.handle('show-notification', (event, { title, body }) => {
-  if (Notification.isSupported()) {
-    new Notification({
-      title: title || 'Valetudo Alert',
-      body: body || 'Notification from Valetudo HealthLink',
-      urgency: 'critical',
-    }).show();
-    return { success: true };
-  }
-  return { success: false, error: 'Notifications not supported on this OS' };
-});
-
-// Add before app.whenReady() in desktop/electron/main.cjs
-app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
-  // Allow self-signed certificate for local infirmary backend
-  if (url.startsWith('https://localhost:5000') || url.startsWith('https://127.0.0.1:5000')) {
-    event.preventDefault();
-    callback(true); // Trust self-signed cert for dev
-  } else {
-    callback(false);
-  }
-});
-
-app.whenReady().then(createWindow);
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
-</file>
-
-<file path="mobile/lib/config/api_config.dart">
-// mobile/lib/config/api_config.dart
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'dart:io' show Platform;
-
-class ApiConfig {
-  static String get baseUrl {
-    if (kIsWeb) return 'https://localhost:5000';
-    try {
-      if (Platform.isAndroid) {
-        // Use HTTPS
-        return 'https://192.168.18.116:5000';
-      }
-    } catch (_) {}
-    return 'https://localhost:5000';
-  }
-
-  static String get socketUrl => baseUrl;
-}
 </file>
 
 <file path="mobile/lib/screens/patient_portal_screen.dart">
@@ -16526,12 +16767,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
 
   // Privacy & Consent State (R.A. 10173)
   bool _hasConsented = false;
-  Map<String, dynamic>? _consentDetails;
-  bool _isCheckingConsent = false;
 
   // Live Queue Ticket State
   Map<String, dynamic>? _activeQueueTicket;
-  bool _loadingQueue = false;
   Timer? _queuePollingTimer;
   io.Socket? _socket;
   String _previousQueueStatus = '';
@@ -16546,18 +16784,12 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   @override
   void initState() {
     super.initState();
-    // 1. Mandatory R.A. 10173 Consent Gatekeeper
     _checkPrivacyConsent();
-
-    // 2. Fetch Initial Clinical Data
     _fetchQRPass();
     _fetchProfile();
     _fetchActiveQueueTicket();
-
-    // 3. Connect WebSocket for Realtime Queue Events
     _initQueueSocket();
 
-    // 4. Polling Fallback (every 6 seconds)
     _queuePollingTimer = Timer.periodic(
       const Duration(seconds: 6),
       (_) => _fetchActiveQueueTicket(silent: true),
@@ -16577,7 +16809,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   // ===========================================================================
 
   Future<void> _checkPrivacyConsent() async {
-    setState(() => _isCheckingConsent = true);
     final token = await _storage.read(key: 'jwt_token');
 
     try {
@@ -16593,18 +16824,14 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         if (mounted) {
           setState(() {
             _hasConsented = consented;
-            _consentDetails = data['details'];
           });
 
-          // Gatekeeper: If user has not consented, prompt immediately
           if (!consented) {
             _showConsentModal(isMandatory: true);
           }
         }
       }
     } catch (_) {}
-
-    if (mounted) setState(() => _isCheckingConsent = false);
   }
 
   Future<void> _recordConsent() async {
@@ -16625,7 +16852,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
       if (res.statusCode == 200) {
         setState(() => _hasConsented = true);
 
-        // Immediately populate clinical data now that consent is recorded
         await _fetchQRPass();
         await _fetchProfile();
         await _fetchActiveQueueTicket();
@@ -16716,7 +16942,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
             TextButton(
               onPressed: () async {
                 await _storage.deleteAll();
-                if (ctx.mounted) {
+                if (mounted) {
                   Navigator.pushAndRemoveUntil(
                     context,
                     MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -16768,7 +16994,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   Future<void> _fetchActiveQueueTicket({bool silent = false}) async {
-    if (!silent) setState(() => _loadingQueue = true);
     final token = await _storage.read(key: 'jwt_token');
 
     try {
@@ -16800,8 +17025,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         }
       }
     } catch (_) {}
-
-    if (!silent && mounted) setState(() => _loadingQueue = false);
   }
 
   Future<void> _fetchQRPass() async {
@@ -16835,7 +17058,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   // ===========================================================================
-  // 3. CAMPUS EMERGENCY SOS LOGIC
+  // 3. CAMPUS EMERGENCY SOS LOGIC (STUDENT TRANSMISSION)
   // ===========================================================================
 
   void _startHold() {
@@ -16916,8 +17139,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
           _sosStatusMessage = 'EMERGENCY DISPATCHED!\nClinic and Response team alerted.';
         });
 
+        // Drop student confirmation notification
         EmergencyAlertService().showStudentSosSentNotification();
 
+        // Show student confirmation dialog (WITHOUT siren blaring on victim device)
         if (mounted) {
           _showEmergencyDialog();
         }
@@ -16936,16 +17161,25 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        icon: const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 60),
-        title: const Text('SOS Alert Active', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+        icon: const Icon(Icons.check_circle_outline, color: Color(0xFF0F766E), size: 60),
+        title: const Text(
+          'SOS Alert Active',
+          style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+        ),
         content: const Text(
-          'Your live GPS coordinates and medical profile have been broadcasted to the PSU Infirmary and Quick-Response team.',
+          'Your live GPS coordinates and medical profile have been securely transmitted to the PSU Infirmary and Campus Quick-Response team.',
           textAlign: TextAlign.center,
         ),
         actions: [
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-            onPressed: () => Navigator.pop(ctx),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0F766E),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              EmergencyAlertService().stopAlarmSound();
+              Navigator.pop(ctx);
+            },
             child: const Text('I Understand'),
           )
         ],
@@ -16954,8 +17188,19 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   // ===========================================================================
-  // 4. MAIN BUILD METHOD WITH 15-MIN SESSION TIMEOUT LISTENER
+  // 4. LOGOUT & MAIN BUILD METHOD (WITH 15-MIN SESSION TIMEOUT LISTENER)
   // ===========================================================================
+
+  Future<void> _handleSignOut() async {
+    await _storage.delete(key: 'jwt_token');
+    await _storage.delete(key: 'user_data');
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -16984,15 +17229,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
             IconButton(
               icon: const Icon(Icons.logout),
               tooltip: 'Sign Out',
-              onPressed: () async {
-                await _storage.delete(key: 'jwt_token');
-                await _storage.delete(key: 'user_data');
-                if (!context.mounted) return;
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (_) => const LoginScreen()),
-                );
-              },
+              onPressed: _handleSignOut,
             )
           ],
         ),
@@ -17355,7 +17592,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   // ===========================================================================
-  // 7. TAB 4: HEALTH PROFILE & R.A. 10173 COMPLIANCE PANEL
+  // 7. TAB 4: HEALTH PROFILE (DYNAMIC ROLE-BASED DESIGNATION)
   // ===========================================================================
 
   Widget _buildProfileTab() {
@@ -17375,6 +17612,54 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
 
     final hp = _profileData!['healthProfile'] ?? {};
     final u = _profileData!['user'] ?? {};
+
+    // Determine Role and Theme
+    final String roleCode = (u['primary_role'] ?? 'STUDENT').toString().toUpperCase();
+
+    Color roleBgColor = Colors.teal.shade50;
+    Color roleTextColor = const Color(0xFF0F766E);
+    String roleDisplay = u['role_name'] ?? 'Student';
+
+    if (roleCode == 'ADMIN') {
+      roleBgColor = const Color(0xFFF5F3FF);
+      roleTextColor = const Color(0xFF6D28D9);
+      roleDisplay = 'System Administrator';
+    } else if (roleCode == 'DOCTOR') {
+      roleBgColor = const Color(0xFFF0F9FF);
+      roleTextColor = const Color(0xFF0284C7);
+      roleDisplay = 'Campus Physician';
+    } else if (roleCode == 'DENTIST') {
+      roleBgColor = const Color(0xFFECFEFF);
+      roleTextColor = const Color(0xFF0E7490);
+      roleDisplay = 'Campus Dentist';
+    } else if (roleCode == 'NURSE') {
+      roleBgColor = const Color(0xFFF0FDFA);
+      roleTextColor = const Color(0xFF0F766E);
+      roleDisplay = 'Infirmary Nurse';
+    } else if (roleCode == 'FACULTY') {
+      roleBgColor = const Color(0xFFFFF7ED);
+      roleTextColor = const Color(0xFFC2410C);
+      roleDisplay = 'Faculty / Staff';
+    } else if (roleCode == 'EMERGENCY_RESPONDER') {
+      roleBgColor = const Color(0xFFFEF2F2);
+      roleTextColor = const Color(0xFFB91C1C);
+      roleDisplay = 'Emergency Responder';
+    }
+
+    // Determine Dynamic Identifier Label
+    String idLabel = 'Member ID: PSU-${u['user_id']}';
+    String deptLabel = u['department'] ?? 'PSU Lingayen Campus';
+
+    if (roleCode == 'STUDENT') {
+      idLabel = 'Student No: ${u['student_no'] ?? 'Unassigned'}';
+      deptLabel = 'Course: ${u['course'] ?? 'General Education'}${u['year_level'] != null ? ' (Year ${u['year_level']})' : ''}';
+    } else if (roleCode == 'ADMIN' || roleCode == 'NURSE' || roleCode == 'DOCTOR' || roleCode == 'DENTIST') {
+      idLabel = 'License / Staff No: ${u['license_no'] ?? 'PSU-STAFF-${u['user_id']}'}';
+      deptLabel = 'Department: ${u['department'] ?? 'University Infirmary'}';
+    } else if (roleCode == 'FACULTY') {
+      idLabel = 'Position: ${u['position'] ?? 'Faculty Member'}';
+      deptLabel = 'Department: ${u['department'] ?? 'Academic Affairs'}';
+    }
 
     List<String> immunizations = [];
     final rawImm = hp['immunization_history'];
@@ -17405,9 +17690,19 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
               child: Row(
                 children: [
                   CircleAvatar(
-                    radius: 30,
-                    backgroundColor: Colors.teal.shade100,
-                    child: const Icon(Icons.person, size: 36, color: Colors.teal),
+                    radius: 32,
+                    backgroundColor: roleBgColor,
+                    child: Icon(
+                      roleCode == 'ADMIN'
+                          ? Icons.admin_panel_settings_rounded
+                          : roleCode == 'DOCTOR' || roleCode == 'DENTIST'
+                              ? Icons.medical_services_rounded
+                              : roleCode == 'NURSE'
+                                  ? Icons.healing_rounded
+                                  : Icons.person_rounded,
+                      size: 36,
+                      color: roleTextColor,
+                    ),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
@@ -17418,18 +17713,37 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                           '${u['first_name']} ${u['last_name']}',
                           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                         ),
+                        const SizedBox(height: 3),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: roleBgColor,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: roleTextColor.withAlpha(80)),
+                          ),
+                          child: Text(
+                            roleDisplay.toUpperCase(),
+                            style: TextStyle(
+                              color: roleTextColor,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
                         Text(
-                          'ID: ${u['student_no'] ?? 'Staff/Faculty'}',
-                          style: const TextStyle(color: Colors.black54),
+                          idLabel,
+                          style: const TextStyle(color: Colors.black87, fontSize: 13, fontWeight: FontWeight.w500),
                         ),
                         Text(
-                          'Dept/Course: ${u['course'] ?? u['department'] ?? 'PSU Lingayen'}',
-                          style: const TextStyle(color: Colors.black54),
+                          deptLabel,
+                          style: const TextStyle(color: Colors.black54, fontSize: 12),
                         ),
-                        if (u['phone'] != null)
+                        if (u['phone'] != null && u['phone'].toString().isNotEmpty)
                           Text(
                             'Phone: ${u['phone']}',
-                            style: const TextStyle(color: Colors.black87, fontSize: 13),
+                            style: const TextStyle(color: Colors.black54, fontSize: 12),
                           ),
                       ],
                     ),
@@ -18014,35 +18328,37 @@ export const io = new Server(server, {
   },
 });
 
-io.on('connection', (socket) => {
-  console.log(`[Socket.IO ${isHttps ? 'WSS' : 'WS'}] Client connected: ${socket.id}`);
-  socket.on('disconnect', () => {
-    console.log(`[Socket.IO] Client disconnected: ${socket.id}`);
-  });
-});
-
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
 
-// Add Socket.IO authentication middleware
+// Socket.IO authentication middleware (asynchronous token validation)
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.split(' ')[1];
-  if (!token) {
-    return next(new Error('Authentication token required'));
-  }
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return next(new Error('Invalid token'));
-    socket.user = user;
+  if (token) {
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+      if (!err && user) {
+        socket.user = user;
+      }
+      next();
+    });
+  } else {
     next();
-  });
+  }
 });
 
 io.on('connection', (socket) => {
+  const userEmail = socket.user?.email || 'Anonymous / Kiosk';
   const roles = socket.user?.roles || [];
-  // Join privileged room if clinical staff or emergency responder
+  console.log(`⚡ [Socket.IO ${isHttps ? 'WSS' : 'WS'}] Client connected: ${socket.id} (${userEmail})`);
+
   const authorizedRoles = ['EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'];
   if (roles.some((r) => authorizedRoles.includes(r))) {
     socket.join('responders');
+    console.log(`🛡️ [Socket.IO] Socket ${socket.id} joined 'responders' room`);
   }
+
+  socket.on('disconnect', (reason) => {
+    console.log(`🔌 [Socket.IO] Client disconnected: ${socket.id} (${reason})`);
+  });
 });
 
 // 2. Public Auth Routes
@@ -18081,7 +18397,6 @@ import { logPhiAccess } from '../utils/phiLogger.js';
 import { sendAppointmentEmail } from '../utils/mailer.js';
 import { encrypt, decrypt } from '../utils/cryptoVault.js';
 import { requirePrivacyConsent } from '../middleware/consent.js';
-
 
 export default function appointmentRouter(io) {
   const router = express.Router();
@@ -18127,11 +18442,11 @@ export default function appointmentRouter(io) {
 
       const [existingBookings] = await pool.query(
         `SELECT DATE_FORMAT(date_time, '%H:%i') as booked_time
- FROM APPOINTMENTS
- WHERE doctor_user_id = ?
-   AND DATE(date_time) = ?
-   AND status IN ('scheduled', 'checked_in', 'serving')
-   AND deleted_at IS NULL`
+         FROM APPOINTMENTS
+         WHERE doctor_user_id = ?
+           AND DATE(date_time) = ?
+           AND status IN ('scheduled', 'checked_in', 'serving')
+           AND deleted_at IS NULL`,
         [doctorId, date]
       );
 
@@ -18175,7 +18490,8 @@ export default function appointmentRouter(io) {
         `SELECT appointment_id FROM APPOINTMENTS 
          WHERE doctor_user_id = ? 
            AND date_time = ? 
-           AND status IN ('scheduled', 'checked_in', 'serving')`,
+           AND status IN ('scheduled', 'checked_in', 'serving')
+           AND deleted_at IS NULL`,
         [doctor_user_id, date_time]
       );
 
@@ -18187,7 +18503,8 @@ export default function appointmentRouter(io) {
         `SELECT appointment_id FROM APPOINTMENTS 
          WHERE patient_user_id = ? 
            AND date_time = ? 
-           AND status IN ('scheduled', 'checked_in', 'serving')`,
+           AND status IN ('scheduled', 'checked_in', 'serving')
+           AND deleted_at IS NULL`,
         [patientUserId, date_time]
       );
 
@@ -18203,21 +18520,15 @@ export default function appointmentRouter(io) {
 
       const appointmentId = insertResult.insertId;
 
-      // In POST /api/appointments/:id/complete inside the transaction:
-await logAudit(connection, {
-  userId: doctorUserId,
-  action: 'CREATE',
-  table: 'EMR_RECORDS',
-  recordId: emrId,
-  oldValue: null,
-  newValue: {
-    patient_user_id,
-    appointment_id: appointmentId,
-    vitals_logged: vitals ? Object.keys(vitals) : [],
-    encrypted: true,
-  },
-  ipAddress: req.ip,
-});
+      await logAudit(connection, {
+        userId: patientUserId,
+        action: 'CREATE',
+        table: 'APPOINTMENTS',
+        recordId: appointmentId,
+        oldValue: null,
+        newValue: { doctor_user_id, date_time, appointment_type, notes },
+        ipAddress: req.ip,
+      });
 
       await connection.commit();
 
@@ -18298,7 +18609,7 @@ await logAudit(connection, {
          FROM APPOINTMENTS a
          JOIN USERS u ON a.doctor_user_id = u.user_id
          LEFT JOIN STAFF_PROFILES sp ON u.user_id = sp.user_id
-         WHERE a.patient_user_id = ?
+         WHERE a.patient_user_id = ? AND a.deleted_at IS NULL
          ORDER BY a.date_time DESC`,
         [userId]
       );
@@ -18370,17 +18681,23 @@ await logAudit(connection, {
   router.get('/today', authenticateToken, async (req, res) => {
     try {
       const { date, filter } = req.query;
-      whereClause += ' AND a.deleted_at IS NULL';
+      let whereClause = '';
       const params = [];
 
       if (filter === 'history') {
         whereClause = `WHERE a.status IN ('completed', 'cancelled', 'no_show')`;
+      } else if (filter === 'scheduled') {
+        whereClause = `WHERE a.status = 'scheduled' AND a.date_time >= CURDATE()`;
+      } else if (filter === 'all') {
+        whereClause = `WHERE a.status IN ('scheduled', 'checked_in', 'serving')`;
       } else if (date) {
-        whereClause = `WHERE DATE(a.date_time) = ? AND a.status IN ('scheduled', 'checked_in', 'serving')`;
+        whereClause = `WHERE DATE(a.date_time) = ? AND a.status IN ('checked_in', 'serving')`;
         params.push(date);
       } else {
-        whereClause = `WHERE a.date_time >= CURDATE() AND a.status IN ('scheduled', 'checked_in', 'serving')`;
+        whereClause = `WHERE a.status IN ('checked_in', 'serving')`;
       }
+
+      whereClause += ' AND a.deleted_at IS NULL';
 
       const [rows] = await pool.query(
         `SELECT a.appointment_id, 
@@ -18392,18 +18709,20 @@ await logAudit(connection, {
                 hp.blood_type, hp.allergies, hp.chronic_conditions,
                 hp.height, hp.weight,
                 emr.diagnosis AS past_diagnosis,
-                emr.treatment_plan AS past_treatment
+                emr.treatment_plan AS past_treatment,
+                CONCAT('Q-', LPAD(COALESCE(q.queue_number, 1), 2, '0')) AS queue_ticket,
+                q.status AS queue_status
          FROM APPOINTMENTS a
          JOIN USERS u ON a.patient_user_id = u.user_id
          LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
          LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
          LEFT JOIN EMR_RECORDS emr ON (emr.patient_user_id = a.patient_user_id AND DATE(emr.encounter_date) = DATE(a.date_time))
+         LEFT JOIN QUEUE q ON (q.appointment_id = a.appointment_id AND q.status != 'done')
          ${whereClause}
-         ORDER BY a.date_time DESC`,
+         ORDER BY COALESCE(q.queue_number, 999) ASC, a.date_time ASC`,
         params
       );
 
-      // Decrypt clinical and historical fields
       const decryptedRows = rows.map((r) => ({
         ...r,
         allergies: decrypt(r.allergies),
@@ -18414,6 +18733,7 @@ await logAudit(connection, {
 
       res.json(decryptedRows);
     } catch (error) {
+      console.error('[Appointments] Today roster error:', error);
       res.status(500).json({ error: 'Failed to retrieve appointments roster.' });
     }
   });
@@ -18448,7 +18768,6 @@ await logAudit(connection, {
       const doctorUserId = req.user.user_id;
       const { patient_user_id, chief_complaint, diagnosis, treatment_plan, notes, vitals } = req.body;
 
-      // Encrypt sensitive clinical PHI
       const encComplaint = encrypt(chief_complaint);
       const encDiagnosis = encrypt(diagnosis);
       const encTreatment = encrypt(treatment_plan);
@@ -18494,6 +18813,21 @@ await logAudit(connection, {
 
       await connection.query(`UPDATE APPOINTMENTS SET status = 'completed' WHERE appointment_id = ?`, [appointmentId]);
       await connection.query(`UPDATE QUEUE SET status = 'done', served_at = CURRENT_TIMESTAMP WHERE appointment_id = ?`, [appointmentId]);
+
+      await logAudit(connection, {
+        userId: doctorUserId,
+        action: 'CREATE',
+        table: 'EMR_RECORDS',
+        recordId: emrId,
+        oldValue: null,
+        newValue: {
+          patient_user_id,
+          appointment_id: appointmentId,
+          vitals_logged: vitals ? Object.keys(vitals) : [],
+          encrypted: true,
+        },
+        ipAddress: req.ip,
+      });
 
       await connection.commit();
 
@@ -18557,7 +18891,6 @@ await logAudit(connection, {
         });
       }
 
-      // Decrypt sensitive fields
       const decryptedResults = results.map((item) => ({
         ...item,
         allergies: decrypt(item.allergies),
@@ -18664,6 +18997,17 @@ await logAudit(connection, {
 
       await pool.query('UPDATE QUEUE SET status = ? WHERE queue_id = ?', [status, queueId]);
 
+      // When the nurse calls 'in-consultation', automatically sync the linked appointment to 'serving'
+      if (status === 'in-consultation') {
+        const [qRow] = await pool.query('SELECT appointment_id FROM QUEUE WHERE queue_id = ?', [queueId]);
+        if (qRow.length > 0 && qRow[0].appointment_id) {
+          await pool.query("UPDATE APPOINTMENTS SET status = 'serving' WHERE appointment_id = ?", [qRow[0].appointment_id]);
+          if (io) {
+            io.emit('appointment:status_changed', { appointmentId: qRow[0].appointment_id, status: 'serving' });
+          }
+        }
+      }
+
       if (io) {
         io.emit('queue:updated');
       }
@@ -18673,13 +19017,12 @@ await logAudit(connection, {
       res.status(500).json({ error: 'Failed to update queue status.' });
     }
   });
-
-  // 13. GET /api/appointments/patient/:userId/history (CORRECTED ORDER & DECRYPTED)
+  
+  // 13. GET /api/appointments/patient/:userId/history
   router.get('/patient/:userId/history', authenticateToken, async (req, res) => {
     try {
-      const { userId } = req.params;
+      const userId = Number(req.params.userId);
 
-      // 1. Fetch encrypted encounters from MySQL
       const [history] = await pool.query(
         `SELECT e.emr_id, e.encounter_date, e.chief_complaint, e.diagnosis, e.treatment_plan, e.notes,
                 doc.first_name as doctor_first_name, doc.last_name as doctor_last_name,
@@ -18699,7 +19042,6 @@ await logAudit(connection, {
         [userId]
       );
 
-      // 2. Decrypt clinical PHI with AES-256
       const decryptedHistory = history.map((item) => ({
         ...item,
         chief_complaint: decrypt(item.chief_complaint),
@@ -18708,7 +19050,6 @@ await logAudit(connection, {
         notes: decrypt(item.notes),
       }));
 
-      // 3. Log PHI read access for clinical accountability
       logPhiAccess({
         viewerUserId: req.user.user_id,
         patientUserId: userId,
@@ -18718,7 +19059,6 @@ await logAudit(connection, {
         ipAddress: req.ip,
       });
 
-      // 4. Return the decrypted medical encounters
       res.json(decryptedHistory);
     } catch (error) {
       console.error('Failed to retrieve patient EMR history:', error);

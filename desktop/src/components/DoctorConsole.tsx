@@ -93,7 +93,6 @@ export default function DoctorConsole() {
           if (!retainSelection || !selectedApp) {
             selectPatient(data[0]);
           } else {
-            // Keep current selection refreshed
             const updated = data.find((a) => a.appointment_id === selectedApp.appointment_id);
             if (updated) selectPatient(updated);
           }
@@ -115,6 +114,7 @@ export default function DoctorConsole() {
     const token = localStorage.getItem('valetudo_token');
     const socket = io('https://localhost:5000', {
       auth: { token },
+      transports: ['websocket', 'polling'],
     });
 
     socket.on('appointment:booked', () => {

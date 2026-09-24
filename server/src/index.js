@@ -73,16 +73,9 @@ export const io = new Server(server, {
   },
 });
 
-io.on('connection', (socket) => {
-  console.log(`[Socket.IO ${isHttps ? 'WSS' : 'WS'}] Client connected: ${socket.id}`);
-  socket.on('disconnect', () => {
-    console.log(`[Socket.IO] Client disconnected: ${socket.id}`);
-  });
-});
-
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
 
-// Add Socket.IO authentication middleware (non-blocking for desktop & mobile)
+// Socket.IO authentication middleware (asynchronous token validation)
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.split(' ')[1];
   if (token) {
@@ -90,24 +83,29 @@ io.use((socket, next) => {
       if (!err && user) {
         socket.user = user;
       }
+      next();
     });
+  } else {
+    next();
   }
-  return next(); // Always allow connection so real-time broadcasts are received
 });
 
 io.on('connection', (socket) => {
-  console.log(`[Socket.IO ${isHttps ? 'WSS' : 'WS'}] Client connected: ${socket.id}`);
-  
+  const userEmail = socket.user?.email || 'Anonymous / Kiosk';
   const roles = socket.user?.roles || [];
+  console.log(`⚡ [Socket.IO ${isHttps ? 'WSS' : 'WS'}] Client connected: ${socket.id} (${userEmail})`);
+
   const authorizedRoles = ['EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'];
   if (roles.some((r) => authorizedRoles.includes(r))) {
     socket.join('responders');
+    console.log(`🛡️ [Socket.IO] Socket ${socket.id} joined 'responders' room`);
   }
 
-  socket.on('disconnect', () => {
-    console.log(`[Socket.IO] Client disconnected: ${socket.id}`);
+  socket.on('disconnect', (reason) => {
+    console.log(`🔌 [Socket.IO] Client disconnected: ${socket.id} (${reason})`);
   });
 });
+
 // 2. Public Auth Routes
 app.post('/api/auth/login', loginUser);
 

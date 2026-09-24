@@ -8,7 +8,7 @@ function createWindow() {
     height: 880,
     minWidth: 1024,
     minHeight: 720,
-    show: false, // Don't show until ready to prevent white flash
+    show: false, // Prevent white flash before content loads
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -16,10 +16,11 @@ function createWindow() {
     },
   });
 
-  const devUrl = 'http://localhost:5173';
+  // Use HTTPS on 127.0.0.1 to match Vite's host
+  const devUrl = 'https://127.0.0.1:5173';
   win.loadURL(devUrl);
 
-  // Force focus onto the window so input fields immediately capture keystrokes
+  // Focus window on startup to ensure input fields capture keystrokes
   win.once('ready-to-show', () => {
     win.show();
     win.focus();
@@ -58,12 +59,22 @@ ipcMain.handle('show-notification', (event, { title, body }) => {
   return { success: false, error: 'Notifications not supported on this OS' };
 });
 
-// Add before app.whenReady() in desktop/electron/main.cjs
+// 3. ALLOW SELF-SIGNED CERTIFICATES (Backend Port 5000 & Vite Dev Port 5173)
 app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
-  // Allow self-signed certificate for local infirmary backend
-  if (url.startsWith('https://localhost:5000') || url.startsWith('https://127.0.0.1:5000')) {
+  if (
+    // Backend API (Express & Socket.IO)
+    url.startsWith('https://localhost:5000') ||
+    url.startsWith('https://127.0.0.1:5000') ||
+    url.startsWith('wss://localhost:5000') ||
+    url.startsWith('wss://127.0.0.1:5000') ||
+    // Frontend Dev Server (Vite & HMR WebSocket)
+    url.startsWith('https://localhost:5173') ||
+    url.startsWith('https://127.0.0.1:5173') ||
+    url.startsWith('wss://localhost:5173') ||
+    url.startsWith('wss://127.0.0.1:5173')
+  ) {
     event.preventDefault();
-    callback(true); // Trust self-signed cert for dev
+    callback(true); // Trust self-signed cert for development
   } else {
     callback(false);
   }
@@ -74,4 +85,3 @@ app.whenReady().then(createWindow);
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
-
