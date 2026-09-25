@@ -41,7 +41,7 @@ export default function NurseConsole() {
     }
   };
 
-    useEffect(() => {
+  useEffect(() => {
     fetchLiveQueue();
 
     const token = localStorage.getItem('valetudo_token');
@@ -49,6 +49,7 @@ export default function NurseConsole() {
       auth: { token },
       transports: ['websocket', 'polling'],
     });
+
     socket.on('queue:updated', () => {
       fetchLiveQueue();
     });

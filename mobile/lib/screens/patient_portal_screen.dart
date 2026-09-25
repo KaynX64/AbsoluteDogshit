@@ -38,12 +38,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
 
   // Privacy & Consent State (R.A. 10173)
   bool _hasConsented = false;
-  Map<String, dynamic>? _consentDetails;
-  bool _isCheckingConsent = false;
 
   // Live Queue Ticket State
   Map<String, dynamic>? _activeQueueTicket;
-  bool _loadingQueue = false;
   Timer? _queuePollingTimer;
   io.Socket? _socket;
   String _previousQueueStatus = '';
@@ -58,18 +55,12 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   @override
   void initState() {
     super.initState();
-    // 1. Mandatory R.A. 10173 Consent Gatekeeper
     _checkPrivacyConsent();
-
-    // 2. Fetch Initial Clinical Data
     _fetchQRPass();
     _fetchProfile();
     _fetchActiveQueueTicket();
-
-    // 3. Connect WebSocket for Realtime Queue Events
     _initQueueSocket();
 
-    // 4. Polling Fallback (every 6 seconds)
     _queuePollingTimer = Timer.periodic(
       const Duration(seconds: 6),
       (_) => _fetchActiveQueueTicket(silent: true),
@@ -89,7 +80,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   // ===========================================================================
 
   Future<void> _checkPrivacyConsent() async {
-    setState(() => _isCheckingConsent = true);
     final token = await _storage.read(key: 'jwt_token');
 
     try {
@@ -105,18 +95,14 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         if (mounted) {
           setState(() {
             _hasConsented = consented;
-            _consentDetails = data['details'];
           });
 
-          // Gatekeeper: If user has not consented, prompt immediately
           if (!consented) {
             _showConsentModal(isMandatory: true);
           }
         }
       }
     } catch (_) {}
-
-    if (mounted) setState(() => _isCheckingConsent = false);
   }
 
   Future<void> _recordConsent() async {
@@ -137,7 +123,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
       if (res.statusCode == 200) {
         setState(() => _hasConsented = true);
 
-        // Immediately populate clinical data now that consent is recorded
         await _fetchQRPass();
         await _fetchProfile();
         await _fetchActiveQueueTicket();
@@ -228,7 +213,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
             TextButton(
               onPressed: () async {
                 await _storage.deleteAll();
-                if (ctx.mounted) {
+                if (mounted) {
                   Navigator.pushAndRemoveUntil(
                     context,
                     MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -282,7 +267,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   Future<void> _fetchActiveQueueTicket({bool silent = false}) async {
-    if (!silent) setState(() => _loadingQueue = true);
     final token = await _storage.read(key: 'jwt_token');
 
     try {
@@ -314,8 +298,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         }
       }
     } catch (_) {}
-
-    if (!silent && mounted) setState(() => _loadingQueue = false);
   }
 
   Future<void> _fetchQRPass() async {
@@ -349,7 +331,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   // ===========================================================================
-  // 3. CAMPUS EMERGENCY SOS LOGIC
+  // 3. CAMPUS EMERGENCY SOS LOGIC (STUDENT TRANSMISSION)
   // ===========================================================================
 
   void _startHold() {
@@ -430,8 +412,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
           _sosStatusMessage = 'EMERGENCY DISPATCHED!\nClinic and Response team alerted.';
         });
 
+        // Drop student confirmation notification
         EmergencyAlertService().showStudentSosSentNotification();
 
+        // Show student confirmation dialog (WITHOUT siren blaring on victim device)
         if (mounted) {
           _showEmergencyDialog();
         }
@@ -450,16 +434,25 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        icon: const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 60),
-        title: const Text('SOS Alert Active', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+        icon: const Icon(Icons.check_circle_outline, color: Color(0xFF0F766E), size: 60),
+        title: const Text(
+          'SOS Alert Active',
+          style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+        ),
         content: const Text(
-          'Your live GPS coordinates and medical profile have been broadcasted to the PSU Infirmary and Quick-Response team.',
+          'Your live GPS coordinates and medical profile have been securely transmitted to the PSU Infirmary and Campus Quick-Response team.',
           textAlign: TextAlign.center,
         ),
         actions: [
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-            onPressed: () => Navigator.pop(ctx),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0F766E),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              EmergencyAlertService().stopAlarmSound();
+              Navigator.pop(ctx);
+            },
             child: const Text('I Understand'),
           )
         ],
@@ -468,8 +461,19 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   // ===========================================================================
-  // 4. MAIN BUILD METHOD WITH 15-MIN SESSION TIMEOUT LISTENER
+  // 4. LOGOUT & MAIN BUILD METHOD (WITH 15-MIN SESSION TIMEOUT LISTENER)
   // ===========================================================================
+
+  Future<void> _handleSignOut() async {
+    await _storage.delete(key: 'jwt_token');
+    await _storage.delete(key: 'user_data');
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -498,15 +502,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
             IconButton(
               icon: const Icon(Icons.logout),
               tooltip: 'Sign Out',
-              onPressed: () async {
-                await _storage.delete(key: 'jwt_token');
-                await _storage.delete(key: 'user_data');
-                if (!context.mounted) return;
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (_) => const LoginScreen()),
-                );
-              },
+              onPressed: _handleSignOut,
             )
           ],
         ),
@@ -869,7 +865,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   // ===========================================================================
-  // 7. TAB 4: HEALTH PROFILE & R.A. 10173 COMPLIANCE PANEL
+  // 7. TAB 4: HEALTH PROFILE (DYNAMIC ROLE-BASED DESIGNATION)
   // ===========================================================================
 
   Widget _buildProfileTab() {
@@ -889,6 +885,54 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
 
     final hp = _profileData!['healthProfile'] ?? {};
     final u = _profileData!['user'] ?? {};
+
+    // Determine Role and Theme
+    final String roleCode = (u['primary_role'] ?? 'STUDENT').toString().toUpperCase();
+
+    Color roleBgColor = Colors.teal.shade50;
+    Color roleTextColor = const Color(0xFF0F766E);
+    String roleDisplay = u['role_name'] ?? 'Student';
+
+    if (roleCode == 'ADMIN') {
+      roleBgColor = const Color(0xFFF5F3FF);
+      roleTextColor = const Color(0xFF6D28D9);
+      roleDisplay = 'System Administrator';
+    } else if (roleCode == 'DOCTOR') {
+      roleBgColor = const Color(0xFFF0F9FF);
+      roleTextColor = const Color(0xFF0284C7);
+      roleDisplay = 'Campus Physician';
+    } else if (roleCode == 'DENTIST') {
+      roleBgColor = const Color(0xFFECFEFF);
+      roleTextColor = const Color(0xFF0E7490);
+      roleDisplay = 'Campus Dentist';
+    } else if (roleCode == 'NURSE') {
+      roleBgColor = const Color(0xFFF0FDFA);
+      roleTextColor = const Color(0xFF0F766E);
+      roleDisplay = 'Infirmary Nurse';
+    } else if (roleCode == 'FACULTY') {
+      roleBgColor = const Color(0xFFFFF7ED);
+      roleTextColor = const Color(0xFFC2410C);
+      roleDisplay = 'Faculty / Staff';
+    } else if (roleCode == 'EMERGENCY_RESPONDER') {
+      roleBgColor = const Color(0xFFFEF2F2);
+      roleTextColor = const Color(0xFFB91C1C);
+      roleDisplay = 'Emergency Responder';
+    }
+
+    // Determine Dynamic Identifier Label
+    String idLabel = 'Member ID: PSU-${u['user_id']}';
+    String deptLabel = u['department'] ?? 'PSU Lingayen Campus';
+
+    if (roleCode == 'STUDENT') {
+      idLabel = 'Student No: ${u['student_no'] ?? 'Unassigned'}';
+      deptLabel = 'Course: ${u['course'] ?? 'General Education'}${u['year_level'] != null ? ' (Year ${u['year_level']})' : ''}';
+    } else if (roleCode == 'ADMIN' || roleCode == 'NURSE' || roleCode == 'DOCTOR' || roleCode == 'DENTIST') {
+      idLabel = 'License / Staff No: ${u['license_no'] ?? 'PSU-STAFF-${u['user_id']}'}';
+      deptLabel = 'Department: ${u['department'] ?? 'University Infirmary'}';
+    } else if (roleCode == 'FACULTY') {
+      idLabel = 'Position: ${u['position'] ?? 'Faculty Member'}';
+      deptLabel = 'Department: ${u['department'] ?? 'Academic Affairs'}';
+    }
 
     List<String> immunizations = [];
     final rawImm = hp['immunization_history'];
@@ -919,9 +963,19 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
               child: Row(
                 children: [
                   CircleAvatar(
-                    radius: 30,
-                    backgroundColor: Colors.teal.shade100,
-                    child: const Icon(Icons.person, size: 36, color: Colors.teal),
+                    radius: 32,
+                    backgroundColor: roleBgColor,
+                    child: Icon(
+                      roleCode == 'ADMIN'
+                          ? Icons.admin_panel_settings_rounded
+                          : roleCode == 'DOCTOR' || roleCode == 'DENTIST'
+                              ? Icons.medical_services_rounded
+                              : roleCode == 'NURSE'
+                                  ? Icons.healing_rounded
+                                  : Icons.person_rounded,
+                      size: 36,
+                      color: roleTextColor,
+                    ),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
@@ -932,18 +986,37 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                           '${u['first_name']} ${u['last_name']}',
                           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                         ),
+                        const SizedBox(height: 3),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: roleBgColor,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: roleTextColor.withAlpha(80)),
+                          ),
+                          child: Text(
+                            roleDisplay.toUpperCase(),
+                            style: TextStyle(
+                              color: roleTextColor,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
                         Text(
-                          'ID: ${u['student_no'] ?? 'Staff/Faculty'}',
-                          style: const TextStyle(color: Colors.black54),
+                          idLabel,
+                          style: const TextStyle(color: Colors.black87, fontSize: 13, fontWeight: FontWeight.w500),
                         ),
                         Text(
-                          'Dept/Course: ${u['course'] ?? u['department'] ?? 'PSU Lingayen'}',
-                          style: const TextStyle(color: Colors.black54),
+                          deptLabel,
+                          style: const TextStyle(color: Colors.black54, fontSize: 12),
                         ),
-                        if (u['phone'] != null)
+                        if (u['phone'] != null && u['phone'].toString().isNotEmpty)
                           Text(
                             'Phone: ${u['phone']}',
-                            style: const TextStyle(color: Colors.black87, fontSize: 13),
+                            style: const TextStyle(color: Colors.black54, fontSize: 12),
                           ),
                       ],
                     ),

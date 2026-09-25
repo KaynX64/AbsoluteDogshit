@@ -30,6 +30,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
     _fetchActiveAlerts();
 
     EmergencyAlertService().startResponderListener();
+    // Silent background polling to ensure sync
     _pollingTimer = Timer.periodic(const Duration(seconds: 4), (_) => _fetchActiveAlerts(silent: true));
   }
 
@@ -64,12 +65,25 @@ class _ResponderScreenState extends State<ResponderScreen> {
     }
   }
 
+  // Instant optimistic update on mobile
   Future<void> _updateAlertStatus(int alertId, String status) async {
     EmergencyAlertService().stopAlarmSound();
 
+    setState(() {
+      if (status == 'resolved' || status == 'false_alarm') {
+        _activeAlerts.removeWhere((a) => a['alert_id'] == alertId);
+      } else {
+        for (var a in _activeAlerts) {
+          if (a['alert_id'] == alertId) {
+            a['status'] = status;
+          }
+        }
+      }
+    });
+
     final token = await _storage.read(key: 'jwt_token');
     try {
-      final res = await http.patch(
+      await http.patch(
         Uri.parse('${ApiConfig.baseUrl}/api/emergency/$alertId/status'),
         headers: {
           'Content-Type': 'application/json',
@@ -77,24 +91,13 @@ class _ResponderScreenState extends State<ResponderScreen> {
         },
         body: jsonEncode({'status': status}),
       );
-
-      if (res.statusCode == 200) {
-        _fetchActiveAlerts(silent: true);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Incident #$alertId marked as $status.'),
-              backgroundColor: const Color(0xFF0F766E),
-            ),
-          );
-        }
-      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Update failed: $e'), backgroundColor: Colors.red),
         );
       }
+      _fetchActiveAlerts(silent: true);
     }
   }
 
@@ -132,9 +135,10 @@ class _ResponderScreenState extends State<ResponderScreen> {
                 await _storage.delete(key: 'jwt_token');
                 await _storage.delete(key: 'user_data');
                 if (!context.mounted) return;
-                Navigator.pushReplacement(
+                Navigator.pushAndRemoveUntil(
                   context,
                   MaterialPageRoute(builder: (_) => const LoginScreen()),
+                  (route) => false,
                 );
               },
             )
@@ -172,7 +176,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
             ),
             const Divider(height: 1),
             Expanded(
-              child: _isLoading
+              child: _isLoading && _activeAlerts.isEmpty
                   ? const Center(child: CircularProgressIndicator(color: Colors.red))
                   : _activeAlerts.isEmpty
                       ? Center(

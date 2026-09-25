@@ -97,9 +97,9 @@ export default function appointmentRouter(io) {
       await connection.query('SELECT user_id FROM USERS WHERE user_id = ? FOR UPDATE', [doctor_user_id]);
 
       const [conflict] = await connection.query(
-        `SELECT appointment_id FROM APPOINTMENTS 
-         WHERE doctor_user_id = ? 
-           AND date_time = ? 
+        `SELECT appointment_id FROM APPOINTMENTS
+         WHERE doctor_user_id = ?
+           AND date_time = ?
            AND status IN ('scheduled', 'checked_in', 'serving')
            AND deleted_at IS NULL`,
         [doctor_user_id, date_time]
@@ -110,9 +110,9 @@ export default function appointmentRouter(io) {
       }
 
       const [patientConflict] = await connection.query(
-        `SELECT appointment_id FROM APPOINTMENTS 
-         WHERE patient_user_id = ? 
-           AND date_time = ? 
+        `SELECT appointment_id FROM APPOINTMENTS
+         WHERE patient_user_id = ?
+           AND date_time = ?
            AND status IN ('scheduled', 'checked_in', 'serving')
            AND deleted_at IS NULL`,
         [patientUserId, date_time]
@@ -140,6 +140,7 @@ export default function appointmentRouter(io) {
           doctor_user_id,
           date_time,
           appointment_type,
+          notes,
         },
         ipAddress: req.ip,
       });
@@ -214,10 +215,10 @@ export default function appointmentRouter(io) {
     try {
       const userId = req.user.user_id;
       const [rows] = await pool.query(
-        `SELECT a.appointment_id, 
+        `SELECT a.appointment_id,
                 DATE_FORMAT(a.date_time, '%Y-%m-%d %H:%i') as formatted_date_time,
                 a.date_time, a.appointment_type, a.status, a.notes, a.cancelled_reason,
-                u.first_name AS doctor_first_name, 
+                u.first_name AS doctor_first_name,
                 u.last_name AS doctor_last_name,
                 COALESCE(sp.specialty, 'Campus Health Specialist') AS doctor_specialty
          FROM APPOINTMENTS a
@@ -254,8 +255,8 @@ export default function appointmentRouter(io) {
       }
 
       await pool.query(
-        `UPDATE APPOINTMENTS 
-         SET status = 'cancelled', cancelled_reason = ? 
+        `UPDATE APPOINTMENTS
+         SET status = 'cancelled', cancelled_reason = ?
          WHERE appointment_id = ?`,
         [cancelled_reason || 'Cancelled by patient via mobile app', appointmentId]
       );
@@ -278,16 +279,22 @@ export default function appointmentRouter(io) {
       const params = [];
 
       if (filter === 'history') {
-        whereClause = `WHERE a.status IN ('completed', 'cancelled', 'no_show') AND a.deleted_at IS NULL`;
+        whereClause = `WHERE a.status IN ('completed', 'cancelled', 'no_show')`;
+      } else if (filter === 'scheduled') {
+        whereClause = `WHERE a.status = 'scheduled' AND a.date_time >= CURDATE()`;
+      } else if (filter === 'all') {
+        whereClause = `WHERE a.status IN ('scheduled', 'checked_in', 'serving')`;
       } else if (date) {
-        whereClause = `WHERE DATE(a.date_time) = ? AND a.status IN ('scheduled', 'checked_in', 'serving') AND a.deleted_at IS NULL`;
+        whereClause = `WHERE DATE(a.date_time) = ? AND a.status IN ('checked_in', 'serving')`;
         params.push(date);
       } else {
-        whereClause = `WHERE a.date_time >= CURDATE() AND a.status IN ('scheduled', 'checked_in', 'serving') AND a.deleted_at IS NULL`;
+        whereClause = `WHERE a.status IN ('checked_in', 'serving')`;
       }
 
+      whereClause += ' AND a.deleted_at IS NULL';
+
       const [rows] = await pool.query(
-        `SELECT a.appointment_id, 
+        `SELECT a.appointment_id,
                 DATE_FORMAT(a.date_time, '%h:%i %p') AS time_slot,
                 DATE_FORMAT(a.date_time, '%Y-%m-%d') AS date_str,
                 a.date_time, a.appointment_type, a.status, a.notes, a.cancelled_reason,
@@ -296,14 +303,17 @@ export default function appointmentRouter(io) {
                 hp.blood_type, hp.allergies, hp.chronic_conditions,
                 hp.height, hp.weight,
                 emr.diagnosis AS past_diagnosis,
-                emr.treatment_plan AS past_treatment
+                emr.treatment_plan AS past_treatment,
+                CONCAT('Q-', LPAD(COALESCE(q.queue_number, 1), 2, '0')) AS queue_ticket,
+                q.status AS queue_status
          FROM APPOINTMENTS a
          JOIN USERS u ON a.patient_user_id = u.user_id
          LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
          LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
          LEFT JOIN EMR_RECORDS emr ON (emr.patient_user_id = a.patient_user_id AND DATE(emr.encounter_date) = DATE(a.date_time))
+         LEFT JOIN QUEUE q ON (q.appointment_id = a.appointment_id AND q.status != 'done')
          ${whereClause}
-         ORDER BY a.date_time DESC`,
+         ORDER BY COALESCE(q.queue_number, 999) ASC, a.date_time ASC`,
         params
       );
 
@@ -317,7 +327,7 @@ export default function appointmentRouter(io) {
 
       res.json(decryptedRows);
     } catch (error) {
-      console.error('[Appointments] Error fetching today roster:', error);
+      console.error('[Appointments] Today roster error:', error);
       res.status(500).json({ error: 'Failed to retrieve appointments roster.' });
     }
   });
@@ -430,7 +440,7 @@ export default function appointmentRouter(io) {
       const { query, userId } = req.query;
 
       let sql = `
-        SELECT a.appointment_id, 
+        SELECT a.appointment_id,
                DATE_FORMAT(a.date_time, '%Y-%m-%d %h:%i %p') AS formatted_schedule,
                a.date_time, a.appointment_type, a.status, a.notes,
                u.user_id, u.first_name, u.last_name, u.phone,
@@ -574,6 +584,17 @@ export default function appointmentRouter(io) {
       const { status } = req.body;
 
       await pool.query('UPDATE QUEUE SET status = ? WHERE queue_id = ?', [status, queueId]);
+
+      // When the nurse calls 'in-consultation', automatically sync the linked appointment to 'serving'
+      if (status === 'in-consultation') {
+        const [qRow] = await pool.query('SELECT appointment_id FROM QUEUE WHERE queue_id = ?', [queueId]);
+        if (qRow.length > 0 && qRow[0].appointment_id) {
+          await pool.query("UPDATE APPOINTMENTS SET status = 'serving' WHERE appointment_id = ?", [qRow[0].appointment_id]);
+          if (io) {
+            io.emit('appointment:status_changed', { appointmentId: qRow[0].appointment_id, status: 'serving' });
+          }
+        }
+      }
 
       if (io) {
         io.emit('queue:updated');

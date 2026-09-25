@@ -7,6 +7,8 @@ interface EmergencyAlert {
   userId: number;
   patientName: string;
   phone: string;
+  role?: string;
+  roleLabel?: string;
   studentNo: string;
   course: string;
   bloodType: string;
@@ -23,7 +25,7 @@ interface EmergencyAlert {
 export default function EmergencyAlertBanner() {
   const [alerts, setAlerts] = useState<EmergencyAlert[]>([]);
 
-  // Synthesize an audible emergency alert beep using Web Audio API
+  // Synthesize an audible emergency alert chime using Web Audio API
   const playEmergencyAlarm = () => {
     try {
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -49,35 +51,47 @@ export default function EmergencyAlertBanner() {
         });
         const data = await res.json();
         if (Array.isArray(data)) {
-          const mapped: EmergencyAlert[] = data.map((a: any) => ({
-            alertId: a.alert_id,
-            userId: a.user_id,
-            patientName: `${a.first_name} ${a.last_name}`,
-            phone: a.phone,
-            studentNo: 'Verified',
-            course: 'PSU Student',
-            bloodType: a.blood_type || 'Unknown',
-            allergies: a.allergies || 'None',
-            chronicConditions: 'N/A',
-            emergencyContact: 'Check Profile',
-            latitude: Number(a.latitude),
-            longitude: Number(a.longitude),
-            googleMapsUrl: `https://www.google.com/maps?q=${a.latitude},${a.longitude}`,
-            status: a.status,
-            createdAt: a.created_at,
-          }));
+          const mapped: EmergencyAlert[] = data.map((a: any) => {
+            let roleLabel = 'Student';
+            if (a.primary_role === 'ADMIN') roleLabel = 'System Administrator';
+            else if (a.primary_role === 'DOCTOR') roleLabel = 'Campus Physician';
+            else if (a.primary_role === 'DENTIST') roleLabel = 'Campus Dentist';
+            else if (a.primary_role === 'NURSE') roleLabel = 'Clinic Nurse';
+            else if (a.primary_role === 'FACULTY') roleLabel = 'Faculty / Staff';
+            else if (a.primary_role === 'EMERGENCY_RESPONDER') roleLabel = 'Emergency Responder';
+
+            return {
+              alertId: a.alert_id,
+              userId: a.user_id,
+              patientName: `${a.first_name} ${a.last_name}`,
+              phone: a.phone,
+              role: a.primary_role,
+              roleLabel: roleLabel,
+              studentNo: a.studentNo || a.identifier_no || 'Verified',
+              course: a.course || a.affiliation || 'PSU Lingayen',
+              bloodType: a.blood_type || 'Unknown',
+              allergies: a.allergies || 'None',
+              chronicConditions: 'N/A',
+              emergencyContact: 'Check Profile',
+              latitude: Number(a.latitude),
+              longitude: Number(a.longitude),
+              googleMapsUrl: `https://www.google.com/maps?q=${a.latitude},${a.longitude}`,
+              status: a.status,
+              createdAt: a.created_at,
+            };
+          });
           setAlerts(mapped);
         }
       } catch (_) {}
     };
 
-fetchActiveAlerts();
+    fetchActiveAlerts();
 
-    // 2. Connect Socket.IO with token and transport fallbacks
+    // 2. Connect Socket.IO with token authentication
     const token = localStorage.getItem('valetudo_token');
     const socket: Socket = io('https://localhost:5000', {
       auth: { token },
-      transports: ['polling', 'websocket'],
+      transports: ['websocket', 'polling'],
     });
 
     socket.on('connect', () => {
@@ -95,7 +109,7 @@ fetchActiveAlerts();
       // Trigger native OS system tray notification
       if ((window as any).electronAPI?.showNotification) {
         (window as any).electronAPI.showNotification({
-          title: `🚨 SOS EMERGENCY: ${newAlert.patientName}`,
+          title: `🚨 SOS: ${newAlert.patientName} (${newAlert.roleLabel || 'PSU Member'})`,
           body: `Location: ${newAlert.latitude.toFixed(5)}, ${newAlert.longitude.toFixed(5)}. Blood: ${newAlert.bloodType}. Allergies: ${newAlert.allergies}`,
         });
       }
@@ -107,8 +121,8 @@ fetchActiveAlerts();
     socket.on('emergency:status_change', ({ alertId, status }: { alertId: number; status: string }) => {
       setAlerts((prev) =>
         prev
-          .map((a) => (a.alertId === alertId ? { ...a, status } : a))
-          .filter((a) => a.status !== 'resolved' && a.status !== 'false_alarm')
+          .map((a) => (Number(a.alertId) === Number(alertId) ? { ...a, status } : a))
+          .filter((a) => (status !== 'resolved' && status !== 'false_alarm' ? true : Number(a.alertId) !== Number(alertId)))
       );
     });
 
@@ -133,7 +147,7 @@ fetchActiveAlerts();
     }
   };
 
-  // --- TEST BUTTON HANDLER 1: INSTANT NATIVE OS NOTIFICATION ---
+  // Test OS notification
   const handleTestDirectNotification = () => {
     playEmergencyAlarm();
     if ((window as any).electronAPI?.showNotification) {
@@ -146,7 +160,7 @@ fetchActiveAlerts();
     }
   };
 
-  // --- TEST BUTTON HANDLER 2: FULL STACK REAL-TIME SOS TRIGGER ---
+  // Full stack SOS test
   const handleTestFullStackSOS = async () => {
     const token = localStorage.getItem('valetudo_token');
     try {
@@ -238,7 +252,7 @@ fetchActiveAlerts();
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 24 }}>🚨</span>
               <h3 style={{ margin: 0, color: '#b91c1c' }}>
-                ACTIVE SOS ALERT: {alert.patientName} ({alert.studentNo || 'Student'})
+                ACTIVE SOS ALERT: {alert.patientName} ({alert.roleLabel || alert.studentNo || 'Campus Personnel'})
               </h3>
             </div>
             <span
@@ -274,7 +288,7 @@ fetchActiveAlerts();
             </div>
             <div>
               <b>Allergies:</b> <span style={{ color: 'red' }}>{alert.allergies}</span><br />
-              <b>Conditions:</b> {alert.chronicConditions}
+              <b>Role / Unit:</b> {alert.roleLabel || alert.course || 'PSU Personnel'}
             </div>
             <div>
               <b>Emergency Contact:</b><br />

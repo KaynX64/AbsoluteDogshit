@@ -16,11 +16,11 @@ import privacyRouter from './routes/privacy.js';
 import profileRoutes from './routes/profile.js';
 import healthPassRoutes from './routes/healthPass.js';
 import appointmentRoutes from './routes/appointments.js';
-import emergencyRouter from './routes/emergency.js'; 
-import inventoryRoutes from './routes/inventory.js'; 
-import documentRoutes from './routes/documents.js';   
-import adminRoutes from './routes/admin.js';         
-import analyticsRoutes from './routes/analytics.js'; 
+import emergencyRouter from './routes/emergency.js';
+import inventoryRoutes from './routes/inventory.js';
+import documentRoutes from './routes/documents.js';
+import adminRoutes from './routes/admin.js';
+import analyticsRoutes from './routes/analytics.js';
 import { startReminderScheduler } from './utils/reminderWorker.js';
 
 dotenv.config();
@@ -75,7 +75,7 @@ export const io = new Server(server, {
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
 
-// Add Socket.IO authentication middleware
+// Socket.IO authentication middleware (asynchronous token validation)
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.split(' ')[1];
   if (token) {
@@ -94,7 +94,7 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
   const userEmail = socket.user?.email || 'Anonymous / Kiosk';
   const roles = socket.user?.roles || [];
-  console.log(`⚡ [Socket.IO] Client connected: ${socket.id} (${userEmail})`);
+  console.log(`⚡ [Socket.IO ${isHttps ? 'WSS' : 'WS'}] Client connected: ${socket.id} (${userEmail})`);
 
   const authorizedRoles = ['EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'];
   if (roles.some((r) => authorizedRoles.includes(r))) {
