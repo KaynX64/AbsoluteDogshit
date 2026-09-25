@@ -94,7 +94,16 @@ export default function EmergencyAlertBanner() {
       transports: ['websocket', 'polling'],
     });
 
+    socket.on('connect', () => {
+      console.log('✅ [EmergencyAlertBanner] Live Socket connected:', socket.id);
+    });
+
+    socket.on('connect_error', (err) => {
+      console.error('❌ [EmergencyAlertBanner] Socket error:', err.message);
+    });
+
     socket.on('emergency:new_alert', (newAlert: EmergencyAlert) => {
+      console.log('🚨 [EmergencyAlertBanner] New SOS received in real-time:', newAlert);
       playEmergencyAlarm();
 
       // Trigger native OS system tray notification
@@ -105,6 +114,7 @@ export default function EmergencyAlertBanner() {
         });
       }
 
+      // Immediately display the red banner at the top of the UI
       setAlerts((prev) => [newAlert, ...prev.filter((a) => a.alertId !== newAlert.alertId)]);
     });
 

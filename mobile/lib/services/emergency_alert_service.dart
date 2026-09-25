@@ -21,7 +21,7 @@ class EmergencyAlertService {
   io.Socket? _socket;
   final AudioPlayer _audioPlayer = AudioPlayer();
   final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
-  final _storage = const FlutterSecureStorage();
+  final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
   bool _isAlarmPlaying = false;
   Timer? _vibrationTimer;
@@ -59,7 +59,17 @@ class EmergencyAlertService {
     await androidImplementation?.createNotificationChannel(_criticalChannel);
     await androidImplementation?.requestNotificationsPermission();
 
-    // 2. Configure audio player with safe alarm context
+    // 2. Connect Persistent WebSocket with stored auth token
+    await connectSocket();
+  }
+
+  Future<void> connectSocket([String? overrideToken]) async {
+    final token = overrideToken ?? await _storage.read(key: 'jwt_token');
+
+    _socket?.disconnect();
+    _socket?.dispose();
+
+    // 3. Configure audio player with safe alarm context
     try {
       await _audioPlayer.setAudioContext(
         AudioContext(
@@ -73,10 +83,8 @@ class EmergencyAlertService {
       );
     } catch (_) {}
 
-    // 3. Connect Persistent WebSocket with Auth
+    // 4. Connect Persistent WebSocket with Auth
     try {
-      final token = await _storage.read(key: 'jwt_token');
-
       _socket = io.io(
         ApiConfig.socketUrl,
         io.OptionBuilder()
@@ -89,7 +97,7 @@ class EmergencyAlertService {
       );
 
       _socket!.onConnect((_) {
-        debugPrint('✅ [Socket.IO Mobile] Connected to Emergency Gateway at ${ApiConfig.socketUrl}');
+        debugPrint('✅ [Socket.IO Mobile] Connected to Emergency Gateway');
       });
 
       _socket!.on('emergency:new_alert', (data) async {
@@ -122,9 +130,10 @@ class EmergencyAlertService {
     }
   }
 
-  void startResponderListener() {
+  /// Called ONLY by ResponderScreen when a responder logs in
+  void startResponderListener() async {
     _isResponderActive = true;
-    initialize();
+    await connectSocket();
   }
 
   void stopResponderListener() {

@@ -16,11 +16,11 @@ import privacyRouter from './routes/privacy.js';
 import profileRoutes from './routes/profile.js';
 import healthPassRoutes from './routes/healthPass.js';
 import appointmentRoutes from './routes/appointments.js';
-import emergencyRouter from './routes/emergency.js'; 
-import inventoryRoutes from './routes/inventory.js'; 
-import documentRoutes from './routes/documents.js';   
-import adminRoutes from './routes/admin.js';         
-import analyticsRoutes from './routes/analytics.js'; 
+import emergencyRouter from './routes/emergency.js';
+import inventoryRoutes from './routes/inventory.js';
+import documentRoutes from './routes/documents.js';
+import adminRoutes from './routes/admin.js';
+import analyticsRoutes from './routes/analytics.js';
 import { startReminderScheduler } from './utils/reminderWorker.js';
 
 dotenv.config();
@@ -90,6 +90,7 @@ io.use((socket, next) => {
   }
 });
 
+// 2. Connection Handler & Room Assignment
 io.on('connection', (socket) => {
   const userEmail = socket.user?.email || 'Anonymous / Kiosk';
   const roles = socket.user?.roles || [];
