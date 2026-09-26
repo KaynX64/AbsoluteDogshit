@@ -180,7 +180,7 @@ router.post('/receive', authenticateToken, requireRoles('NURSE', 'ADMIN'), async
 // =============================================================================
 
 // POST /api/inventory/medicines - Add a new drug definition to the University formulary
-router.post('/medicines', authenticateToken, requireRoles('DOCTOR', 'ADMIN'), async (req, res) => {
+router.post('/medicines', authenticateToken, requireRoles('DOCTOR', 'NURSE', 'ADMIN'), async (req, res) => {
   const { name, generic_name, form, strength, unit, reorder_level } = req.body;
 
   if (!name || !generic_name || !form || !strength) {
