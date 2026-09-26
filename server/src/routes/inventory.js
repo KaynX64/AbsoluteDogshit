@@ -8,7 +8,7 @@ import { logAudit } from '../utils/auditLogger.js';
 const router = express.Router();
 
 // =============================================================================
-// 1. READ / QUERY CATALOGUE
+// 1. READ / QUERY CATALOGUE & LOGS
 // =============================================================================
 
 // GET /api/inventory/batches - Fetch all active inventory batches (FEFO sorted)
@@ -51,7 +51,8 @@ router.get('/expiring-soon', authenticateToken, requireRoles('NURSE', 'DOCTOR', 
   try {
     const [rows] = await pool.query(
       `SELECT b.batch_id, m.name, m.generic_name, b.batch_no, b.quantity_on_hand, m.reorder_level,
-              b.expiry_date, DATEDIFF(b.expiry_date, CURDATE()) as days_until_expiry,
+              DATE_FORMAT(b.expiry_date, '%Y-%m-%d') as expiry_date,
+              DATEDIFF(b.expiry_date, CURDATE()) as days_until_expiry,
               CASE 
                 WHEN DATEDIFF(b.expiry_date, CURDATE()) < 0 THEN 'EXPIRED'
                 WHEN DATEDIFF(b.expiry_date, CURDATE()) <= 30 THEN 'CRITICAL'
@@ -71,8 +72,62 @@ router.get('/expiring-soon', authenticateToken, requireRoles('NURSE', 'DOCTOR', 
   }
 });
 
+// GET /api/inventory/reorder-suggestions - Dynamic replenishment algorithm comparing unexpired stock vs reorder_level
+router.get('/reorder-suggestions', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT m.medicine_id, m.name, m.generic_name, m.form, m.strength, m.unit, m.reorder_level,
+              COALESCE(SUM(b.quantity_on_hand), 0) AS total_stock_on_hand,
+              CASE 
+                WHEN COALESCE(SUM(b.quantity_on_hand), 0) <= m.reorder_level 
+                THEN GREATEST((m.reorder_level * 2) - COALESCE(SUM(b.quantity_on_hand), 0), m.reorder_level)
+                ELSE 0 
+              END AS suggested_reorder_qty,
+              CASE 
+                WHEN COALESCE(SUM(b.quantity_on_hand), 0) = 0 THEN 'OUT_OF_STOCK'
+                WHEN COALESCE(SUM(b.quantity_on_hand), 0) <= m.reorder_level THEN 'CRITICAL_BUFFER'
+                ELSE 'ADEQUATE'
+              END AS stock_status
+       FROM MEDICINES m
+       LEFT JOIN MEDICINE_BATCHES b ON m.medicine_id = b.medicine_id 
+            AND b.deleted_at IS NULL 
+            AND b.expiry_date > CURDATE()
+       WHERE m.is_active = TRUE AND m.deleted_at IS NULL
+       GROUP BY m.medicine_id, m.name, m.generic_name, m.form, m.strength, m.unit, m.reorder_level
+       ORDER BY total_stock_on_hand ASC`
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('Error computing reorder suggestions:', error);
+    res.status(500).json({ error: 'Failed to calculate reorder suggestions.' });
+  }
+});
+
+// GET /api/inventory/logs - Audit & Consumption log retrieval
+router.get('/logs', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+  try {
+    const [logs] = await pool.query(
+      `SELECT l.log_id, l.batch_id, l.quantity_change, l.transaction_type, l.reason, l.created_at,
+              b.batch_no, b.expiry_date,
+              m.name AS medicine_name, m.generic_name, m.strength, m.form,
+              CONCAT(u.first_name, ' ', u.last_name) AS performed_by_name,
+              u.email AS performed_by_email
+       FROM INVENTORY_LOGS l
+       JOIN MEDICINE_BATCHES b ON l.batch_id = b.batch_id
+       JOIN MEDICINES m ON b.medicine_id = m.medicine_id
+       JOIN USERS u ON l.performed_by = u.user_id
+       ORDER BY l.log_id DESC
+       LIMIT 100`
+    );
+    res.json(logs);
+  } catch (error) {
+    console.error('Error fetching inventory consumption logs:', error);
+    res.status(500).json({ error: 'Failed to retrieve inventory logs.' });
+  }
+});
+
 // =============================================================================
-// 2. INBOUND & STOCK REPLENISHMENT (NEW FEATURE)
+// 2. INBOUND & STOCK REPLENISHMENT
 // =============================================================================
 
 // POST /api/inventory/receive - Log a new shipment delivery / stock-in
@@ -98,14 +153,12 @@ router.post('/receive', authenticateToken, requireRoles('NURSE', 'ADMIN'), async
   try {
     await connection.beginTransaction();
 
-    // 1. Verify medicine exists in master
     const [medRows] = await connection.query(
       'SELECT name FROM MEDICINES WHERE medicine_id = ? AND deleted_at IS NULL',
       [medicine_id]
     );
     if (medRows.length === 0) throw new Error('Medicine not found in master formulary.');
 
-    // 2. Check if this exact batch number already exists for this medicine
     const [existingBatch] = await connection.query(
       'SELECT batch_id, quantity_on_hand FROM MEDICINE_BATCHES WHERE medicine_id = ? AND batch_no = ? FOR UPDATE',
       [medicine_id, batch_no]
@@ -115,7 +168,6 @@ router.post('/receive', authenticateToken, requireRoles('NURSE', 'ADMIN'), async
     let newQty;
 
     if (existingBatch.length > 0) {
-      // Restock existing lot
       targetBatchId = existingBatch[0].batch_id;
       newQty = existingBatch[0].quantity_on_hand + Number(quantity_received);
 
@@ -124,7 +176,6 @@ router.post('/receive', authenticateToken, requireRoles('NURSE', 'ADMIN'), async
         [newQty, supplier || null, targetBatchId]
       );
     } else {
-      // Create new lot batch
       const [batchResult] = await connection.query(
         `INSERT INTO MEDICINE_BATCHES 
          (medicine_id, batch_no, manufacture_date, expiry_date, supplier, quantity_on_hand)
@@ -135,14 +186,12 @@ router.post('/receive', authenticateToken, requireRoles('NURSE', 'ADMIN'), async
       newQty = Number(quantity_received);
     }
 
-    // 3. Log into INVENTORY_LOGS as 'receive'
     await connection.query(
       `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
        VALUES (?, ?, 'receive', ?, ?)`,
       [targetBatchId, Number(quantity_received), `Shipment received from ${supplier || 'Depot'}`, req.user.user_id]
     );
 
-    // 4. Record to R.A. 10173 Audit Ledger
     await logAudit(connection, {
       userId: req.user.user_id,
       action: 'CREATE',
@@ -176,11 +225,11 @@ router.post('/receive', authenticateToken, requireRoles('NURSE', 'ADMIN'), async
 });
 
 // =============================================================================
-// 3. MASTER FORMULARY REGISTRATION (NEW FEATURE)
+// 3. MASTER FORMULARY REGISTRATION
 // =============================================================================
 
 // POST /api/inventory/medicines - Add a new drug definition to the University formulary
-router.post('/medicines', authenticateToken, requireRoles('DOCTOR', 'ADMIN'), async (req, res) => {
+router.post('/medicines', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
   const { name, generic_name, form, strength, unit, reorder_level } = req.body;
 
   if (!name || !generic_name || !form || !strength) {
@@ -242,7 +291,6 @@ router.post('/deduct', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
   try {
     await connection.beginTransaction();
 
-    // 1. Lock the batch row and check current stock levels
     const [batchRows] = await connection.query(
       'SELECT quantity_on_hand, batch_no FROM MEDICINE_BATCHES WHERE batch_id = ? FOR UPDATE',
       [batch_id]
@@ -257,20 +305,17 @@ router.post('/deduct', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
 
     const newQuantity = oldQuantity - Number(quantity_deducted);
 
-    // 2. Deduct the quantity
     await connection.query(
       'UPDATE MEDICINE_BATCHES SET quantity_on_hand = ? WHERE batch_id = ?',
       [newQuantity, batch_id]
     );
 
-    // 3. Append to internal INVENTORY_LOGS
     await connection.query(
       `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
        VALUES (?, ?, 'dispense', ?, ?)`,
       [batch_id, -Number(quantity_deducted), reason || 'Prescription issuance', req.user.user_id]
     );
 
-    // 4. Append to Global Cryptographic Audit Trail
     await logAudit(connection, {
       userId: req.user.user_id,
       action: 'UPDATE',
@@ -292,13 +337,12 @@ router.post('/deduct', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
 });
 
 // =============================================================================
-// 5. STOCK ADJUSTMENT & EXPIRED DRUG DISPOSAL (NEW FEATURE)
+// 5. STOCK ADJUSTMENT & EXPIRED DRUG DISPOSAL
 // =============================================================================
 
 // POST /api/inventory/adjust - Discard expired medicine, damaged bottles, or log returns
 router.post('/adjust', authenticateToken, requireRoles('NURSE', 'ADMIN'), async (req, res) => {
   const { batch_id, quantity_removed, transaction_type, reason } = req.body;
-  // Allowed types: 'dispose', 'adjust', 'recall', 'return'
   const validTypes = ['dispose', 'adjust', 'recall', 'return'];
 
   if (!validTypes.includes(transaction_type)) {

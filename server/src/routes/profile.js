@@ -49,8 +49,8 @@ router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
     let healthProfile = healthRows.length > 0 ? healthRows[0] : null;
 
     if (healthProfile) {
-      healthProfile.allergies = decrypt(healthProfile.allergies);
-      healthProfile.chronic_conditions = decrypt(healthProfile.chronic_conditions);
+      healthProfile.allergies = decrypt(healthProfile.allergies) || '';
+      healthProfile.chronic_conditions = decrypt(healthProfile.chronic_conditions) || '';
     }
 
     res.json({
@@ -108,7 +108,7 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
       const updatedWeight = weight !== undefined ? weight : old.weight;
 
       await connection.query(
-        `UPDATE HEALTH_PROFILES 
+        `UPDATE HEALTH_PROFILES
          SET blood_type = ?, allergies = ?, chronic_conditions = ?,
              emergency_contact_name = ?, emergency_contact_phone = ?,
              height = ?, weight = ?, version = version + 1
@@ -117,7 +117,7 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
       );
     } else {
       const [result] = await connection.query(
-        `INSERT INTO HEALTH_PROFILES 
+        `INSERT INTO HEALTH_PROFILES
          (user_id, blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, height, weight)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
