@@ -1,4 +1,5 @@
 // mobile/lib/screens/responder_screen.dart
+import 'change_password_screen.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -157,6 +158,14 @@ class _ResponderScreenState extends State<ResponderScreen> {
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () => _fetchActiveAlerts(),
+          ),
+          IconButton(
+            icon: const Icon(Icons.key),
+            tooltip: 'Change Password',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ChangePasswordScreen()),
+            ),
           ),
           IconButton(
             icon: const Icon(Icons.logout),

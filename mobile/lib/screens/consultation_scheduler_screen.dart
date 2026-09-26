@@ -29,14 +29,24 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   bool _loadingSlots = false;
   String? _selectedSlotTime;
 
-  String _selectedPurpose = 'General Medical Consultation';
-  final List<String> _purposes = [
+  // Specific Medical vs. Dental consultation purposes
+  final List<String> _medicalPurposes = [
     'General Medical Consultation',
-    'Dental Check-up / Extraction',
     'Physical Examination',
     'Prescription Refill / Lab Review',
     'OJT / Academic Medical Clearance',
   ];
+
+  final List<String> _dentalPurposes = [
+    'Dental Check-up / Oral Examination',
+    'Tooth Extraction',
+    'Oral Prophylaxis (Cleaning)',
+    'Dental Filling / Cavity Restoration',
+    'Dental Pain / Toothache Emergency',
+  ];
+
+  List<String> _currentPurposes = [];
+  String _selectedPurpose = 'General Medical Consultation';
 
   final _notesController = TextEditingController();
   bool _isSubmitting = false;
@@ -48,6 +58,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   @override
   void initState() {
     super.initState();
+    _currentPurposes = _medicalPurposes;
     _fetchDoctors();
     _fetchMyAppointments();
   }
@@ -58,7 +69,23 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     super.dispose();
   }
 
-  // --- API Methods ---
+  void _updatePurposesForSelectedDoctor(int doctorId) {
+    final doc = _doctors.firstWhere((d) => d['user_id'] == doctorId, orElse: () => null);
+    if (doc != null) {
+      final isDentist = doc['role_code'] == 'DENTIST' ||
+          (doc['specialty'] != null && doc['specialty'].toString().toLowerCase().contains('dent'));
+
+      setState(() {
+        if (isDentist) {
+          _currentPurposes = _dentalPurposes;
+          _selectedPurpose = _dentalPurposes[0];
+        } else {
+          _currentPurposes = _medicalPurposes;
+          _selectedPurpose = _medicalPurposes[0];
+        }
+      });
+    }
+  }
 
   Future<void> _fetchDoctors() async {
     setState(() => _loadingDoctors = true);
@@ -74,6 +101,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
           _doctors = data;
           if (_doctors.isNotEmpty) {
             _selectedDoctorId = _doctors[0]['user_id'];
+            _updatePurposesForSelectedDoctor(_selectedDoctorId!);
             _fetchAvailableSlots();
           }
         });
@@ -169,7 +197,6 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
         _fetchAvailableSlots();
         _fetchMyAppointments();
 
-        // 🔔 Trigger local confirmation notification
         EmergencyAlertService().showAppointmentConfirmedNotification(
           '📅 Consultation Confirmed',
           'Your appointment for $_selectedPurpose on $scheduledDateTime is set.',
@@ -203,7 +230,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                   ),
                   onPressed: () {
                     Navigator.pop(ctx);
-                    setState(() => _activeSubTab = 1); // Switch to My Bookings
+                    setState(() => _activeSubTab = 1);
                   },
                   child: const Text('View in My Bookings'),
                 ),
@@ -381,6 +408,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
               onChanged: (val) {
                 if (val != null) {
                   setState(() => _selectedDoctorId = val);
+                  _updatePurposesForSelectedDoctor(val);
                   _fetchAvailableSlots();
                 }
               },
@@ -389,12 +417,12 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
         ),
         const SizedBox(height: 18),
 
-        const Text('2. Purpose of Consultation', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+        const Text('2. Purpose of Visit', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
         const SizedBox(height: 6),
         Wrap(
           spacing: 8,
           runSpacing: 4,
-          children: _purposes.map((purpose) {
+          children: _currentPurposes.map((purpose) {
             final isSelected = _selectedPurpose == purpose;
             return ChoiceChip(
               label: Text(purpose, style: TextStyle(fontSize: 12, color: isSelected ? Colors.white : Colors.black87)),

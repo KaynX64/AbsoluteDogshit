@@ -6,6 +6,20 @@ export default function ResponderConsole() {
   const [activeAlerts, setActiveAlerts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
+  const playEmergencyAlarm = () => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(850, audioCtx.currentTime);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.6);
+    } catch (_) {}
+  };
+
   const fetchAlerts = async (silent = false) => {
     if (!silent) setLoading(true);
     const token = localStorage.getItem('valetudo_token');
@@ -33,29 +47,32 @@ export default function ResponderConsole() {
       transports: ['websocket', 'polling'],
     });
 
-    // 1. Listen for new emergencies in real time
-    socket.on('emergency:new_alert', () => {
+    socket.on('emergency:new_alert', (newAlert: any) => {
+      playEmergencyAlarm();
+
+      if (window.electronAPI?.showNotification) {
+        window.electronAPI.showNotification({
+          title: `🚨 SOS: ${newAlert.patientName || 'Campus Incident'}`,
+          body: `Location: ${newAlert.latitude?.toFixed(5)}, ${newAlert.longitude?.toFixed(5)}. Blood: ${newAlert.bloodType}. Allergies: ${newAlert.allergies}`,
+        });
+      }
+
       fetchAlerts(true);
     });
 
-    // 2. Real-time update when status is changed from mobile (or another console)
     socket.on('emergency:status_change', (data: { alertId: number; status: string }) => {
       setActiveAlerts((prev) => {
         if (data.status === 'resolved' || data.status === 'false_alarm') {
-          // Instantly remove resolved/false alarm incidents
           return prev.filter((a) => Number(a.alert_id) !== Number(data.alertId));
         } else {
-          // Update status in place
           return prev.map((a) =>
             Number(a.alert_id) === Number(data.alertId) ? { ...a, status: data.status } : a
           );
         }
       });
-      // Silent sync from server
       fetchAlerts(true);
     });
 
-    // 3. Silent 3-second heartbeat to guarantee zero-refresh sync under all conditions
     const interval = setInterval(() => {
       fetchAlerts(true);
     }, 3000);
@@ -66,7 +83,6 @@ export default function ResponderConsole() {
     };
   }, []);
 
-  // Instant optimistic update for clicks directly on this console
   const updateStatus = async (alertId: number, status: string) => {
     setActiveAlerts((prev) =>
       prev
@@ -88,8 +104,102 @@ export default function ResponderConsole() {
     }
   };
 
+  const handleTestDirectNotification = () => {
+    playEmergencyAlarm();
+    if (window.electronAPI?.showNotification) {
+      window.electronAPI.showNotification({
+        title: '🚨 Valetudo HealthLink — SOS Alert Test',
+        body: 'Daniella Movida (BSIT) reported a medical emergency at PSU Lingayen Library. Allergies: Penicillin.',
+      });
+    } else {
+      alert('electronAPI.showNotification not detected.');
+    }
+  };
+
+  const handleTestFullStackSOS = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch('https://localhost:5000/api/emergency/sos', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          latitude: 16.029851,
+          longitude: 120.228543,
+          notes: 'SIMULATED SOS: PSU Lingayen Administration Building',
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        alert('Server SOS error: ' + (data.error || 'Check server connection'));
+      }
+    } catch (err: any) {
+      alert('Could not trigger backend test SOS: ' + err.message);
+    }
+  };
+
   return (
     <div style={{ background: '#ffffff', padding: 20, borderRadius: 8, border: '1px solid #cbd5e1' }}>
+      {/* TEST HARNESS (Exclusively visible on Responder Console) */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 16,
+          padding: '8px 12px',
+          background: '#f8fafc',
+          borderRadius: 6,
+          border: '1px solid #e2e8f0',
+          flexWrap: 'wrap',
+          gap: 10,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 13 }}>🛠️</span>
+          <span style={{ fontSize: 12, fontWeight: 'bold', color: '#475569' }}>
+            RESPONDER DISPATCH TEST HARNESS:
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            type="button"
+            onClick={handleTestDirectNotification}
+            style={{
+              padding: '5px 12px',
+              fontSize: 12,
+              borderRadius: 4,
+              border: '1px solid #cbd5e1',
+              background: '#ffffff',
+              color: '#334155',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+            }}
+          >
+            🧪 Test OS Tray Banner
+          </button>
+          <button
+            type="button"
+            onClick={handleTestFullStackSOS}
+            style={{
+              padding: '5px 12px',
+              fontSize: 12,
+              borderRadius: 4,
+              border: '1px solid #fca5a5',
+              background: '#fef2f2',
+              color: '#dc2626',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+            }}
+          >
+            🚨 Trigger Live SOS (Full System Test)
+          </button>
+        </div>
+      </div>
+
+      {/* Main Dispatch Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <div>
           <h3 style={{ margin: 0, color: '#dc2626' }}>🚨 Campus Emergency Quick-Response Dispatch</h3>
@@ -127,6 +237,8 @@ export default function ResponderConsole() {
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 12,
               }}
             >
               <div>
@@ -158,7 +270,7 @@ export default function ResponderConsole() {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {a.status === 'triggered' && (
                   <button
                     onClick={() => updateStatus(a.alert_id, 'acknowledged')}

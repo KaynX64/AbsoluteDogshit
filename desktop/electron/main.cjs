@@ -1,14 +1,16 @@
 // desktop/electron/main.cjs
-const { app, BrowserWindow, ipcMain, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, Notification, Menu } = require('electron');
 const path = require('path');
 
 function createWindow() {
   const win = new BrowserWindow({
+    title: 'Valetudo HealthLink', // Changes "desktop" to the actual app name
     width: 1300,
     height: 880,
     minWidth: 1024,
     minHeight: 720,
-    show: false, // Prevent white flash before content loads
+    autoHideMenuBar: true,       // Hides the top menu bar
+    show: false,                 // Prevent white flash before content loads
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -16,19 +18,22 @@ function createWindow() {
     },
   });
 
+  // Completely removes the "File", "Edit", "View", "Window" menu bar
+  win.removeMenu();
+  Menu.setApplicationMenu(null);
+
   // Use HTTPS on 127.0.0.1 to match Vite's host
   const devUrl = 'https://127.0.0.1:5173';
   win.loadURL(devUrl);
 
-  // Focus window on startup and open DevTools
+  // Focus window on startup and ensure clean title
   win.once('ready-to-show', () => {
+    win.setTitle('Valetudo HealthLink - PSU Lingayen Infirmary');
     win.show();
     win.focus();
-    // Automatically opens DevTools in development
-    //win.webContents.openDevTools();
   });
 
-  // Enable F12 and Ctrl + Shift + I to toggle DevTools anytime
+  // Keep F12 and Ctrl + Shift + I available for DevTools anytime
   win.webContents.on('before-input-event', (event, input) => {
     if (
       input.key === 'F12' ||
@@ -87,7 +92,7 @@ app.on('certificate-error', (event, webContents, url, error, certificate, callba
     url.startsWith('wss://127.0.0.1:5173')
   ) {
     event.preventDefault();
-    callback(true); // Trust self-signed cert for development
+    callback(true);
   } else {
     callback(false);
   }

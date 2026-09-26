@@ -1,6 +1,5 @@
 // desktop/src/App.tsx
 import React, { useEffect, useState } from 'react';
-import EmergencyAlertBanner from './components/EmergencyAlertBanner';
 import NurseConsole from './components/NurseConsole';
 import DoctorConsole from './components/DoctorConsole';
 import AdminConsole from './components/AdminConsole';
@@ -47,8 +46,19 @@ export default function App() {
   const [offlineQueueCount, setOfflineQueueCount] = useState<number>(() => getOfflineQueue().length);
   const [isReplaying, setIsReplaying] = useState(false);
 
-  // Activate the RA 10173 Session Timeout
-  useSessionTimeout(Boolean(user), 15);
+  // Change Password Modal States
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordMsg, setPasswordMsg] = useState<{ text: string; isError: boolean } | null>(null);
+  const [isSubmittingPassword, setIsSubmittingPassword] = useState(false);
+
+  // Activate the single 8-hour timeout for non-responders
+  const isResponder =
+    activeRoleView === 'EMERGENCY_RESPONDER' ||
+    (user?.roles?.length === 1 && user.roles[0] === 'EMERGENCY_RESPONDER');
+  useSessionTimeout(Boolean(user) && !isResponder, 480);
 
   useEffect(() => {
     const updateOnline = () => setIsOnline(true);
@@ -79,9 +89,22 @@ export default function App() {
 
       const data = await res.json();
       if (res.ok) {
+        const userRoles: string[] = data.user.roles || [];
+        const staffRoles = ['NURSE', 'DOCTOR', 'DENTIST', 'ADMIN', 'EMERGENCY_RESPONDER'];
+
+        // GATEKEEPER: Prevent student-only accounts from logging into clinic desktop terminals
+        const isAuthorizedStaff = userRoles.some((r) => staffRoles.includes(r));
+        if (!isAuthorizedStaff) {
+          setError('⛔ Access Denied: Student accounts are restricted to the Valetudo Mobile App.');
+          return;
+        }
+
         localStorage.setItem('valetudo_token', data.token);
         setUser(data.user);
-        setActiveRoleView(data.user.roles[0] || 'NURSE');
+
+        // Select the primary authorized staff role
+        const defaultRole = userRoles.find((r) => staffRoles.includes(r)) || staffRoles[0];
+        setActiveRoleView(defaultRole);
       } else {
         setError(data.error || 'Login failed');
       }
@@ -102,8 +125,52 @@ export default function App() {
     }
   };
 
-    const isResponder = activeRoleView === 'EMERGENCY_RESPONDER' || (user?.roles?.length === 1 && user.roles[0] === 'EMERGENCY_RESPONDER');
-    useSessionTimeout(Boolean(user) && !isResponder, 480);
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordMsg(null);
+
+    if (newPassword !== confirmPassword) {
+      setPasswordMsg({ text: 'New passwords do not match.', isError: true });
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      setPasswordMsg({ text: 'New password must be at least 8 characters long.', isError: true });
+      return;
+    }
+
+    setIsSubmittingPassword(true);
+    const token = localStorage.getItem('valetudo_token');
+
+    try {
+      const res = await fetch('https://localhost:5000/api/auth/change-password', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setPasswordMsg({ text: '✅ ' + data.message, isError: false });
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setTimeout(() => {
+          setShowPasswordModal(false);
+          setPasswordMsg(null);
+        }, 1500);
+      } else {
+        setPasswordMsg({ text: '❌ ' + (data.error || 'Failed to update password.'), isError: true });
+      }
+    } catch (err: any) {
+      setPasswordMsg({ text: '❌ Network error: ' + err.message, isError: true });
+    } finally {
+      setIsSubmittingPassword(false);
+    }
+  };
 
   // ---------------------------------------------------------------------------
   // LOGIN SCREEN
@@ -172,7 +239,23 @@ export default function App() {
               />
             </div>
 
-            {error && <p style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</p>}
+            {error && (
+              <div
+                style={{
+                  color: '#dc2626',
+                  fontSize: 12,
+                  marginBottom: 14,
+                  padding: '8px 10px',
+                  borderRadius: 6,
+                  background: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  fontWeight: 600,
+                  lineHeight: 1.4,
+                }}
+              >
+                {error}
+              </div>
+            )}
 
             <button
               type="submit"
@@ -188,38 +271,38 @@ export default function App() {
                 fontSize: 14,
               }}
             >
-              Sign In
+              Sign In to Clinic Terminal
             </button>
           </form>
 
-          {/* Quick preset buttons for testing each role */}
+          {/* Quick preset buttons for testing clinical roles */}
           <div style={{ marginTop: 24, borderTop: '1px dashed #cbd5e1', paddingTop: 14 }}>
-            <small style={{ color: '#64748b', display: 'block', marginBottom: 8, fontWeight: 'bold' }}>Quick Select Test Role:</small>
+            <small style={{ color: '#64748b', display: 'block', marginBottom: 8, fontWeight: 'bold' }}>Quick Select Staff Role:</small>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
               <button
                 type="button"
-                onClick={() => { setEmail('nurse@psu.edu.ph'); setPassword('Password123!'); }}
+                onClick={() => { setEmail('nurse@psu.edu.ph'); setPassword('Password123!'); setError(''); }}
                 style={{ padding: '6px 8px', fontSize: 12, cursor: 'pointer', background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 4, color: '#0f766e' }}
               >
                 👩‍⚕️ Clinic Nurse
               </button>
               <button
                 type="button"
-                onClick={() => { setEmail('doctor@psu.edu.ph'); setPassword('Password123!'); }}
+                onClick={() => { setEmail('doctor@psu.edu.ph'); setPassword('Password123!'); setError(''); }}
                 style={{ padding: '6px 8px', fontSize: 12, cursor: 'pointer', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 4, color: '#0284c7' }}
               >
                 🩺 Campus Doctor
               </button>
               <button
                 type="button"
-                onClick={() => { setEmail('admin@psu.edu.ph'); setPassword('Password123!'); }}
+                onClick={() => { setEmail('admin@psu.edu.ph'); setPassword('Password123!'); setError(''); }}
                 style={{ padding: '6px 8px', fontSize: 12, cursor: 'pointer', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 4, color: '#6d28d9' }}
               >
                 ⚙️ System Admin
               </button>
               <button
                 type="button"
-                onClick={() => { setEmail('responder@psu.edu.ph'); setPassword('Password123!'); }}
+                onClick={() => { setEmail('responder@psu.edu.ph'); setPassword('Password123!'); setError(''); }}
                 style={{ padding: '6px 8px', fontSize: 12, cursor: 'pointer', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 4, color: '#b91c1c' }}
               >
                 🚨 SOS Responder
@@ -232,7 +315,7 @@ export default function App() {
   }
 
   // ---------------------------------------------------------------------------
-  // ROLE-BASED CONSOLE ROUTING WITH OFFLINE SYNC STATUS
+  // ROLE-BASED CONSOLE ROUTING
   // ---------------------------------------------------------------------------
   return (
     <div style={{ padding: 'clamp(14px, 2vw, 28px)', fontFamily: 'sans-serif', width: '100%', boxSizing: 'border-box', maxWidth: '1600px', margin: '0 auto' }}>
@@ -296,7 +379,7 @@ export default function App() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           {/* Switch view if user holds multiple roles */}
           {user.roles.length > 1 && (
             <select
@@ -310,6 +393,26 @@ export default function App() {
             </select>
           )}
 
+          {/* Password Change Button */}
+          <button
+            onClick={() => {
+              setShowPasswordModal(true);
+              setPasswordMsg(null);
+            }}
+            style={{
+              padding: '6px 12px',
+              background: '#f0fdfa',
+              border: '1px solid #99f6e4',
+              color: '#0f766e',
+              borderRadius: 4,
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              fontSize: 12,
+            }}
+          >
+            🔑 Change Password
+          </button>
+
           <button
             onClick={() => setUser(null)}
             style={{ padding: '6px 14px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
@@ -319,16 +422,128 @@ export default function App() {
         </div>
       </header>
 
-      {/* Real-time Emergency SOS Alert Banner */}
-      <div style={{ marginBottom: 16 }}>
-        <EmergencyAlertBanner />
-      </div>
-
       {/* Render Role-Specific Interface */}
       {activeRoleView === 'NURSE' && <NurseConsole />}
       {(activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST') && <DoctorConsole />}
       {activeRoleView === 'ADMIN' && <AdminConsole />}
       {activeRoleView === 'EMERGENCY_RESPONDER' && <ResponderConsole />}
+
+      {/* --------------------------------------------------------------------- */}
+      {/* CHANGE PASSWORD MODAL DIALOG                                          */}
+      {/* --------------------------------------------------------------------- */}
+      {showPasswordModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              width: 380,
+              background: '#ffffff',
+              borderRadius: 8,
+              padding: 24,
+              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)',
+              border: '1px solid #cbd5e1',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <h3 style={{ margin: 0, color: '#0f766e', fontSize: 16 }}>🔑 Update Account Password</h3>
+              <button
+                type="button"
+                onClick={() => setShowPasswordModal(false)}
+                style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleChangePassword}>
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Current Password:</label>
+                <input
+                  type="password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  required
+                  style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', marginTop: 4, borderRadius: 5, border: '1px solid #cbd5e1', fontSize: 13 }}
+                />
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>New Password (min 8 chars):</label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  required
+                  style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', marginTop: 4, borderRadius: 5, border: '1px solid #cbd5e1', fontSize: 13 }}
+                />
+              </div>
+
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Confirm New Password:</label>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required
+                  style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', marginTop: 4, borderRadius: 5, border: '1px solid #cbd5e1', fontSize: 13 }}
+                />
+              </div>
+
+              {passwordMsg && (
+                <div
+                  style={{
+                    padding: '8px 10px',
+                    borderRadius: 5,
+                    fontSize: 12,
+                    fontWeight: 'bold',
+                    marginBottom: 12,
+                    background: passwordMsg.isError ? '#fef2f2' : '#f0fdf4',
+                    color: passwordMsg.isError ? '#dc2626' : '#15803d',
+                    border: `1px solid ${passwordMsg.isError ? '#fecaca' : '#bbf7d0'}`,
+                  }}
+                >
+                  {passwordMsg.text}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordModal(false)}
+                  style={{ flex: 1, padding: 10, background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingPassword}
+                  style={{
+                    flex: 1,
+                    padding: 10,
+                    background: isSubmittingPassword ? '#94a3b8' : '#0f766e',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: 5,
+                    cursor: isSubmittingPassword ? 'not-allowed' : 'pointer',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  {isSubmittingPassword ? 'Updating...' : 'Save Password'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

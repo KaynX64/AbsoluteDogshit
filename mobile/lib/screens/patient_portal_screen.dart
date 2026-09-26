@@ -1,4 +1,5 @@
 // mobile/lib/screens/patient_portal_screen.dart
+import 'change_password_screen.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -15,6 +16,7 @@ import 'login_screen.dart';
 import 'edit_profile_screen.dart';
 import 'consultation_scheduler_screen.dart';
 import 'documents_viewer_screen.dart';
+
 
 class PatientPortalScreen extends StatefulWidget {
   final Map<String, dynamic> user;
@@ -1034,23 +1036,36 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                 'Clinical Indicators',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
-              OutlinedButton.icon(
-                onPressed: () async {
-                  final updated = await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => EditProfileScreen(
-                        user: u,
-                        healthProfile: hp,
-                      ),
+              Row(
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const ChangePasswordScreen()),
                     ),
-                  );
-                  if (updated == true) {
-                    _fetchProfile();
-                  }
-                },
-                icon: const Icon(Icons.edit, size: 18),
-                label: const Text('Edit Contacts'),
+                    icon: const Icon(Icons.key, size: 16),
+                    label: const Text('Password', style: TextStyle(fontSize: 12)),
+                  ),
+                  const SizedBox(width: 6),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final updated = await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => EditProfileScreen(
+                            user: u,
+                            healthProfile: hp,
+                          ),
+                        ),
+                      );
+                      if (updated == true) {
+                        _fetchProfile();
+                      }
+                    },
+                    icon: const Icon(Icons.edit, size: 16),
+                    label: const Text('Contacts', style: TextStyle(fontSize: 12)),
+                  ),
+                ],
               ),
             ],
           ),

@@ -72,7 +72,6 @@ export default function DoctorConsole() {
   const [patientHistory, setPatientHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
-  // Helper for status badges
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'scheduled':
@@ -146,7 +145,7 @@ export default function DoctorConsole() {
       if (evt?.status === 'checked_in' && window.electronAPI?.showNotification) {
         window.electronAPI.showNotification({
           title: '🔔 Patient Triaged & Ready',
-          body: 'A student has been checked in by the triage nurse and is waiting in the queue.',
+          body: 'A student booked under your care has been checked in by the triage nurse.',
         });
       }
     });
@@ -177,7 +176,6 @@ export default function DoctorConsole() {
   const selectPatient = (app: AppointmentItem) => {
     setSelectedApp(app);
 
-    // Clean out the triage string from the chief complaint box
     let rawComplaint = app.notes || `${app.appointment_type} requested`;
     if (rawComplaint.includes('[TRIAGE VITALS]')) {
       rawComplaint = rawComplaint.replace(/\[TRIAGE VITALS\][^\n]*\n?/, '').trim();
@@ -190,7 +188,6 @@ export default function DoctorConsole() {
     setAttachedFile(null);
     setFeedbackMsg(null);
 
-    // Auto-populate triage vitals
     if (app.notes && app.notes.includes('[TRIAGE VITALS]')) {
       const bpMatch = app.notes.match(/BP:\s*(\d+)\/(\d+)/);
       if (bpMatch) {
@@ -217,6 +214,9 @@ export default function DoctorConsole() {
         setSelectedApp({ ...selectedApp, status: 'serving' });
         fetchAppointments('active', true);
         setFeedbackMsg({ text: '▶ Consultation in progress.', type: 'success' });
+      } else {
+        const errData = await res.json();
+        setFeedbackMsg({ text: errData.error || 'Failed to begin consultation.', type: 'error' });
       }
     } catch (err: any) {
       setFeedbackMsg({ text: err.message, type: 'error' });
@@ -260,7 +260,6 @@ export default function DoctorConsole() {
         throw new Error(data.error || 'Failed to complete encounter.');
       }
 
-      // If doctor selected a lab file, stream it to MinIO S3
       let fileSuccess = false;
       if (attachedFile && data.emrId) {
         try {
@@ -276,10 +275,10 @@ export default function DoctorConsole() {
             fileSuccess = true;
           } else {
             const errData = await uploadRes.json();
-            alert(`⚠️ Encounter saved, but MinIO file upload failed: ${errData.error || 'Check MinIO Docker container'}`);
+            alert(`⚠️ Encounter saved, but MinIO file upload failed: ${errData.error || 'Check MinIO container'}`);
           }
         } catch (uploadErr: any) {
-          alert(`⚠️ MinIO Connection Error: ${uploadErr.message}. Ensure MinIO container is running on port 9000.`);
+          alert(`⚠️ MinIO Connection Error: ${uploadErr.message}.`);
         }
       }
 
@@ -445,21 +444,21 @@ export default function DoctorConsole() {
           <div>
             <h3 style={{ margin: 0, color: '#0284c7' }}>
               {viewMode === 'active'
-                ? "🩺 Active Consultation Queue (Triaged & Ready)"
+                ? "🩺 My Consultation Queue (Triaged & Assigned to Me)"
                 : viewMode === 'scheduled'
-                ? "📅 Today's Bookings (Awaiting Nurse Intake)"
+                ? "📅 My Upcoming Bookings (Awaiting Nurse Intake)"
                 : viewMode === 'history'
-                ? '📜 Consultation History Archive'
+                ? '📜 My Consultation History Archive'
                 : '📊 Epidemiological Analytics & Visual Charts'}
             </h3>
             <small style={{ color: '#64748b' }}>
               {viewMode === 'active'
-                ? 'Students checked in by the triage nurse with vitals recorded'
+                ? 'Patients triaged and awaiting consultation with your department only'
                 : viewMode === 'scheduled'
-                ? 'Booked on mobile app. Must scan QR pass at the nurse intake desk before entering this room.'
+                ? 'Bookings scheduled with your practitioner account'
                 : viewMode === 'analytics'
                 ? 'Campus illness trajectories, seasonal spike monitoring & health reports'
-                : 'Completed and discharged encounters'}
+                : 'Completed encounters discharged by your department'}
             </small>
           </div>
 
@@ -478,7 +477,7 @@ export default function DoctorConsole() {
                 color: viewMode === 'active' ? '#ffffff' : '#0284c7',
               }}
             >
-              🩺 Active Queue (Triaged)
+              🩺 My Active Queue
             </button>
             <button
               onClick={() => handleSwitchView('scheduled')}
@@ -493,7 +492,7 @@ export default function DoctorConsole() {
                 color: viewMode === 'scheduled' ? '#ffffff' : '#d97706',
               }}
             >
-              📅 Today's Bookings
+              📅 My Bookings
             </button>
             <button
               onClick={() => handleSwitchView('history')}
@@ -508,7 +507,7 @@ export default function DoctorConsole() {
                 color: viewMode === 'history' ? '#ffffff' : '#64748b',
               }}
             >
-              📜 History Archive
+              📜 My History Archive
             </button>
             <button
               onClick={() => handleSwitchView('analytics')}
@@ -537,14 +536,14 @@ export default function DoctorConsole() {
         {/* Patient card grid */}
         {viewMode !== 'analytics' && (
           loadingAppointments ? (
-            <p style={{ color: '#64748b', fontSize: 13 }}>Loading roster...</p>
+            <p style={{ color: '#64748b', fontSize: 13 }}>Loading isolated roster...</p>
           ) : appointments.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '16px 0', color: '#64748b', fontSize: 13 }}>
               {viewMode === 'active'
-                ? 'ℹ️ No patients currently waiting in consultation queue. When the nurse checks in a student, they will appear here automatically.'
+                ? 'ℹ️ No patients currently waiting in your consultation queue. Other medical or dental departments manage their own respective queues.'
                 : viewMode === 'scheduled'
-                ? 'No pending mobile bookings for today.'
-                : 'No archived consultations found.'}
+                ? 'No pending mobile bookings assigned to your practitioner schedule.'
+                : 'No archived consultations found for your department.'}
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>

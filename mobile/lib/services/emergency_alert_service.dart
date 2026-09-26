@@ -32,8 +32,8 @@ class EmergencyAlertService {
   bool _isResponderActive = false;
   int? _lastAlertIdProcessed;
 
-  // v4 forces Android to register the new emr_sound.ogg notification sound
-  static const AndroidNotificationChannel _criticalChannel = AndroidNotificationChannel(
+  // 1. Critical Channel for Responders (Plays custom emr_sound.ogg siren)
+  static const AndroidNotificationChannel _responderCriticalChannel = AndroidNotificationChannel(
     'emergency_sos_channel_v4',
     '🚨 Critical Emergency SOS',
     description: 'High-priority campus emergency dispatch alerts with heads-up banners',
@@ -42,6 +42,26 @@ class EmergencyAlertService {
     sound: RawResourceAndroidNotificationSound('emr_sound'),
     enableVibration: true,
     enableLights: true,
+  );
+
+  // 2. Student / Victim Confirmation Channel (Plays DEFAULT phone notification chime)
+  static const AndroidNotificationChannel _studentConfirmChannel = AndroidNotificationChannel(
+    'student_sos_confirmation_channel',
+    'SOS Dispatch Confirmation',
+    description: 'Confirmation alert when student sends an SOS emergency',
+    importance: Importance.high,
+    playSound: true, // Native phone default notification sound
+    enableVibration: true,
+  );
+
+  // 3. Queue Turn Channel (Plays DEFAULT phone notification chime)
+  static const AndroidNotificationChannel _queueTurnChannel = AndroidNotificationChannel(
+    'clinic_queue_channel',
+    '🔔 Clinic Queue Turn',
+    description: 'Alerts when your queue ticket is called for consultation',
+    importance: Importance.high,
+    playSound: true, // Native phone default notification sound
+    enableVibration: true,
   );
 
   Future<void> initialize() async {
@@ -59,7 +79,9 @@ class EmergencyAlertService {
     final androidImplementation = _localNotifications
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
 
-    await androidImplementation?.createNotificationChannel(_criticalChannel);
+    await androidImplementation?.createNotificationChannel(_responderCriticalChannel);
+    await androidImplementation?.createNotificationChannel(_studentConfirmChannel);
+    await androidImplementation?.createNotificationChannel(_queueTurnChannel);
     await androidImplementation?.requestNotificationsPermission();
 
     // 2. Configure audio player context
@@ -140,11 +162,13 @@ class EmergencyAlertService {
         debugPrint('🚨 [Socket.IO Mobile] SOS Alert Broadcast Received: $data');
         final alertMap = data is Map<String, dynamic> ? data : Map<String, dynamic>.from(data);
 
+        // Guard: Only sound alarm if device is in Responder mode
         if (!_isResponderActive) {
           debugPrint('🛡️ [Socket.IO Mobile] Ignored: Device not in responder mode.');
           return;
         }
 
+        // Avoid self-echo if alert was initiated on this device
         final userDataStr = await _storage.read(key: 'user_data');
         if (userDataStr != null) {
           try {
@@ -182,18 +206,18 @@ class EmergencyAlertService {
     _disableBackgroundService();
   }
 
+  // --- STUDENT CONFIRMATION NOTIFICATION (Default Phone Chime) ---
   Future<void> showStudentSosSentNotification() async {
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'emergency_sos_channel_v4',
-      '🚨 Critical Emergency SOS',
+      'student_sos_confirmation_channel',
+      'SOS Dispatch Confirmation',
       channelDescription: 'Emergency dispatch confirmation',
-      importance: Importance.max,
+      importance: Importance.high,
       priority: Priority.high,
       ticker: 'SOS Dispatched',
-      playSound: true,
-      sound: RawResourceAndroidNotificationSound('emr_sound'),
+      playSound: true, // Native default phone sound
       enableVibration: true,
-      fullScreenIntent: true,
+      fullScreenIntent: false,
     );
 
     const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
@@ -206,6 +230,7 @@ class EmergencyAlertService {
     );
   }
 
+  // --- APPOINTMENT CONFIRMATION NOTIFICATION (Default Phone Chime) ---
   Future<void> showAppointmentConfirmedNotification([String? title, String? body]) async {
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'appointment_channel',
@@ -214,7 +239,7 @@ class EmergencyAlertService {
       importance: Importance.high,
       priority: Priority.high,
       ticker: 'Appointment Confirmed',
-      playSound: true,
+      playSound: true, // Native default phone sound
     );
 
     const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
@@ -227,19 +252,19 @@ class EmergencyAlertService {
     );
   }
 
+  // --- CLINIC QUEUE TURN NOTIFICATION (Now uses DEFAULT Phone Chime) ---
   Future<void> showQueueTurnNotification({
     required String ticketNo,
     required String doctorName,
   }) async {
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'emergency_sos_channel_v4',
-      '🚨 Critical Emergency SOS',
-      channelDescription: 'Alerts when it is your turn for consultation',
-      importance: Importance.max,
+      'clinic_queue_channel',
+      '🔔 Clinic Queue Turn',
+      channelDescription: 'Alerts when your queue ticket is called for consultation',
+      importance: Importance.high,
       priority: Priority.high,
       ticker: 'Your Turn!',
-      playSound: true,
-      sound: RawResourceAndroidNotificationSound('emr_sound'),
+      playSound: true, // Native default phone sound (NO custom siren)
       enableVibration: true,
     );
 
@@ -302,7 +327,6 @@ class EmergencyAlertService {
     _isAlarmPlaying = true;
 
     try {
-      // 1. Release previous native player state to avoid Error (-38, 0)
       try {
         await _audioPlayer.stop();
         await _audioPlayer.release();
@@ -311,7 +335,6 @@ class EmergencyAlertService {
       await _audioPlayer.setReleaseMode(ReleaseMode.loop);
       await _audioPlayer.setVolume(1.0);
 
-      // 2. Play emr_sound.ogg directly
       try {
         await _audioPlayer.play(AssetSource('emr_sound.ogg'));
       } catch (assetErr) {
@@ -320,7 +343,6 @@ class EmergencyAlertService {
         await _audioPlayer.play(BytesSource(wav, mimeType: 'audio/wav'));
       }
 
-      // 3. Vibration pulse loop
       _vibrationTimer?.cancel();
       _vibrationTimer = Timer.periodic(const Duration(milliseconds: 600), (timer) {
         if (!_isAlarmPlaying) {
@@ -343,6 +365,7 @@ class EmergencyAlertService {
     } catch (_) {}
   }
 
+  // --- EMERGENCY DISPATCH BROADCAST (For Responders Only) ---
   Future<void> triggerEmergencyBroadcast(Map<String, dynamic> alertData) async {
     playAlarmSound();
 

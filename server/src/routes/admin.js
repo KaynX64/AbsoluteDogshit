@@ -1,10 +1,10 @@
 // server/src/routes/admin.js
-import { isRedisActive } from '../utils/redisClient.js';
 import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { logAudit } from '../utils/auditLogger.js';
+import { isRedisActive } from '../utils/redisClient.js';
 
 const router = express.Router();
 
@@ -125,30 +125,8 @@ router.get('/audit-logs', async (req, res) => {
   }
 });
 
-// 5. GET /api/admin/telemetry - Health Status
+// 5. GET /api/admin/telemetry - Health Status (Single Clean Route)
 router.get('/telemetry', async (req, res) => {
-  try {
-    const [dbTest] = await pool.query('SELECT 1 as isAlive');
-    const [userCount] = await pool.query('SELECT COUNT(*) as total FROM USERS WHERE is_active = TRUE AND deleted_at IS NULL');
-    const [auditCount] = await pool.query('SELECT COUNT(*) as total FROM AUDIT_LOGS');
-
-    res.json({
-      database: {
-        status: dbTest.length > 0 ? 'Operational' : 'Degraded',
-        driver: 'MySQL 8.0 with Spatial SRID 4326',
-        totalUsers: userCount[0].total,
-        totalAuditBlocks: auditCount[0].total,
-      },
-      server: {
-        uptimeSeconds: Math.floor(process.uptime()),
-        memoryUsageMB: (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2),
-        nodeVersion: process.version,
-      },
-    });
-  } catch (error) {
-    res.status(500).json({ error: 'Telemetry unavailable.' });
-  }
-  router.get('/telemetry', async (req, res) => {
   try {
     const [dbTest] = await pool.query('SELECT 1 as isAlive');
     const [userCount] = await pool.query('SELECT COUNT(*) as total FROM USERS WHERE is_active = TRUE AND deleted_at IS NULL');
@@ -174,7 +152,6 @@ router.get('/telemetry', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Telemetry unavailable.' });
   }
-});
 });
 
 export default router;

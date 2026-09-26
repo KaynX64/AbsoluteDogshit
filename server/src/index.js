@@ -8,8 +8,8 @@ import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { loginUser, authenticateToken } from './auth.js';
 import jwt from 'jsonwebtoken';
+import { loginUser, authenticateToken, changePassword } from './auth.js';
 
 // Route imports
 import privacyRouter from './routes/privacy.js';
@@ -121,6 +121,7 @@ io.on('connection', (socket) => {
 // API ROUTES
 // =============================================================================
 app.post('/api/auth/login', loginUser);
+app.put('/api/auth/change-password', authenticateToken, changePassword);
 
 app.use('/api/privacy', privacyRouter);
 app.use('/api/profile', profileRoutes);
