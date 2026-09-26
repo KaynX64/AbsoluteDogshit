@@ -7,6 +7,7 @@ import { logPhiAccess } from '../utils/phiLogger.js';
 import { sendAppointmentEmail } from '../utils/mailer.js';
 import { encrypt, decrypt } from '../utils/cryptoVault.js';
 import { requirePrivacyConsent } from '../middleware/consent.js';
+import { getCache, setCache, invalidateCache } from '../utils/redisClient.js';
 
 export default function appointmentRouter(io) {
   const router = express.Router();
@@ -423,7 +424,10 @@ export default function appointmentRouter(io) {
         io.emit('appointment:completed', { appointmentId: Number(appointmentId) });
         io.emit('queue:updated');
       }
-
+      
+      const today = new Date().toISOString().split('T')[0];
+      await invalidateCache(`queue:today:${today}`);
+      
       res.json({ message: 'Consultation finalized and saved to patient EMR history!', emrId });
     } catch (error) {
       await connection.rollback();
@@ -531,6 +535,7 @@ export default function appointmentRouter(io) {
       );
 
       await connection.commit();
+      await invalidateCache(`queue:today:${today}`);
 
       const arrivalTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const queueTicket = `Q-${nextQueueNo.toString().padStart(2, '0')}`;
@@ -553,29 +558,44 @@ export default function appointmentRouter(io) {
     }
   });
 
-  // 11. GET /api/appointments/queue/today
-  router.get('/queue/today', authenticateToken, async (req, res) => {
-    try {
-      const today = new Date().toISOString().split('T')[0];
-      const [rows] = await pool.query(
-        `SELECT q.queue_id, q.queue_number, q.status, q.counter_id,
-                DATE_FORMAT(q.checked_in_at, '%h:%i %p') AS arrival_time,
-                CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS ticket_no,
-                u.first_name, u.last_name, sp.student_no,
-                COALESCE(a.appointment_type, 'Walk-in Intake') AS visit_type
-         FROM QUEUE q
-         JOIN USERS u ON q.patient_user_id = u.user_id
-         LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
-         LEFT JOIN APPOINTMENTS a ON q.appointment_id = a.appointment_id
-         WHERE q.queue_date = ? AND q.status != 'done'
-         ORDER BY q.queue_number ASC`,
-        [today]
-      );
-      res.json(rows);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to retrieve live queue.' });
+ // 11. GET /api/appointments/queue/today
+router.get('/queue/today', authenticateToken, async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const cacheKey = `queue:today:${today}`;
+
+    // 1. Check Redis Cache first (Cache Hit)
+    const cachedQueue = await getCache(cacheKey);
+    if (cachedQueue) {
+      res.setHeader('X-Cache', 'HIT');
+      return res.json(cachedQueue);
     }
-  });
+
+    // 2. Cache Miss: Query MySQL source of truth
+    const [rows] = await pool.query(
+      `SELECT q.queue_id, q.queue_number, q.status, q.counter_id,
+              DATE_FORMAT(q.checked_in_at, '%h:%i %p') AS arrival_time,
+              CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS ticket_no,
+              u.first_name, u.last_name, sp.student_no,
+              COALESCE(a.appointment_type, 'Walk-in Intake') AS visit_type
+       FROM QUEUE q
+       JOIN USERS u ON q.patient_user_id = u.user_id
+       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+       LEFT JOIN APPOINTMENTS a ON q.appointment_id = a.appointment_id
+       WHERE q.queue_date = ? AND q.status != 'done'
+       ORDER BY q.queue_number ASC`,
+      [today]
+    );
+
+    // 3. Populate Redis Cache with a 60-second TTL
+    await setCache(cacheKey, rows, 60);
+
+    res.setHeader('X-Cache', 'MISS');
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to retrieve live queue.' });
+  }
+});
 
   // 12. PATCH /api/appointments/queue/:id/status
   router.patch('/queue/:id/status', authenticateToken, async (req, res) => {
@@ -599,6 +619,8 @@ export default function appointmentRouter(io) {
       if (io) {
         io.emit('queue:updated');
       }
+      const today = new Date().toISOString().split('T')[0];
+      await invalidateCache(`queue:today:${today}`);
 
       res.json({ message: `Queue ticket #${queueId} updated to ${status}.` });
     } catch (error) {

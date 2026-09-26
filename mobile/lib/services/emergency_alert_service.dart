@@ -10,6 +10,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter_background/flutter_background.dart';
 import '../config/api_config.dart';
 import '../main.dart';
 
@@ -21,7 +22,7 @@ class EmergencyAlertService {
   io.Socket? _socket;
   final AudioPlayer _audioPlayer = AudioPlayer();
   final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
-  final FlutterSecureStorage _storage = const FlutterSecureStorage();
+  final _storage = const FlutterSecureStorage();
 
   bool _isAlarmPlaying = false;
   Timer? _vibrationTimer;
@@ -29,14 +30,16 @@ class EmergencyAlertService {
   bool _isInitialized = false;
 
   bool _isResponderActive = false;
+  int? _lastAlertIdProcessed;
 
-  // High-priority notification channel forces Android to create a heads-up banner
+  // v4 forces Android to register the new emr_sound.ogg notification sound
   static const AndroidNotificationChannel _criticalChannel = AndroidNotificationChannel(
-    'emergency_sos_channel_v3',
+    'emergency_sos_channel_v4',
     '🚨 Critical Emergency SOS',
     description: 'High-priority campus emergency dispatch alerts with heads-up banners',
     importance: Importance.max,
     playSound: true,
+    sound: RawResourceAndroidNotificationSound('emr_sound'),
     enableVibration: true,
     enableLights: true,
   );
@@ -59,17 +62,7 @@ class EmergencyAlertService {
     await androidImplementation?.createNotificationChannel(_criticalChannel);
     await androidImplementation?.requestNotificationsPermission();
 
-    // 2. Connect Persistent WebSocket with stored auth token
-    await connectSocket();
-  }
-
-  Future<void> connectSocket([String? overrideToken]) async {
-    final token = overrideToken ?? await _storage.read(key: 'jwt_token');
-
-    _socket?.disconnect();
-    _socket?.dispose();
-
-    // 3. Configure audio player with safe alarm context
+    // 2. Configure audio player context
     try {
       await _audioPlayer.setAudioContext(
         AudioContext(
@@ -83,7 +76,49 @@ class EmergencyAlertService {
       );
     } catch (_) {}
 
-    // 4. Connect Persistent WebSocket with Auth
+    await connectSocket();
+  }
+
+  Future<void> _enableBackgroundService() async {
+    try {
+      const androidConfig = FlutterBackgroundAndroidConfig(
+        notificationTitle: "PSU Quick-Response Unit",
+        notificationText: "Active on-call in background for campus emergencies.",
+        notificationImportance: AndroidNotificationImportance.normal,
+        notificationIcon: AndroidResource(name: 'ic_launcher', defType: 'mipmap'),
+        enableWifiLock: true,
+      );
+
+      bool hasPermissions = await FlutterBackground.hasPermissions;
+      if (!hasPermissions) {
+        await FlutterBackground.initialize(androidConfig: androidConfig);
+      }
+      await FlutterBackground.enableBackgroundExecution();
+      debugPrint('🛡️ [Background Service] Active on-call foreground service enabled.');
+    } catch (e) {
+      debugPrint('⚠️ [Background Service Error]: $e');
+    }
+  }
+
+  Future<void> _disableBackgroundService() async {
+    try {
+      if (FlutterBackground.isBackgroundExecutionEnabled) {
+        await FlutterBackground.disableBackgroundExecution();
+        debugPrint('🛡️ [Background Service] Disabled on logout.');
+      }
+    } catch (_) {}
+  }
+
+  Future<void> connectSocket({bool force = false}) async {
+    if (_socket != null && _socket!.connected && !force) return;
+
+    try {
+      _socket?.dispose();
+      _socket = null;
+    } catch (_) {}
+
+    final token = await _storage.read(key: 'jwt_token');
+
     try {
       _socket = io.io(
         ApiConfig.socketUrl,
@@ -97,20 +132,19 @@ class EmergencyAlertService {
       );
 
       _socket!.onConnect((_) {
-        debugPrint('✅ [Socket.IO Mobile] Connected to Emergency Gateway');
+        debugPrint('✅ [Socket.IO Mobile] Connected to Gateway with token: ${token != null ? "VALID" : "ANON"}');
+        _socket!.emit('join:responders');
       });
 
       _socket!.on('emergency:new_alert', (data) async {
-        debugPrint('🚨 [Socket.IO Mobile] SOS Alert Broadcast: $data');
+        debugPrint('🚨 [Socket.IO Mobile] SOS Alert Broadcast Received: $data');
         final alertMap = data is Map<String, dynamic> ? data : Map<String, dynamic>.from(data);
 
-        // 1. GUARD: Only trigger siren & red alert if device is logged in as an active responder
         if (!_isResponderActive) {
-          debugPrint('🛡️ [Socket.IO Mobile] Ignored: Device is in Student/User mode.');
+          debugPrint('🛡️ [Socket.IO Mobile] Ignored: Device not in responder mode.');
           return;
         }
 
-        // 2. Prevent self-echoing if the alert originated from this account
         final userDataStr = await _storage.read(key: 'user_data');
         if (userDataStr != null) {
           try {
@@ -122,35 +156,42 @@ class EmergencyAlertService {
           } catch (_) {}
         }
 
-        // 3. Trigger emergency broadcast for responders only
+        final alertId = alertMap['alertId'] ?? alertMap['alert_id'];
+        if (_lastAlertIdProcessed == alertId && _isAlarmPlaying) return;
+        _lastAlertIdProcessed = alertId;
+
         triggerEmergencyBroadcast(alertMap);
       });
     } catch (e) {
-      debugPrint('[Socket.IO Mobile] Error: $e');
+      debugPrint('[Socket.IO Mobile] Connection error: $e');
     }
   }
 
-  /// Called ONLY by ResponderScreen when a responder logs in
-  void startResponderListener() async {
+  void startResponderListener() {
     _isResponderActive = true;
-    await connectSocket();
+    _lastAlertIdProcessed = null;
+    initialize();
+    connectSocket(force: true);
+    _enableBackgroundService();
   }
 
   void stopResponderListener() {
     _isResponderActive = false;
+    _lastAlertIdProcessed = null;
     stopAlarmSound();
+    _disableBackgroundService();
   }
 
-  // --- 1. STUDENT CONFIRMATION NOTIFICATION ---
   Future<void> showStudentSosSentNotification() async {
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'emergency_sos_channel_v3',
+      'emergency_sos_channel_v4',
       '🚨 Critical Emergency SOS',
       channelDescription: 'Emergency dispatch confirmation',
       importance: Importance.max,
       priority: Priority.high,
       ticker: 'SOS Dispatched',
       playSound: true,
+      sound: RawResourceAndroidNotificationSound('emr_sound'),
       enableVibration: true,
       fullScreenIntent: true,
     );
@@ -165,11 +206,7 @@ class EmergencyAlertService {
     );
   }
 
-  // --- 2. APPOINTMENT CONFIRMATION NOTIFICATION ---
-  Future<void> showAppointmentConfirmedNotification([
-    String? title,
-    String? body,
-  ]) async {
+  Future<void> showAppointmentConfirmedNotification([String? title, String? body]) async {
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'appointment_channel',
       'Consultation Appointments',
@@ -190,19 +227,19 @@ class EmergencyAlertService {
     );
   }
 
-  // --- 3. CLINIC QUEUE TURN NOTIFICATION ---
   Future<void> showQueueTurnNotification({
     required String ticketNo,
     required String doctorName,
   }) async {
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'emergency_sos_channel_v3',
+      'emergency_sos_channel_v4',
       '🚨 Critical Emergency SOS',
       channelDescription: 'Alerts when it is your turn for consultation',
       importance: Importance.max,
       priority: Priority.high,
       ticker: 'Your Turn!',
       playSound: true,
+      sound: RawResourceAndroidNotificationSound('emr_sound'),
       enableVibration: true,
     );
 
@@ -216,7 +253,6 @@ class EmergencyAlertService {
     );
   }
 
-  // Procedural dual-tone EAS Siren (853Hz + 960Hz) in-memory WAV Generator
   Uint8List _generateEasSirenWav({double durationSeconds = 3.0, int sampleRate = 22050}) {
     if (_cachedWavBytes != null) return _cachedWavBytes!;
 
@@ -262,23 +298,29 @@ class EmergencyAlertService {
   }
 
   void playAlarmSound() async {
-    try {
-      _isAlarmPlaying = true;
-      await _audioPlayer.stop();
-      await _audioPlayer.setVolume(1.0);
-      await _audioPlayer.setReleaseMode(ReleaseMode.loop);
+    if (_isAlarmPlaying) return;
+    _isAlarmPlaying = true;
 
+    try {
+      // 1. Release previous native player state to avoid Error (-38, 0)
+      try {
+        await _audioPlayer.stop();
+        await _audioPlayer.release();
+      } catch (_) {}
+
+      await _audioPlayer.setReleaseMode(ReleaseMode.loop);
+      await _audioPlayer.setVolume(1.0);
+
+      // 2. Play emr_sound.ogg directly
       try {
         await _audioPlayer.play(AssetSource('emr_sound.ogg'));
-      } catch (e1) {
-        try {
-          await _audioPlayer.play(AssetSource('assets/emr_sound.ogg'));
-        } catch (e2) {
-          final wav = _generateEasSirenWav();
-          await _audioPlayer.play(BytesSource(wav));
-        }
+      } catch (assetErr) {
+        debugPrint('⚠️ AssetSource fallback to procedural WAV: $assetErr');
+        final wav = _generateEasSirenWav();
+        await _audioPlayer.play(BytesSource(wav, mimeType: 'audio/wav'));
       }
 
+      // 3. Vibration pulse loop
       _vibrationTimer?.cancel();
       _vibrationTimer = Timer.periodic(const Duration(milliseconds: 600), (timer) {
         if (!_isAlarmPlaying) {
@@ -288,7 +330,7 @@ class EmergencyAlertService {
         }
       });
     } catch (e) {
-      debugPrint('[Audio alarm error]: $e');
+      debugPrint('❌ [Audio alarm error]: $e');
     }
   }
 
@@ -297,23 +339,24 @@ class EmergencyAlertService {
     _vibrationTimer?.cancel();
     try {
       await _audioPlayer.stop();
+      await _audioPlayer.release();
     } catch (_) {}
   }
 
   Future<void> triggerEmergencyBroadcast(Map<String, dynamic> alertData) async {
     playAlarmSound();
 
-    final patientName = alertData['patientName'] ?? 'Unknown Student/Staff';
-    final studentNo = alertData['studentNo'] ?? 'Verified User';
-    final bloodType = alertData['bloodType'] ?? 'Unknown';
+    final patientName = alertData['patientName'] ??
+        "${alertData['first_name'] ?? 'Unknown'} ${alertData['last_name'] ?? 'User'}";
+    final studentNo = alertData['studentNo'] ?? alertData['identifier_no'] ?? 'Verified User';
+    final bloodType = alertData['bloodType'] ?? alertData['blood_type'] ?? 'Unknown';
     final allergies = alertData['allergies'] ?? 'None recorded';
     final lat = double.tryParse(alertData['latitude'].toString()) ?? 0.0;
     final lng = double.tryParse(alertData['longitude'].toString()) ?? 0.0;
     final googleMapsUrl = alertData['googleMapsUrl'] ?? 'https://www.google.com/maps?q=$lat,$lng';
 
-    // Drop heads-up notification from top of screen
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'emergency_sos_channel_v3',
+      'emergency_sos_channel_v4',
       '🚨 Critical Emergency SOS',
       channelDescription: 'High-priority campus emergency dispatch alerts',
       importance: Importance.max,
@@ -322,6 +365,7 @@ class EmergencyAlertService {
       fullScreenIntent: true,
       enableVibration: true,
       playSound: true,
+      sound: RawResourceAndroidNotificationSound('emr_sound'),
       category: AndroidNotificationCategory.alarm,
     );
 

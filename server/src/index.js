@@ -10,19 +10,23 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { loginUser, authenticateToken } from './auth.js';
 import jwt from 'jsonwebtoken';
-import { ensureBucketExists } from './utils/s3Vault.js';
 
 // Route imports
 import privacyRouter from './routes/privacy.js';
 import profileRoutes from './routes/profile.js';
 import healthPassRoutes from './routes/healthPass.js';
 import appointmentRoutes from './routes/appointments.js';
-import emergencyRouter from './routes/emergency.js';
-import inventoryRoutes from './routes/inventory.js';
-import documentRoutes from './routes/documents.js';
-import adminRoutes from './routes/admin.js';
-import analyticsRoutes from './routes/analytics.js';
+import emergencyRouter from './routes/emergency.js'; 
+import inventoryRoutes from './routes/inventory.js'; 
+import documentRoutes from './routes/documents.js';   
+import adminRoutes from './routes/admin.js';         
+import analyticsRoutes from './routes/analytics.js'; 
+import syncRoutes from './routes/sync.js';
 import { startReminderScheduler } from './utils/reminderWorker.js';
+
+// Utilities (MinIO S3 & Redis)
+import { ensureBucketExists } from './utils/s3Vault.js';
+import { initRedis } from './utils/redisClient.js';
 
 dotenv.config();
 
@@ -76,7 +80,7 @@ export const io = new Server(server, {
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
 
-// Socket.IO authentication middleware (asynchronous token validation)
+// Socket.IO authentication middleware
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.split(' ')[1];
   if (token) {
@@ -91,7 +95,6 @@ io.use((socket, next) => {
   }
 });
 
-// 2. Connection Handler & Room Assignment
 io.on('connection', (socket) => {
   const userEmail = socket.user?.email || 'Anonymous / Kiosk';
   const roles = socket.user?.roles || [];
@@ -103,15 +106,22 @@ io.on('connection', (socket) => {
     console.log(`🛡️ [Socket.IO] Socket ${socket.id} joined 'responders' room`);
   }
 
+  // Explicit registration listener for mobile responders
+  socket.on('join:responders', () => {
+    socket.join('responders');
+    console.log(`🛡️ [Socket.IO] Socket ${socket.id} manually joined 'responders' room`);
+  });
+
   socket.on('disconnect', (reason) => {
     console.log(`🔌 [Socket.IO] Client disconnected: ${socket.id} (${reason})`);
   });
 });
 
-// 2. Public Auth Routes
+// =============================================================================
+// API ROUTES
+// =============================================================================
 app.post('/api/auth/login', loginUser);
 
-// 3. Protected Core Modules
 app.use('/api/privacy', privacyRouter);
 app.use('/api/profile', profileRoutes);
 app.use('/api/health-pass', healthPassRoutes);
@@ -121,15 +131,20 @@ app.use('/api/inventory', inventoryRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/sync', syncRoutes);
 
 app.get('/api/users/me', authenticateToken, (req, res) => {
   res.json({ message: 'Authenticated', user: req.user });
 });
 
+// =============================================================================
+// SERVER BOOTSTRAP (SINGLE LISTEN CALL)
+// =============================================================================
 const PORT = process.env.PORT || 5000;
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`✅ Valetudo HealthLink API & WebSockets running on ${isHttps ? 'HTTPS/WSS' : 'HTTP/WS'} port ${PORT}`);
-  ensureBucketExists().catch(() => {});
+  await initRedis().catch(() => {});
+  await ensureBucketExists().catch(() => {});
   startReminderScheduler(io);
 });

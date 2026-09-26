@@ -1,21 +1,23 @@
+// desktop/src/App.tsx
 import React, { useEffect, useState } from 'react';
 import EmergencyAlertBanner from './components/EmergencyAlertBanner';
 import NurseConsole from './components/NurseConsole';
 import DoctorConsole from './components/DoctorConsole';
 import AdminConsole from './components/AdminConsole';
 import ResponderConsole from './components/ResponderConsole';
+import { getOfflineQueue, replayOfflineQueue } from './services/offlineSync';
 
-export function useSessionTimeout(isActive: boolean, timeoutMinutes = 15) {
+export function useSessionTimeout(isActive: boolean, timeoutMinutes = 480) {
   useEffect(() => {
     if (!isActive) return;
 
-    let timeoutId: NodeJS.Timeout;
+    let timeoutId: ReturnType<typeof setTimeout>;
     const resetTimer = () => {
       clearTimeout(timeoutId);
       timeoutId = setTimeout(() => {
         localStorage.removeItem('valetudo_token');
         localStorage.removeItem('token');
-        alert('🔒 Session expired due to inactivity (R.A. 10173 Compliance). Please log in again.');
+        alert('🔒 Session expired due to 8 hours of inactivity (R.A. 10173 Compliance). Please log in again.');
         window.location.reload();
       }, timeoutMinutes * 60 * 1000);
     };
@@ -40,8 +42,29 @@ export default function App() {
   // Allows switching perspectives if the account has multi-roles
   const [activeRoleView, setActiveRoleView] = useState<string>('');
 
+  // Offline Sync & Connectivity States
+  const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
+  const [offlineQueueCount, setOfflineQueueCount] = useState<number>(() => getOfflineQueue().length);
+  const [isReplaying, setIsReplaying] = useState(false);
+
   // Activate the RA 10173 Session Timeout
   useSessionTimeout(Boolean(user), 15);
+
+  useEffect(() => {
+    const updateOnline = () => setIsOnline(true);
+    const updateOffline = () => setIsOnline(false);
+    const updateQueueCount = () => setOfflineQueueCount(getOfflineQueue().length);
+
+    window.addEventListener('online', updateOnline);
+    window.addEventListener('offline', updateOffline);
+    window.addEventListener('offline-queue-changed', updateQueueCount);
+
+    return () => {
+      window.removeEventListener('online', updateOnline);
+      window.removeEventListener('offline', updateOffline);
+      window.removeEventListener('offline-queue-changed', updateQueueCount);
+    };
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,8 +90,23 @@ export default function App() {
     }
   };
 
+  const handleManualReplay = async () => {
+    setIsReplaying(true);
+    try {
+      const result = await replayOfflineQueue();
+      alert(`✅ Replay complete. Synced ${result.synced} offline mutations.`);
+    } catch (err: any) {
+      alert(`⚠️ Replay failed: ${err.message}`);
+    } finally {
+      setIsReplaying(false);
+    }
+  };
+
+    const isResponder = activeRoleView === 'EMERGENCY_RESPONDER' || (user?.roles?.length === 1 && user.roles[0] === 'EMERGENCY_RESPONDER');
+    useSessionTimeout(Boolean(user) && !isResponder, 480);
+
   // ---------------------------------------------------------------------------
-  // LOGIN SCREEN (Fixed input styling to allow typing in Electron)
+  // LOGIN SCREEN
   // ---------------------------------------------------------------------------
   if (!user) {
     return (
@@ -194,10 +232,9 @@ export default function App() {
   }
 
   // ---------------------------------------------------------------------------
-  // ROLE-BASED CONSOLE ROUTING
+  // ROLE-BASED CONSOLE ROUTING WITH OFFLINE SYNC STATUS
   // ---------------------------------------------------------------------------
   return (
-    // To a fully fluid, dynamically scalable container:
     <div style={{ padding: 'clamp(14px, 2vw, 28px)', fontFamily: 'sans-serif', width: '100%', boxSizing: 'border-box', maxWidth: '1600px', margin: '0 auto' }}>
       {/* Top Header */}
       <header
@@ -208,6 +245,8 @@ export default function App() {
           borderBottom: '1px solid #e2e8f0',
           paddingBottom: 16,
           marginBottom: 16,
+          flexWrap: 'wrap',
+          gap: 12,
         }}
       >
         <div>
@@ -215,10 +254,50 @@ export default function App() {
           <small style={{ color: '#475569' }}>
             Logged in: <b>{user.first_name} {user.last_name}</b> ({user.email}) &nbsp;|&nbsp; Active Interface: <b style={{ color: '#0f766e' }}>{activeRoleView}</b>
           </small>
+
+          {/* Live Connectivity & Offline Replay Queue Indicator */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6, flexWrap: 'wrap' }}>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 11,
+                fontWeight: 'bold',
+                padding: '2px 8px',
+                borderRadius: 12,
+                background: isOnline ? '#dcfce7' : '#fee2e2',
+                color: isOnline ? '#15803d' : '#b91c1c',
+                border: `1px solid ${isOnline ? '#bbf7d0' : '#fecaca'}`,
+              }}
+            >
+              <span style={{ fontSize: 8 }}>●</span> {isOnline ? 'Online (Connected)' : 'Offline Mode (Local Storage)'}
+            </span>
+
+            {offlineQueueCount > 0 && (
+              <button
+                type="button"
+                onClick={handleManualReplay}
+                disabled={isReplaying}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 'bold',
+                  padding: '2px 10px',
+                  borderRadius: 12,
+                  background: '#fef3c7',
+                  color: '#b45309',
+                  border: '1px solid #fde68a',
+                  cursor: isReplaying ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {isReplaying ? '⏳ Syncing...' : `⏳ ${offlineQueueCount} Queued Offline Replays (Sync Now)`}
+              </button>
+            )}
+          </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {/* Switch view if user holds multiple roles or wants to preview */}
+          {/* Switch view if user holds multiple roles */}
           {user.roles.length > 1 && (
             <select
               value={activeRoleView}
@@ -240,12 +319,12 @@ export default function App() {
         </div>
       </header>
 
-      {/* Real-time Emergency SOS Alert Banner is visible across all campus staff */}
+      {/* Real-time Emergency SOS Alert Banner */}
       <div style={{ marginBottom: 16 }}>
         <EmergencyAlertBanner />
       </div>
 
-      {/* Render Role-Specific Interface according to Architectural Design */}
+      {/* Render Role-Specific Interface */}
       {activeRoleView === 'NURSE' && <NurseConsole />}
       {(activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST') && <DoctorConsole />}
       {activeRoleView === 'ADMIN' && <AdminConsole />}

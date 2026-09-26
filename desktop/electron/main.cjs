@@ -20,10 +20,23 @@ function createWindow() {
   const devUrl = 'https://127.0.0.1:5173';
   win.loadURL(devUrl);
 
-  // Focus window on startup to ensure input fields capture keystrokes
+  // Focus window on startup and open DevTools
   win.once('ready-to-show', () => {
     win.show();
     win.focus();
+    // Automatically opens DevTools in development
+    //win.webContents.openDevTools();
+  });
+
+  // Enable F12 and Ctrl + Shift + I to toggle DevTools anytime
+  win.webContents.on('before-input-event', (event, input) => {
+    if (
+      input.key === 'F12' ||
+      (input.control && input.shift && input.key.toLowerCase() === 'i')
+    ) {
+      win.webContents.toggleDevTools();
+      event.preventDefault();
+    }
   });
 }
 

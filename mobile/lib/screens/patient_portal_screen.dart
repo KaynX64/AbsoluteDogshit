@@ -494,7 +494,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     ];
 
     return SessionTimeoutListener(
-      timeoutMinutes: 15,
+      timeoutMinutes: 480,
       child: Scaffold(
         appBar: AppBar(
           title: Text(titles[_currentIndex]),
