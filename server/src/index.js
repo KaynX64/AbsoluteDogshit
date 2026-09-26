@@ -10,6 +10,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { loginUser, authenticateToken } from './auth.js';
 import jwt from 'jsonwebtoken';
+import { ensureBucketExists } from './utils/s3Vault.js';
 
 // Route imports
 import privacyRouter from './routes/privacy.js';
@@ -129,5 +130,6 @@ const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, () => {
   console.log(`✅ Valetudo HealthLink API & WebSockets running on ${isHttps ? 'HTTPS/WSS' : 'HTTP/WS'} port ${PORT}`);
+  ensureBucketExists().catch(() => {});
   startReminderScheduler(io);
 });

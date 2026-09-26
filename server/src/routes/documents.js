@@ -7,6 +7,10 @@ import { requireRoles } from '../middleware/rbac.js';
 import { logAudit } from '../utils/auditLogger.js';
 import { encrypt, decrypt } from '../utils/cryptoVault.js';
 import { requirePrivacyConsent } from '../middleware/consent.js';
+import multer from 'multer';
+import { uploadToS3, getFromS3 } from '../utils/s3Vault.js';
+import { logPhiAccess } from '../utils/phiLogger.js';
+
 
 const router = express.Router();
 
@@ -363,6 +367,144 @@ router.get('/clearances/verify/:token', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: 'Verification failed.' });
+  }
+});
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 },
+});
+
+
+// =============================================================================
+// 4. EMR DIAGNOSTIC & LAB ATTACHMENTS (MINIO S3)
+// =============================================================================
+
+// POST /api/documents/emr/:emrId/attachments - Upload diagnostic file (CBC, X-ray, lab report)
+router.post(
+  '/emr/:emrId/attachments',
+  authenticateToken,
+  requireRoles('DOCTOR', 'DENTIST', 'NURSE'),
+  upload.single('file'),
+  async (req, res) => {
+    const { emrId } = req.params;
+    const file = req.file;
+    const userId = req.user.user_id;
+
+    if (!file) {
+      return res.status(400).json({ error: 'No file uploaded.' });
+    }
+
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      // Verify EMR record exists
+      const [emrRows] = await connection.query(
+        'SELECT patient_user_id FROM EMR_RECORDS WHERE emr_id = ? AND deleted_at IS NULL',
+        [emrId]
+      );
+      if (emrRows.length === 0) {
+        throw new Error('EMR record not found.');
+      }
+
+      const patientUserId = emrRows[0].patient_user_id;
+      const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const s3Key = `emr-${emrId}/${Date.now()}-${sanitizedName}`;
+
+      // 1. Upload file buffer to MinIO S3
+      await uploadToS3({
+        buffer: file.buffer,
+        key: s3Key,
+        mimeType: file.mimetype,
+      });
+
+      // 2. Persist record in database
+      const [insertResult] = await connection.query(
+        `INSERT INTO EMR_ATTACHMENTS (emr_id, file_name, s3_key, file_size, mime_type, uploaded_by)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [emrId, file.originalname, s3Key, file.size, file.mimetype, userId]
+      );
+
+      // 3. Log to R.A. 10173 Cryptographic Audit Trail
+      await logAudit(connection, {
+        userId,
+        action: 'CREATE',
+        table: 'EMR_ATTACHMENTS',
+        recordId: insertResult.insertId,
+        oldValue: null,
+        newValue: {
+          emr_id: Number(emrId),
+          file_name: file.originalname,
+          s3_key: s3Key,
+          file_size: file.size,
+          patient_user_id: patientUserId,
+        },
+        ipAddress: req.ip,
+      });
+
+      await connection.commit();
+
+      res.status(201).json({
+        message: 'Diagnostic file uploaded to S3 and linked to EMR record.',
+        attachmentId: insertResult.insertId,
+        fileName: file.originalname,
+      });
+    } catch (error) {
+      await connection.rollback();
+      console.error('[Attachment Upload Error]:', error);
+      res.status(500).json({ error: error.message || 'Failed to upload attachment.' });
+    } finally {
+      connection.release();
+    }
+  }
+);
+
+// GET /api/documents/attachments/:attachmentId/download - Secure file retrieval
+router.get('/attachments/:attachmentId/download', authenticateToken, async (req, res) => {
+  const { attachmentId } = req.params;
+
+  try {
+    const [rows] = await pool.query(
+      `SELECT a.attachment_id, a.emr_id, a.file_name, a.s3_key, a.mime_type, e.patient_user_id
+       FROM EMR_ATTACHMENTS a
+       JOIN EMR_RECORDS e ON a.emr_id = e.emr_id
+       WHERE a.attachment_id = ?`,
+      [attachmentId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Attachment not found.' });
+    }
+
+    const att = rows[0];
+    const userRoles = req.user.roles || [];
+    const isClinicalStaff = userRoles.some((r) => ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'].includes(r));
+    const isOwner = req.user.user_id === att.patient_user_id;
+
+    if (!isClinicalStaff && !isOwner) {
+      return res.status(403).json({ error: 'Unauthorized to access this clinical file.' });
+    }
+
+    // Stream from MinIO S3
+    const s3Object = await getFromS3(att.s3_key);
+
+    // Log PHI read access
+    logPhiAccess({
+      viewerUserId: req.user.user_id,
+      patientUserId: att.patient_user_id,
+      table: 'EMR_ATTACHMENTS',
+      recordId: Number(attachmentId),
+      purpose: 'Lab/Diagnostic Document Review',
+      ipAddress: req.ip,
+    });
+
+    res.setHeader('Content-Type', att.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(att.file_name)}"`);
+    s3Object.Body.pipe(res);
+  } catch (error) {
+    console.error('[Attachment Download Error]:', error);
+    res.status(500).json({ error: 'Failed to retrieve document from storage.' });
   }
 });
 

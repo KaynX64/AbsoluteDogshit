@@ -654,6 +654,67 @@ export default function appointmentRouter(io) {
     }
   });
 
+  // In server/src/routes/appointments.js under route 13:
+router.get('/patient/:userId/history', authenticateToken, async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+
+    const [history] = await pool.query(
+      `SELECT e.emr_id, e.encounter_date, e.chief_complaint, e.diagnosis, e.treatment_plan, e.notes,
+              doc.first_name as doctor_first_name, doc.last_name as doctor_last_name,
+              sp.license_no as doctor_license,
+              JSON_ARRAYAGG(
+                IF(v.vital_id IS NULL, NULL,
+                  JSON_OBJECT('metric', v.metric, 'value', v.value, 'unit', v.unit, 'recorded_at', v.recorded_at)
+                )
+              ) as vitals,
+              (
+                SELECT COALESCE(JSON_ARRAYAGG(
+                  JSON_OBJECT(
+                    'attachment_id', att.attachment_id,
+                    'file_name', att.file_name,
+                    'file_size', att.file_size,
+                    'mime_type', att.mime_type,
+                    'created_at', att.created_at
+                  )
+                ), JSON_ARRAY())
+                FROM EMR_ATTACHMENTS att
+                WHERE att.emr_id = e.emr_id
+              ) as attachments
+       FROM EMR_RECORDS e
+       JOIN USERS doc ON e.doctor_user_id = doc.user_id
+       LEFT JOIN STAFF_PROFILES sp ON doc.user_id = sp.user_id
+       LEFT JOIN VITAL_SIGNS v ON e.emr_id = v.emr_id
+       WHERE e.patient_user_id = ? AND e.deleted_at IS NULL
+       GROUP BY e.emr_id
+       ORDER BY e.encounter_date DESC`,
+      [userId]
+    );
+
+    const decryptedHistory = history.map((item) => ({
+      ...item,
+      chief_complaint: decrypt(item.chief_complaint),
+      diagnosis: decrypt(item.diagnosis),
+      treatment_plan: decrypt(item.treatment_plan),
+      notes: decrypt(item.notes),
+    }));
+
+    logPhiAccess({
+      viewerUserId: req.user.user_id,
+      patientUserId: userId,
+      table: 'EMR_RECORDS',
+      recordId: userId,
+      purpose: 'Clinical Encounter History Review',
+      ipAddress: req.ip,
+    });
+
+    res.json(decryptedHistory);
+  } catch (error) {
+    console.error('Failed to retrieve patient EMR history:', error);
+    res.status(500).json({ error: 'Failed to retrieve patient medical history.' });
+  }
+});
+
   // 14. GET /api/appointments/queue/my
   router.get('/queue/my', authenticateToken, async (req, res) => {
     try {
