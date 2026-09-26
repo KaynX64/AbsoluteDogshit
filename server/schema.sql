@@ -24,6 +24,7 @@ DROP TABLE IF EXISTS `PRESCRIPTIONS`;
 DROP TABLE IF EXISTS `INVENTORY_LOGS`;
 DROP TABLE IF EXISTS `MEDICINE_BATCHES`;
 DROP TABLE IF EXISTS `MEDICINES`;
+DROP TABLE IF EXISTS `EMR_ATTACHMENTS`;
 DROP TABLE IF EXISTS `VITAL_SIGNS`;
 DROP TABLE IF EXISTS `EMR_RECORDS`;
 DROP TABLE IF EXISTS `QUEUE`;
@@ -177,6 +178,20 @@ CREATE TABLE `VITAL_SIGNS` (
   `recorded_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT `fk_vitals_emr` FOREIGN KEY (`emr_id`) REFERENCES `EMR_RECORDS` (`emr_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_vitals_recorder` FOREIGN KEY (`recorded_by`) REFERENCES `USERS` (`user_id`)
+) ENGINE=InnoDB;
+
+-- Diagnostic lab results & clinical attachments stored via MinIO S3
+CREATE TABLE `EMR_ATTACHMENTS` (
+  `attachment_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `emr_id` BIGINT NOT NULL,
+  `file_name` VARCHAR(255) NOT NULL,
+  `s3_key` VARCHAR(255) NOT NULL,
+  `file_size` BIGINT NOT NULL,
+  `mime_type` VARCHAR(100) NOT NULL,
+  `uploaded_by` BIGINT NOT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT `fk_att_emr` FOREIGN KEY (`emr_id`) REFERENCES `EMR_RECORDS` (`emr_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_att_uploader` FOREIGN KEY (`uploaded_by`) REFERENCES `USERS` (`user_id`)
 ) ENGINE=InnoDB;
 
 -- =============================================================================

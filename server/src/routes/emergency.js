@@ -8,7 +8,7 @@ import { requireRoles } from '../middleware/rbac.js';
 export default function emergencyRouter(io) {
   const router = express.Router();
 
-  // 1. POST /api/emergency/sos (Accurate Role & Identification Mapping)
+  // 1. POST /api/emergency/sos (Fixed coordinate order for SRID 4326 + Accurate Role & Identification Mapping)
   router.post('/sos', authenticateToken, async (req, res) => {
     try {
       const userId = req.user.user_id;
@@ -18,10 +18,11 @@ export default function emergencyRouter(io) {
         return res.status(400).json({ error: 'Latitude and Longitude are required coordinates.' });
       }
 
+      // In MySQL 8.0 SRID 4326, the axis order is Long then Lat, so we use POINT(longitude, latitude)
       const [insertResult] = await pool.query(
-        `INSERT INTO EMERGENCY_ALERTS (user_id, location, status, notes)
-         VALUES (?, ST_SRID(POINT(?, ?), 4326), 'triggered', ?)`,
-        [userId, Number(longitude), Number(latitude), notes || 'Emergency SOS pressed']
+      `INSERT INTO EMERGENCY_ALERTS (user_id, location, status, notes)
+      VALUES (?, ST_SRID(POINT(?, ?), 4326), 'triggered', ?)`,
+      [userId, Number(longitude), Number(latitude), notes || 'Emergency SOS pressed']
       );
 
       const alertId = insertResult.insertId;
@@ -78,8 +79,9 @@ export default function emergencyRouter(io) {
         createdAt: new Date().toISOString(),
       };
 
-      // Broadcast ONLY to authenticated responders and clinic consoles
+      // Broadcast to both privileged responders (room) and all connected clinical banner/dashboard listeners
       io.to('responders').emit('emergency:new_alert', alertPayload);
+      io.emit('emergency:new_alert', alertPayload);
 
       res.status(201).json({
         message: 'Emergency alert dispatched to PSU Clinic and Quick-Response team.',
@@ -143,14 +145,14 @@ export default function emergencyRouter(io) {
       if (status === 'acknowledged') {
         extraUpdate = ', acknowledged_at = CURRENT_TIMESTAMP';
       } else if (status === 'resolved' || status === 'false_alarm') {
-        extraUpdate = `, resolved_at = CURRENT_TIMESTAMP, 
+        extraUpdate = `, resolved_at = CURRENT_TIMESTAMP,
                        response_time_seconds = TIMESTAMPDIFF(SECOND, created_at, CURRENT_TIMESTAMP)`;
       }
 
       params.push(alertId);
 
       await pool.query(
-        `UPDATE EMERGENCY_ALERTS 
+        `UPDATE EMERGENCY_ALERTS
          SET status = ?, assigned_responder_id = ? ${extraUpdate}
          WHERE alert_id = ?`,
         params

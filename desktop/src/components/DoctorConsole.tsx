@@ -35,7 +35,7 @@ export default function DoctorConsole() {
   const [selectedApp, setSelectedApp] = useState<AppointmentItem | null>(null);
   const [loadingAppointments, setLoadingAppointments] = useState(false);
 
-  // 'active' = Triaged & Ready in clinic; 'scheduled' = Booked on app, awaiting nurse intake
+  // 'active' = Triaged & Ready; 'scheduled' = Booked on app; 'history' = Discharged
   const [viewMode, setViewMode] = useState<'active' | 'scheduled' | 'history' | 'analytics'>('active');
 
   // Form fields
@@ -45,6 +45,9 @@ export default function DoctorConsole() {
   const [clinicalNotes, setClinicalNotes] = useState('');
   const [isSubmittingEMR, setIsSubmittingEMR] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // Lab / Diagnostic File Attachment (MinIO S3)
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
 
   // Encounter Vitals
   const [bpSystolic, setBpSystolic] = useState('120');
@@ -58,7 +61,6 @@ export default function DoctorConsole() {
   const [clearanceRemarks, setClearanceRemarks] = useState('Physically fit to undergo university practicum requirements.');
   const [isIssuingClearance, setIsIssuingClearance] = useState(false);
 
-  // Expiration Date State (Defaults to 6 months from today)
   const [clearanceExpiryDate, setClearanceExpiryDate] = useState<string>(() => {
     const d = new Date();
     d.setMonth(d.getMonth() + 6);
@@ -69,6 +71,26 @@ export default function DoctorConsole() {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [patientHistory, setPatientHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+
+  // Helper for status badges
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'scheduled':
+        return { text: 'AWAITING NURSE', bg: '#fef3c7', color: '#b45309' };
+      case 'serving':
+        return { text: 'IN CONSULTATION', bg: '#dcfce7', color: '#15803d' };
+      case 'checked_in':
+        return { text: 'TRIAGED / READY', bg: '#e0f2fe', color: '#0369a1' };
+      case 'completed':
+        return { text: 'COMPLETED', bg: '#dcfce7', color: '#15803d' };
+      case 'cancelled':
+        return { text: 'CANCELLED', bg: '#fee2e2', color: '#b91c1c' };
+      case 'no_show':
+        return { text: 'NO SHOW', bg: '#f1f5f9', color: '#475569' };
+      default:
+        return { text: status.toUpperCase(), bg: '#f1f5f9', color: '#475569' };
+    }
+  };
 
   const fetchAppointments = async (mode = viewMode, retainSelection = true) => {
     if (mode === 'analytics') return;
@@ -95,6 +117,7 @@ export default function DoctorConsole() {
           } else {
             const updated = data.find((a) => a.appointment_id === selectedApp.appointment_id);
             if (updated) selectPatient(updated);
+            else selectPatient(data[0]);
           }
         } else {
           setSelectedApp(null);
@@ -117,10 +140,7 @@ export default function DoctorConsole() {
       transports: ['websocket', 'polling'],
     });
 
-    socket.on('appointment:booked', () => {
-      fetchAppointments(viewMode, true);
-    });
-
+    socket.on('appointment:booked', () => fetchAppointments(viewMode, true));
     socket.on('appointment:status_changed', (evt: any) => {
       fetchAppointments(viewMode, true);
       if (evt?.status === 'checked_in' && window.electronAPI?.showNotification) {
@@ -130,14 +150,8 @@ export default function DoctorConsole() {
         });
       }
     });
-
-    socket.on('queue:updated', () => {
-      fetchAppointments(viewMode, true);
-    });
-
-    socket.on('appointment:cancelled', () => {
-      fetchAppointments(viewMode, true);
-    });
+    socket.on('queue:updated', () => fetchAppointments(viewMode, true));
+    socket.on('appointment:cancelled', () => fetchAppointments(viewMode, true));
 
     return () => {
       socket.disconnect();
@@ -156,18 +170,27 @@ export default function DoctorConsole() {
     setDiagnosis('');
     setTreatmentPlan('');
     setClinicalNotes('');
+    setAttachedFile(null);
     setFeedbackMsg(null);
   };
 
   const selectPatient = (app: AppointmentItem) => {
     setSelectedApp(app);
-    setChiefComplaint(app.notes || `${app.appointment_type} requested`);
+
+    // Clean out the triage string from the chief complaint box
+    let rawComplaint = app.notes || `${app.appointment_type} requested`;
+    if (rawComplaint.includes('[TRIAGE VITALS]')) {
+      rawComplaint = rawComplaint.replace(/\[TRIAGE VITALS\][^\n]*\n?/, '').trim();
+    }
+    setChiefComplaint(rawComplaint || `${app.appointment_type} requested`);
+
     setDiagnosis(app.past_diagnosis || '');
     setTreatmentPlan(app.past_treatment || '');
     setClinicalNotes('');
+    setAttachedFile(null);
     setFeedbackMsg(null);
 
-    // Auto-populate triage vitals recorded by the nurse
+    // Auto-populate triage vitals
     if (app.notes && app.notes.includes('[TRIAGE VITALS]')) {
       const bpMatch = app.notes.match(/BP:\s*(\d+)\/(\d+)/);
       if (bpMatch) {
@@ -183,7 +206,6 @@ export default function DoctorConsole() {
 
   const handleStartConsultation = async () => {
     if (!selectedApp) return;
-
     const token = localStorage.getItem('valetudo_token');
     try {
       const res = await fetch(`https://localhost:5000/api/appointments/${selectedApp.appointment_id}/status`, {
@@ -211,7 +233,9 @@ export default function DoctorConsole() {
     }
 
     setIsSubmittingEMR(true);
+    setFeedbackMsg(null);
     const token = localStorage.getItem('valetudo_token');
+
     try {
       const res = await fetch(`https://localhost:5000/api/appointments/${selectedApp.appointment_id}/complete`, {
         method: 'POST',
@@ -232,13 +256,41 @@ export default function DoctorConsole() {
       });
 
       const data = await res.json();
-      if (res.ok) {
-        await fetchAppointments('active', false);
-        resetForm();
-        setFeedbackMsg({ text: '✅ Encounter finalized and patient discharged.', type: 'success' });
-      } else {
-        setFeedbackMsg({ text: data.error || 'Failed to complete encounter.', type: 'error' });
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to complete encounter.');
       }
+
+      // If doctor selected a lab file, stream it to MinIO S3
+      let fileSuccess = false;
+      if (attachedFile && data.emrId) {
+        try {
+          const formData = new FormData();
+          formData.append('file', attachedFile);
+          const uploadRes = await fetch(`https://localhost:5000/api/documents/emr/${data.emrId}/attachments`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+            body: formData,
+          });
+
+          if (uploadRes.ok) {
+            fileSuccess = true;
+          } else {
+            const errData = await uploadRes.json();
+            alert(`⚠️ Encounter saved, but MinIO file upload failed: ${errData.error || 'Check MinIO Docker container'}`);
+          }
+        } catch (uploadErr: any) {
+          alert(`⚠️ MinIO Connection Error: ${uploadErr.message}. Ensure MinIO container is running on port 9000.`);
+        }
+      }
+
+      await fetchAppointments('active', false);
+      resetForm();
+      setFeedbackMsg({
+        text: fileSuccess
+          ? '✅ Encounter finalized, lab file uploaded to MinIO S3, and patient discharged.'
+          : '✅ Encounter finalized and patient discharged to History Archive.',
+        type: 'success',
+      });
     } catch (err: any) {
       setFeedbackMsg({ text: err.message, type: 'error' });
     } finally {
@@ -268,16 +320,12 @@ export default function DoctorConsole() {
 
   const handlePrintClearance = async () => {
     if (!selectedApp) return;
-
     setIsIssuingClearance(true);
     const token = localStorage.getItem('valetudo_token');
     try {
       const res = await fetch('https://localhost:5000/api/documents/clearances', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           user_id: selectedApp.patient_id,
           purpose: clearancePurpose,
@@ -287,9 +335,7 @@ export default function DoctorConsole() {
       });
 
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to issue medical clearance.');
-      }
+      if (!res.ok) throw new Error(data.error || 'Failed to issue medical clearance.');
 
       const realQrToken = data.qrToken;
       const clearanceId = data.clearanceId;
@@ -389,11 +435,13 @@ export default function DoctorConsole() {
     backgroundColor: '#ffffff',
   };
 
+  const isArchivedMode = viewMode === 'history' || selectedApp?.status === 'completed' || selectedApp?.status === 'cancelled';
+
   return (
     <div>
       {/* 1. TOP ROSTER */}
       <div style={{ background: '#ffffff', padding: 16, borderRadius: 8, border: '1px solid #cbd5e1', marginBottom: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
           <div>
             <h3 style={{ margin: 0, color: '#0284c7' }}>
               {viewMode === 'active'
@@ -416,7 +464,7 @@ export default function DoctorConsole() {
           </div>
 
           {/* TAB CONTROLS */}
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             <button
               onClick={() => handleSwitchView('active')}
               style={{
@@ -445,7 +493,7 @@ export default function DoctorConsole() {
                 color: viewMode === 'scheduled' ? '#ffffff' : '#d97706',
               }}
             >
-              📅 Today's Bookings (Awaiting Nurse)
+              📅 Today's Bookings
             </button>
             <button
               onClick={() => handleSwitchView('history')}
@@ -475,7 +523,7 @@ export default function DoctorConsole() {
                 color: viewMode === 'analytics' ? '#ffffff' : '#0f766e',
               }}
             >
-              📊 Epidemiological Charts
+              📊 Health Analytics
             </button>
             <button
               onClick={() => fetchAppointments(viewMode, true)}
@@ -502,7 +550,7 @@ export default function DoctorConsole() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
               {appointments.map((app) => {
                 const isSelected = selectedApp?.appointment_id === app.appointment_id;
-                const isScheduledOnly = app.status === 'scheduled';
+                const badge = getStatusBadge(app.status);
                 return (
                   <div
                     key={app.appointment_id}
@@ -516,7 +564,7 @@ export default function DoctorConsole() {
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontWeight: 'bold', color: isScheduledOnly ? '#d97706' : '#0284c7', fontSize: 13 }}>
+                      <span style={{ fontWeight: 'bold', color: '#0284c7', fontSize: 13 }}>
                         🎫 {app.queue_ticket || 'Q-??'} &nbsp;•&nbsp; ⏰ {app.time_slot}
                       </span>
                       <span
@@ -524,12 +572,12 @@ export default function DoctorConsole() {
                           fontSize: 10,
                           padding: '2px 8px',
                           borderRadius: 4,
-                          background: isScheduledOnly ? '#fef3c7' : app.status === 'serving' ? '#dcfce7' : '#e0f2fe',
-                          color: isScheduledOnly ? '#b45309' : app.status === 'serving' ? '#15803d' : '#0369a1',
+                          background: badge.bg,
+                          color: badge.color,
                           fontWeight: 'bold',
                         }}
                       >
-                        {isScheduledOnly ? 'AWAITING NURSE' : app.status === 'serving' ? 'IN CONSULTATION' : 'TRIAGED / READY'}
+                        {badge.text}
                       </span>
                     </div>
                     <p style={{ margin: '6px 0 2px', fontWeight: 'bold', fontSize: 14, color: '#1e293b' }}>
@@ -544,7 +592,6 @@ export default function DoctorConsole() {
         )}
       </div>
 
-      {/* RENDER ANALYTICS OR WORKSPACE */}
       {viewMode === 'analytics' ? (
         <AnalyticsDashboard />
       ) : (
@@ -555,30 +602,44 @@ export default function DoctorConsole() {
               style={{
                 background: '#ffffff',
                 border: '1px solid #cbd5e1',
-                borderLeft: `5px solid ${selectedApp.status === 'scheduled' ? '#f59e0b' : '#0284c7'}`,
+                borderLeft: `5px solid ${selectedApp.status === 'scheduled' ? '#f59e0b' : selectedApp.status === 'completed' ? '#10b981' : '#0284c7'}`,
                 borderRadius: 8,
                 padding: '12px 18px',
                 marginBottom: 20,
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 12,
               }}
             >
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <h4 style={{ margin: 0, fontSize: 16, color: '#0f172a' }}>
-                    {selectedApp.first_name} {selectedApp.last_name} ({selectedApp.student_no || 'ID: Staff'})
+                    {selectedApp.first_name} {selectedApp.last_name} ({selectedApp.student_no || 'Staff'})
                   </h4>
                   <span style={{ background: '#f1f5f9', color: '#475569', fontSize: 12, padding: '2px 8px', borderRadius: 4 }}>
                     {selectedApp.course || 'PSU Lingayen'}
                   </span>
+                  <span
+                    style={{
+                      background: getStatusBadge(selectedApp.status).bg,
+                      color: getStatusBadge(selectedApp.status).color,
+                      fontSize: 11,
+                      fontWeight: 'bold',
+                      padding: '2px 8px',
+                      borderRadius: 4,
+                    }}
+                  >
+                    {getStatusBadge(selectedApp.status).text}
+                  </span>
                 </div>
 
-                <div style={{ display: 'flex', gap: 18, marginTop: 8, fontSize: 13 }}>
+                <div style={{ display: 'flex', gap: 18, marginTop: 8, fontSize: 13, flexWrap: 'wrap' }}>
                   <span><b>Blood:</b> {selectedApp.blood_type || 'O+'}</span>
                   <span>
                     <b>Allergies:</b>{' '}
-                    <span style={{ color: selectedApp.allergies ? '#dc2626' : '#16a34a', fontWeight: 'bold' }}>
+                    <span style={{ color: selectedApp.allergies && selectedApp.allergies !== 'None' ? '#dc2626' : '#16a34a', fontWeight: 'bold' }}>
                       {selectedApp.allergies ? `⚠️ ${selectedApp.allergies}` : 'None reported'}
                     </span>
                   </span>
@@ -595,9 +656,13 @@ export default function DoctorConsole() {
                   📜 Past EMR History
                 </button>
 
-                {selectedApp.status === 'scheduled' ? (
+                {selectedApp.status === 'completed' ? (
+                  <span style={{ background: '#dcfce7', color: '#15803d', padding: '8px 14px', borderRadius: 6, fontWeight: 'bold', fontSize: 12, border: '1px solid #bbf7d0' }}>
+                    ✅ Encounter Discharged
+                  </span>
+                ) : selectedApp.status === 'scheduled' ? (
                   <span style={{ background: '#fef3c7', color: '#b45309', padding: '8px 14px', borderRadius: 6, fontWeight: 'bold', fontSize: 12, border: '1px solid #fde68a' }}>
-                    ⏳ Awaiting Nurse Triage (Not Checked In)
+                    ⏳ Awaiting Nurse Triage
                   </span>
                 ) : selectedApp.status === 'serving' ? (
                   <span style={{ background: '#dcfce7', color: '#15803d', padding: '8px 14px', borderRadius: 6, fontWeight: 'bold', fontSize: 13, border: '1px solid #bbf7d0' }}>
@@ -622,6 +687,12 @@ export default function DoctorConsole() {
             <section style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff', textAlign: 'left' }}>
               <h3 style={{ margin: '0 0 14px 0', color: '#0284c7', fontSize: 16 }}>🩺 Encounter Diagnosis & Vitals Logging</h3>
 
+              {isArchivedMode && (
+                <div style={{ padding: '10px 14px', background: '#f1f5f9', color: '#475569', borderRadius: 6, marginBottom: 14, fontSize: 12, border: '1px solid #cbd5e1' }}>
+                  🔒 <b>Archived Record:</b> This encounter is completed and permanently signed. The fields below reflect the recorded EMR entry.
+                </div>
+              )}
+
               {selectedApp?.status === 'scheduled' && (
                 <div style={{ padding: '10px 14px', background: '#fef3c7', color: '#92400e', borderRadius: 6, marginBottom: 14, fontSize: 12, border: '1px solid #fde68a' }}>
                   ⚠️ <b>Patient Not Yet Triaged:</b> This booking was placed on the mobile app. The student must first present their QR Health Pass at the intake desk for the Clinic Nurse to record initial vitals.
@@ -639,6 +710,7 @@ export default function DoctorConsole() {
                       <label style={{ fontSize: 11, color: '#64748b' }}>BP (Systolic):</label>
                       <input
                         style={inputStyle}
+                        disabled={isArchivedMode}
                         value={bpSystolic}
                         onChange={(e) => setBpSystolic(e.target.value)}
                       />
@@ -647,6 +719,7 @@ export default function DoctorConsole() {
                       <label style={{ fontSize: 11, color: '#64748b' }}>BP (Diastolic):</label>
                       <input
                         style={inputStyle}
+                        disabled={isArchivedMode}
                         value={bpDiastolic}
                         onChange={(e) => setBpDiastolic(e.target.value)}
                       />
@@ -655,6 +728,7 @@ export default function DoctorConsole() {
                       <label style={{ fontSize: 11, color: '#64748b' }}>Temp (°C):</label>
                       <input
                         style={inputStyle}
+                        disabled={isArchivedMode}
                         value={temperature}
                         onChange={(e) => setTemperature(e.target.value)}
                       />
@@ -663,6 +737,7 @@ export default function DoctorConsole() {
                       <label style={{ fontSize: 11, color: '#64748b' }}>Pulse (bpm):</label>
                       <input
                         style={inputStyle}
+                        disabled={isArchivedMode}
                         value={pulseRate}
                         onChange={(e) => setPulseRate(e.target.value)}
                       />
@@ -676,6 +751,7 @@ export default function DoctorConsole() {
                   </label>
                   <textarea
                     rows={2}
+                    disabled={isArchivedMode}
                     style={{ ...inputStyle, resize: 'vertical' }}
                     value={chiefComplaint}
                     onChange={(e) => setChiefComplaint(e.target.value)}
@@ -689,6 +765,7 @@ export default function DoctorConsole() {
                   </label>
                   <input
                     style={inputStyle}
+                    disabled={isArchivedMode}
                     value={diagnosis}
                     placeholder="e.g. Fit for OJT / Acute Viral Pharyngitis"
                     onChange={(e) => setDiagnosis(e.target.value)}
@@ -702,6 +779,7 @@ export default function DoctorConsole() {
                   </label>
                   <textarea
                     rows={3}
+                    disabled={isArchivedMode}
                     style={{ ...inputStyle, resize: 'vertical' }}
                     value={treatmentPlan}
                     placeholder="Prescribed medicine regimen, rest recommendations..."
@@ -709,23 +787,56 @@ export default function DoctorConsole() {
                   />
                 </div>
 
+                {/* Lab File Attachment Input (MinIO S3 Integration) */}
+                {!isArchivedMode && (
+                  <div style={{ marginBottom: 16, padding: 12, background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: 6 }}>
+                    <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
+                      📎 Attach Diagnostic Lab Result (CBC, Urinalysis, X-ray PDF/Image):
+                    </label>
+                    <input
+                      type="file"
+                      accept=".pdf,image/png,image/jpeg,.jpg"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          setAttachedFile(e.target.files[0]);
+                        }
+                      }}
+                      style={{ fontSize: 12, color: '#334155' }}
+                    />
+                    {attachedFile && (
+                      <div style={{ fontSize: 12, color: '#0f766e', fontWeight: 'bold', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span>📄 {attachedFile.name} ({(attachedFile.size / 1024).toFixed(1)} KB)</span>
+                        <button
+                          type="button"
+                          onClick={() => setAttachedFile(null)}
+                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
+                        >
+                          ✕ Remove
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <button
                   type="submit"
-                  disabled={isSubmittingEMR || !selectedApp || selectedApp.status === 'scheduled'}
+                  disabled={isSubmittingEMR || !selectedApp || selectedApp.status === 'scheduled' || isArchivedMode}
                   style={{
                     width: '100%',
                     padding: 12,
-                    background: (!selectedApp || selectedApp.status === 'scheduled') ? '#94a3b8' : '#059669',
+                    background: (isArchivedMode || !selectedApp || selectedApp.status === 'scheduled') ? '#94a3b8' : '#059669',
                     color: '#ffffff',
                     border: 'none',
                     borderRadius: 6,
-                    cursor: (!selectedApp || selectedApp.status === 'scheduled') ? 'not-allowed' : 'pointer',
+                    cursor: (isArchivedMode || !selectedApp || selectedApp.status === 'scheduled') ? 'not-allowed' : 'pointer',
                     fontWeight: 'bold',
                     fontSize: 14,
                   }}
                 >
                   {isSubmittingEMR
-                    ? 'Finalizing Encounter...'
+                    ? 'Finalizing Encounter & Uploading to MinIO...'
+                    : isArchivedMode
+                    ? '🔒 Encounter Already Finalized & Discharged'
                     : selectedApp?.status === 'scheduled'
                     ? '⏳ Patient Not Triaged by Nurse'
                     : '✅ Finish Consultation & Discharge'}
@@ -898,7 +1009,7 @@ export default function DoctorConsole() {
         </>
       )}
 
-      {/* 4. MODAL: EMR HISTORY */}
+      {/* 4. MODAL: EMR HISTORY & LAB ATTACHMENTS */}
       {showHistoryModal && (
         <div
           style={{
@@ -958,7 +1069,41 @@ export default function DoctorConsole() {
                     </div>
                     <div style={{ fontSize: 13, marginBottom: 4 }}><b>Diagnosis:</b> {item.diagnosis}</div>
                     <div style={{ fontSize: 13, marginBottom: 4 }}><b>Complaint:</b> {item.chief_complaint}</div>
-                    {item.treatment_plan && <div style={{ fontSize: 13, color: '#334155' }}><b>Treatment:</b> {item.treatment_plan}</div>}
+                    {item.treatment_plan && <div style={{ fontSize: 13, color: '#334155', marginBottom: 4 }}><b>Treatment:</b> {item.treatment_plan}</div>}
+
+                    {/* Diagnostic Lab Attachments from MinIO S3 */}
+                    {item.attachments && item.attachments.length > 0 && (
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #cbd5e1' }}>
+                        <small style={{ fontWeight: 'bold', color: '#0f766e', display: 'block', marginBottom: 4 }}>
+                          📎 Diagnostic Lab Attachments (MinIO S3):
+                        </small>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          {item.attachments.map((att: any) => (
+                            <a
+                              key={att.attachment_id}
+                              href={`https://localhost:5000/api/documents/attachments/${att.attachment_id}/download`}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                padding: '4px 8px',
+                                background: '#e0f2fe',
+                                color: '#0369a1',
+                                borderRadius: 4,
+                                fontSize: 11,
+                                fontWeight: 'bold',
+                                textDecoration: 'none',
+                                border: '1px solid #bae6fd',
+                              }}
+                            >
+                              📄 {att.file_name} ({(att.file_size / 1024).toFixed(0)} KB)
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

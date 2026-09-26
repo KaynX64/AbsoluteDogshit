@@ -1,29 +1,39 @@
 // desktop/src/components/InventoryManager.tsx
 import React, { useState, useEffect, useRef } from 'react';
 
+interface MedicineMaster {
+  medicine_id: number;
+  name: string;
+  generic_name: string;
+  form: string;
+  strength: string;
+  unit?: string;
+  reorder_level?: number;
+}
+
 export default function InventoryManager() {
   const [activeTab, setActiveTab] = useState<'catalog' | 'stockin' | 'adjust' | 'alerts' | 'logs' | 'addmed'>('catalog');
-  
-  // Catalog & Deduction State (Preserved Workflow)
+
+  // Catalog & Deduction State
   const [batchId, setBatchId] = useState('');
   const [quantity, setQuantity] = useState('1');
   const [reason, setReason] = useState('Prescription issuance');
   const [statusMessage, setStatusMessage] = useState('');
   const [batches, setBatches] = useState<any[]>([]);
-  const [medicines, setMedicines] = useState<any[]>([]);
+  const [medicines, setMedicines] = useState<MedicineMaster[]>([]);
 
   // Barcode / Quick-Scan State
   const [barcodeQuery, setBarcodeQuery] = useState('');
   const barcodeInputRef = useRef<HTMLInputElement | null>(null);
 
   // Logs Filter State
-const [logTypeFilter, setLogTypeFilter] = useState<'all' | 'dispense' | 'receive' | 'dispose'>('all');
-const [logSearchQuery, setLogSearchQuery] = useState('');
+  const [logTypeFilter, setLogTypeFilter] = useState<'all' | 'dispense' | 'receive' | 'dispose'>('all');
+  const [logSearchQuery, setLogSearchQuery] = useState('');
 
   // Stock-In State
   const [stockInMedId, setStockInMedId] = useState<number | ''>('');
   const [stockInBatchNo, setStockInBatchNo] = useState('');
-  const [stockInMfgDate, setStockInMfgDate] = useState(new Date().toISOString().split('T')[0]);
+  const [stockInMfgDate, setStockInMfgDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [stockInExpDate, setStockInExpDate] = useState(() => {
     const d = new Date();
     d.setFullYear(d.getFullYear() + 2);
@@ -62,7 +72,7 @@ const [logSearchQuery, setLogSearchQuery] = useState('');
       });
       if (res.ok) setBatches(await res.json());
     } catch (err) {
-      console.error('Failed to fetch catalog:', err);
+      console.error('Failed to fetch batches:', err);
     }
   };
 
@@ -73,7 +83,7 @@ const [logSearchQuery, setLogSearchQuery] = useState('');
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
-        const data = await res.json();
+        const data: MedicineMaster[] = await res.json();
         setMedicines(data);
         if (data.length > 0 && stockInMedId === '') {
           setStockInMedId(data[0].medicine_id);
@@ -113,38 +123,38 @@ const [logSearchQuery, setLogSearchQuery] = useState('');
   }, []);
 
   // Filtered logs computation
-const filteredLogs = inventoryLogs.filter((l) => {
-  // 1. Filter by transaction type
-  const matchesType =
-    logTypeFilter === 'all'
-      ? true
-      : logTypeFilter === 'dispose'
-      ? ['dispose', 'adjust', 'recall', 'return'].includes(l.transaction_type)
-      : l.transaction_type === logTypeFilter;
+  const filteredLogs = inventoryLogs.filter((l) => {
+    const matchesType =
+      logTypeFilter === 'all'
+        ? true
+        : logTypeFilter === 'dispose'
+        ? ['dispose', 'adjust', 'recall', 'return'].includes(l.transaction_type)
+        : l.transaction_type === logTypeFilter;
 
-  // 2. Filter by search text (medicine name, lot number, staff name, or reason)
-  const query = logSearchQuery.trim().toLowerCase();
-  const matchesSearch =
-    !query ||
-    (l.medicine_name && l.medicine_name.toLowerCase().includes(query)) ||
-    (l.batch_no && l.batch_no.toLowerCase().includes(query)) ||
-    (l.performed_by_name && l.performed_by_name.toLowerCase().includes(query)) ||
-    (l.reason && l.reason.toLowerCase().includes(query));
+    const query = logSearchQuery.trim().toLowerCase();
+    const matchesSearch =
+      !query ||
+      (l.medicine_name && l.medicine_name.toLowerCase().includes(query)) ||
+      (l.batch_no && l.batch_no.toLowerCase().includes(query)) ||
+      (l.performed_by_name && l.performed_by_name.toLowerCase().includes(query)) ||
+      (l.reason && l.reason.toLowerCase().includes(query));
 
-  return matchesType && matchesSearch;
-});
+    return matchesType && matchesSearch;
+  });
 
-  // Listen for barcode scanner bursts (Ctrl + B focus or Enter key)
+  // Barcode scanner burst handler
   const handleBarcodeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!barcodeQuery.trim()) return;
-    const match = batches.find((b) => 
-      b.batch_no.toLowerCase() === barcodeQuery.trim().toLowerCase() ||
-      b.batch_id.toString() === barcodeQuery.trim()
+    const match = batches.find(
+      (b) =>
+        b.batch_no.toLowerCase() === barcodeQuery.trim().toLowerCase() ||
+        b.batch_id.toString() === barcodeQuery.trim()
     );
 
     if (match) {
       setBatchId(match.batch_id.toString());
+      setAdjustBatchId(match.batch_id);
       setStatusMessage(`🎯 Barcode Scanned: Selected ${match.name} (Batch ${match.batch_no})`);
       setBarcodeQuery('');
     } else {
@@ -152,12 +162,12 @@ const filteredLogs = inventoryLogs.filter((l) => {
     }
   };
 
-  // 1. Stock Deduction (Existing Core Action)
+  // 1. Stock Deduction
   const handleDeductStock = async (e: React.FormEvent) => {
     e.preventDefault();
-    setStatusMessage('Processing deduction...');
-
+    setStatusMessage('');
     const token = localStorage.getItem('valetudo_token');
+
     try {
       const res = await fetch('https://localhost:5000/api/inventory/deduct', {
         method: 'POST',
@@ -183,7 +193,7 @@ const filteredLogs = inventoryLogs.filter((l) => {
         setStatusMessage('❌ Error: ' + (data.error || 'Failed to deduct stock'));
       }
     } catch (err: any) {
-      setStatusMessage('❌ Network Error: ' + err.message);
+      setStatusMessage('❌ Network error: ' + err.message);
     }
   };
 
@@ -214,6 +224,7 @@ const filteredLogs = inventoryLogs.filter((l) => {
       if (res.ok) {
         setStatusMessage('✅ ' + data.message);
         setStockInBatchNo('');
+        setStockInQty('100');
         fetchBatches();
         fetchReorderAndAlerts();
       } else {
@@ -366,18 +377,39 @@ const filteredLogs = inventoryLogs.filter((l) => {
       </div>
 
       {statusMessage && (
-        <div style={{ padding: '8px 12px', margin: '12px 0', borderRadius: 6, fontSize: 13, background: statusMessage.includes('✅') ? '#f0fdf4' : '#fef2f2', color: statusMessage.includes('✅') ? '#15803d' : '#b91c1c', border: `1px solid ${statusMessage.includes('✅') ? '#bbf7d0' : '#fecaca'}` }}>
+        <div
+          style={{
+            padding: '8px 12px',
+            margin: '12px 0',
+            borderRadius: 6,
+            fontSize: 13,
+            background: statusMessage.includes('✅') ? '#f0fdf4' : '#fef2f2',
+            color: statusMessage.includes('✅') ? '#15803d' : '#b91c1c',
+            border: `1px solid ${statusMessage.includes('✅') ? '#bbf7d0' : '#fecaca'}`,
+          }}
+        >
           {statusMessage}
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* TAB 1: CATALOG & DISPENSE (PRESERVED PRIMARY WORKFLOW)                    */}
-      {/* ========================================================================= */}
+      {/* TAB 1: CATALOG & DISPENSE */}
       {activeTab === 'catalog' && (
         <div>
           {/* USB Barcode Scanner Bar */}
-          <form onSubmit={handleBarcodeSubmit} style={{ display: 'flex', gap: 10, marginTop: 14, marginBottom: 14, background: '#f8fafc', padding: 10, borderRadius: 6, border: '1px solid #e2e8f0', alignItems: 'center' }}>
+          <form
+            onSubmit={handleBarcodeSubmit}
+            style={{
+              display: 'flex',
+              gap: 10,
+              marginTop: 14,
+              marginBottom: 14,
+              background: '#f8fafc',
+              padding: 10,
+              borderRadius: 6,
+              border: '1px solid #e2e8f0',
+              alignItems: 'center',
+            }}
+          >
             <span style={{ fontSize: 16 }}>📟</span>
             <input
               ref={barcodeInputRef}
@@ -385,9 +417,12 @@ const filteredLogs = inventoryLogs.filter((l) => {
               placeholder="Scan Barcode / Batch No with USB Scanner (or type & press Enter)..."
               value={barcodeQuery}
               onChange={(e) => setBarcodeQuery(e.target.value)}
-              style={{ flex: 1, padding: '6px 10px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 4 }}
+              style={{ flex: 1, padding: '6px 10px', fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 4, background: '#ffffff', color: '#0f172a' }}
             />
-            <button type="submit" style={{ padding: '6px 14px', background: '#0f766e', color: '#fff', border: 'none', borderRadius: 4, fontWeight: 'bold', cursor: 'pointer', fontSize: 12 }}>
+            <button
+              type="submit"
+              style={{ padding: '6px 14px', background: '#0f766e', color: '#fff', border: 'none', borderRadius: 4, fontWeight: 'bold', cursor: 'pointer', fontSize: 12 }}
+            >
               Scan / Find Lot
             </button>
           </form>
@@ -400,78 +435,75 @@ const filteredLogs = inventoryLogs.filter((l) => {
                 <small style={{ color: '#64748b' }}>Click a row to select for deduction</small>
               </div>
 
-<div style={{ maxHeight: '340px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 6 }}>
-  <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse', fontSize: 13 }}>
-    <thead>
-      <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
-        <th style={{ padding: '8px 10px', width: '30px' }}>#</th>
-        <th style={{ padding: 8 }}>Batch ID</th>
-        <th style={{ padding: 8 }}>Medicine / Dosage</th>
-        <th style={{ padding: 8 }}>Lot / Batch No</th>
-        <th style={{ padding: 8 }}>Stock</th>
-        <th style={{ padding: 8 }}>Expires</th>
-        <th style={{ padding: 8 }}>Status</th>
-      </tr>
-    </thead>
-    <tbody>
-      {batches.map((b, idx) => {
-        const status = getExpiryStatus(b.expiry_date);
-        const isLowStock = b.quantity_on_hand < 20;
-        const isSelected = batchId === b.batch_id.toString();
+              <div style={{ maxHeight: '340px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 6 }}>
+                <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
+                      <th style={{ padding: '8px 10px', width: '30px' }}>#</th>
+                      <th style={{ padding: 8 }}>Batch ID</th>
+                      <th style={{ padding: 8 }}>Medicine / Dosage</th>
+                      <th style={{ padding: 8 }}>Lot / Batch No</th>
+                      <th style={{ padding: 8 }}>Stock</th>
+                      <th style={{ padding: 8 }}>Expires</th>
+                      <th style={{ padding: 8 }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {batches.map((b, idx) => {
+                      const status = getExpiryStatus(b.expiry_date);
+                      const isLowStock = b.quantity_on_hand < 20;
+                      const isSelected = batchId === b.batch_id.toString();
 
-        return (
-          <tr
-            key={b.batch_id}
-            onClick={() => {
-              setBatchId(b.batch_id.toString());
-              setStatusMessage(`Selected: ${b.name} (${b.batch_no})`);
-            }}
-            style={{
-              cursor: 'pointer',
-              borderBottom: '1px solid #f1f5f9',
-              background: isSelected ? '#ccfbf1' : 'transparent',
-              transition: 'background 0.15s',
-            }}
-          >
-            {/* 1. Clean Sequential Row Counter (1, 2, 3, 4) */}
-            <td style={{ padding: '8px 10px', color: '#64748b', fontWeight: 600 }}>
-              {idx + 1}
-            </td>
-
-            {/* 2. Clearly labeled Database Batch Tag */}
-            <td style={{ padding: 8 }}>
-              <span style={{ 
-                background: '#f1f5f9', 
-                color: '#334155', 
-                padding: '2px 6px', 
-                borderRadius: 4, 
-                fontSize: 11, 
-                fontFamily: 'monospace',
-                fontWeight: 'bold',
-                border: '1px solid #e2e8f0'
-              }}>
-                ID: {b.batch_id}
-              </span>
-            </td>
-
-            <td style={{ padding: 8 }}>
-              <span style={{ fontWeight: 600, color: '#0f172a' }}>{b.name}</span>
-              <div style={{ fontSize: 11, color: '#64748b' }}>{b.generic_name} • {b.strength}</div>
-            </td>
-            <td style={{ padding: 8, fontFamily: 'monospace', fontSize: 12 }}>{b.batch_no}</td>
-            <td style={{ padding: 8, color: isLowStock ? '#dc2626' : '#0f766e', fontWeight: 'bold' }}>
-              {b.quantity_on_hand} {b.unit || 'pcs'}
-            </td>
-            <td style={{ padding: 8, fontSize: 12 }}>{new Date(b.expiry_date).toISOString().split('T')[0]}</td>
-            <td style={{ padding: 8, color: status.color, fontWeight: 'bold', fontSize: 11 }}>
-              {status.label}
-            </td>
-          </tr>
-        );
-      })}
-    </tbody>
-  </table>
-</div>
+                      return (
+                        <tr
+                          key={b.batch_id}
+                          onClick={() => {
+                            setBatchId(b.batch_id.toString());
+                            setAdjustBatchId(b.batch_id);
+                            setStatusMessage(`Selected: ${b.name} (${b.batch_no})`);
+                          }}
+                          style={{
+                            cursor: 'pointer',
+                            borderBottom: '1px solid #f1f5f9',
+                            background: isSelected ? '#ccfbf1' : 'transparent',
+                            transition: 'background 0.15s',
+                          }}
+                        >
+                          <td style={{ padding: '8px 10px', color: '#64748b', fontWeight: 600 }}>{idx + 1}</td>
+                          <td style={{ padding: 8 }}>
+                            <span
+                              style={{
+                                background: '#f1f5f9',
+                                color: '#334155',
+                                padding: '2px 6px',
+                                borderRadius: 4,
+                                fontSize: 11,
+                                fontFamily: 'monospace',
+                                fontWeight: 'bold',
+                                border: '1px solid #e2e8f0',
+                              }}
+                            >
+                              ID: {b.batch_id}
+                            </span>
+                          </td>
+                          <td style={{ padding: 8 }}>
+                            <span style={{ fontWeight: 600, color: '#0f172a' }}>{b.name}</span>
+                            <div style={{ fontSize: 11, color: '#64748b' }}>{b.generic_name} • {b.strength}</div>
+                          </td>
+                          <td style={{ padding: 8, fontFamily: 'monospace', fontSize: 12 }}>{b.batch_no}</td>
+                          <td style={{ padding: 8, color: isLowStock ? '#dc2626' : '#0f766e', fontWeight: 'bold' }}>
+                            {b.quantity_on_hand} {b.unit || 'pcs'}
+                          </td>
+                          <td style={{ padding: 8, fontSize: 12 }}>{new Date(b.expiry_date).toISOString().split('T')[0]}</td>
+                          <td style={{ padding: 8, color: status.color, fontWeight: 'bold', fontSize: 11 }}>
+                            {status.label}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             {/* Deduction Form */}
@@ -480,7 +512,7 @@ const filteredLogs = inventoryLogs.filter((l) => {
               <form onSubmit={handleDeductStock}>
                 <div style={{ marginBottom: 10 }}>
                   <label style={{ fontSize: 12, fontWeight: 'bold', color: '#475569' }}>Selected Batch ID:</label>
-                  <input style={{ ...inputStyle, background: '#f1f5f9' }} value={batchId} readOnly placeholder="Select from catalog above..." />
+                  <input style={{ ...inputStyle, background: '#f1f5f9' }} value={batchId ? `Batch #${batchId}` : ''} readOnly placeholder="Select from catalog above..." />
                 </div>
                 <div style={{ marginBottom: 10 }}>
                   <label style={{ fontSize: 12, fontWeight: 'bold', color: '#475569' }}>Quantity to Dispense:</label>
@@ -512,9 +544,7 @@ const filteredLogs = inventoryLogs.filter((l) => {
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* TAB 2: INBOUND STOCK-IN (RECEIVE SHIPMENT)                                */}
-      {/* ========================================================================= */}
+      {/* TAB 2: INBOUND STOCK-IN (RECEIVE SHIPMENT) */}
       {activeTab === 'stockin' && (
         <div style={{ marginTop: 14, maxWidth: 640 }}>
           <h4 style={{ margin: '0 0 12px 0', color: '#0f766e' }}>📥 Log Incoming Medication Shipment</h4>
@@ -564,13 +594,10 @@ const filteredLogs = inventoryLogs.filter((l) => {
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* TAB 3: ALERTS & AUTOMATED REORDER SUGGESTIONS                              */}
-      {/* ========================================================================= */}
+      {/* TAB 3: ALERTS & REORDER SUGGESTIONS */}
       {activeTab === 'alerts' && (
         <div style={{ marginTop: 14 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
-            {/* Reorder Suggestions */}
             <div>
               <h4 style={{ margin: '0 0 10px 0', color: '#b45309' }}>📉 Automated Reorder Suggestions</h4>
               <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 6 }}>
@@ -601,7 +628,6 @@ const filteredLogs = inventoryLogs.filter((l) => {
               </div>
             </div>
 
-            {/* Near-Expiry Sweeps */}
             <div>
               <h4 style={{ margin: '0 0 10px 0', color: '#dc2626' }}>⏳ Near-Expiry & Critical Lots (&lt; 90 Days)</h4>
               <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 6 }}>
@@ -637,9 +663,7 @@ const filteredLogs = inventoryLogs.filter((l) => {
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* TAB 4: DISPOSAL & ADJUSTMENTS                                            */}
-      {/* ========================================================================= */}
+      {/* TAB 4: DISPOSAL & ADJUSTMENTS */}
       {activeTab === 'adjust' && (
         <div style={{ marginTop: 14, maxWidth: 540 }}>
           <h4 style={{ margin: '0 0 12px 0', color: '#dc2626' }}>🗑️ Discard Expired / Damaged Medicines</h4>
@@ -663,7 +687,7 @@ const filteredLogs = inventoryLogs.filter((l) => {
               </div>
               <div>
                 <label style={{ fontSize: 12, fontWeight: 'bold' }}>Adjustment Type:</label>
-                <select style={inputStyle} value={adjustType} onChange={(e) => setAdjustType(e.target.value as any)}>
+                <select style={inputStyle} value={adjustType} onChange={(e: any) => setAdjustType(e.target.value)}>
                   <option value="dispose">Disposal (Expired/Spoiled)</option>
                   <option value="recall">Manufacturer Recall</option>
                   <option value="return">Supplier Return</option>
@@ -684,12 +708,9 @@ const filteredLogs = inventoryLogs.filter((l) => {
         </div>
       )}
 
-{/* ========================================================================= */}
-      {/* TAB 5: TRANSACTION & CONSUMPTION LOGS                                    */}
-      {/* ========================================================================= */}
+      {/* TAB 5: TRANSACTION & CONSUMPTION LOGS */}
       {activeTab === 'logs' && (
         <div style={{ marginTop: 14 }}>
-          {/* Top Title & Toolbar */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
             <div>
               <h4 style={{ margin: 0, color: '#0f766e', fontSize: 16 }}>📜 Central Inventory Consumption & Activity Log</h4>
@@ -698,8 +719,8 @@ const filteredLogs = inventoryLogs.filter((l) => {
               </small>
             </div>
 
-            <button 
-              onClick={fetchLogs} 
+            <button
+              onClick={fetchLogs}
               style={{ padding: '6px 12px', fontSize: 12, border: '1px solid #cbd5e1', background: '#f8fafc', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}
             >
               🔄 Refresh
@@ -708,7 +729,6 @@ const filteredLogs = inventoryLogs.filter((l) => {
 
           {/* Filter Toolbar: Action Pills + Search Box */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap', background: '#f8fafc', padding: 10, borderRadius: 6, border: '1px solid #e2e8f0' }}>
-            {/* Filter Buttons */}
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               <button
                 type="button"
@@ -758,7 +778,7 @@ const filteredLogs = inventoryLogs.filter((l) => {
                   color: logTypeFilter === 'receive' ? '#ffffff' : '#15803d',
                 }}
               >
-                📥 Received (Shipments) ({inventoryLogs.filter((l) => l.transaction_type === 'receive').length})
+                📥 Received ({inventoryLogs.filter((l) => l.transaction_type === 'receive').length})
               </button>
 
               <button
@@ -775,11 +795,10 @@ const filteredLogs = inventoryLogs.filter((l) => {
                   color: logTypeFilter === 'dispose' ? '#ffffff' : '#b91c1c',
                 }}
               >
-                🗑️ Disposals & Adjustments ({inventoryLogs.filter((l) => ['dispose', 'adjust', 'recall', 'return'].includes(l.transaction_type)).length})
+                🗑️ Disposals ({inventoryLogs.filter((l) => ['dispose', 'adjust', 'recall', 'return'].includes(l.transaction_type)).length})
               </button>
             </div>
 
-            {/* Keyword Search Input */}
             <div style={{ minWidth: 220 }}>
               <input
                 type="text"
@@ -799,7 +818,6 @@ const filteredLogs = inventoryLogs.filter((l) => {
             </div>
           </div>
 
-          {/* Table Area */}
           {loadingLogs ? (
             <p style={{ color: '#64748b', fontSize: 13 }}>Loading activity logs...</p>
           ) : filteredLogs.length === 0 ? (
@@ -824,9 +842,7 @@ const filteredLogs = inventoryLogs.filter((l) => {
                   {filteredLogs.map((l) => (
                     <tr key={l.log_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                       <td style={{ padding: '8px 10px', fontWeight: 'bold' }}>#{l.log_id}</td>
-                      <td style={{ padding: '8px 10px', color: '#64748b' }}>
-                        {new Date(l.created_at).toLocaleString()}
-                      </td>
+                      <td style={{ padding: '8px 10px', color: '#64748b' }}>{new Date(l.created_at).toLocaleString()}</td>
                       <td style={{ padding: '8px 10px' }}>
                         <span
                           style={{
@@ -878,9 +894,7 @@ const filteredLogs = inventoryLogs.filter((l) => {
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* TAB 6: NEW MEDICINE REGISTRATION                                         */}
-      {/* ========================================================================= */}
+      {/* TAB 6: NEW MEDICINE REGISTRATION */}
       {activeTab === 'addmed' && (
         <div style={{ marginTop: 14, maxWidth: 540 }}>
           <h4 style={{ margin: '0 0 12px 0', color: '#0f766e' }}>➕ Add New Drug Definition to Hospital Formulary</h4>
