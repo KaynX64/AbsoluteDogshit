@@ -11,7 +11,7 @@ class SessionTimeoutListener extends StatefulWidget {
   const SessionTimeoutListener({
     super.key,
     required this.child,
-    this.timeoutMinutes = 15,
+    this.timeoutMinutes = 480, // Default to 8 hours
   });
 
   @override
@@ -43,15 +43,19 @@ class _SessionTimeoutListenerState extends State<SessionTimeoutListener> {
     await _storage.deleteAll();
     if (!mounted) return;
 
+    final durationString = widget.timeoutMinutes >= 60
+        ? '${(widget.timeoutMinutes / 60).round()} hours'
+        : '${widget.timeoutMinutes} minutes';
+
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         icon: const Icon(Icons.lock_clock, color: Colors.teal, size: 48),
         title: const Text('Session Expired', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: const Text(
+        content: Text(
           'For your protection under Republic Act No. 10173 (Data Privacy Act of 2012), '
-          'your session has ended due to 15 minutes of inactivity.',
+          'your session has ended due to $durationString of inactivity.',
           textAlign: TextAlign.center,
         ),
         actions: [
