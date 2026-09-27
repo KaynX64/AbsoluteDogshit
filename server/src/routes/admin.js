@@ -4,6 +4,7 @@ import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { logAudit } from '../utils/auditLogger.js';
+import { isRedisActive } from '../utils/redisClient.js';
 
 const router = express.Router();
 
@@ -124,7 +125,7 @@ router.get('/audit-logs', async (req, res) => {
   }
 });
 
-// 5. GET /api/admin/telemetry - Health Status
+// 5. GET /api/admin/telemetry - Health Status (Single Clean Route)
 router.get('/telemetry', async (req, res) => {
   try {
     const [dbTest] = await pool.query('SELECT 1 as isAlive');
@@ -137,6 +138,10 @@ router.get('/telemetry', async (req, res) => {
         driver: 'MySQL 8.0 with Spatial SRID 4326',
         totalUsers: userCount[0].total,
         totalAuditBlocks: auditCount[0].total,
+      },
+      cache: {
+        engine: 'Redis 7.0 (In-Memory Queue Cache)',
+        status: isRedisActive() ? 'Operational' : 'Fallback (Direct DB)',
       },
       server: {
         uptimeSeconds: Math.floor(process.uptime()),
