@@ -272,7 +272,7 @@ export default function appointmentRouter(io) {
     }
   });
 
-  // 6. GET /api/appointments/today (STRICT 1-ROW-PER-APPOINTMENT TO PREVENT DUPLICATES)
+  // 6. GET /api/appointments/today (STRICT PRACTITIONER ISOLATION & DEDUPLICATION)
   router.get('/today', authenticateToken, async (req, res) => {
     try {
       const { date, filter } = req.query;
@@ -298,10 +298,12 @@ export default function appointmentRouter(io) {
         whereClause = `WHERE a.status IN ('checked_in', 'serving')`;
       }
 
+      // ISOLATION: DOCTOR and DENTIST accounts can only see patients assigned to their own user_id!
       if (isDoctorOrDentist && !isNurseOrAdmin) {
         whereClause += ' AND a.doctor_user_id = ?';
         params.push(userId);
       } else if (req.query.doctorId) {
+        // Triage nurses and admins can optionally filter by a specific doctor
         whereClause += ' AND a.doctor_user_id = ?';
         params.push(Number(req.query.doctorId));
       }
@@ -413,6 +415,7 @@ export default function appointmentRouter(io) {
         return res.status(400).json({ error: 'Invalid appointment status transition.' });
       }
 
+      // Check appointment ownership
       const [appRows] = await pool.query('SELECT doctor_user_id FROM APPOINTMENTS WHERE appointment_id = ?', [appointmentId]);
       if (appRows.length === 0) return res.status(404).json({ error: 'Appointment not found.' });
 
@@ -435,7 +438,7 @@ export default function appointmentRouter(io) {
     }
   });
 
-  // 8. POST /api/appointments/:id/complete (INSERTS APPOINTMENT_ID INTO EMR_RECORDS)
+  // 8. POST /api/appointments/:id/complete (INSERTS APPOINTMENT_ID INTO EMR & PREVENTS UNAUTHORIZED DISCHARGE)
   router.post('/:id/complete', authenticateToken, async (req, res) => {
     const connection = await pool.getConnection();
     try {
@@ -446,6 +449,7 @@ export default function appointmentRouter(io) {
 
       await connection.beginTransaction();
 
+      // Check appointment ownership
       const [appRows] = await connection.query('SELECT doctor_user_id FROM APPOINTMENTS WHERE appointment_id = ? FOR UPDATE', [appointmentId]);
       if (appRows.length === 0) {
         await connection.rollback();
@@ -528,6 +532,9 @@ export default function appointmentRouter(io) {
         io.emit('appointment:completed', { appointmentId: Number(appointmentId) });
         io.emit('queue:updated');
       }
+
+      const today = new Date().toISOString().split('T')[0];
+      await invalidateCache(`queue:today:${today}`);
 
       res.json({ message: 'Consultation finalized and saved to patient EMR history!', emrId });
     } catch (error) {
@@ -630,6 +637,7 @@ export default function appointmentRouter(io) {
       const [queueCount] = await connection.query(`SELECT COUNT(*) as totalToday FROM QUEUE WHERE queue_date = ?`, [today]);
       const nextQueueNo = (queueCount[0].totalToday || 0) + 1;
 
+      // Assign room counter based on practitioner role (Counter 2 = Dental, Counter 1 = Medical)
       const [docRoles] = await connection.query(
         `SELECT r.code FROM ROLES r JOIN USER_ROLES ur ON r.role_id = ur.role_id WHERE ur.user_id = ?`,
         [doctorUserId]
@@ -643,6 +651,7 @@ export default function appointmentRouter(io) {
       );
 
       await connection.commit();
+      await invalidateCache(`queue:today:${today}`);
 
       const arrivalTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const queueTicket = `Q-${nextQueueNo.toString().padStart(2, '0')}`;
@@ -669,6 +678,14 @@ export default function appointmentRouter(io) {
   router.get('/queue/today', authenticateToken, async (req, res) => {
     try {
       const today = new Date().toISOString().split('T')[0];
+      const cacheKey = `queue:today:${today}`;
+
+      const cachedQueue = await getCache(cacheKey);
+      if (cachedQueue) {
+        res.setHeader('X-Cache', 'HIT');
+        return res.json(cachedQueue);
+      }
+
       const [rows] = await pool.query(
         `SELECT q.queue_id, q.queue_number, q.status, q.counter_id,
                 DATE_FORMAT(q.checked_in_at, '%h:%i %p') AS arrival_time,
@@ -683,6 +700,10 @@ export default function appointmentRouter(io) {
          ORDER BY q.queue_number ASC`,
         [today]
       );
+
+      await setCache(cacheKey, rows, 60);
+
+      res.setHeader('X-Cache', 'MISS');
       res.json(rows);
     } catch (error) {
       res.status(500).json({ error: 'Failed to retrieve live queue.' });
@@ -710,6 +731,8 @@ export default function appointmentRouter(io) {
       if (io) {
         io.emit('queue:updated');
       }
+      const today = new Date().toISOString().split('T')[0];
+      await invalidateCache(`queue:today:${today}`);
 
       res.json({ message: `Queue ticket #${queueId} updated to ${status}.` });
     } catch (error) {
@@ -797,7 +820,7 @@ export default function appointmentRouter(io) {
     }
   });
 
-  // 14. GET /api/appointments/queue/my
+  // 14. GET /api/appointments/queue/my (PROVIDES ACCURATE CLINIC ROOM DESTINATION)
   router.get('/queue/my', authenticateToken, async (req, res) => {
     try {
       const userId = req.user.user_id;

@@ -1,50 +1,91 @@
 // server/src/utils/redisClient.js
-import { createClient } from 'redis';
+import Redis from 'ioredis';
 
-const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+const REDIS_HOST = process.env.REDIS_HOST || '127.0.0.1';
+const REDIS_PORT = Number(process.env.REDIS_PORT) || 6379;
 
-export const redis = createClient({ url: redisUrl });
-
-redis.on('error', (err) => {
-  console.warn('⚠️ [Redis] Client Warning/Error:', err.message);
+export const redis = new Redis({
+  host: REDIS_HOST,
+  port: REDIS_PORT,
+  lazyConnect: true,
+  retryStrategy: (times) => {
+    // Retry every 3 seconds, up to 5 attempts before pausing
+    if (times > 5) return null;
+    return 3000;
+  },
 });
 
-(async () => {
+let isConnected = false;
+
+redis.on('connect', () => {
+  isConnected = true;
+  console.log(`⚡ [Redis Cache] Connected to Redis server at ${REDIS_HOST}:${REDIS_PORT}`);
+});
+
+redis.on('ready', () => {
+  isConnected = true;
+});
+
+redis.on('close', () => {
+  isConnected = false;
+});
+
+redis.on('error', (err) => {
+  isConnected = false;
+  console.warn(`⚠️ [Redis Cache Warning] Redis unavailable (${err.message}). Falling back to direct MySQL queries.`);
+});
+
+export async function initRedis() {
   try {
     await redis.connect();
-    console.log('⚡ [Redis] Connected successfully.');
   } catch (err) {
-    console.warn('⚠️ [Redis] Could not connect to Redis server. Operating with fallback.');
+    console.warn(`⚠️ [Redis Init] Could not connect to Redis on boot. Running in fallback mode.`);
   }
-})();
+}
 
+// Automatically connect on module boot
+initRedis().catch(() => {});
+
+export function isRedisActive() {
+  return isConnected && redis.status === 'ready';
+}
+
+/**
+ * Cache-aside get helper
+ */
 export async function getCache(key) {
+  if (!isRedisActive()) return null;
   try {
-    if (!redis.isOpen) return null;
     const data = await redis.get(key);
     return data ? JSON.parse(data) : null;
-  } catch (err) {
+  } catch (_) {
     return null;
   }
 }
 
-export async function setCache(key, value, ttlSeconds = 60) {
+/**
+ * Cache-aside set helper (default TTL: 120 seconds)
+ */
+export async function setCache(key, value, ttlSeconds = 120) {
+  if (!isRedisActive()) return;
   try {
-    if (!redis.isOpen) return;
-    await redis.set(key, JSON.stringify(value), { EX: ttlSeconds });
-  } catch (err) {
-    // Fail silently so Redis failures don't break request flow
-  }
+    await redis.set(key, JSON.stringify(value), 'EX', ttlSeconds);
+  } catch (_) {}
 }
 
-export async function invalidateCache(pattern) {
+/**
+ * Invalidate cache key or pattern
+ */
+export async function invalidateCache(patternOrKey) {
+  if (!isRedisActive()) return;
   try {
-    if (!redis.isOpen) return;
-    const keys = await redis.keys(pattern);
-    if (keys.length > 0) {
-      await redis.del(keys);
+    if (patternOrKey.includes('*')) {
+      const keys = await redis.keys(patternOrKey);
+      if (keys.length > 0) {
+        await redis.del(...keys);
+      }
+    } else {
+      await redis.del(patternOrKey);
     }
-  } catch (err) {
-    // Fail silently
-  }
+  } catch (_) {}
 }

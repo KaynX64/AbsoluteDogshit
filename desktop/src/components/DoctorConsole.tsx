@@ -548,7 +548,7 @@ export default function DoctorConsole() {
           ) : appointments.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '16px 0', color: '#64748b', fontSize: 13 }}>
               {viewMode === 'active'
-                ? 'ℹ️ No patients currently waiting in your consultation queue.'
+                ? 'ℹ️ No patients currently waiting in your consultation queue. Other medical or dental departments manage their own respective queues.'
                 : viewMode === 'scheduled'
                 ? 'No pending mobile bookings assigned to your practitioner schedule.'
                 : 'No archived consultations found for your department.'}
