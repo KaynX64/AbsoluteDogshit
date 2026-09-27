@@ -24,10 +24,13 @@ interface AppointmentItem {
   chronic_conditions: string;
   height: number;
   weight: number;
-  past_diagnosis?: string;
-  past_treatment?: string;
   queue_ticket?: string;
   queue_status?: string;
+  past_chief_complaint?: string;
+  past_diagnosis?: string;
+  past_treatment?: string;
+  past_clinical_notes?: string;
+  past_dietary_notes?: string;
 }
 
 export default function DoctorConsole() {
@@ -72,7 +75,6 @@ export default function DoctorConsole() {
   const [patientHistory, setPatientHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
-  // Helper for status badges
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'scheduled':
@@ -110,14 +112,19 @@ export default function DoctorConsole() {
       });
       const data = await res.json();
       if (Array.isArray(data)) {
-        setAppointments(data);
-        if (data.length > 0) {
+        // Strict deduplication so each appointment_id renders exactly once
+        const uniqueAppointments = Array.from(
+          new Map(data.map((item: AppointmentItem) => [item.appointment_id, item])).values()
+        );
+        setAppointments(uniqueAppointments);
+
+        if (uniqueAppointments.length > 0) {
           if (!retainSelection || !selectedApp) {
-            selectPatient(data[0]);
+            selectPatient(uniqueAppointments[0]);
           } else {
-            const updated = data.find((a) => a.appointment_id === selectedApp.appointment_id);
+            const updated = uniqueAppointments.find((a) => a.appointment_id === selectedApp.appointment_id);
             if (updated) selectPatient(updated);
-            else selectPatient(data[0]);
+            else selectPatient(uniqueAppointments[0]);
           }
         } else {
           setSelectedApp(null);
@@ -146,7 +153,7 @@ export default function DoctorConsole() {
       if (evt?.status === 'checked_in' && window.electronAPI?.showNotification) {
         window.electronAPI.showNotification({
           title: '🔔 Patient Triaged & Ready',
-          body: 'A student has been checked in by the triage nurse and is waiting in the queue.',
+          body: 'A student booked under your care has been checked in by the triage nurse.',
         });
       }
     });
@@ -177,8 +184,7 @@ export default function DoctorConsole() {
   const selectPatient = (app: AppointmentItem) => {
     setSelectedApp(app);
 
-    // Clean out the triage string from the chief complaint box
-    let rawComplaint = app.notes || `${app.appointment_type} requested`;
+    let rawComplaint = app.past_chief_complaint || app.notes || `${app.appointment_type} requested`;
     if (rawComplaint.includes('[TRIAGE VITALS]')) {
       rawComplaint = rawComplaint.replace(/\[TRIAGE VITALS\][^\n]*\n?/, '').trim();
     }
@@ -186,11 +192,10 @@ export default function DoctorConsole() {
 
     setDiagnosis(app.past_diagnosis || '');
     setTreatmentPlan(app.past_treatment || '');
-    setClinicalNotes('');
+    setClinicalNotes(app.past_clinical_notes || '');
     setAttachedFile(null);
     setFeedbackMsg(null);
 
-    // Auto-populate triage vitals
     if (app.notes && app.notes.includes('[TRIAGE VITALS]')) {
       const bpMatch = app.notes.match(/BP:\s*(\d+)\/(\d+)/);
       if (bpMatch) {
@@ -217,6 +222,9 @@ export default function DoctorConsole() {
         setSelectedApp({ ...selectedApp, status: 'serving' });
         fetchAppointments('active', true);
         setFeedbackMsg({ text: '▶ Consultation in progress.', type: 'success' });
+      } else {
+        const errData = await res.json();
+        setFeedbackMsg({ text: errData.error || 'Failed to begin consultation.', type: 'error' });
       }
     } catch (err: any) {
       setFeedbackMsg({ text: err.message, type: 'error' });
@@ -260,7 +268,6 @@ export default function DoctorConsole() {
         throw new Error(data.error || 'Failed to complete encounter.');
       }
 
-      // If doctor selected a lab file, stream it to MinIO S3
       let fileSuccess = false;
       if (attachedFile && data.emrId) {
         try {
@@ -276,10 +283,10 @@ export default function DoctorConsole() {
             fileSuccess = true;
           } else {
             const errData = await uploadRes.json();
-            alert(`⚠️ Encounter saved, but MinIO file upload failed: ${errData.error || 'Check MinIO Docker container'}`);
+            alert(`⚠️ Encounter saved, but MinIO file upload failed: ${errData.error || 'Check MinIO container'}`);
           }
         } catch (uploadErr: any) {
-          alert(`⚠️ MinIO Connection Error: ${uploadErr.message}. Ensure MinIO container is running on port 9000.`);
+          alert(`⚠️ MinIO Connection Error: ${uploadErr.message}.`);
         }
       }
 
@@ -445,21 +452,21 @@ export default function DoctorConsole() {
           <div>
             <h3 style={{ margin: 0, color: '#0284c7' }}>
               {viewMode === 'active'
-                ? "🩺 Active Consultation Queue (Triaged & Ready)"
+                ? "🩺 My Consultation Queue (Triaged & Assigned to Me)"
                 : viewMode === 'scheduled'
-                ? "📅 Today's Bookings (Awaiting Nurse Intake)"
+                ? "📅 My Upcoming Bookings (Awaiting Nurse Intake)"
                 : viewMode === 'history'
-                ? '📜 Consultation History Archive'
+                ? '📜 My Consultation History Archive'
                 : '📊 Epidemiological Analytics & Visual Charts'}
             </h3>
             <small style={{ color: '#64748b' }}>
               {viewMode === 'active'
-                ? 'Students checked in by the triage nurse with vitals recorded'
+                ? 'Patients triaged and awaiting consultation with your department only'
                 : viewMode === 'scheduled'
-                ? 'Booked on mobile app. Must scan QR pass at the nurse intake desk before entering this room.'
+                ? 'Bookings scheduled with your practitioner account'
                 : viewMode === 'analytics'
                 ? 'Campus illness trajectories, seasonal spike monitoring & health reports'
-                : 'Completed and discharged encounters'}
+                : 'Completed encounters discharged by your department'}
             </small>
           </div>
 
@@ -478,7 +485,7 @@ export default function DoctorConsole() {
                 color: viewMode === 'active' ? '#ffffff' : '#0284c7',
               }}
             >
-              🩺 Active Queue (Triaged)
+              🩺 My Active Queue
             </button>
             <button
               onClick={() => handleSwitchView('scheduled')}
@@ -493,7 +500,7 @@ export default function DoctorConsole() {
                 color: viewMode === 'scheduled' ? '#ffffff' : '#d97706',
               }}
             >
-              📅 Today's Bookings
+              📅 My Bookings
             </button>
             <button
               onClick={() => handleSwitchView('history')}
@@ -508,7 +515,7 @@ export default function DoctorConsole() {
                 color: viewMode === 'history' ? '#ffffff' : '#64748b',
               }}
             >
-              📜 History Archive
+              📜 My History Archive
             </button>
             <button
               onClick={() => handleSwitchView('analytics')}
@@ -520,7 +527,7 @@ export default function DoctorConsole() {
                 cursor: 'pointer',
                 border: '1px solid #0f766e',
                 background: viewMode === 'analytics' ? '#0f766e' : '#ffffff',
-                color: viewMode === 'analytics' ? '#ffffff' : '#0f766e',
+                color: viewMode === 'analytics' ? '#fff' : '#334155',
               }}
             >
               📊 Health Analytics
@@ -537,14 +544,14 @@ export default function DoctorConsole() {
         {/* Patient card grid */}
         {viewMode !== 'analytics' && (
           loadingAppointments ? (
-            <p style={{ color: '#64748b', fontSize: 13 }}>Loading roster...</p>
+            <p style={{ color: '#64748b', fontSize: 13 }}>Loading isolated roster...</p>
           ) : appointments.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '16px 0', color: '#64748b', fontSize: 13 }}>
               {viewMode === 'active'
-                ? 'ℹ️ No patients currently waiting in consultation queue. When the nurse checks in a student, they will appear here automatically.'
+                ? 'ℹ️ No patients currently waiting in your consultation queue.'
                 : viewMode === 'scheduled'
-                ? 'No pending mobile bookings for today.'
-                : 'No archived consultations found.'}
+                ? 'No pending mobile bookings assigned to your practitioner schedule.'
+                : 'No archived consultations found for your department.'}
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
@@ -565,7 +572,7 @@ export default function DoctorConsole() {
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ fontWeight: 'bold', color: '#0284c7', fontSize: 13 }}>
-                        🎫 {app.queue_ticket || 'Q-??'} &nbsp;•&nbsp; ⏰ {app.time_slot}
+                        🎫 {app.queue_ticket || 'DONE'} &nbsp;•&nbsp; ⏰ {app.time_slot}
                       </span>
                       <span
                         style={{
@@ -892,6 +899,7 @@ export default function DoctorConsole() {
 
               {docType === 'rx' ? (
                 <PrescriptionGenerator
+                  key={selectedApp?.appointment_id}
                   patientUserId={selectedApp?.patient_id || 5}
                   verifiedPatient={{
                     first_name: selectedApp?.first_name || 'Daniella',
@@ -900,6 +908,8 @@ export default function DoctorConsole() {
                     course: selectedApp?.course || 'BS Information Technology',
                     allergies: selectedApp?.allergies || 'None',
                   }}
+                  initialNotes={selectedApp?.past_dietary_notes}
+                  isArchived={isArchivedMode}
                   onPrescriptionIssued={() => {
                     setFeedbackMsg({ text: '✅ Prescription successfully issued to patient.', type: 'success' });
                   }}
@@ -1070,6 +1080,13 @@ export default function DoctorConsole() {
                     <div style={{ fontSize: 13, marginBottom: 4 }}><b>Diagnosis:</b> {item.diagnosis}</div>
                     <div style={{ fontSize: 13, marginBottom: 4 }}><b>Complaint:</b> {item.chief_complaint}</div>
                     {item.treatment_plan && <div style={{ fontSize: 13, color: '#334155', marginBottom: 4 }}><b>Treatment:</b> {item.treatment_plan}</div>}
+
+                    {item.notes && <div style={{ fontSize: 13, color: '#334155', marginBottom: 4 }}><b>Clinical Notes:</b> {item.notes}</div>}
+                    {item.prescriptions && item.prescriptions.length > 0 && item.prescriptions[0].notes && (
+                      <div style={{ fontSize: 13, color: '#0f766e', marginBottom: 4 }}>
+                        <b>Physician Dietary / Rx Notes:</b> {item.prescriptions[0].notes}
+                      </div>
+                    )}
 
                     {/* Diagnostic Lab Attachments from MinIO S3 */}
                     {item.attachments && item.attachments.length > 0 && (
