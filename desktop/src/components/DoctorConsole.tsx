@@ -446,15 +446,15 @@ export default function DoctorConsole() {
 
   return (
     <div>
-      {/* 1. TOP ROSTER */}
+{/* 1. TOP ROSTER */}
       <div style={{ background: '#ffffff', padding: 16, borderRadius: 8, border: '1px solid #cbd5e1', marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
-          <div>
-            <h3 style={{ margin: 0, color: '#0284c7' }}>
+          <div style={{ minWidth: 280, flex: '1 1 auto' }}>
+            <h3 style={{ margin: 0, color: '#0284c7', fontSize: 17 }}>
               {viewMode === 'active'
                 ? "🩺 My Consultation Queue (Triaged & Assigned to Me)"
                 : viewMode === 'scheduled'
-                ? "📅 My Upcoming Bookings (Awaiting Nurse Intake)"
+                ? "📅 My Upcoming Bookings"
                 : viewMode === 'history'
                 ? '📜 My Consultation History Archive'
                 : '📊 Epidemiological Analytics & Visual Charts'}
@@ -463,15 +463,15 @@ export default function DoctorConsole() {
               {viewMode === 'active'
                 ? 'Patients triaged and awaiting consultation with your department only'
                 : viewMode === 'scheduled'
-                ? 'Bookings scheduled with your practitioner account'
+                ? 'Bookings awaiting clinic nurse triage check-in'
                 : viewMode === 'analytics'
                 ? 'Campus illness trajectories, seasonal spike monitoring & health reports'
                 : 'Completed encounters discharged by your department'}
             </small>
           </div>
 
-          {/* TAB CONTROLS */}
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {/* TAB CONTROLS (flex-shrink prevents unexpected wrapping) */}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flexShrink: 0 }}>
             <button
               onClick={() => handleSwitchView('active')}
               style={{
@@ -707,7 +707,7 @@ export default function DoctorConsole() {
               )}
 
               <form onSubmit={handleFinishConsultation}>
-                {/* Vitals Input Grid */}
+{/* Vitals Input Grid */}
                 <div style={{ background: '#f8fafc', padding: 10, borderRadius: 6, marginBottom: 12, border: '1px solid #e2e8f0' }}>
                   <small style={{ fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: 6 }}>
                     Encounter Vitals (Persists to Normalized VITAL_SIGNS table):
@@ -718,6 +718,7 @@ export default function DoctorConsole() {
                       <input
                         style={inputStyle}
                         disabled={isArchivedMode}
+                        readOnly={isArchivedMode}
                         value={bpSystolic}
                         onChange={(e) => setBpSystolic(e.target.value)}
                       />
@@ -727,6 +728,7 @@ export default function DoctorConsole() {
                       <input
                         style={inputStyle}
                         disabled={isArchivedMode}
+                        readOnly={isArchivedMode}
                         value={bpDiastolic}
                         onChange={(e) => setBpDiastolic(e.target.value)}
                       />
@@ -736,6 +738,7 @@ export default function DoctorConsole() {
                       <input
                         style={inputStyle}
                         disabled={isArchivedMode}
+                        readOnly={isArchivedMode}
                         value={temperature}
                         onChange={(e) => setTemperature(e.target.value)}
                       />
@@ -745,6 +748,7 @@ export default function DoctorConsole() {
                       <input
                         style={inputStyle}
                         disabled={isArchivedMode}
+                        readOnly={isArchivedMode}
                         value={pulseRate}
                         onChange={(e) => setPulseRate(e.target.value)}
                       />
@@ -759,6 +763,7 @@ export default function DoctorConsole() {
                   <textarea
                     rows={2}
                     disabled={isArchivedMode}
+                    readOnly={isArchivedMode}
                     style={{ ...inputStyle, resize: 'vertical' }}
                     value={chiefComplaint}
                     onChange={(e) => setChiefComplaint(e.target.value)}
@@ -773,6 +778,7 @@ export default function DoctorConsole() {
                   <input
                     style={inputStyle}
                     disabled={isArchivedMode}
+                    readOnly={isArchivedMode}
                     value={diagnosis}
                     placeholder="e.g. Fit for OJT / Acute Viral Pharyngitis"
                     onChange={(e) => setDiagnosis(e.target.value)}
@@ -787,6 +793,7 @@ export default function DoctorConsole() {
                   <textarea
                     rows={3}
                     disabled={isArchivedMode}
+                    readOnly={isArchivedMode}
                     style={{ ...inputStyle, resize: 'vertical' }}
                     value={treatmentPlan}
                     placeholder="Prescribed medicine regimen, rest recommendations..."
@@ -914,7 +921,7 @@ export default function DoctorConsole() {
                     setFeedbackMsg({ text: '✅ Prescription successfully issued to patient.', type: 'success' });
                   }}
                 />
-              ) : (
+) : (
                 <div>
                   <div style={{ marginBottom: 12 }}>
                     <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
@@ -922,6 +929,7 @@ export default function DoctorConsole() {
                     </label>
                     <select
                       value={clearancePurpose}
+                      disabled={isArchivedMode}
                       onChange={(e) => setClearancePurpose(e.target.value)}
                       style={inputStyle}
                     >
@@ -937,45 +945,49 @@ export default function DoctorConsole() {
                       <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155' }}>
                         Validity / Expiration Date:
                       </label>
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const d = new Date();
-                            d.setDate(d.getDate() + 30);
-                            setClearanceExpiryDate(d.toISOString().split('T')[0]);
-                          }}
-                          style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
-                        >
-                          +30 Days
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const d = new Date();
-                            d.setMonth(d.getMonth() + 6);
-                            setClearanceExpiryDate(d.toISOString().split('T')[0]);
-                          }}
-                          style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
-                        >
-                          +6 Months
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const d = new Date();
-                            d.setFullYear(d.getFullYear() + 1);
-                            setClearanceExpiryDate(d.toISOString().split('T')[0]);
-                          }}
-                          style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
-                        >
-                          +1 Year
-                        </button>
-                      </div>
+                      {!isArchivedMode && (
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const d = new Date();
+                              d.setDate(d.getDate() + 30);
+                              setClearanceExpiryDate(d.toISOString().split('T')[0]);
+                            }}
+                            style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
+                          >
+                            +30 Days
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const d = new Date();
+                              d.setMonth(d.getMonth() + 6);
+                              setClearanceExpiryDate(d.toISOString().split('T')[0]);
+                            }}
+                            style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
+                          >
+                            +6 Months
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const d = new Date();
+                              d.setFullYear(d.getFullYear() + 1);
+                              setClearanceExpiryDate(d.toISOString().split('T')[0]);
+                            }}
+                            style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
+                          >
+                            +1 Year
+                          </button>
+                        </div>
+                      )}
                     </div>
                     <input
                       type="date"
                       value={clearanceExpiryDate}
+                      disabled={isArchivedMode}
+                      readOnly={isArchivedMode}
                       onChange={(e) => setClearanceExpiryDate(e.target.value)}
                       style={inputStyle}
                       required
@@ -989,6 +1001,8 @@ export default function DoctorConsole() {
                     <textarea
                       rows={4}
                       value={clearanceRemarks}
+                      disabled={isArchivedMode}
+                      readOnly={isArchivedMode}
                       onChange={(e) => setClearanceRemarks(e.target.value)}
                       style={{ ...inputStyle, resize: 'vertical' }}
                     />
@@ -997,23 +1011,27 @@ export default function DoctorConsole() {
                   <button
                     type="button"
                     onClick={handlePrintClearance}
-                    disabled={!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled'}
+                    disabled={!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled' || isArchivedMode}
                     style={{
                       width: '100%',
                       padding: 10,
-                      background: (!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled') ? '#94a3b8' : '#0284c7',
+                      background: (!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled' || isArchivedMode) ? '#94a3b8' : '#0284c7',
                       color: '#fff',
                       border: 'none',
                       borderRadius: 6,
-                      cursor: (!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled') ? 'not-allowed' : 'pointer',
+                      cursor: (!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled' || isArchivedMode) ? 'not-allowed' : 'pointer',
                       fontWeight: 'bold',
                       fontSize: 14,
                     }}
                   >
-                    {isIssuingClearance ? 'Signing & Spooling...' : '🖨️ Issue, Sign & Print Clearance'}
+                    {isArchivedMode
+                      ? '🔒 Clearance Already Archived'
+                      : isIssuingClearance
+                      ? 'Signing & Spooling...'
+                      : '🖨️ Issue, Sign & Print Clearance'}
                   </button>
                 </div>
-              )}
+              )}  
             </section>
           </div>
         </>
