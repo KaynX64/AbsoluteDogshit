@@ -31,12 +31,16 @@ interface PrescriptionGeneratorProps {
     course: string;
     allergies: string;
   };
+  initialNotes?: string;
+  isArchived?: boolean;
   onPrescriptionIssued?: () => void;
 }
 
 export default function PrescriptionGenerator({
   patientUserId,
   verifiedPatient,
+  initialNotes,
+  isArchived = false,
   onPrescriptionIssued,
 }: PrescriptionGeneratorProps) {
   const [medicines, setMedicines] = useState<MedicineMaster[]>([]);
@@ -47,10 +51,24 @@ export default function PrescriptionGenerator({
   const [rxDurationDays, setRxDurationDays] = useState('5');
   const [rxQuantity, setRxQuantity] = useState('10');
   const [rxInstructions, setRxInstructions] = useState('Take 1 tablet after meals when fever exceeds 37.8°C.');
-  const [doctorNotes, setDoctorNotes] = useState('Maintain proper hydration and rest.');
+
+  const [doctorNotes, setDoctorNotes] = useState(
+    initialNotes || (isArchived ? 'None recorded' : 'Maintain proper hydration and rest.')
+  );
 
   const [isSaving, setIsSaving] = useState(false);
   const [issuedStatus, setIssuedStatus] = useState<string | null>(null);
+
+  // Sync state dynamically whenever patient or initial notes prop changes
+  useEffect(() => {
+    if (initialNotes !== undefined && initialNotes !== null && initialNotes !== '') {
+      setDoctorNotes(initialNotes);
+    } else if (isArchived) {
+      setDoctorNotes('None recorded');
+    } else {
+      setDoctorNotes('Maintain proper hydration and rest.');
+    }
+  }, [initialNotes, isArchived]);
 
   // 1. Fetch live medicine catalogue
   useEffect(() => {
@@ -230,6 +248,7 @@ export default function PrescriptionGenerator({
         <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Select Medicine (Formulary):</label>
         <select
           style={{ width: '100%', padding: 6, marginTop: 4, borderRadius: 4, border: '1px solid #cbd5e1', fontSize: 13 }}
+          disabled={isArchived}
           value={selectedMedicineId}
           onChange={(e) => handleSelectMedicine(Number(e.target.value))}
         >
@@ -246,6 +265,7 @@ export default function PrescriptionGenerator({
           <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Dosage:</label>
           <input
             style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
+            disabled={isArchived}
             value={rxDosage}
             onChange={(e) => setRxDosage(e.target.value)}
           />
@@ -256,6 +276,7 @@ export default function PrescriptionGenerator({
             type="number"
             min="1"
             style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
+            disabled={isArchived}
             value={rxQuantity}
             onChange={(e) => setRxQuantity(e.target.value)}
           />
@@ -267,6 +288,7 @@ export default function PrescriptionGenerator({
           <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Frequency:</label>
           <input
             style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
+            disabled={isArchived}
             value={rxFrequency}
             onChange={(e) => setRxFrequency(e.target.value)}
           />
@@ -277,6 +299,7 @@ export default function PrescriptionGenerator({
             type="number"
             min="1"
             style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
+            disabled={isArchived}
             value={rxDurationDays}
             onChange={(e) => setRxDurationDays(e.target.value)}
           />
@@ -288,6 +311,7 @@ export default function PrescriptionGenerator({
         <textarea
           rows={2}
           style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
+          disabled={isArchived}
           value={rxInstructions}
           onChange={(e) => setRxInstructions(e.target.value)}
         />
@@ -297,6 +321,7 @@ export default function PrescriptionGenerator({
         <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Physician Dietary / Clinical Notes:</label>
         <input
           style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
+          disabled={isArchived}
           value={doctorNotes}
           onChange={(e) => setDoctorNotes(e.target.value)}
         />
@@ -304,20 +329,24 @@ export default function PrescriptionGenerator({
 
       <button
         onClick={handleSaveAndPrintPrescription}
-        disabled={isSaving}
+        disabled={isSaving || isArchived}
         style={{
           width: '100%',
           padding: 10,
-          background: isSaving ? '#94a3b8' : '#0f766e',
+          background: (isSaving || isArchived) ? '#94a3b8' : '#0f766e',
           color: '#fff',
           border: 'none',
           borderRadius: 6,
-          cursor: isSaving ? 'not-allowed' : 'pointer',
+          cursor: (isSaving || isArchived) ? 'not-allowed' : 'pointer',
           fontWeight: 'bold',
           fontSize: 13,
         }}
       >
-        {isSaving ? 'Signing & Printing...' : '🖨️ Issue, Sign & Print Prescription'}
+        {isArchived
+          ? '🔒 Prescription Issued & Archived'
+          : isSaving
+          ? 'Signing & Printing...'
+          : '🖨️ Issue, Sign & Print Prescription'}
       </button>
 
       {issuedStatus && (

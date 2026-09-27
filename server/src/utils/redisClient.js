@@ -22,6 +22,14 @@ redis.on('connect', () => {
   console.log(`⚡ [Redis Cache] Connected to Redis server at ${REDIS_HOST}:${REDIS_PORT}`);
 });
 
+redis.on('ready', () => {
+  isConnected = true;
+});
+
+redis.on('close', () => {
+  isConnected = false;
+});
+
 redis.on('error', (err) => {
   isConnected = false;
   console.warn(`⚠️ [Redis Cache Warning] Redis unavailable (${err.message}). Falling back to direct MySQL queries.`);
@@ -34,6 +42,9 @@ export async function initRedis() {
     console.warn(`⚠️ [Redis Init] Could not connect to Redis on boot. Running in fallback mode.`);
   }
 }
+
+// Automatically connect on module boot
+initRedis().catch(() => {});
 
 export function isRedisActive() {
   return isConnected && redis.status === 'ready';
@@ -63,11 +74,18 @@ export async function setCache(key, value, ttlSeconds = 120) {
 }
 
 /**
- * Invalidate cache key
+ * Invalidate cache key or pattern
  */
-export async function invalidateCache(key) {
+export async function invalidateCache(patternOrKey) {
   if (!isRedisActive()) return;
   try {
-    await redis.del(key);
+    if (patternOrKey.includes('*')) {
+      const keys = await redis.keys(patternOrKey);
+      if (keys.length > 0) {
+        await redis.del(...keys);
+      }
+    } else {
+      await redis.del(patternOrKey);
+    }
   } catch (_) {}
 }

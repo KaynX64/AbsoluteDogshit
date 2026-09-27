@@ -272,7 +272,7 @@ export default function appointmentRouter(io) {
     }
   });
 
-  // 6. GET /api/appointments/today (STRICT PRACTITIONER ISOLATION)
+  // 6. GET /api/appointments/today (STRICT PRACTITIONER ISOLATION & DEDUPLICATION)
   router.get('/today', authenticateToken, async (req, res) => {
     try {
       const { date, filter } = req.query;
@@ -320,18 +320,68 @@ export default function appointmentRouter(io) {
                 sp.student_no, sp.course,
                 hp.blood_type, hp.allergies, hp.chronic_conditions,
                 hp.height, hp.weight,
-                emr.diagnosis AS past_diagnosis,
-                emr.treatment_plan AS past_treatment,
-                CONCAT('Q-', LPAD(COALESCE(q.queue_number, 1), 2, '0')) AS queue_ticket,
-                q.status AS queue_status
+                (
+                  SELECT e2.chief_complaint 
+                  FROM EMR_RECORDS e2 
+                  WHERE e2.appointment_id = a.appointment_id AND e2.deleted_at IS NULL
+                  ORDER BY e2.emr_id DESC 
+                  LIMIT 1
+                ) AS past_chief_complaint,
+                (
+                  SELECT e2.diagnosis 
+                  FROM EMR_RECORDS e2 
+                  WHERE e2.appointment_id = a.appointment_id AND e2.deleted_at IS NULL
+                  ORDER BY e2.emr_id DESC 
+                  LIMIT 1
+                ) AS past_diagnosis,
+                (
+                  SELECT e2.treatment_plan 
+                  FROM EMR_RECORDS e2 
+                  WHERE e2.appointment_id = a.appointment_id AND e2.deleted_at IS NULL
+                  ORDER BY e2.emr_id DESC 
+                  LIMIT 1
+                ) AS past_treatment,
+                (
+                  SELECT e2.notes 
+                  FROM EMR_RECORDS e2 
+                  WHERE e2.appointment_id = a.appointment_id AND e2.deleted_at IS NULL
+                  ORDER BY e2.emr_id DESC 
+                  LIMIT 1
+                ) AS past_clinical_notes,
+                (
+                  SELECT rx.notes
+                  FROM PRESCRIPTIONS rx
+                  JOIN EMR_RECORDS e3 ON rx.emr_id = e3.emr_id
+                  WHERE e3.appointment_id = a.appointment_id AND rx.deleted_at IS NULL
+                  ORDER BY rx.prescription_id DESC
+                  LIMIT 1
+                ) AS past_dietary_notes,
+                COALESCE(
+                  (
+                    SELECT CONCAT('Q-', LPAD(q.queue_number, 2, '0'))
+                    FROM QUEUE q
+                    WHERE q.appointment_id = a.appointment_id
+                    ORDER BY q.queue_id DESC
+                    LIMIT 1
+                  ),
+                  'DONE'
+                ) AS queue_ticket,
+                COALESCE(
+                  (
+                    SELECT q.status
+                    FROM QUEUE q
+                    WHERE q.appointment_id = a.appointment_id
+                    ORDER BY q.queue_id DESC
+                    LIMIT 1
+                  ),
+                  'done'
+                ) AS queue_status
          FROM APPOINTMENTS a
          JOIN USERS u ON a.patient_user_id = u.user_id
          LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
          LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
-         LEFT JOIN EMR_RECORDS emr ON (emr.patient_user_id = a.patient_user_id AND DATE(emr.encounter_date) = DATE(a.date_time))
-         LEFT JOIN QUEUE q ON (q.appointment_id = a.appointment_id AND q.status != 'done')
          ${whereClause}
-         ORDER BY COALESCE(q.queue_number, 999) ASC, a.date_time ASC`,
+         ORDER BY a.date_time DESC`,
         params
       );
 
@@ -339,8 +389,11 @@ export default function appointmentRouter(io) {
         ...r,
         allergies: decrypt(r.allergies),
         chronic_conditions: decrypt(r.chronic_conditions),
+        past_chief_complaint: r.past_chief_complaint ? decrypt(r.past_chief_complaint) : '',
         past_diagnosis: r.past_diagnosis ? decrypt(r.past_diagnosis) : '',
         past_treatment: r.past_treatment ? decrypt(r.past_treatment) : '',
+        past_clinical_notes: r.past_clinical_notes ? decrypt(r.past_clinical_notes) : '',
+        past_dietary_notes: r.past_dietary_notes ? decrypt(r.past_dietary_notes) : '',
       }));
 
       res.json(decryptedRows);
@@ -385,7 +438,7 @@ export default function appointmentRouter(io) {
     }
   });
 
-  // 8. POST /api/appointments/:id/complete (PREVENTS DISCHARGE BY UNAUTHORIZED PRACTITIONER)
+  // 8. POST /api/appointments/:id/complete (INSERTS APPOINTMENT_ID INTO EMR & PREVENTS UNAUTHORIZED DISCHARGE)
   router.post('/:id/complete', authenticateToken, async (req, res) => {
     const connection = await pool.getConnection();
     try {
@@ -416,13 +469,22 @@ export default function appointmentRouter(io) {
       const encTreatment = encrypt(treatment_plan);
       const encNotes = encrypt(notes || '');
 
+      // Directly insert appointment_id to link this encounter to the appointment
       const [emrResult] = await connection.query(
-        `INSERT INTO EMR_RECORDS (patient_user_id, doctor_user_id, chief_complaint, diagnosis, treatment_plan, notes)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [patient_user_id, doctorUserId, encComplaint, encDiagnosis, encTreatment, encNotes]
+        `INSERT INTO EMR_RECORDS (patient_user_id, doctor_user_id, appointment_id, chief_complaint, diagnosis, treatment_plan, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [patient_user_id, doctorUserId, appointmentId, encComplaint, encDiagnosis, encTreatment, encNotes]
       );
 
       const emrId = emrResult.insertId;
+
+      // Link any prescription issued for this patient and doctor today to this EMR record
+      await connection.query(
+        `UPDATE PRESCRIPTIONS 
+         SET emr_id = ? 
+         WHERE patient_user_id = ? AND doctor_user_id = ? AND DATE(issued_at) = CURDATE()`,
+        [emrId, patient_user_id, doctorUserId]
+      );
 
       if (vitals && typeof vitals === 'object') {
         const vitalEntries = [];
@@ -704,7 +766,19 @@ export default function appointmentRouter(io) {
                   ), JSON_ARRAY())
                   FROM EMR_ATTACHMENTS att
                   WHERE att.emr_id = e.emr_id
-                ) as attachments
+                ) as attachments,
+                (
+                  SELECT COALESCE(JSON_ARRAYAGG(
+                    JSON_OBJECT(
+                      'prescription_id', p.prescription_id,
+                      'notes', p.notes,
+                      'status', p.status,
+                      'issued_at', p.issued_at
+                    )
+                  ), JSON_ARRAY())
+                  FROM PRESCRIPTIONS p
+                  WHERE p.emr_id = e.emr_id AND p.deleted_at IS NULL
+                ) as prescriptions
          FROM EMR_RECORDS e
          JOIN USERS doc ON e.doctor_user_id = doc.user_id
          LEFT JOIN STAFF_PROFILES sp ON doc.user_id = sp.user_id
@@ -715,13 +789,20 @@ export default function appointmentRouter(io) {
         [userId]
       );
 
-      const decryptedHistory = history.map((item) => ({
-        ...item,
-        chief_complaint: decrypt(item.chief_complaint),
-        diagnosis: decrypt(item.diagnosis),
-        treatment_plan: decrypt(item.treatment_plan),
-        notes: decrypt(item.notes),
-      }));
+      const decryptedHistory = history.map((item) => {
+        const rxList = (item.prescriptions || []).map((rx) => ({
+          ...rx,
+          notes: decrypt(rx.notes),
+        }));
+        return {
+          ...item,
+          chief_complaint: decrypt(item.chief_complaint),
+          diagnosis: decrypt(item.diagnosis),
+          treatment_plan: decrypt(item.treatment_plan),
+          notes: decrypt(item.notes),
+          prescriptions: rxList,
+        };
+      });
 
       logPhiAccess({
         viewerUserId: req.user.user_id,

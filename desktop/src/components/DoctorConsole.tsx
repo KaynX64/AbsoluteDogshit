@@ -24,10 +24,13 @@ interface AppointmentItem {
   chronic_conditions: string;
   height: number;
   weight: number;
-  past_diagnosis?: string;
-  past_treatment?: string;
   queue_ticket?: string;
   queue_status?: string;
+  past_chief_complaint?: string;
+  past_diagnosis?: string;
+  past_treatment?: string;
+  past_clinical_notes?: string;
+  past_dietary_notes?: string;
 }
 
 export default function DoctorConsole() {
@@ -109,14 +112,19 @@ export default function DoctorConsole() {
       });
       const data = await res.json();
       if (Array.isArray(data)) {
-        setAppointments(data);
-        if (data.length > 0) {
+        // Strict deduplication so each appointment_id renders exactly once
+        const uniqueAppointments = Array.from(
+          new Map(data.map((item: AppointmentItem) => [item.appointment_id, item])).values()
+        );
+        setAppointments(uniqueAppointments);
+
+        if (uniqueAppointments.length > 0) {
           if (!retainSelection || !selectedApp) {
-            selectPatient(data[0]);
+            selectPatient(uniqueAppointments[0]);
           } else {
-            const updated = data.find((a) => a.appointment_id === selectedApp.appointment_id);
+            const updated = uniqueAppointments.find((a) => a.appointment_id === selectedApp.appointment_id);
             if (updated) selectPatient(updated);
-            else selectPatient(data[0]);
+            else selectPatient(uniqueAppointments[0]);
           }
         } else {
           setSelectedApp(null);
@@ -176,7 +184,7 @@ export default function DoctorConsole() {
   const selectPatient = (app: AppointmentItem) => {
     setSelectedApp(app);
 
-    let rawComplaint = app.notes || `${app.appointment_type} requested`;
+    let rawComplaint = app.past_chief_complaint || app.notes || `${app.appointment_type} requested`;
     if (rawComplaint.includes('[TRIAGE VITALS]')) {
       rawComplaint = rawComplaint.replace(/\[TRIAGE VITALS\][^\n]*\n?/, '').trim();
     }
@@ -184,7 +192,7 @@ export default function DoctorConsole() {
 
     setDiagnosis(app.past_diagnosis || '');
     setTreatmentPlan(app.past_treatment || '');
-    setClinicalNotes('');
+    setClinicalNotes(app.past_clinical_notes || '');
     setAttachedFile(null);
     setFeedbackMsg(null);
 
@@ -519,7 +527,7 @@ export default function DoctorConsole() {
                 cursor: 'pointer',
                 border: '1px solid #0f766e',
                 background: viewMode === 'analytics' ? '#0f766e' : '#ffffff',
-                color: viewMode === 'analytics' ? '#ffffff' : '#0f766e',
+                color: viewMode === 'analytics' ? '#fff' : '#334155',
               }}
             >
               📊 Health Analytics
@@ -564,7 +572,7 @@ export default function DoctorConsole() {
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ fontWeight: 'bold', color: '#0284c7', fontSize: 13 }}>
-                        🎫 {app.queue_ticket || 'Q-??'} &nbsp;•&nbsp; ⏰ {app.time_slot}
+                        🎫 {app.queue_ticket || 'DONE'} &nbsp;•&nbsp; ⏰ {app.time_slot}
                       </span>
                       <span
                         style={{
@@ -891,6 +899,7 @@ export default function DoctorConsole() {
 
               {docType === 'rx' ? (
                 <PrescriptionGenerator
+                  key={selectedApp?.appointment_id}
                   patientUserId={selectedApp?.patient_id || 5}
                   verifiedPatient={{
                     first_name: selectedApp?.first_name || 'Daniella',
@@ -899,6 +908,8 @@ export default function DoctorConsole() {
                     course: selectedApp?.course || 'BS Information Technology',
                     allergies: selectedApp?.allergies || 'None',
                   }}
+                  initialNotes={selectedApp?.past_dietary_notes}
+                  isArchived={isArchivedMode}
                   onPrescriptionIssued={() => {
                     setFeedbackMsg({ text: '✅ Prescription successfully issued to patient.', type: 'success' });
                   }}
@@ -1069,6 +1080,13 @@ export default function DoctorConsole() {
                     <div style={{ fontSize: 13, marginBottom: 4 }}><b>Diagnosis:</b> {item.diagnosis}</div>
                     <div style={{ fontSize: 13, marginBottom: 4 }}><b>Complaint:</b> {item.chief_complaint}</div>
                     {item.treatment_plan && <div style={{ fontSize: 13, color: '#334155', marginBottom: 4 }}><b>Treatment:</b> {item.treatment_plan}</div>}
+
+                    {item.notes && <div style={{ fontSize: 13, color: '#334155', marginBottom: 4 }}><b>Clinical Notes:</b> {item.notes}</div>}
+                    {item.prescriptions && item.prescriptions.length > 0 && item.prescriptions[0].notes && (
+                      <div style={{ fontSize: 13, color: '#0f766e', marginBottom: 4 }}>
+                        <b>Physician Dietary / Rx Notes:</b> {item.prescriptions[0].notes}
+                      </div>
+                    )}
 
                     {/* Diagnostic Lab Attachments from MinIO S3 */}
                     {item.attachments && item.attachments.length > 0 && (
