@@ -1,14 +1,24 @@
 // server/src/utils/mailer.js
+import 'dotenv/config';
 import nodemailer from 'nodemailer';
 
-// In development/testing, you can use ethereal.email or Gmail SMTP / PSU SMTP relay
+function requiredEnv(name) {
+  const val = process.env[name];
+  if (!val) {
+    throw new Error(`[Mailer] Missing required environment variable: ${name}`);
+  }
+  return val;
+}
+
+// ── mailer.js:5-12 ─────────────────────────────────────────────────
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.ethereal.email',
+  host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT) || 587,
-  auth: {
-    user: process.env.SMTP_USER || 'valetudo.infirmary@psu.edu.ph',
-    pass: process.env.SMTP_PASS || 'infirmary_secret',
-  },
+  secure: Number(process.env.SMTP_PORT) === 465,
+  requireTLS: true, // never send PHI mail in cleartext
+  auth: process.env.SMTP_USER
+    ? { user: process.env.SMTP_USER, pass: requiredEnv('SMTP_PASS') }
+    : undefined,
 });
 
 export async function sendAppointmentEmail({ toEmail, patientName, doctorName, specialty, dateTime, purpose, type }) {

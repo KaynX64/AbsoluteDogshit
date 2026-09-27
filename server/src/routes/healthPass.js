@@ -7,9 +7,11 @@ import { requireRoles } from '../middleware/rbac.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
 import { decrypt } from '../utils/cryptoVault.js';
 import { requirePrivacyConsent } from '../middleware/consent.js';
+import { JWT_SECRET } from '../utils/secrets.js';
+
 
 const router = express.Router();
-const HMAC_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
+const HMAC_SECRET = JWT_SECRET;
 
 // GET /api/health-pass/token
 router.get('/token', authenticateToken, requirePrivacyConsent, (req, res) => {

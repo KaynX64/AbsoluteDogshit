@@ -8,7 +8,7 @@ class ApiConfig {
     try {
       if (Platform.isAndroid) {
         // Use HTTPS
-        return 'https://192.168.18.116:5000';
+        return 'https://10.0.2.2:5000';
       }
     } catch (_) {}
     return 'https://localhost:5000';
