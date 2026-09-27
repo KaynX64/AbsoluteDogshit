@@ -4,8 +4,8 @@ import jwt from 'jsonwebtoken';
 import { pool } from './db.js';
 import { logAudit } from './utils/auditLogger.js';
 
-// Secret key with environment variable fallback for production key hygiene
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
+const SEED_DEFAULT_HASH = '$2b$10$Y5.xe6H/ZbWi0K/RYcQE2uGPh9hdAn/vKWCit/EMDrpqigeOQ45n.';
 
 export async function loginUser(req, res) {
   const { email, password } = req.body;
@@ -27,10 +27,11 @@ export async function loginUser(req, res) {
 
     const user = users[0];
 
-    // 2. Validate Password (supports bcrypt hash or development test password)
+    // 2. Validate Password:
+    // Compares bcrypt hash. Only permits 'Password123!' if the account is still on the un-modified seed hash.
     const isMatch =
       (await bcrypt.compare(password, user.password_hash)) ||
-      (password === 'Password123!');
+      (user.password_hash === SEED_DEFAULT_HASH && password === 'Password123!');
 
     if (!isMatch) {
       return res.status(401).json({ error: 'Invalid credentials.' });
@@ -58,7 +59,7 @@ export async function loginUser(req, res) {
       { expiresIn: '24h' }
     );
 
-    // 5. R.A. 10173: Log authentication event to append-only hash-chained audit trail
+    // 5. R.A. 10173: Log authentication event to append-only audit trail
     const connection = await pool.getConnection();
     try {
       await logAudit(connection, {
@@ -107,4 +108,65 @@ export function authenticateToken(req, res, next) {
     req.user = user;
     next();
   });
+}
+
+// Handler for user password changes
+export async function changePassword(req, res) {
+  const userId = req.user.user_id;
+  const { currentPassword, newPassword } = req.body;
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'Current password and new password are required.' });
+  }
+
+  if (newPassword.length < 8) {
+    return res.status(400).json({ error: 'New password must be at least 8 characters long.' });
+  }
+
+  try {
+    const [users] = await pool.query(
+      'SELECT password_hash FROM USERS WHERE user_id = ? AND deleted_at IS NULL',
+      [userId]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    const user = users[0];
+
+    // Verify current password
+    const isMatch =
+      (await bcrypt.compare(currentPassword, user.password_hash)) ||
+      (user.password_hash === SEED_DEFAULT_HASH && currentPassword === 'Password123!');
+
+    if (!isMatch) {
+      return res.status(400).json({ error: 'Incorrect current password.' });
+    }
+
+    // Generate new bcrypt hash
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE USERS SET password_hash = ? WHERE user_id = ?', [newHash, userId]);
+
+    // R.A. 10173 Audit logging
+    const connection = await pool.getConnection();
+    try {
+      await logAudit(connection, {
+        userId,
+        action: 'UPDATE',
+        table: 'USERS',
+        recordId: userId,
+        oldValue: null,
+        newValue: { event: 'PASSWORD_CHANGED_BY_USER' },
+        ipAddress: req.ip,
+      });
+    } finally {
+      connection.release();
+    }
+
+    res.json({ message: 'Password updated successfully.' });
+  } catch (error) {
+    console.error('[Change Password Error]:', error);
+    res.status(500).json({ error: 'Failed to update password.' });
+  }
 }
