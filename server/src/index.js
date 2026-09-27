@@ -12,6 +12,7 @@ import { loginUser, authenticateToken } from './auth.js';
 import jwt from 'jsonwebtoken';
 import { ensureBucketExists } from './utils/s3Vault.js';
 
+
 // Route imports
 import privacyRouter from './routes/privacy.js';
 import profileRoutes from './routes/profile.js';
@@ -23,6 +24,8 @@ import documentRoutes from './routes/documents.js';
 import adminRoutes from './routes/admin.js';
 import analyticsRoutes from './routes/analytics.js';
 import { startReminderScheduler } from './utils/reminderWorker.js';
+import { JWT_SECRET } from './utils/secrets.js';
+
 
 dotenv.config();
 
@@ -55,15 +58,15 @@ let server;
 let isHttps = false;
 
 if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
-  const credentials = {
-    key: fs.readFileSync(keyPath),
-    cert: fs.readFileSync(certPath),
-  };
-  server = https.createServer(credentials, app);
+  server = https.createServer({ key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) }, app);
   isHttps = true;
-} else {
-  console.warn('⚠️ [TLS Warning] Certs not found in server/certs/. Running unencrypted HTTP fallback.');
+} else if (process.env.ALLOW_INSECURE_HTTP === 'true') {
+  console.warn('⚠️ [TLS Warning] TLS disabled by explicit ALLOW_INSECURE_HTTP=true. PHI will transit in CLEARTEXT.');
   server = http.createServer(app);
+} else {
+  console.error('❌ [TLS Fatal] server/certs/{cert,key}.pem not found. Refusing to serve PHI over plaintext HTTP.');
+  console.error('   Set ALLOW_INSECURE_HTTP=true only for isolated local development.');
+  process.exit(1);
 }
 
 // Mount Secure WebSockets (WSS over HTTPS)
@@ -73,8 +76,6 @@ export const io = new Server(server, {
     methods: ['GET', 'POST', 'PATCH'],
   },
 });
-
-const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
 
 // Socket.IO authentication middleware (asynchronous token validation)
 io.use((socket, next) => {

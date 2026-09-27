@@ -10,6 +10,7 @@ import { requirePrivacyConsent } from '../middleware/consent.js';
 import multer from 'multer';
 import { uploadToS3, getFromS3 } from '../utils/s3Vault.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
+import { JWT_SECRET } from '../utils/secrets.js'; // <-- use ../
 
 
 const router = express.Router();
@@ -52,7 +53,7 @@ router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST
 
     const rxUuid = crypto.randomUUID();
     const hmac = crypto
-      .createHmac('sha256', process.env.JWT_SECRET || 'supersecretkeyvaletudo')
+      .createHmac('sha256', JWT_SECRET)
       .update(rxUuid)
       .digest('hex');
     const qrToken = `RX.${rxUuid}.${hmac.substring(0, 16)}`;

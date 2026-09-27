@@ -20,3 +20,8 @@ dist/
 build/
 desktop/dist/
 mobile/build/
+
+# S-07: Never commit private TLS certificates to git
+server/certs/*.pem
+server/certs/*.key
+server/certs/*.crt

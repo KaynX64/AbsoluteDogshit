@@ -1,12 +1,15 @@
 // server/src/utils/redisClient.js
+import 'dotenv/config';
 import Redis from 'ioredis';
 
 const REDIS_HOST = process.env.REDIS_HOST || '127.0.0.1';
 const REDIS_PORT = Number(process.env.REDIS_PORT) || 6379;
+const REDIS_PASSWORD = process.env.REDIS_PASSWORD || undefined;
 
 export const redis = new Redis({
   host: REDIS_HOST,
   port: REDIS_PORT,
+  password: REDIS_PASSWORD, // <-- S-06 / S-28: Pass the Redis password
   lazyConnect: true,
   retryStrategy: (times) => {
     // Retry every 3 seconds, up to 5 attempts before pausing

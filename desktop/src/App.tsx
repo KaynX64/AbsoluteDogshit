@@ -9,7 +9,7 @@ export function useSessionTimeout(isActive: boolean, timeoutMinutes = 15) {
   useEffect(() => {
     if (!isActive) return;
 
-    let timeoutId: NodeJS.Timeout;
+    let timeoutId: ReturnType<typeof setTimeout>;
     const resetTimer = () => {
       clearTimeout(timeoutId);
       timeoutId = setTimeout(() => {
@@ -32,8 +32,8 @@ export function useSessionTimeout(isActive: boolean, timeoutMinutes = 15) {
 }
 
 export default function App() {
-  const [email, setEmail] = useState('nurse@psu.edu.ph');
-  const [password, setPassword] = useState('Password123!');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [user, setUser] = useState<any>(null);
   const [error, setError] = useState('');
 
@@ -154,40 +154,44 @@ export default function App() {
             </button>
           </form>
 
-          {/* Quick preset buttons for testing each role */}
-          <div style={{ marginTop: 24, borderTop: '1px dashed #cbd5e1', paddingTop: 14 }}>
-            <small style={{ color: '#64748b', display: 'block', marginBottom: 8, fontWeight: 'bold' }}>Quick Select Test Role:</small>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-              <button
-                type="button"
-                onClick={() => { setEmail('nurse@psu.edu.ph'); setPassword('Password123!'); }}
-                style={{ padding: '6px 8px', fontSize: 12, cursor: 'pointer', background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 4, color: '#0f766e' }}
-              >
-                👩‍⚕️ Clinic Nurse
-              </button>
-              <button
-                type="button"
-                onClick={() => { setEmail('doctor@psu.edu.ph'); setPassword('Password123!'); }}
-                style={{ padding: '6px 8px', fontSize: 12, cursor: 'pointer', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 4, color: '#0284c7' }}
-              >
-                🩺 Campus Doctor
-              </button>
-              <button
-                type="button"
-                onClick={() => { setEmail('admin@psu.edu.ph'); setPassword('Password123!'); }}
-                style={{ padding: '6px 8px', fontSize: 12, cursor: 'pointer', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 4, color: '#6d28d9' }}
-              >
-                ⚙️ System Admin
-              </button>
-              <button
-                type="button"
-                onClick={() => { setEmail('responder@psu.edu.ph'); setPassword('Password123!'); }}
-                style={{ padding: '6px 8px', fontSize: 12, cursor: 'pointer', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 4, color: '#b91c1c' }}
-              >
-                🚨 SOS Responder
-              </button>
+{/* Quick preset buttons for testing each role (F05: Only compiled in development) */}
+          {import.meta.env.DEV && (
+            <div style={{ marginTop: 24, borderTop: '1px dashed #cbd5e1', paddingTop: 14 }}>
+              <small style={{ color: '#64748b', display: 'block', marginBottom: 8, fontWeight: 'bold' }}>
+                Quick Select Test Role (Dev Only):
+              </small>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => { setEmail('nurse@psu.edu.ph'); setPassword('Password123!'); }}
+                  style={{ padding: '6px 8px', fontSize: 12, cursor: 'pointer', background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 4, color: '#0f766e' }}
+                >
+                  👩‍⚕️ Clinic Nurse
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setEmail('doctor@psu.edu.ph'); setPassword('Password123!'); }}
+                  style={{ padding: '6px 8px', fontSize: 12, cursor: 'pointer', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 4, color: '#0284c7' }}
+                >
+                  🩺 Campus Doctor
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setEmail('admin@psu.edu.ph'); setPassword('Password123!'); }}
+                  style={{ padding: '6px 8px', fontSize: 12, cursor: 'pointer', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 4, color: '#6d28d9' }}
+                >
+                  ⚙️ System Admin
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setEmail('responder@psu.edu.ph'); setPassword('Password123!'); }}
+                  style={{ padding: '6px 8px', fontSize: 12, cursor: 'pointer', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 4, color: '#b91c1c' }}
+                >
+                  🚨 SOS Responder
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     );

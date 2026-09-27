@@ -14,8 +14,8 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _emailController = TextEditingController(text: 'student@psu.edu.ph');
-  final _passwordController = TextEditingController(text: 'Password123!');
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
   final _storage = const FlutterSecureStorage();
   bool _isLoading = false;
   String _errorMessage = '';
@@ -61,9 +61,10 @@ class _LoginScreenState extends State<LoginScreen> {
       } else {
         setState(() => _errorMessage = data['error'] ?? 'Login failed');
       }
-    } catch (e) {
+} catch (e) {
+      debugPrint('[Login Network Exception]: $e');
       if (mounted) {
-        setState(() => _errorMessage = 'Unable to connect. Please try again.');
+        setState(() => _errorMessage = '$e');
       }
     } finally {
       if (mounted) {

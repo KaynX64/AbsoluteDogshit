@@ -3,9 +3,10 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { pool } from './db.js';
 import { logAudit } from './utils/auditLogger.js';
+import { JWT_SECRET } from './utils/secrets.js';
 
-// Secret key with environment variable fallback for production key hygiene
-const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkeyvaletudo';
+// S-09: Pre-computed dummy hash to prevent user-enumeration timing attacks
+const DUMMY_HASH = bcrypt.hashSync('timing-equalizer', 10);
 
 export async function loginUser(req, res) {
   const { email, password } = req.body;
@@ -21,16 +22,16 @@ export async function loginUser(req, res) {
       [email]
     );
 
+    // S-09: If user not found, perform dummy bcrypt compare so timing is identical
     if (users.length === 0) {
+      await bcrypt.compare(password, DUMMY_HASH);
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
 
     const user = users[0];
 
-    // 2. Validate Password (supports bcrypt hash or development test password)
-    const isMatch =
-      (await bcrypt.compare(password, user.password_hash)) ||
-      (password === 'Password123!');
+    // 2. Validate Password strictly against bcrypt hash (Backdoor removed for S-09)
+    const isMatch = await bcrypt.compare(password, user.password_hash);
 
     if (!isMatch) {
       return res.status(401).json({ error: 'Invalid credentials.' });
