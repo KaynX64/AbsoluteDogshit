@@ -1,17 +1,22 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- M-01 FIX: Required for all network calls in release builds -->
+    <!-- Network & Communication -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Geolocation for SOS Emergency Dispatch -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Notifications, Alarms & Wake Controls -->
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
-    
+    <!-- Foreground Service Permissions (Android 14+ / API 34+ requirement) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
     <application
         android:label="mobile"
         android:name="${applicationName}"

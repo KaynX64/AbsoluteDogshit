@@ -5,6 +5,8 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http; // <-- FIXED: Added missing import
+import 'package:firebase_messaging/firebase_messaging.dart'; // <-- FIXED: Added missing import
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -28,6 +30,7 @@ class EmergencyAlertService {
   Timer? _vibrationTimer;
   Uint8List? _cachedWavBytes;
   bool _isInitialized = false;
+  bool _isFcmListening = false;
 
   bool _isResponderActive = false;
   int? _lastAlertIdProcessed;
@@ -50,7 +53,7 @@ class EmergencyAlertService {
     'SOS Dispatch Confirmation',
     description: 'Confirmation alert when student sends an SOS emergency',
     importance: Importance.high,
-    playSound: true, // Native phone default notification sound
+    playSound: true,
     enableVibration: true,
   );
 
@@ -60,7 +63,7 @@ class EmergencyAlertService {
     '🔔 Clinic Queue Turn',
     description: 'Alerts when your queue ticket is called for consultation',
     importance: Importance.high,
-    playSound: true, // Native phone default notification sound
+    playSound: true,
     enableVibration: true,
   );
 
@@ -101,6 +104,69 @@ class EmergencyAlertService {
     await connectSocket();
   }
 
+// --- FIREBASE CLOUD MESSAGING (FCM) TOKEN REGISTRATION ---
+  Future<void> syncFcmTokenWithBackend() async {
+    try {
+      final messaging = FirebaseMessaging.instance;
+      
+      // Request permission for heads-up alerts
+      await messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+
+      // Get the unique FCM token from Google Play Services
+      String? token = await messaging.getToken();
+      debugPrint("🔔 [FCM Mobile] Retrieved Token: $token");
+
+      if (token != null && token.isNotEmpty) {
+        final jwt = await _storage.read(key: 'jwt_token');
+        if (jwt != null) {
+          debugPrint("🔔 [FCM Mobile] Syncing token to ${ApiConfig.baseUrl}/api/profile/fcm-token...");
+          final res = await http.post(
+            Uri.parse('${ApiConfig.baseUrl}/api/profile/fcm-token'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $jwt',
+            },
+            body: jsonEncode({'fcm_token': token, 'device_type': 'android'}),
+          );
+          debugPrint("🔥 [FCM Mobile] Server registration status: ${res.statusCode} - ${res.body}");
+        } else {
+          debugPrint("⚠️ [FCM Mobile] No JWT in storage; token will be synced on next login.");
+        }
+      } else {
+        debugPrint("⚠️ [FCM Mobile] FirebaseMessaging.getToken() returned null. Ensure Google Play Services are active.");
+      }
+
+      // Attach foreground listener once
+      if (!_isFcmListening) {
+        _isFcmListening = true;
+        FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+          final type = message.data['type'] ?? '';
+
+          if (type == 'EMERGENCY_SOS') {
+            if (_isResponderActive) {
+              triggerEmergencyBroadcast(message.data);
+            }
+          } else if (type == 'QUEUE_TURN') {
+            showQueueTurnNotification(
+              ticketNo: message.data['ticketNo'] ?? 'Your Ticket',
+              doctorName: message.data['doctorName'] ?? 'Attending Doctor',
+            );
+          } else {
+            showAppointmentConfirmedNotification(
+              message.notification?.title ?? message.data['title'],
+              message.notification?.body ?? message.data['body'],
+            );
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint("❌ [FCM Mobile Token Error]: $e");
+    }
+  }
   Future<void> _enableBackgroundService() async {
     try {
       const androidConfig = FlutterBackgroundAndroidConfig(
@@ -162,13 +228,11 @@ class EmergencyAlertService {
         debugPrint('🚨 [Socket.IO Mobile] SOS Alert Broadcast Received: $data');
         final alertMap = data is Map<String, dynamic> ? data : Map<String, dynamic>.from(data);
 
-        // Guard: Only sound alarm if device is in Responder mode
         if (!_isResponderActive) {
           debugPrint('🛡️ [Socket.IO Mobile] Ignored: Device not in responder mode.');
           return;
         }
 
-        // Avoid self-echo if alert was initiated on this device
         final userDataStr = await _storage.read(key: 'user_data');
         if (userDataStr != null) {
           try {
@@ -197,6 +261,7 @@ class EmergencyAlertService {
     initialize();
     connectSocket(force: true);
     _enableBackgroundService();
+    syncFcmTokenWithBackend();
   }
 
   void stopResponderListener() {
@@ -215,7 +280,7 @@ class EmergencyAlertService {
       importance: Importance.high,
       priority: Priority.high,
       ticker: 'SOS Dispatched',
-      playSound: true, // Native default phone sound
+      playSound: true,
       enableVibration: true,
       fullScreenIntent: false,
     );
@@ -239,7 +304,7 @@ class EmergencyAlertService {
       importance: Importance.high,
       priority: Priority.high,
       ticker: 'Appointment Confirmed',
-      playSound: true, // Native default phone sound
+      playSound: true,
     );
 
     const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
@@ -252,7 +317,7 @@ class EmergencyAlertService {
     );
   }
 
-  // --- CLINIC QUEUE TURN NOTIFICATION (Now uses DEFAULT Phone Chime) ---
+  // --- CLINIC QUEUE TURN NOTIFICATION ---
   Future<void> showQueueTurnNotification({
     required String ticketNo,
     required String doctorName,
@@ -264,7 +329,7 @@ class EmergencyAlertService {
       importance: Importance.high,
       priority: Priority.high,
       ticker: 'Your Turn!',
-      playSound: true, // Native default phone sound (NO custom siren)
+      playSound: true,
       enableVibration: true,
     );
 

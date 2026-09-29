@@ -13,6 +13,7 @@ USE `valetudo_healthlink`;
 -- Disable FK checks during recreation
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP TABLE IF EXISTS `DEVICE_TOKENS`;
 DROP TABLE IF EXISTS `CONSENT_RECORDS`;
 DROP TABLE IF EXISTS `LOCAL_SYNC_LOGS`;
 DROP TABLE IF EXISTS `PHI_ACCESS_LOGS`;
@@ -92,6 +93,15 @@ CREATE TABLE `STAFF_PROFILES` (
   `specialty` VARCHAR(100) NULL,
   `department` VARCHAR(100) NOT NULL DEFAULT 'University Infirmary',
   CONSTRAINT `fk_staff_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE `DEVICE_TOKENS` (
+  `token_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT NOT NULL,
+  `fcm_token` VARCHAR(255) NOT NULL UNIQUE,
+  `device_type` ENUM('android', 'ios', 'web') NOT NULL DEFAULT 'android',
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT `fk_dt_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- =============================================================================
@@ -375,7 +385,7 @@ CREATE TABLE `CONSENT_RECORDS` (
 ) ENGINE=InnoDB;
 
 -- =============================================================================
--- SEED DATA
+-- SEED DATA (BASELINE SYSTEM ACCOUNTS & FORMULARY)
 -- =============================================================================
 
 INSERT INTO `ROLES` (`role_id`, `code`, `name`) VALUES

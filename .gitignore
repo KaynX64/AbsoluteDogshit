@@ -25,3 +25,7 @@ mobile/build/
 server/certs/*.pem
 server/certs/*.key
 server/certs/*.crt
+
+#googleFirebaseCredentials.json
+server/serviceAccountKey.json
+mobile/android/app/google-services.json
