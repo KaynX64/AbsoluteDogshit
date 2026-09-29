@@ -61,13 +61,14 @@ router.post('/replay', authenticateToken, async (req, res) => {
 
         // 2. DISPATCH MUTATION BASED ON TABLE
         if (table_name === 'EMR_RECORDS' && action === 'CREATE') {
-          const { patient_user_id, chief_complaint, diagnosis, treatment_plan, notes } = payload;
+          const { patient_user_id, chief_complaint, diagnosis, treatment_plan, notes, appointment_id, vitals } = payload;
           const [emrResult] = await connection.query(
-            `INSERT INTO EMR_RECORDS (patient_user_id, doctor_user_id, chief_complaint, diagnosis, treatment_plan, notes)
-             VALUES (?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO EMR_RECORDS (patient_user_id, doctor_user_id, appointment_id, chief_complaint, diagnosis, treatment_plan, notes)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
             [
               patient_user_id,
               userId,
+              appointment_id || null,
               encrypt(chief_complaint),
               encrypt(diagnosis),
               encrypt(treatment_plan || ''),
@@ -75,25 +76,24 @@ router.post('/replay', authenticateToken, async (req, res) => {
             ]
           );
           serverRecordId = emrResult.insertId;
-        } else if (table_name === 'MEDICINE_BATCHES' && action === 'UPDATE') {
-          // Inventory stock deduction replay
-          const { batch_id, quantity_deducted, reason } = payload;
-          const [batch] = await connection.query(
-            'SELECT quantity_on_hand FROM MEDICINE_BATCHES WHERE batch_id = ? FOR UPDATE',
-            [batch_id]
-          );
 
-          if (batch.length > 0 && batch[0].quantity_on_hand >= Number(quantity_deducted)) {
-            const newQty = batch[0].quantity_on_hand - Number(quantity_deducted);
-            await connection.query('UPDATE MEDICINE_BATCHES SET quantity_on_hand = ? WHERE batch_id = ?', [newQty, batch_id]);
-            await connection.query(
-              `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
-               VALUES (?, ?, 'dispense', ?, ?)`,
-              [batch_id, -Number(quantity_deducted), `[OFFLINE SYNC] ${reason || 'Dispense'}`, userId]
-            );
-            serverRecordId = batch_id;
-          } else {
-            throw new Error('Insufficient stock at server replay time');
+          // If linked to an appointment, complete it
+          if (appointment_id) {
+            await connection.query("UPDATE APPOINTMENTS SET status = 'completed' WHERE appointment_id = ?", [appointment_id]);
+            await connection.query("UPDATE QUEUE SET status = 'done', served_at = CURRENT_TIMESTAMP WHERE appointment_id = ?", [appointment_id]);
+          }
+
+          // Persist replayed vitals to VITAL_SIGNS
+          if (vitals && typeof vitals === 'object') {
+            for (const [metric, val] of Object.entries(vitals)) {
+              if (val && !isNaN(Number(val))) {
+                const unit = metric.includes('bp') ? 'mmHg' : metric === 'temperature' ? '°C' : metric === 'pulse' ? 'bpm' : metric === 'spo2' ? '%' : 'cpm';
+                await connection.query(
+                  "INSERT INTO VITAL_SIGNS (emr_id, metric, value, unit, recorded_by) VALUES (?, ?, ?, ?, ?)",
+                  [serverRecordId, metric, Number(val), unit, userId]
+                );
+              }
+            }
           }
         }
 

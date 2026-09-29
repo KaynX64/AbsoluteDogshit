@@ -46,9 +46,6 @@ export async function initRedis() {
   }
 }
 
-// Automatically connect on module boot
-initRedis().catch(() => {});
-
 export function isRedisActive() {
   return isConnected && redis.status === 'ready';
 }
