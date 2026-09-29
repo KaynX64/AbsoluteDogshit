@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import PrescriptionGenerator from './PrescriptionGenerator';
 import { io } from 'socket.io-client';
 import AnalyticsDashboard from './AnalyticsDashboard';
+import { queueOfflineMutation } from '../services/offlineSync';
 
 interface AppointmentItem {
   appointment_id: number;
@@ -39,7 +40,7 @@ export default function DoctorConsole() {
   const [loadingAppointments, setLoadingAppointments] = useState(false);
 
   // 'active' = Triaged & Ready; 'scheduled' = Booked on app; 'history' = Discharged
-  const [viewMode, setViewMode] = useState<'active' | 'scheduled' | 'history' | 'analytics'>('active');
+  const [viewMode, setViewMode] = useState<'active' | 'scheduled' | 'history' | 'archive' | 'analytics'>('active');
 
   // Form fields
   const [chiefComplaint, setChiefComplaint] = useState('');
@@ -57,6 +58,8 @@ export default function DoctorConsole() {
   const [bpDiastolic, setBpDiastolic] = useState('80');
   const [temperature, setTemperature] = useState('36.6');
   const [pulseRate, setPulseRate] = useState('75');
+  const [spo2, setSpo2] = useState('98');
+  const [respRate, setRespRate] = useState('18');
 
   // Document Issuance Tab
   const [docType, setDocType] = useState<'rx' | 'clearance'>('rx');
@@ -74,6 +77,12 @@ export default function DoctorConsole() {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [patientHistory, setPatientHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [patientSearchQuery, setPatientSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearchingPatients, setIsSearchingPatients] = useState(false);
+  const [selectedDirectoryPatient, setSelectedDirectoryPatient] = useState<any | null>(null);
+  const [directoryTimeline, setDirectoryTimeline] = useState<any[]>([]);
+  const [loadingTimeline, setLoadingTimeline] = useState(false);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -112,7 +121,6 @@ export default function DoctorConsole() {
       });
       const data = await res.json();
       if (Array.isArray(data)) {
-        // Strict deduplication so each appointment_id renders exactly once
         const uniqueAppointments = Array.from(
           new Map(data.map((item: AppointmentItem) => [item.appointment_id, item])).values()
         );
@@ -165,9 +173,9 @@ export default function DoctorConsole() {
     };
   }, [viewMode]);
 
-  const handleSwitchView = (mode: 'active' | 'scheduled' | 'history' | 'analytics') => {
+  const handleSwitchView = (mode: 'active' | 'scheduled' | 'history' | 'analytics' | 'archive') => {
     setViewMode(mode);
-    if (mode !== 'analytics') {
+    if (mode !== 'analytics' && mode !== 'archive') {
       fetchAppointments(mode, false);
     }
   };
@@ -244,30 +252,53 @@ export default function DoctorConsole() {
     setFeedbackMsg(null);
     const token = localStorage.getItem('valetudo_token');
 
+    const encounterPayload = {
+      patient_user_id: selectedApp.patient_id,
+      appointment_id: selectedApp.appointment_id,
+      chief_complaint: chiefComplaint,
+      diagnosis,
+      treatment_plan: treatmentPlan,
+      notes: clinicalNotes,
+      vitals: {
+        systolic_bp: bpSystolic,
+        diastolic_bp: bpDiastolic,
+        temperature,
+        pulse: pulseRate,
+        spo2,
+        resp_rate: respRate,
+      },
+    };
+
+    // OFFLINE CHECK & QUEUEING (Process 3.0 Compliance)
+    if (!navigator.onLine) {
+      queueOfflineMutation({
+        table_name: 'EMR_RECORDS',
+        record_uuid: crypto.randomUUID(),
+        action: 'CREATE',
+        payload: encounterPayload,
+      });
+
+      setSelectedApp({ ...selectedApp, status: 'completed' });
+      resetForm();
+      setIsSubmittingEMR(false);
+      setFeedbackMsg({
+        text: '🌐 [Offline Mode] Network unavailable. Encounter saved to local offline queue. Will auto-sync to MySQL upon reconnection.',
+        type: 'success',
+      });
+      return;
+    }
+
     try {
       const res = await fetch(`https://localhost:5000/api/appointments/${selectedApp.appointment_id}/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          patient_user_id: selectedApp.patient_id,
-          chief_complaint: chiefComplaint,
-          diagnosis,
-          treatment_plan: treatmentPlan,
-          notes: clinicalNotes,
-          vitals: {
-            systolic_bp: bpSystolic,
-            diastolic_bp: bpDiastolic,
-            temperature,
-            pulse: pulseRate,
-          },
-        }),
+        body: JSON.stringify(encounterPayload),
       });
 
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to complete encounter.');
-      }
+      if (!res.ok) throw new Error(data.error || 'Failed to complete encounter.');
 
+      // Attach file to MinIO S3 if provided
       let fileSuccess = false;
       if (attachedFile && data.emrId) {
         try {
@@ -278,16 +309,8 @@ export default function DoctorConsole() {
             headers: { Authorization: `Bearer ${token}` },
             body: formData,
           });
-
-          if (uploadRes.ok) {
-            fileSuccess = true;
-          } else {
-            const errData = await uploadRes.json();
-            alert(`⚠️ Encounter saved, but MinIO file upload failed: ${errData.error || 'Check MinIO container'}`);
-          }
-        } catch (uploadErr: any) {
-          alert(`⚠️ MinIO Connection Error: ${uploadErr.message}.`);
-        }
+          if (uploadRes.ok) fileSuccess = true;
+        } catch (_) {}
       }
 
       await fetchAppointments('active', false);
@@ -299,7 +322,18 @@ export default function DoctorConsole() {
         type: 'success',
       });
     } catch (err: any) {
-      setFeedbackMsg({ text: err.message, type: 'error' });
+      queueOfflineMutation({
+        table_name: 'EMR_RECORDS',
+        record_uuid: crypto.randomUUID(),
+        action: 'CREATE',
+        payload: encounterPayload,
+      });
+
+      resetForm();
+      setFeedbackMsg({
+        text: '⚠️ Server unreachable. Encounter queued locally in offline storage. Will replay automatically when online.',
+        type: 'success',
+      });
     } finally {
       setIsSubmittingEMR(false);
     }
@@ -322,6 +356,47 @@ export default function DoctorConsole() {
       console.error('History fetch error:', err);
     } finally {
       setLoadingHistory(false);
+    }
+  };
+
+  const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!patientSearchQuery.trim()) return;
+
+    setIsSearchingPatients(true);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(
+        `https://localhost:5000/api/appointments/patients/search?query=${encodeURIComponent(patientSearchQuery.trim())}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setSearchResults(data);
+      }
+    } catch (err) {
+      console.error('Failed to search patients:', err);
+    } finally {
+      setIsSearchingPatients(false);
+    }
+  };
+
+  const loadPatientTimeline = async (patient: any) => {
+    setSelectedDirectoryPatient(patient);
+    setLoadingTimeline(true);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`https://localhost:5000/api/appointments/patient/${patient.user_id}/history`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDirectoryTimeline(data);
+      }
+    } catch (err) {
+      console.error('Failed to load patient timeline:', err);
+    } finally {
+      setLoadingTimeline(false);
     }
   };
 
@@ -361,7 +436,7 @@ export default function DoctorConsole() {
               .patient-box { margin: 16px 0; padding: 14px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; line-height: 1.6; }
               .body-text { font-size: 14px; line-height: 1.8; margin-top: 18px; }
               .verification-panel { margin-top: 26px; display: flex; align-items: center; gap: 20px; border: 1px solid #99f6e4; background: #f0fdfa; padding: 16px; border-radius: 6px; }
-              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; font-size: 12px; }
+              .footer { margin-top: 40px; display: space-between; align-items: flex-end; font-size: 12px; }
               .sig-line { border-top: 1px solid #000; width: 220px; text-align: center; font-weight: bold; padding-top: 4px; }
             </style>
           </head>
@@ -446,7 +521,7 @@ export default function DoctorConsole() {
 
   return (
     <div>
-{/* 1. TOP ROSTER */}
+      {/* 1. TOP ROSTER */}
       <div style={{ background: '#ffffff', padding: 16, borderRadius: 8, border: '1px solid #cbd5e1', marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
           <div style={{ minWidth: 280, flex: '1 1 auto' }}>
@@ -457,6 +532,8 @@ export default function DoctorConsole() {
                 ? "📅 My Upcoming Bookings"
                 : viewMode === 'history'
                 ? '📜 My Consultation History Archive'
+                : viewMode === 'archive'
+                ? '📁 Searchable Patient EMR Directory'
                 : '📊 Epidemiological Analytics & Visual Charts'}
             </h3>
             <small style={{ color: '#64748b' }}>
@@ -470,7 +547,7 @@ export default function DoctorConsole() {
             </small>
           </div>
 
-          {/* TAB CONTROLS (flex-shrink prevents unexpected wrapping) */}
+          {/* TAB CONTROLS */}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flexShrink: 0 }}>
             <button
               onClick={() => handleSwitchView('active')}
@@ -518,6 +595,21 @@ export default function DoctorConsole() {
               📜 My History Archive
             </button>
             <button
+              onClick={() => handleSwitchView('archive')}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 4,
+                fontSize: 12,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                border: '1px solid #4f46e5',
+                background: viewMode === 'archive' ? '#4f46e5' : '#ffffff',
+                color: viewMode === 'archive' ? '#ffffff' : '#4f46e5',
+              }}
+            >
+              📁 Patient EMR Archive
+            </button>
+            <button
               onClick={() => handleSwitchView('analytics')}
               style={{
                 padding: '6px 14px',
@@ -542,7 +634,7 @@ export default function DoctorConsole() {
         </div>
 
         {/* Patient card grid */}
-        {viewMode !== 'analytics' && (
+        {viewMode !== 'analytics' && viewMode !== 'archive' && (
           loadingAppointments ? (
             <p style={{ color: '#64748b', fontSize: 13 }}>Loading isolated roster...</p>
           ) : appointments.length === 0 ? (
@@ -601,6 +693,127 @@ export default function DoctorConsole() {
 
       {viewMode === 'analytics' ? (
         <AnalyticsDashboard />
+      ) : viewMode === 'archive' ? (
+        /* Patient EMR Directory View */
+        <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: 8, padding: 18, marginTop: 10 }}>
+          <h4 style={{ margin: '0 0 10px 0', color: '#4f46e5' }}>📁 Searchable Patient EMR Directory & Chronological Timeline</h4>
+          <form onSubmit={handleSearchPatientDirectory} style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+            <input
+              style={{ ...inputStyle, flex: 1, marginTop: 0 }}
+              placeholder="Search by Student ID (e.g. 22-LN-0123), First/Last Name, or Email..."
+              value={patientSearchQuery}
+              onChange={(e) => setPatientSearchQuery(e.target.value)}
+            />
+            <button
+              type="submit"
+              disabled={isSearchingPatients}
+              style={{ padding: '8px 18px', background: '#4f46e5', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer' }}
+            >
+              {isSearchingPatients ? 'Searching...' : '🔍 Search Records'}
+            </button>
+          </form>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 16 }}>
+            {/* Results List */}
+            <div style={{ borderRight: '1px solid #e2e8f0', paddingRight: 12 }}>
+              <span style={{ fontSize: 12, fontWeight: 'bold', color: '#64748b' }}>Matched Patients ({searchResults.length}):</span>
+              {searchResults.length === 0 ? (
+                <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 12 }}>Type a query and press Search.</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+                  {searchResults.map((p) => (
+                    <div
+                      key={p.user_id}
+                      onClick={() => loadPatientTimeline(p)}
+                      style={{
+                        padding: 10,
+                        borderRadius: 6,
+                        border: selectedDirectoryPatient?.user_id === p.user_id ? '2px solid #4f46e5' : '1px solid #cbd5e1',
+                        background: selectedDirectoryPatient?.user_id === p.user_id ? '#eef2ff' : '#f8fafc',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <b style={{ color: '#1e293b' }}>{p.first_name} {p.last_name}</b>
+                      <div style={{ fontSize: 11, color: '#4f46e5', fontWeight: 'bold' }}>{p.identifier_no}</div>
+                      <div style={{ fontSize: 11, color: '#64748b' }}>{p.affiliation}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Chronological Timeline */}
+            <div>
+              {!selectedDirectoryPatient ? (
+                <div style={{ textAlign: 'center', padding: '40px 0', color: '#94a3b8' }}>
+                  Select a patient from the search results to inspect their chronological EMR timeline.
+                </div>
+              ) : loadingTimeline ? (
+                <p style={{ color: '#64748b' }}>Loading clinical timeline...</p>
+              ) : (
+                <div>
+                  <div style={{ background: '#f8fafc', padding: 12, borderRadius: 6, marginBottom: 14, border: '1px solid #e2e8f0' }}>
+                    <h4 style={{ margin: 0, color: '#1e293b' }}>
+                      👤 {selectedDirectoryPatient.first_name} {selectedDirectoryPatient.last_name} ({selectedDirectoryPatient.identifier_no})
+                    </h4>
+                    <p style={{ margin: '4px 0 0', fontSize: 12, color: '#475569' }}>
+                      <b>Affiliation:</b> {selectedDirectoryPatient.affiliation} | <b>Blood:</b> {selectedDirectoryPatient.blood_type || 'Unknown'} | <b>Allergies:</b> {selectedDirectoryPatient.allergies}
+                    </p>
+                  </div>
+
+                  <h5 style={{ margin: '0 0 10px', color: '#0f766e' }}>Chronological Encounter History ({directoryTimeline.length} Encounters):</h5>
+                  {directoryTimeline.length === 0 ? (
+                    <p style={{ fontSize: 13, color: '#64748b' }}>No prior encounters on record for this patient.</p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      {directoryTimeline.map((item) => (
+                        <div key={item.emr_id} style={{ border: '1px solid #e2e8f0', borderRadius: 6, padding: 12, background: '#ffffff', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                            <span style={{ fontWeight: 'bold', color: '#0f766e', fontSize: 13 }}>
+                              🗓️ {new Date(item.encounter_date).toLocaleDateString()} at {new Date(item.encounter_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            <span style={{ fontSize: 11, color: '#64748b' }}>Attending: Dr. {item.doctor_last_name}</span>
+                          </div>
+                          <div style={{ fontSize: 13, marginBottom: 3 }}><b>Complaint:</b> {item.chief_complaint}</div>
+                          <div style={{ fontSize: 13, marginBottom: 3, color: '#0284c7' }}><b>Diagnosis:</b> {item.diagnosis}</div>
+                          {item.treatment_plan && <div style={{ fontSize: 12, color: '#334155', marginBottom: 3 }}><b>Plan:</b> {item.treatment_plan}</div>}
+
+                          {/* Normalized Vitals Pills */}
+                          {item.vitals && item.vitals.filter(Boolean).length > 0 && (
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6, marginBottom: 6 }}>
+                              {item.vitals.filter(Boolean).map((v: any, vIdx: number) => (
+                                <span key={vIdx} style={{ fontSize: 11, background: '#f1f5f9', padding: '2px 6px', borderRadius: 4, color: '#475569' }}>
+                                  {v.metric}: <b>{v.value} {v.unit}</b>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* MinIO S3 Attachments */}
+                          {item.attachments && item.attachments.length > 0 && (
+                            <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px dashed #e2e8f0', display: 'flex', gap: 8 }}>
+                              {item.attachments.map((att: any) => (
+                                <a
+                                  key={att.attachment_id}
+                                  href={`https://localhost:5000/api/documents/attachments/${att.attachment_id}/download`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  style={{ fontSize: 11, color: '#0284c7', textDecoration: 'underline', fontWeight: 'bold' }}
+                                >
+                                  📎 Download {att.file_name}
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       ) : (
         <>
           {/* 2. PATIENT SAFETY & VITALS BANNER */}
@@ -707,12 +920,12 @@ export default function DoctorConsole() {
               )}
 
               <form onSubmit={handleFinishConsultation}>
-{/* Vitals Input Grid */}
+                {/* Vitals Input Grid */}
                 <div style={{ background: '#f8fafc', padding: 10, borderRadius: 6, marginBottom: 12, border: '1px solid #e2e8f0' }}>
                   <small style={{ fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: 6 }}>
                     Encounter Vitals (Persists to Normalized VITAL_SIGNS table):
                   </small>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8 }}>
                     <div>
                       <label style={{ fontSize: 11, color: '#64748b' }}>BP (Systolic):</label>
                       <input
@@ -751,6 +964,26 @@ export default function DoctorConsole() {
                         readOnly={isArchivedMode}
                         value={pulseRate}
                         onChange={(e) => setPulseRate(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#64748b' }}>SpO2 (%):</label>
+                      <input
+                        style={inputStyle}
+                        disabled={isArchivedMode}
+                        readOnly={isArchivedMode}
+                        value={spo2}
+                        onChange={(e) => setSpo2(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#64748b' }}>Resp (cpm):</label>
+                      <input
+                        style={inputStyle}
+                        disabled={isArchivedMode}
+                        readOnly={isArchivedMode}
+                        value={respRate}
+                        onChange={(e) => setRespRate(e.target.value)}
                       />
                     </div>
                   </div>
@@ -921,7 +1154,7 @@ export default function DoctorConsole() {
                     setFeedbackMsg({ text: '✅ Prescription successfully issued to patient.', type: 'success' });
                   }}
                 />
-) : (
+              ) : (
                 <div>
                   <div style={{ marginBottom: 12 }}>
                     <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>

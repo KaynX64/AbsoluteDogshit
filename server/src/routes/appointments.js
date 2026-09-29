@@ -500,6 +500,12 @@ export default function appointmentRouter(io) {
         if (vitals.pulse && !isNaN(Number(vitals.pulse))) {
           vitalEntries.push([emrId, 'pulse', Number(vitals.pulse), 'bpm', doctorUserId]);
         }
+        if (vitals.spo2 && !isNaN(Number(vitals.spo2))) {
+          vitalEntries.push([emrId, 'spo2', Number(vitals.spo2), '%', doctorUserId]);
+        }
+        if (vitals.resp_rate && !isNaN(Number(vitals.resp_rate))) {
+          vitalEntries.push([emrId, 'resp_rate', Number(vitals.resp_rate), 'cpm', doctorUserId]);
+        }
         for (const entry of vitalEntries) {
           await connection.query(
             `INSERT INTO VITAL_SIGNS (emr_id, metric, value, unit, recorded_by) VALUES (?, ?, ?, ?, ?)`,
@@ -882,6 +888,45 @@ export default function appointmentRouter(io) {
     } catch (error) {
       console.error('[Appointments] Error fetching student queue ticket:', error);
       res.status(500).json({ error: 'Failed to retrieve active queue ticket.' });
+    }
+  });
+
+  // 15. GET /api/appointments/patients/search - Global patient directory for EMR lookup
+  router.get('/patients/search', authenticateToken, async (req, res) => {
+    try {
+      const { query } = req.query;
+      if (!query || !query.trim()) return res.json([]);
+
+      const q = `%${query.trim()}%`;
+      const [patients] = await pool.query(
+        `SELECT u.user_id, u.first_name, u.last_name, u.email, u.phone,
+                COALESCE(r.code, 'STUDENT') AS role_code,
+                COALESCE(sp.student_no, st.license_no, fp.position, 'PSU Member') AS identifier_no,
+                COALESCE(sp.course, st.department, fp.department, 'PSU Lingayen') AS affiliation,
+                hp.blood_type, hp.allergies, hp.chronic_conditions, hp.height, hp.weight
+         FROM USERS u
+         LEFT JOIN USER_ROLES ur ON u.user_id = ur.user_id
+         LEFT JOIN ROLES r ON ur.role_id = r.role_id
+         LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+         LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
+         LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
+         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+         WHERE (u.first_name LIKE ? OR u.last_name LIKE ? OR sp.student_no LIKE ? OR u.email LIKE ?)
+           AND u.deleted_at IS NULL
+         LIMIT 8`,
+        [q, q, q, q]
+      );
+
+      const decryptedPatients = patients.map((p) => ({
+        ...p,
+        allergies: decrypt(p.allergies) || 'None',
+        chronic_conditions: decrypt(p.chronic_conditions) || 'None',
+      }));
+
+      res.json(decryptedPatients);
+    } catch (err) {
+      console.error('[Patient Search Error]:', err);
+      res.status(500).json({ error: 'Failed to search patients.' });
     }
   });
 
