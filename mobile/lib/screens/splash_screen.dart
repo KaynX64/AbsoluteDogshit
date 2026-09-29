@@ -7,6 +7,7 @@ import '../config/api_config.dart';
 import 'login_screen.dart';
 import 'patient_portal_screen.dart';
 import 'responder_screen.dart';
+import '../services/emergency_alert_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -41,6 +42,7 @@ class _SplashScreenState extends State<SplashScreen> {
   ).timeout(const Duration(seconds: 3));
 
   if (res.statusCode == 200) {
+    EmergencyAlertService().syncFcmTokenWithBackend();
     _routeUser(jsonDecode(userDataStr));
     return;
   }

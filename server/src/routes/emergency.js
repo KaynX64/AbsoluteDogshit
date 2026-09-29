@@ -4,11 +4,13 @@ import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { decrypt } from '../utils/cryptoVault.js';
 import { requireRoles } from '../middleware/rbac.js';
+import { sendPushToRoles } from '../utils/fcmNotifier.js';
+import { logAudit } from '../utils/auditLogger.js';
 
 export default function emergencyRouter(io) {
   const router = express.Router();
 
-  // 1. POST /api/emergency/sos (Fixed coordinate order for SRID 4326 + Accurate Role & Identification Mapping)
+  // 1. POST /api/emergency/sos - Trigger Campus Emergency SOS
   router.post('/sos', authenticateToken, async (req, res) => {
     try {
       const userId = req.user.user_id;
@@ -18,15 +20,47 @@ export default function emergencyRouter(io) {
         return res.status(400).json({ error: 'Latitude and Longitude are required coordinates.' });
       }
 
-      // In MySQL 8.0 SRID 4326, the axis order is Long then Lat, so we use POINT(longitude, latitude)
-      const [insertResult] = await pool.query(
-      `INSERT INTO EMERGENCY_ALERTS (user_id, location, status, notes)
-      VALUES (?, ST_SRID(POINT(?, ?), 4326), 'triggered', ?)`,
-      [userId, Number(longitude), Number(latitude), notes || 'Emergency SOS pressed']
-      );
+      const lat = Number(latitude);
+      const lng = Number(longitude);
 
-      const alertId = insertResult.insertId;
+      if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return res.status(400).json({ error: 'Invalid geographic coordinates provided.' });
+      }
 
+      const connection = await pool.getConnection();
+
+      let alertId;
+      try {
+        await connection.beginTransaction();
+
+        const [insertResult] = await connection.query(
+          `INSERT INTO EMERGENCY_ALERTS (user_id, location, status, notes)
+           VALUES (?, ST_SRID(POINT(?, ?), 4326), 'triggered', ?)`,
+          [userId, lng, lat, notes || 'Emergency SOS pressed'] //lng (X), lat (Y)
+        );
+
+        alertId = insertResult.insertId;
+
+        // R.A. 10173 Audit Logging
+        await logAudit(connection, {
+          userId,
+          action: 'CREATE',
+          table: 'EMERGENCY_ALERTS',
+          recordId: alertId,
+          oldValue: null,
+          newValue: { latitude: lat, longitude: lng, notes: notes || 'Emergency SOS pressed' },
+          ipAddress: req.ip,
+        });
+
+        await connection.commit();
+      } catch (dbErr) {
+        await connection.rollback();
+        throw dbErr;
+      } finally {
+        connection.release();
+      }
+
+      // Fetch user demographic & health indicators for responder payload
       const [details] = await pool.query(
         `SELECT u.user_id, u.first_name, u.last_name, u.phone, u.email,
                 COALESCE(r.code, 'STUDENT') AS primary_role,
@@ -65,23 +99,32 @@ export default function emergencyRouter(io) {
         patientName: `${patientInfo.first_name} ${patientInfo.last_name}`,
         phone: patientInfo.phone,
         role: patientInfo.primary_role,
-        roleLabel: roleLabel,
+        roleLabel,
         studentNo: patientInfo.identifier_no,
         course: patientInfo.affiliation,
         bloodType: patientInfo.blood_type || 'Unknown',
         allergies: decryptedAllergies,
         chronicConditions: decryptedConditions,
         emergencyContact: `${patientInfo.emergency_contact_name || 'N/A'} (${patientInfo.emergency_contact_phone || 'N/A'})`,
-        latitude: Number(latitude),
-        longitude: Number(longitude),
-        googleMapsUrl: `https://www.google.com/maps?q=${latitude},${longitude}`,
+        latitude: lat,
+        longitude: lng,
+        googleMapsUrl: `https://www.google.com/maps?q=${lat},${lng}`,
         status: 'triggered',
         createdAt: new Date().toISOString(),
       };
 
-      // Broadcast to both privileged responders (room) and all connected clinical banner/dashboard listeners
-      io.to('responders').emit('emergency:new_alert', alertPayload);
-      io.emit('emergency:new_alert', alertPayload);
+      // 1. Dispatch Firebase Cloud Messaging (FCM) background push to responders & medical staff
+      sendPushToRoles(['EMERGENCY_RESPONDER', 'NURSE', 'DOCTOR', 'ADMIN'], {
+        title: `🚨 EMERGENCY SOS: ${alertPayload.patientName}`,
+        body: `Location: ${lat.toFixed(5)}, ${lng.toFixed(5)} | Blood: ${alertPayload.bloodType} | Allergies: ${alertPayload.allergies}`,
+        data: { alertId: String(alertId), type: 'EMERGENCY_SOS' },
+      }).catch((err) => console.error('[FCM SOS Push Error]:', err.message));
+
+      // 2. Broadcast via WebSockets (Socket.IO) to both responder room and clinical consoles
+      if (io) {
+        io.to('responders').emit('emergency:new_alert', alertPayload);
+        io.emit('emergency:new_alert', alertPayload);
+      }
 
       res.status(201).json({
         message: 'Emergency alert dispatched to PSU Clinic and Quick-Response team.',
@@ -93,7 +136,7 @@ export default function emergencyRouter(io) {
     }
   });
 
-  // 2. GET /api/emergency/active
+  // 2. GET /api/emergency/active - Retrieve Active/Dispatched Alerts
   router.get('/active', authenticateToken, requireRoles('EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'), async (req, res) => {
     try {
       const [alerts] = await pool.query(
@@ -124,11 +167,12 @@ export default function emergencyRouter(io) {
 
       res.json(decryptedAlerts);
     } catch (error) {
+      console.error('[Emergency Active Error]:', error);
       res.status(500).json({ error: 'Failed to fetch active alerts.' });
     }
   });
 
-  // 3. PATCH /api/emergency/:alertId/status
+  // 3. PATCH /api/emergency/:alertId/status - Update Incident Status (Acknowledge / Dispatch / Resolve)
   router.patch('/:alertId/status', authenticateToken, requireRoles('EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'), async (req, res) => {
     try {
       const { alertId } = req.params;
@@ -158,10 +202,13 @@ export default function emergencyRouter(io) {
         params
       );
 
-      io.emit('emergency:status_change', { alertId: Number(alertId), status, responderId });
+      if (io) {
+        io.emit('emergency:status_change', { alertId: Number(alertId), status, responderId });
+      }
 
       res.json({ message: `Alert #${alertId} updated to ${status}.` });
     } catch (error) {
+      console.error('[Emergency Status Error]:', error);
       res.status(500).json({ error: 'Failed to update alert status.' });
     }
   });

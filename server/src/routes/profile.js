@@ -155,4 +155,25 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
   }
 });
 
+// POST /api/profile/fcm-token - Register device token for background push
+router.post('/fcm-token', authenticateToken, async (req, res) => {
+  const userId = req.user.user_id;
+  const { fcm_token, device_type = 'android' } = req.body;
+
+  if (!fcm_token) return res.status(400).json({ error: 'fcm_token is required.' });
+
+  try {
+    await pool.query(
+      `INSERT INTO DEVICE_TOKENS (user_id, fcm_token, device_type)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), device_type = VALUES(device_type)`,
+      [userId, fcm_token.trim(), device_type]
+    );
+    console.log(`📱 [FCM] Successfully registered device token for user #${userId} (${device_type})`);
+    res.json({ message: 'Device token registered for push notifications.' });
+  } catch (err) {
+    console.error('[FCM Token Registration Error]:', err);
+    res.status(500).json({ error: 'Failed to save device token.' });
+  }
+});
 export default router;

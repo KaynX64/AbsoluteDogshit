@@ -4,7 +4,8 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../config/api_config.dart';
 import 'patient_portal_screen.dart';
-import 'responder_screen.dart'; // <-- IMPORTED HERE
+import 'responder_screen.dart';
+import '../services/emergency_alert_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -42,6 +43,7 @@ class _LoginScreenState extends State<LoginScreen> {
         // Save BOTH token and user profile into secure storage
         await _storage.write(key: 'jwt_token', value: data['token']);
         await _storage.write(key: 'user_data', value: jsonEncode(data['user']));
+        await EmergencyAlertService().syncFcmTokenWithBackend();
 
         if (!mounted) return;
 
