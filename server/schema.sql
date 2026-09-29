@@ -154,6 +154,7 @@ CREATE TABLE `EMR_RECORDS` (
   `emr_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `patient_user_id` BIGINT NOT NULL,
   `doctor_user_id` BIGINT NOT NULL,
+  `appointment_id` BIGINT NULL,
   `encounter_date` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `chief_complaint` TEXT NOT NULL,
   `diagnosis` TEXT NOT NULL,
@@ -165,7 +166,8 @@ CREATE TABLE `EMR_RECORDS` (
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX `idx_emr_patient_date` (`patient_user_id`, `encounter_date`),
   CONSTRAINT `fk_emr_patient` FOREIGN KEY (`patient_user_id`) REFERENCES `USERS` (`user_id`),
-  CONSTRAINT `fk_emr_doctor` FOREIGN KEY (`doctor_user_id`) REFERENCES `USERS` (`user_id`)
+  CONSTRAINT `fk_emr_doctor` FOREIGN KEY (`doctor_user_id`) REFERENCES `USERS` (`user_id`),
+  CONSTRAINT `fk_emr_appointment` FOREIGN KEY (`appointment_id`) REFERENCES `APPOINTMENTS` (`appointment_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
 CREATE TABLE `VITAL_SIGNS` (
@@ -180,7 +182,6 @@ CREATE TABLE `VITAL_SIGNS` (
   CONSTRAINT `fk_vitals_recorder` FOREIGN KEY (`recorded_by`) REFERENCES `USERS` (`user_id`)
 ) ENGINE=InnoDB;
 
--- Diagnostic lab results & clinical attachments stored via MinIO S3
 CREATE TABLE `EMR_ATTACHMENTS` (
   `attachment_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `emr_id` BIGINT NOT NULL,
@@ -402,7 +403,6 @@ INSERT INTO `USER_ROLES` (`user_id`, `role_id`) VALUES
 INSERT INTO `STUDENT_PROFILES` (`user_id`, `student_no`, `course`, `year_level`) VALUES
 (5, '22-LN-0123', 'BS Information Technology', 3);
 
--- Staff profiles for Admin, Doctor, Nurse, Responder, and Dentist
 INSERT INTO `STAFF_PROFILES` (`user_id`, `license_no`, `specialty`, `department`) VALUES
 (1, 'PSU-IT-ADMIN', 'Systems & Database Administration', 'PSU Management Information Systems'),
 (2, 'PRC-MD-098765', 'General Medicine', 'PSU Lingayen Clinic'),
@@ -410,7 +410,6 @@ INSERT INTO `STAFF_PROFILES` (`user_id`, `license_no`, `specialty`, `department`
 (4, 'PSU-SEC-0042', 'Campus Security & Disaster Quick-Response', 'Campus Safety & Emergency Unit'),
 (6, 'PRC-DDS-045678', 'Dentistry & Oral Health', 'PSU Lingayen Clinic');
 
--- Complete health profiles for all accounts (Admin, Doctor, Nurse, Responder, Student, Dentist)
 INSERT INTO `HEALTH_PROFILES` (`user_id`, `blood_type`, `allergies`, `chronic_conditions`, `emergency_contact_name`, `emergency_contact_phone`, `height`, `weight`, `immunization_history`) VALUES
 (1, 'O+', 'None', 'None', 'Maria Castro', '09171112233', 175.00, 72.00, '["COVID-19 Booster", "Hepatitis B"]'),
 (2, 'A+', 'None', 'Hypertension (Controlled)', 'Elena Mata', '09182223344', 170.00, 68.00, '["COVID-19 Booster", "Influenza 2026", "Hepatitis B"]'),
@@ -435,7 +434,6 @@ INSERT INTO `MEDICINE_BATCHES` (`batch_id`, `medicine_id`, `batch_no`, `manufact
 (2, 2, 'BATCH-NZP-2026B', '2026-02-15', '2027-08-15', 'Unilab Philippines', 150),
 (3, 3, 'BATCH-SLB-2025X', '2025-06-01', '2027-06-01', 'GlaxoSmithKline', 15);
 
--- Pre-seed R.A. 10173 statutory consent for all system users
 INSERT INTO `CONSENT_RECORDS` (`user_id`, `consent_type`, `is_granted`, `ip_address`) VALUES
 (1, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
 (2, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),

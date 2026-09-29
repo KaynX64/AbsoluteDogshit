@@ -2,8 +2,6 @@
   "name": "valetudo-backend",
   "version": "1.0.0",
   "type": "module",
-  "main": "src/index.js",
-  "description": "Backend for Valetudo for doing servers stuff",
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js"
@@ -14,10 +12,12 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.4.0",
     "mysql2": "^3.24.4",
     "nodemailer": "^10.0.10",
+    "redis": "^6.2.1",
     "socket.io": "^4.8.3"
   },
   "devDependencies": {

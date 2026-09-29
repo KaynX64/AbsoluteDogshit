@@ -1,22 +1,31 @@
 // server/src/utils/cryptoVault.js
+import 'dotenv/config'; // Ensures process.env is populated before this module evaluates
 import crypto from 'crypto';
 
-// 32-byte secret key for AES-256
-const MASTER_KEY_RAW = process.env.ENCRYPTION_KEY || 'valetudo_healthlink_aes256_secret_key_32bytes!!';
 const CIPHER_ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12; // 96-bit IV recommended for GCM
 
-// Ensure key is exactly 32 bytes
-const ENCRYPTION_KEY = crypto.createHash('sha256').update(MASTER_KEY_RAW).digest();
+const MASTER_KEY_RAW = process.env.ENCRYPTION_KEY;
+if (!MASTER_KEY_RAW || MASTER_KEY_RAW.length < 32) {
+  throw new Error(
+    '[cryptoVault] ENCRYPTION_KEY is missing or shorter than 32 characters. ' +
+    'Set a unique, random value in server/.env (generate with: openssl rand -hex 32). ' +
+    'Refusing to start with a hard-coded fallback key.'
+  );
+}
+
+// Derive a 32-byte key using scrypt (memory-hard) instead of single SHA-256 (S-04)
+const ENCRYPTION_KEY = crypto.scryptSync(MASTER_KEY_RAW, 'valetudo-healthlink-v1', 32);
 
 /**
  * Encrypts sensitive clinical plain text using AES-256-GCM
  * Output format: enc:v1:<iv_hex>:<tag_hex>:<ciphertext_hex>
  */
 export function encrypt(plainText) {
-  if (plainText === null || plainText === undefined) return plainText;
+  // Fix B-05: return explicit null, never undefined
+  if (plainText === null || plainText === undefined) return null;
   const stringVal = String(plainText);
-  if (!stringVal.trim()) return stringVal;
+  if (!stringVal.trim()) return '';
 
   try {
     const iv = crypto.randomBytes(IV_LENGTH);
@@ -52,6 +61,12 @@ export function decrypt(cipherText) {
     const iv = Buffer.from(parts[2], 'hex');
     const authTag = Buffer.from(parts[3], 'hex');
     const encryptedText = parts[4];
+
+    // S-04: Validate IV and AuthTag lengths to avoid unhandled open failures
+    if (iv.length !== IV_LENGTH || authTag.length !== 16) {
+      console.error('[AES-256 Decryption Error]: malformed envelope');
+      return '[ENCRYPTED PHI - INTEGRITY VERIFICATION FAILED]';
+    }
 
     const decipher = crypto.createDecipheriv(CIPHER_ALGORITHM, ENCRYPTION_KEY, iv);
     decipher.setAuthTag(authTag);
