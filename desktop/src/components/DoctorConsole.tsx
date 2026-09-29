@@ -121,7 +121,6 @@ export default function DoctorConsole() {
       });
       const data = await res.json();
       if (Array.isArray(data)) {
-        // Strict deduplication so each appointment_id renders exactly once
         const uniqueAppointments = Array.from(
           new Map(data.map((item: AppointmentItem) => [item.appointment_id, item])).values()
         );
@@ -174,9 +173,9 @@ export default function DoctorConsole() {
     };
   }, [viewMode]);
 
-  const handleSwitchView = (mode: 'active' | 'scheduled' | 'history' | 'analytics') => {
+  const handleSwitchView = (mode: 'active' | 'scheduled' | 'history' | 'analytics' | 'archive') => {
     setViewMode(mode);
-    if (mode !== 'analytics') {
+    if (mode !== 'analytics' && mode !== 'archive') {
       fetchAppointments(mode, false);
     }
   };
@@ -240,7 +239,7 @@ export default function DoctorConsole() {
     }
   };
 
-const handleFinishConsultation = async (e: React.FormEvent) => {
+  const handleFinishConsultation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedApp) return;
 
@@ -323,7 +322,6 @@ const handleFinishConsultation = async (e: React.FormEvent) => {
         type: 'success',
       });
     } catch (err: any) {
-      // Automatic fallback if server unreachable during fetch
       queueOfflineMutation({
         table_name: 'EMR_RECORDS',
         record_uuid: crypto.randomUUID(),
@@ -438,7 +436,7 @@ const handleFinishConsultation = async (e: React.FormEvent) => {
               .patient-box { margin: 16px 0; padding: 14px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; line-height: 1.6; }
               .body-text { font-size: 14px; line-height: 1.8; margin-top: 18px; }
               .verification-panel { margin-top: 26px; display: flex; align-items: center; gap: 20px; border: 1px solid #99f6e4; background: #f0fdfa; padding: 16px; border-radius: 6px; }
-              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; font-size: 12px; }
+              .footer { margin-top: 40px; display: space-between; align-items: flex-end; font-size: 12px; }
               .sig-line { border-top: 1px solid #000; width: 220px; text-align: center; font-weight: bold; padding-top: 4px; }
             </style>
           </head>
@@ -526,21 +524,23 @@ const handleFinishConsultation = async (e: React.FormEvent) => {
       {/* 1. TOP ROSTER */}
       <div style={{ background: '#ffffff', padding: 16, borderRadius: 8, border: '1px solid #cbd5e1', marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
-          <div>
-            <h3 style={{ margin: 0, color: '#0284c7' }}>
+          <div style={{ minWidth: 280, flex: '1 1 auto' }}>
+            <h3 style={{ margin: 0, color: '#0284c7', fontSize: 17 }}>
               {viewMode === 'active'
                 ? "🩺 My Consultation Queue (Triaged & Assigned to Me)"
                 : viewMode === 'scheduled'
-                ? "📅 My Upcoming Bookings (Awaiting Nurse Intake)"
+                ? "📅 My Upcoming Bookings"
                 : viewMode === 'history'
                 ? '📜 My Consultation History Archive'
+                : viewMode === 'archive'
+                ? '📁 Searchable Patient EMR Directory'
                 : '📊 Epidemiological Analytics & Visual Charts'}
             </h3>
             <small style={{ color: '#64748b' }}>
               {viewMode === 'active'
                 ? 'Patients triaged and awaiting consultation with your department only'
                 : viewMode === 'scheduled'
-                ? 'Bookings scheduled with your practitioner account'
+                ? 'Bookings awaiting clinic nurse triage check-in'
                 : viewMode === 'analytics'
                 ? 'Campus illness trajectories, seasonal spike monitoring & health reports'
                 : 'Completed encounters discharged by your department'}
@@ -548,7 +548,7 @@ const handleFinishConsultation = async (e: React.FormEvent) => {
           </div>
 
           {/* TAB CONTROLS */}
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flexShrink: 0 }}>
             <button
               onClick={() => handleSwitchView('active')}
               style={{
@@ -595,6 +595,21 @@ const handleFinishConsultation = async (e: React.FormEvent) => {
               📜 My History Archive
             </button>
             <button
+              onClick={() => handleSwitchView('archive')}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 4,
+                fontSize: 12,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                border: '1px solid #4f46e5',
+                background: viewMode === 'archive' ? '#4f46e5' : '#ffffff',
+                color: viewMode === 'archive' ? '#ffffff' : '#4f46e5',
+              }}
+            >
+              📁 Patient EMR Archive
+            </button>
+            <button
               onClick={() => handleSwitchView('analytics')}
               style={{
                 padding: '6px 14px',
@@ -609,23 +624,6 @@ const handleFinishConsultation = async (e: React.FormEvent) => {
             >
               📊 Health Analytics
             </button>
-
-          <button
-            onClick={() => handleSwitchView('archive' as any)}
-            style={{
-              padding: '6px 14px',
-              borderRadius: 4,
-              fontSize: 12,
-              fontWeight: 'bold',
-              cursor: 'pointer',
-              border: '1px solid #4f46e5',
-              background: viewMode === 'archive' ? '#4f46e5' : '#ffffff',
-              color: viewMode === 'archive' ? '#ffffff' : '#4f46e5',
-            }}
-          >
-            📁 Patient EMR Archive
-          </button>
-
             <button
               onClick={() => fetchAppointments(viewMode, true)}
               style={{ padding: '6px 10px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
@@ -636,7 +634,7 @@ const handleFinishConsultation = async (e: React.FormEvent) => {
         </div>
 
         {/* Patient card grid */}
-        {viewMode !== 'analytics' && (
+        {viewMode !== 'analytics' && viewMode !== 'archive' && (
           loadingAppointments ? (
             <p style={{ color: '#64748b', fontSize: 13 }}>Loading isolated roster...</p>
           ) : appointments.length === 0 ? (
@@ -693,10 +691,10 @@ const handleFinishConsultation = async (e: React.FormEvent) => {
         )}
       </div>
 
-{viewMode === 'analytics' ? (
+      {viewMode === 'analytics' ? (
         <AnalyticsDashboard />
       ) : viewMode === 'archive' ? (
-        /* ── ⬇️ PASTE YOUR CODE RIGHT HERE ────────────────────────────── */
+        /* Patient EMR Directory View */
         <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: 8, padding: 18, marginTop: 10 }}>
           <h4 style={{ margin: '0 0 10px 0', color: '#4f46e5' }}>📁 Searchable Patient EMR Directory & Chronological Timeline</h4>
           <form onSubmit={handleSearchPatientDirectory} style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
@@ -816,7 +814,6 @@ const handleFinishConsultation = async (e: React.FormEvent) => {
             </div>
           </div>
         </div>
-        /* ─────────────────────────────────────────────────────────────── */
       ) : (
         <>
           {/* 2. PATIENT SAFETY & VITALS BANNER */}
@@ -924,34 +921,70 @@ const handleFinishConsultation = async (e: React.FormEvent) => {
 
               <form onSubmit={handleFinishConsultation}>
                 {/* Vitals Input Grid */}
-                  <div style={{ background: '#f8fafc', padding: 10, borderRadius: 6, marginBottom: 12, border: '1px solid #e2e8f0' }}>
+                <div style={{ background: '#f8fafc', padding: 10, borderRadius: 6, marginBottom: 12, border: '1px solid #e2e8f0' }}>
                   <small style={{ fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: 6 }}>
                     Encounter Vitals (Persists to Normalized VITAL_SIGNS table):
                   </small>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8 }}>
                     <div>
                       <label style={{ fontSize: 11, color: '#64748b' }}>BP (Systolic):</label>
-                      <input style={inputStyle} disabled={isArchivedMode} value={bpSystolic} onChange={(e) => setBpSystolic(e.target.value)} />
+                      <input
+                        style={inputStyle}
+                        disabled={isArchivedMode}
+                        readOnly={isArchivedMode}
+                        value={bpSystolic}
+                        onChange={(e) => setBpSystolic(e.target.value)}
+                      />
                     </div>
                     <div>
                       <label style={{ fontSize: 11, color: '#64748b' }}>BP (Diastolic):</label>
-                      <input style={inputStyle} disabled={isArchivedMode} value={bpDiastolic} onChange={(e) => setBpDiastolic(e.target.value)} />
+                      <input
+                        style={inputStyle}
+                        disabled={isArchivedMode}
+                        readOnly={isArchivedMode}
+                        value={bpDiastolic}
+                        onChange={(e) => setBpDiastolic(e.target.value)}
+                      />
                     </div>
                     <div>
                       <label style={{ fontSize: 11, color: '#64748b' }}>Temp (°C):</label>
-                      <input style={inputStyle} disabled={isArchivedMode} value={temperature} onChange={(e) => setTemperature(e.target.value)} />
+                      <input
+                        style={inputStyle}
+                        disabled={isArchivedMode}
+                        readOnly={isArchivedMode}
+                        value={temperature}
+                        onChange={(e) => setTemperature(e.target.value)}
+                      />
                     </div>
                     <div>
                       <label style={{ fontSize: 11, color: '#64748b' }}>Pulse (bpm):</label>
-                      <input style={inputStyle} disabled={isArchivedMode} value={pulseRate} onChange={(e) => setPulseRate(e.target.value)} />
+                      <input
+                        style={inputStyle}
+                        disabled={isArchivedMode}
+                        readOnly={isArchivedMode}
+                        value={pulseRate}
+                        onChange={(e) => setPulseRate(e.target.value)}
+                      />
                     </div>
                     <div>
                       <label style={{ fontSize: 11, color: '#64748b' }}>SpO2 (%):</label>
-                      <input style={inputStyle} disabled={isArchivedMode} value={spo2} onChange={(e) => setSpo2(e.target.value)} />
+                      <input
+                        style={inputStyle}
+                        disabled={isArchivedMode}
+                        readOnly={isArchivedMode}
+                        value={spo2}
+                        onChange={(e) => setSpo2(e.target.value)}
+                      />
                     </div>
                     <div>
                       <label style={{ fontSize: 11, color: '#64748b' }}>Resp (cpm):</label>
-                      <input style={inputStyle} disabled={isArchivedMode} value={respRate} onChange={(e) => setRespRate(e.target.value)} />
+                      <input
+                        style={inputStyle}
+                        disabled={isArchivedMode}
+                        readOnly={isArchivedMode}
+                        value={respRate}
+                        onChange={(e) => setRespRate(e.target.value)}
+                      />
                     </div>
                   </div>
                 </div>
@@ -963,6 +996,7 @@ const handleFinishConsultation = async (e: React.FormEvent) => {
                   <textarea
                     rows={2}
                     disabled={isArchivedMode}
+                    readOnly={isArchivedMode}
                     style={{ ...inputStyle, resize: 'vertical' }}
                     value={chiefComplaint}
                     onChange={(e) => setChiefComplaint(e.target.value)}
@@ -977,6 +1011,7 @@ const handleFinishConsultation = async (e: React.FormEvent) => {
                   <input
                     style={inputStyle}
                     disabled={isArchivedMode}
+                    readOnly={isArchivedMode}
                     value={diagnosis}
                     placeholder="e.g. Fit for OJT / Acute Viral Pharyngitis"
                     onChange={(e) => setDiagnosis(e.target.value)}
@@ -991,6 +1026,7 @@ const handleFinishConsultation = async (e: React.FormEvent) => {
                   <textarea
                     rows={3}
                     disabled={isArchivedMode}
+                    readOnly={isArchivedMode}
                     style={{ ...inputStyle, resize: 'vertical' }}
                     value={treatmentPlan}
                     placeholder="Prescribed medicine regimen, rest recommendations..."
@@ -1126,6 +1162,7 @@ const handleFinishConsultation = async (e: React.FormEvent) => {
                     </label>
                     <select
                       value={clearancePurpose}
+                      disabled={isArchivedMode}
                       onChange={(e) => setClearancePurpose(e.target.value)}
                       style={inputStyle}
                     >
@@ -1141,45 +1178,49 @@ const handleFinishConsultation = async (e: React.FormEvent) => {
                       <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155' }}>
                         Validity / Expiration Date:
                       </label>
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const d = new Date();
-                            d.setDate(d.getDate() + 30);
-                            setClearanceExpiryDate(d.toISOString().split('T')[0]);
-                          }}
-                          style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
-                        >
-                          +30 Days
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const d = new Date();
-                            d.setMonth(d.getMonth() + 6);
-                            setClearanceExpiryDate(d.toISOString().split('T')[0]);
-                          }}
-                          style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
-                        >
-                          +6 Months
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const d = new Date();
-                            d.setFullYear(d.getFullYear() + 1);
-                            setClearanceExpiryDate(d.toISOString().split('T')[0]);
-                          }}
-                          style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
-                        >
-                          +1 Year
-                        </button>
-                      </div>
+                      {!isArchivedMode && (
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const d = new Date();
+                              d.setDate(d.getDate() + 30);
+                              setClearanceExpiryDate(d.toISOString().split('T')[0]);
+                            }}
+                            style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
+                          >
+                            +30 Days
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const d = new Date();
+                              d.setMonth(d.getMonth() + 6);
+                              setClearanceExpiryDate(d.toISOString().split('T')[0]);
+                            }}
+                            style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
+                          >
+                            +6 Months
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const d = new Date();
+                              d.setFullYear(d.getFullYear() + 1);
+                              setClearanceExpiryDate(d.toISOString().split('T')[0]);
+                            }}
+                            style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
+                          >
+                            +1 Year
+                          </button>
+                        </div>
+                      )}
                     </div>
                     <input
                       type="date"
                       value={clearanceExpiryDate}
+                      disabled={isArchivedMode}
+                      readOnly={isArchivedMode}
                       onChange={(e) => setClearanceExpiryDate(e.target.value)}
                       style={inputStyle}
                       required
@@ -1193,6 +1234,8 @@ const handleFinishConsultation = async (e: React.FormEvent) => {
                     <textarea
                       rows={4}
                       value={clearanceRemarks}
+                      disabled={isArchivedMode}
+                      readOnly={isArchivedMode}
                       onChange={(e) => setClearanceRemarks(e.target.value)}
                       style={{ ...inputStyle, resize: 'vertical' }}
                     />
@@ -1201,23 +1244,27 @@ const handleFinishConsultation = async (e: React.FormEvent) => {
                   <button
                     type="button"
                     onClick={handlePrintClearance}
-                    disabled={!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled'}
+                    disabled={!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled' || isArchivedMode}
                     style={{
                       width: '100%',
                       padding: 10,
-                      background: (!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled') ? '#94a3b8' : '#0284c7',
+                      background: (!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled' || isArchivedMode) ? '#94a3b8' : '#0284c7',
                       color: '#fff',
                       border: 'none',
                       borderRadius: 6,
-                      cursor: (!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled') ? 'not-allowed' : 'pointer',
+                      cursor: (!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled' || isArchivedMode) ? 'not-allowed' : 'pointer',
                       fontWeight: 'bold',
                       fontSize: 14,
                     }}
                   >
-                    {isIssuingClearance ? 'Signing & Spooling...' : '🖨️ Issue, Sign & Print Clearance'}
+                    {isArchivedMode
+                      ? '🔒 Clearance Already Archived'
+                      : isIssuingClearance
+                      ? 'Signing & Spooling...'
+                      : '🖨️ Issue, Sign & Print Clearance'}
                   </button>
                 </div>
-              )}
+              )}  
             </section>
           </div>
         </>

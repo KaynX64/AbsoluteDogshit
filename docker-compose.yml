@@ -15,7 +15,7 @@ services:
   # 2. Redis Live Queue Cache
   redis:
     image: redis:7-alpine
-    container_name: valetudo-redis
+    container_name: valetudo-redis  
     restart: unless-stopped
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}"] # S-06: require auth
     ports:
