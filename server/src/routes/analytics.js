@@ -17,42 +17,31 @@ router.get('/summary', async (req, res) => {
       'SELECT COUNT(*) as total FROM APPOINTMENTS WHERE deleted_at IS NULL'
     );
 
-    // 2. Active Emergencies
+    // 2. Total Enrolled Students
+    const [studentCount] = await pool.query(
+      `SELECT COUNT(DISTINCT sp.user_id) as total_students
+       FROM STUDENT_PROFILES sp
+       JOIN USERS u ON sp.user_id = u.user_id
+       WHERE u.is_active = TRUE AND u.deleted_at IS NULL`
+    );
+
+    // 3. Active Emergencies & Average Response Time
     const [emergencies] = await pool.query(
-      `SELECT COUNT(*) as active, 
+      `SELECT COUNT(CASE WHEN status IN ('triggered', 'acknowledged', 'dispatched') THEN 1 END) as active,
               COALESCE(AVG(response_time_seconds), 0) as avgResponseSeconds 
        FROM EMERGENCY_ALERTS`
     );
 
-    // 3. Top Diagnoses (In-Memory AES-256 Decrypted Aggregation)
-    const [allEmrs] = await pool.query(
-      `SELECT diagnosis FROM EMR_RECORDS WHERE diagnosis IS NOT NULL AND diagnosis != '' AND deleted_at IS NULL`
-    );
-
-    const diagCountMap = {};
-    for (const row of allEmrs) {
-      const plainDiag = decrypt(row.diagnosis) || 'General Health Check';
-      diagCountMap[plainDiag] = (diagCountMap[plainDiag] || 0) + 1;
-    }
-
-    const topDiagnoses = Object.entries(diagCountMap)
-      .map(([diagnosis, count]) => ({ diagnosis, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 5);
-
-    // 4. Consultation Volume per Department
-    const [deptBreakdown] = await pool.query(
-      `SELECT department, COUNT(*) as consultations_count
-       FROM (
-         SELECT COALESCE(sp.course, fp.department, 'General Walk-in') AS department
-         FROM APPOINTMENTS a
-         LEFT JOIN STUDENT_PROFILES sp ON a.patient_user_id = sp.user_id
-         LEFT JOIN FACULTY_PROFILES fp ON a.patient_user_id = fp.user_id
-         WHERE a.status = 'completed' AND a.deleted_at IS NULL
-       ) AS dept_sub
-       GROUP BY department
-       ORDER BY consultations_count DESC
-       LIMIT 6`
+    // 4. Role Distribution (Headcount per role)
+    const [roleDistribution] = await pool.query(
+      `SELECT r.code AS role_code, 
+              r.name AS role_name, 
+              COUNT(u.user_id) AS count
+       FROM ROLES r
+       LEFT JOIN USER_ROLES ur ON r.role_id = ur.role_id
+       LEFT JOIN USERS u ON ur.user_id = u.user_id AND u.is_active = TRUE AND u.deleted_at IS NULL
+       GROUP BY r.role_id, r.code, r.name
+       ORDER BY count DESC`
     );
 
     // 5. 14-Day Consultation Timeline
@@ -82,7 +71,65 @@ router.get('/summary', async (req, res) => {
       });
     }
 
-    // 6. Flu / Respiratory Surveillance (Decrypted in-memory calculation)
+    // 6. 14-Day Emergency SOS Incidents Timeline
+    const [dailyEmergencyTimeline] = await pool.query(
+      `SELECT date_key, label, COUNT(*) as count
+       FROM (
+         SELECT DATE_FORMAT(created_at, '%Y-%m-%d') as date_key,
+                DATE_FORMAT(created_at, '%b %d') as label
+         FROM EMERGENCY_ALERTS
+         WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+       ) AS em_sub
+       GROUP BY date_key, label
+       ORDER BY date_key ASC`
+    );
+
+    const emergencyTimelineMap = new Map(dailyEmergencyTimeline.map((item) => [item.date_key, item.count]));
+    const emergencyTimeSeries = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateKey = d.toISOString().split('T')[0];
+      const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      emergencyTimeSeries.push({
+        date: dateKey,
+        label,
+        count: emergencyTimelineMap.get(dateKey) || 0,
+      });
+    }
+
+    // 7. Top Diagnoses (In-Memory AES-256 Decrypted Aggregation)
+    const [allEmrs] = await pool.query(
+      `SELECT diagnosis FROM EMR_RECORDS WHERE diagnosis IS NOT NULL AND diagnosis != '' AND deleted_at IS NULL`
+    );
+
+    const diagCountMap = {};
+    for (const row of allEmrs) {
+      const plainDiag = decrypt(row.diagnosis) || 'General Health Check';
+      diagCountMap[plainDiag] = (diagCountMap[plainDiag] || 0) + 1;
+    }
+
+    const topDiagnoses = Object.entries(diagCountMap)
+      .map(([diagnosis, count]) => ({ diagnosis, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    // 8. Consultation Volume per Department
+    const [deptBreakdown] = await pool.query(
+      `SELECT department, COUNT(*) as consultations_count
+       FROM (
+         SELECT COALESCE(sp.course, fp.department, 'General Walk-in') AS department
+         FROM APPOINTMENTS a
+         LEFT JOIN STUDENT_PROFILES sp ON a.patient_user_id = sp.user_id
+         LEFT JOIN FACULTY_PROFILES fp ON a.patient_user_id = fp.user_id
+         WHERE a.status = 'completed' AND a.deleted_at IS NULL
+       ) AS dept_sub
+       GROUP BY department
+       ORDER BY consultations_count DESC
+       LIMIT 6`
+    );
+
+    // 9. Flu / Respiratory Surveillance
     const [fluEmrs] = await pool.query(
       `SELECT diagnosis, encounter_date FROM EMR_RECORDS 
        WHERE encounter_date >= DATE_SUB(NOW(), INTERVAL 14 DAY) AND deleted_at IS NULL`
@@ -113,7 +160,7 @@ router.get('/summary', async (req, res) => {
       }
     }
 
-    // 7. High-Risk Student Groups (Decrypted in-memory calculation)
+    // 10. High-Risk Student Groups
     const [riskProfiles] = await pool.query(
       `SELECT chronic_conditions, allergies FROM HEALTH_PROFILES WHERE deleted_at IS NULL`
     );
@@ -135,7 +182,7 @@ router.get('/summary', async (req, res) => {
       }
     }
 
-    // 8. Low Stock & Near Expiry Pharmacy Batches
+    // 11. Low Stock & Near Expiry Pharmacy Batches
     const [lowStockMeds] = await pool.query(
       `SELECT b.batch_id, m.name, m.generic_name, b.batch_no, b.quantity_on_hand, m.reorder_level,
               DATE_FORMAT(b.expiry_date, '%Y-%m-%d') as expiry_date,
@@ -148,9 +195,12 @@ router.get('/summary', async (req, res) => {
     );
 
     res.json({
-      totalConsultations: consultations[0].total,
-      emergencyMetrics: emergencies[0],
+      totalConsultations: consultations[0]?.total || 0,
+      totalStudents: studentCount[0]?.total_students || 0,
+      emergencyMetrics: emergencies[0] || { active: 0, avgResponseSeconds: 0 },
+      roleDistribution,
       timeSeries,
+      emergencyTimeSeries,
       topDiagnoses: topDiagnoses.length > 0 ? topDiagnoses : [{ diagnosis: 'General Health Check', count: 1 }],
       deptBreakdown: deptBreakdown.length > 0 ? deptBreakdown : [{ department: 'BS Information Technology', consultations_count: 1 }],
       fluStats: { cases_past_7_days, cases_prev_7_days },
@@ -190,7 +240,7 @@ router.get('/by-department', async (req, res) => {
   }
 });
 
-// 3. GET /api/analytics/export/csv (Decrypted for Human Readability)
+// 3. GET /api/analytics/export/csv
 router.get('/export/csv', async (req, res) => {
   try {
     const [allEmrs] = await pool.query(
@@ -221,6 +271,15 @@ router.get('/export/csv', async (req, res) => {
        ORDER BY count DESC`
     );
 
+    const [roles] = await pool.query(
+      `SELECT r.name, COUNT(u.user_id) as count
+       FROM ROLES r
+       LEFT JOIN USER_ROLES ur ON r.role_id = ur.role_id
+       LEFT JOIN USERS u ON ur.user_id = u.user_id AND u.is_active = TRUE AND u.deleted_at IS NULL
+       GROUP BY r.role_id, r.name
+       ORDER BY count DESC`
+    );
+
     const [inventory] = await pool.query(
       `SELECT m.name, b.batch_no, b.quantity_on_hand, b.expiry_date 
        FROM MEDICINE_BATCHES b 
@@ -232,21 +291,28 @@ router.get('/export/csv', async (req, res) => {
     csv += 'PANGASINAN STATE UNIVERSITY - INFIRMARY HEALTH ANALYTICS REPORT\n';
     csv += `Exported On,${new Date().toLocaleString()}\n\n`;
 
-    csv += 'SECTION 1: TOP CLINICAL DIAGNOSES\n';
+    csv += 'SECTION 1: CAMPUS ROLES & USER HEADCOUNT\n';
+    csv += 'Role Designation,Active Users\n';
+    roles.forEach((r) => {
+      csv += `"${r.name}",${r.count}\n`;
+    });
+    csv += '\n';
+
+    csv += 'SECTION 2: TOP CLINICAL DIAGNOSES\n';
     csv += 'Diagnosis,Cases Recorded\n';
     topDiagnoses.forEach((d) => {
       csv += `"${d.diagnosis}",${d.count}\n`;
     });
     csv += '\n';
 
-    csv += 'SECTION 2: CONSULTATION VOLUME BY DEPARTMENT / COURSE\n';
+    csv += 'SECTION 3: CONSULTATION VOLUME BY DEPARTMENT / COURSE\n';
     csv += 'Department / Course,Completed Consultations\n';
     deptBreakdown.forEach((d) => {
       csv += `"${d.department}",${d.count}\n`;
     });
     csv += '\n';
 
-    csv += 'SECTION 3: PHARMACY INVENTORY & EXPIRY STATUS\n';
+    csv += 'SECTION 4: PHARMACY INVENTORY & EXPIRY STATUS\n';
     csv += 'Medicine Name,Batch Number,Stock on Hand,Expiry Date\n';
     inventory.forEach((i) => {
       csv += `"${i.name}","${i.batch_no}",${i.quantity_on_hand},"${new Date(i.expiry_date).toISOString().split('T')[0]}"\n`;

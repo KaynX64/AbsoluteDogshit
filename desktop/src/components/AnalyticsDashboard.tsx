@@ -17,10 +17,19 @@ interface DeptItem {
   consultations_count: number;
 }
 
+interface RoleItem {
+  role_code: string;
+  role_name: string;
+  count: number;
+}
+
 interface AnalyticsData {
   totalConsultations: number;
+  totalStudents: number;
   emergencyMetrics: { active: number; avgResponseSeconds: number };
+  roleDistribution: RoleItem[];
   timeSeries: TimePoint[];
+  emergencyTimeSeries: TimePoint[];
   topDiagnoses: DiagnosisItem[];
   deptBreakdown: DeptItem[];
   fluStats: { cases_past_7_days: number; cases_prev_7_days: number };
@@ -44,13 +53,23 @@ interface AnalyticsData {
 }
 
 // =========================================================
-// 1. FULL-WIDTH SVG LINE CHART (Consultation Trajectory)
+// 1. REUSABLE FULL-WIDTH SVG LINE CHART (Configurable Colors)
 // =========================================================
-function SvgLineChart({ data }: { data: TimePoint[] }) {
+function SvgLineChart({
+  data,
+  themeColor = '#0f766e',
+  gradId = 'lineGrad',
+  emptyMessage = 'No data recorded yet.',
+}: {
+  data: TimePoint[];
+  themeColor?: string;
+  gradId?: string;
+  emptyMessage?: string;
+}) {
   if (!data || data.length === 0) {
     return (
       <div style={{ height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
-        No timeline data recorded yet.
+        {emptyMessage}
       </div>
     );
   }
@@ -62,7 +81,7 @@ function SvgLineChart({ data }: { data: TimePoint[] }) {
   const paddingBottom = 32;
 
   const maxCount = Math.max(...data.map((d) => d.count), 1);
-  const maxVal = Math.ceil(maxCount * 1.35); // 35% headroom so highest point never touches top edge
+  const maxVal = Math.ceil(maxCount * 1.35);
   const chartW = width - paddingX * 2;
   const chartH = height - paddingTop - paddingBottom;
 
@@ -78,13 +97,13 @@ function SvgLineChart({ data }: { data: TimePoint[] }) {
   return (
     <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto', maxHeight: 240, overflow: 'visible' }}>
       <defs>
-        <linearGradient id="lineGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#0f766e" stopOpacity="0.30" />
-          <stop offset="100%" stopColor="#0f766e" stopOpacity="0.0" />
+        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={themeColor} stopOpacity="0.30" />
+          <stop offset="100%" stopColor={themeColor} stopOpacity="0.0" />
         </linearGradient>
       </defs>
 
-      {/* Subtle Horizontal Guidelines */}
+      {/* Horizontal Guidelines */}
       {[0, 0.5, 1].map((ratio, i) => {
         const y = paddingTop + (1 - ratio) * chartH;
         const val = Math.round(ratio * maxVal);
@@ -98,16 +117,16 @@ function SvgLineChart({ data }: { data: TimePoint[] }) {
         );
       })}
 
-      {/* Shaded Area & Trajectory Line */}
-      <path d={areaD} fill="url(#lineGrad)" />
-      <path d={pathD} fill="none" stroke="#0f766e" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+      {/* Shaded Area & Line */}
+      <path d={areaD} fill={`url(#${gradId})`} />
+      <path d={pathD} fill="none" stroke={themeColor} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
 
       {/* Nodes and Labels */}
       {points.map((p, i) => (
         <g key={i}>
-          <circle cx={p.x} cy={p.y} r="5" fill="#ffffff" stroke="#0f766e" strokeWidth="2.5" />
+          <circle cx={p.x} cy={p.y} r="5" fill="#ffffff" stroke={themeColor} strokeWidth="2.5" />
           {p.count > 0 && (
-            <text x={p.x} y={p.y - 9} textAnchor="middle" fontSize="11" fontWeight="bold" fill="#0f766e">
+            <text x={p.x} y={p.y - 9} textAnchor="middle" fontSize="11" fontWeight="bold" fill={themeColor}>
               {p.count}
             </text>
           )}
@@ -121,7 +140,7 @@ function SvgLineChart({ data }: { data: TimePoint[] }) {
 }
 
 // =========================================================
-// 2. FULL-WIDTH VERTICAL BAR CHART (Top Diagnoses)
+// 2. VERTICAL BAR CHART (Top Diagnoses)
 // =========================================================
 function SvgVerticalBarChart({ data }: { data: DiagnosisItem[] }) {
   if (!data || data.length === 0) {
@@ -134,11 +153,10 @@ function SvgVerticalBarChart({ data }: { data: DiagnosisItem[] }) {
 
   const width = 900;
   const height = 250;
-  // Left padding is wide (90px) so rotated text for bar #1 is never clipped by the edge
   const padLeft = 95;
   const padRight = 45;
   const padTop = 35;
-  const padBottom = 75; // Plenty of headroom for rotated labels
+  const padBottom = 75;
 
   const maxCount = Math.max(...data.map((d) => d.count), 1);
   const maxVal = Math.ceil(maxCount * 1.3);
@@ -149,7 +167,6 @@ function SvgVerticalBarChart({ data }: { data: DiagnosisItem[] }) {
 
   return (
     <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto', minHeight: 220, overflow: 'visible' }}>
-      {/* Grid Lines */}
       {[0, 0.5, 1].map((ratio, i) => {
         const y = padTop + chartH * (1 - ratio);
         const val = Math.round(ratio * maxVal);
@@ -163,7 +180,6 @@ function SvgVerticalBarChart({ data }: { data: DiagnosisItem[] }) {
         );
       })}
 
-      {/* Base axis */}
       <line x1={padLeft} y1={height - padBottom} x2={width - padRight} y2={height - padBottom} stroke="#cbd5e1" strokeWidth="1.5" />
 
       {data.map((item, idx) => {
@@ -173,15 +189,10 @@ function SvgVerticalBarChart({ data }: { data: DiagnosisItem[] }) {
 
         return (
           <g key={idx}>
-            {/* Blue Rounded Bar */}
             <rect x={x} y={y} width={barWidth} height={bHeight} rx="6" fill="#0284c7" />
-
-            {/* Value on Top */}
             <text x={x + barWidth / 2} y={y - 8} textAnchor="middle" fontSize="12" fontWeight="bold" fill="#0369a1">
               {item.count}
             </text>
-
-            {/* Rotated Diagnosis Label - Now has plenty of left margin */}
             <text
               x={x + barWidth / 2}
               y={height - padBottom + 16}
@@ -201,7 +212,7 @@ function SvgVerticalBarChart({ data }: { data: DiagnosisItem[] }) {
 }
 
 // =========================================================
-// 3. FULL-WIDTH HORIZONTAL BAR CHART (Visits by Department)
+// 3. HORIZONTAL BAR CHART (Visits by Department)
 // =========================================================
 function SvgHorizontalBarChart({ data }: { data: DeptItem[] }) {
   if (!data || data.length === 0) {
@@ -212,12 +223,11 @@ function SvgHorizontalBarChart({ data }: { data: DeptItem[] }) {
     );
   }
 
-  // Adaptive Height: Scales cleanly with number of rows so 1 item looks neat, not empty
   const rowHeight = 44;
   const padY = 20;
   const height = Math.max(data.length * rowHeight + padY * 2, 110);
   const width = 900;
-  const padLeft = 240; // Room for full "BS Information Technology" with zero clipping
+  const padLeft = 240;
   const padRight = 60;
   const maxCount = Math.max(...data.map((d) => d.consultations_count), 1);
   const maxVal = Math.ceil(maxCount * 1.2);
@@ -235,15 +245,11 @@ function SvgHorizontalBarChart({ data }: { data: DeptItem[] }) {
 
         return (
           <g key={idx}>
-            {/* Full Department / Course Name */}
             <text x={padLeft - 14} y={y + 15} textAnchor="end" fontSize="12" fontWeight="600" fill="#334155">
               {d.department}
             </text>
-            {/* Background Track */}
             <rect x={padLeft} y={y} width={chartW} height={barThickness} rx="5" fill="#f1f5f9" />
-            {/* Progress Bar Fill */}
             <rect x={padLeft} y={y} width={bWidth} height={barThickness} rx="5" fill="#0f766e" />
-            {/* Count Tag */}
             <text x={padLeft + bWidth + 10} y={y + 16} fontSize="12" fontWeight="bold" fill="#0f766e">
               {d.consultations_count} visits
             </text>
@@ -317,6 +323,27 @@ export default function AnalyticsDashboard() {
 
   const isFluSpike = (data.fluStats?.cases_past_7_days || 0) > (data.fluStats?.cases_prev_7_days || 0);
 
+  const getRoleBadgeStyle = (code: string) => {
+    switch (code) {
+      case 'STUDENT':
+        return { bg: '#e0f2fe', text: '#0369a1', icon: '🎓' };
+      case 'FACULTY':
+        return { bg: '#fff7ed', text: '#c2410c', icon: '🏫' };
+      case 'DOCTOR':
+        return { bg: '#f0fdf4', text: '#15803d', icon: '🩺' };
+      case 'DENTIST':
+        return { bg: '#ecfeff', text: '#0e7490', icon: '🦷' };
+      case 'NURSE':
+        return { bg: '#f0fdfa', text: '#0f766e', icon: '👩‍⚕️' };
+      case 'EMERGENCY_RESPONDER':
+        return { bg: '#fee2e2', text: '#b91c1c', icon: '🚨' };
+      case 'ADMIN':
+        return { bg: '#f3e8ff', text: '#7e22ce', icon: '⚙️' };
+      default:
+        return { bg: '#f1f5f9', text: '#475569', icon: '👤' };
+    }
+  };
+
   return (
     <div
       id="analytics-report-area"
@@ -367,7 +394,7 @@ export default function AnalyticsDashboard() {
       <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h3 style={{ margin: 0, color: '#0f766e', fontSize: 20 }}>📊 Health Analytics & Epidemic Reporting</h3>
-          <small style={{ color: '#64748b' }}>Campus illness monitoring, 14-day consultation trajectories & departmental surveillance</small>
+          <small style={{ color: '#64748b' }}>Campus illness monitoring, emergency trajectories & population metrics</small>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
@@ -388,6 +415,45 @@ export default function AnalyticsDashboard() {
           >
             🖨️ Export to PDF
           </button>
+        </div>
+      </div>
+
+      {/* EXECUTIVE SUMMARY KPI CARDS */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 20 }}>
+        {/* Metric 1: Students */}
+        <div style={{ padding: 14, background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 'bold', color: '#0f766e' }}>ENROLLED STUDENTS</span>
+          <div style={{ fontSize: 24, fontWeight: 'bold', color: '#134e4a', margin: '4px 0' }}>
+            🎓 {data.totalStudents}
+          </div>
+          <small style={{ color: '#64748b' }}>Verified student profiles</small>
+        </div>
+
+        {/* Metric 2: Consultations */}
+        <div style={{ padding: 14, background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 'bold', color: '#0369a1' }}>TOTAL CONSULTATIONS</span>
+          <div style={{ fontSize: 24, fontWeight: 'bold', color: '#0c4a6e', margin: '4px 0' }}>
+            🩺 {data.totalConsultations}
+          </div>
+          <small style={{ color: '#64748b' }}>All-time encounters logged</small>
+        </div>
+
+        {/* Metric 3: Active SOS */}
+        <div style={{ padding: 14, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 'bold', color: '#b91c1c' }}>ACTIVE EMERGENCIES</span>
+          <div style={{ fontSize: 24, fontWeight: 'bold', color: '#991b1b', margin: '4px 0' }}>
+            🚨 {data.emergencyMetrics?.active || 0}
+          </div>
+          <small style={{ color: '#64748b' }}>Pending / In-dispatch triage</small>
+        </div>
+
+        {/* Metric 4: Avg Response Time */}
+        <div style={{ padding: 14, background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 'bold', color: '#6d28d9' }}>AVG RESPONSE TIME</span>
+          <div style={{ fontSize: 24, fontWeight: 'bold', color: '#4c1d95', margin: '4px 0' }}>
+            ⚡ {Math.round(data.emergencyMetrics?.avgResponseSeconds || 0)}s
+          </div>
+          <small style={{ color: '#64748b' }}>Trigger to resolution average</small>
         </div>
       </div>
 
@@ -418,7 +484,48 @@ export default function AnalyticsDashboard() {
       </div>
 
       {/* ========================================================= */}
-      {/* 1. FULL-WIDTH CARD: 14-DAY TIMELINE (LINE GRAPH)          */}
+      {/* 1. CAMPUS ROLES & USER HEADCOUNT BREAKDOWN                */}
+      {/* ========================================================= */}
+      <div style={{ padding: 18, border: '1px solid #e2e8f0', borderRadius: 8, background: '#ffffff', marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div>
+            <h4 style={{ margin: 0, color: '#1e293b', fontSize: 15 }}>👥 Campus Population & Headcount by Role</h4>
+            <small style={{ color: '#64748b' }}>Distribution of authorized users across all 7 platform RBAC roles</small>
+          </div>
+          <span style={{ fontSize: 12, fontWeight: 'bold', color: '#475569' }}>
+            Total Registered: {data.roleDistribution?.reduce((acc, r) => acc + Number(r.count), 0) || 0}
+          </span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
+          {data.roleDistribution?.map((role) => {
+            const badge = getRoleBadgeStyle(role.role_code);
+            return (
+              <div
+                key={role.role_code}
+                style={{
+                  padding: 12,
+                  borderRadius: 8,
+                  background: badge.bg,
+                  border: `1px solid ${badge.text}33`,
+                  textAlign: 'center',
+                }}
+              >
+                <div style={{ fontSize: 20 }}>{badge.icon}</div>
+                <div style={{ fontSize: 18, fontWeight: 'bold', color: badge.text, marginTop: 4 }}>
+                  {role.count}
+                </div>
+                <div style={{ fontSize: 11, fontWeight: '600', color: badge.text }}>
+                  {role.role_name}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ========================================================= */}
+      {/* 2. 14-DAY CONSULTATION TIMELINE (LINE GRAPH - TEAL)        */}
       {/* ========================================================= */}
       <div style={{ padding: 18, border: '1px solid #e2e8f0', borderRadius: 8, background: '#ffffff', marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -430,11 +537,32 @@ export default function AnalyticsDashboard() {
             Total Consultations: {data.totalConsultations}
           </span>
         </div>
-        <SvgLineChart data={data.timeSeries || []} />
+        <SvgLineChart data={data.timeSeries || []} themeColor="#0f766e" gradId="consultationGrad" />
       </div>
 
       {/* ========================================================= */}
-      {/* 2. FULL-WIDTH CARD: TOP DIAGNOSES (VERTICAL BAR GRAPH)    */}
+      {/* 3. 14-DAY EMERGENCY SOS INCIDENTS (LINE GRAPH - RED)      */}
+      {/* ========================================================= */}
+      <div style={{ padding: 18, border: '1px solid #e2e8f0', borderRadius: 8, background: '#ffffff', marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <div>
+            <h4 style={{ margin: 0, color: '#b91c1c', fontSize: 15 }}>🚨 14-Day Campus Emergency Incidents Trajectory (Line Graph)</h4>
+            <small style={{ color: '#64748b' }}>Daily SOS panic triggers transmitted from mobile clients</small>
+          </div>
+          <span style={{ fontSize: 12, fontWeight: 'bold', color: '#b91c1c', background: '#fef2f2', padding: '4px 8px', borderRadius: 4 }}>
+            Incidents Tracked
+          </span>
+        </div>
+        <SvgLineChart
+          data={data.emergencyTimeSeries || []}
+          themeColor="#dc2626"
+          gradId="emergencyGrad"
+          emptyMessage="No campus emergency incidents reported in the past 14 days."
+        />
+      </div>
+
+      {/* ========================================================= */}
+      {/* 4. TOP DIAGNOSES (VERTICAL BAR GRAPH)                     */}
       {/* ========================================================= */}
       <div style={{ padding: 18, border: '1px solid #e2e8f0', borderRadius: 8, background: '#ffffff', marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
@@ -447,7 +575,7 @@ export default function AnalyticsDashboard() {
       </div>
 
       {/* ========================================================= */}
-      {/* 3. FULL-WIDTH CARD: DEPT VISITS (HORIZONTAL BAR GRAPH)    */}
+      {/* 5. DEPT VISITS (HORIZONTAL BAR GRAPH)                     */}
       {/* ========================================================= */}
       <div style={{ padding: 18, border: '1px solid #e2e8f0', borderRadius: 8, background: '#ffffff', marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
@@ -460,7 +588,7 @@ export default function AnalyticsDashboard() {
       </div>
 
       {/* ========================================================= */}
-      {/* 4. 2-COLUMN GRID: WATCHLIST & CRITICAL INVENTORY          */}
+      {/* 6. WATCHLIST & CRITICAL INVENTORY                         */}
       {/* ========================================================= */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 20 }}>
         {/* High Risk Watchlist */}
