@@ -18,7 +18,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <application
-        android:label="mobile"
+        android:label="Valetudo"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
