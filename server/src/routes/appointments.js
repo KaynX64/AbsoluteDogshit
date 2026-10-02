@@ -2,125 +2,146 @@
 import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
-import { logAudit } from '../utils/auditLogger.js';
-import { logPhiAccess } from '../utils/phiLogger.js';
-import { sendAppointmentEmail } from '../utils/mailer.js';
-import { encrypt, decrypt } from '../utils/cryptoVault.js';
+import { requireRoles } from '../middleware/rbac.js';
 import { requirePrivacyConsent } from '../middleware/consent.js';
+import { logAudit } from '../utils/auditLogger.js';
+import { encrypt, decrypt } from '../utils/cryptoVault.js';
+import { logPhiAccess } from '../utils/phiLogger.js';
 import { getCache, setCache, invalidateCache } from '../utils/redisClient.js';
+import { sendAppointmentEmail } from '../utils/mailer.js';
 
-export default function appointmentRouter(io) {
+export default function appointmentRoutes(io) {
   const router = express.Router();
 
-  // 1. GET /api/appointments/doctors
+  // ===========================================================================
+  // 1. DOCTOR & PRACTITIONER ROSTER
+  // ===========================================================================
+
+  // GET /api/appointments/doctors - Retrieve practitioners available for bookings
   router.get('/doctors', authenticateToken, async (req, res) => {
     try {
       const [doctors] = await pool.query(
         `SELECT u.user_id, u.first_name, u.last_name, u.email,
-                r.code AS role_code,
+                r.code AS role_code, r.name AS role_name,
+                sp.license_no,
                 COALESCE(sp.specialty, 'General Practitioner') AS specialty,
-                COALESCE(sp.department, 'University Infirmary') AS department,
-                sp.license_no
+                COALESCE(sp.department, 'University Infirmary') AS department
          FROM USERS u
-         INNER JOIN USER_ROLES ur ON u.user_id = ur.user_id
-         INNER JOIN ROLES r ON ur.role_id = r.role_id
+         JOIN USER_ROLES ur ON u.user_id = ur.user_id
+         JOIN ROLES r ON ur.role_id = r.role_id
          LEFT JOIN STAFF_PROFILES sp ON u.user_id = sp.user_id
          WHERE r.code IN ('DOCTOR', 'DENTIST')
            AND u.is_active = TRUE
            AND u.deleted_at IS NULL
-         ORDER BY u.last_name ASC`
+         ORDER BY u.first_name ASC`
       );
       res.json(doctors);
     } catch (error) {
-      console.error('[Appointments] Doctors fetch error:', error);
-      res.status(500).json({ error: 'Failed to retrieve clinical practitioners.' });
+      console.error('[Appointments] Error fetching doctors:', error);
+      res.status(500).json({ error: 'Failed to retrieve available practitioners.' });
     }
   });
 
-  // 2. GET /api/appointments/slots
+  // ===========================================================================
+  // 2. TIME SLOT AVAILABILITY
+  // ===========================================================================
+
+  // GET /api/appointments/slots?doctorId=...&date=YYYY-MM-DD
   router.get('/slots', authenticateToken, async (req, res) => {
+    const { doctorId, date } = req.query;
+
+    if (!doctorId || !date) {
+      return res.status(400).json({ error: 'doctorId and date query parameters are required.' });
+    }
+
     try {
-      const { doctorId, date } = req.query;
-
-      if (!doctorId || !date) {
-        return res.status(400).json({ error: 'doctorId and date (YYYY-MM-DD) are required parameters.' });
-      }
-
-      const operationalSlots = [
+      const defaultSlots = [
         '08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
-        '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30'
+        '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30',
       ];
 
-      const [existingBookings] = await pool.query(
-        `SELECT DATE_FORMAT(date_time, '%H:%i') as booked_time
+      const [booked] = await pool.query(
+        `SELECT DATE_FORMAT(date_time, '%H:%i') AS time_slot
          FROM APPOINTMENTS
          WHERE doctor_user_id = ?
            AND DATE(date_time) = ?
-           AND status IN ('scheduled', 'checked_in', 'serving')
+           AND status NOT IN ('cancelled')
            AND deleted_at IS NULL`,
         [doctorId, date]
       );
 
-      const bookedSet = new Set(existingBookings.map((b) => b.booked_time));
-      const isToday = new Date().toISOString().split('T')[0] === date;
-      const nowTime = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      const bookedSet = new Set(booked.map((b) => b.time_slot));
+      const slots = defaultSlots.map((time) => ({
+        time,
+        isAvailable: !bookedSet.has(time),
+      }));
 
-      const slots = operationalSlots.map((time) => {
-        const isPastTime = isToday && time <= nowTime;
-        const isBooked = bookedSet.has(time);
-        return {
-          time,
-          isAvailable: !isBooked && !isPastTime,
-        };
-      });
-
-      res.json({ date, doctorId: Number(doctorId), slots });
+      res.json({ slots });
     } catch (error) {
-      console.error('[Appointments] Slots calculation error:', error);
-      res.status(500).json({ error: 'Failed to compute slot availability.' });
+      console.error('[Appointments] Error fetching slots:', error);
+      res.status(500).json({ error: 'Failed to retrieve available slots.' });
     }
   });
 
-  // 3. POST /api/appointments (Book Consultation)
+  // ===========================================================================
+  // 3. PATIENT APPOINTMENT BOOKING & HISTORY
+  // ===========================================================================
+
+  // GET /api/appointments/my - Retrieve personal appointments for logged-in patient
+  router.get('/my', authenticateToken, requirePrivacyConsent, async (req, res) => {
+    try {
+      const [rows] = await pool.query(
+        `SELECT a.appointment_id,
+                a.date_time,
+                DATE_FORMAT(a.date_time, '%Y-%m-%d %H:%i:%s') AS formatted_date_time,
+                a.appointment_type,
+                a.status,
+                a.notes,
+                a.cancelled_reason,
+                a.booked_at,
+                doc.first_name AS doctor_first_name,
+                doc.last_name AS doctor_last_name,
+                COALESCE(sp.specialty, 'Infirmary Physician') AS doctor_specialty
+         FROM APPOINTMENTS a
+         JOIN USERS doc ON a.doctor_user_id = doc.user_id
+         LEFT JOIN STAFF_PROFILES sp ON doc.user_id = sp.user_id
+         WHERE a.patient_user_id = ?
+           AND a.deleted_at IS NULL
+         ORDER BY a.date_time DESC`,
+        [req.user.user_id]
+      );
+      res.json(rows);
+    } catch (error) {
+      console.error('[Appointments] Error fetching user appointments:', error);
+      res.status(500).json({ error: 'Failed to retrieve appointments.' });
+    }
+  });
+
+  // POST /api/appointments - Book a consultation
   router.post('/', authenticateToken, requirePrivacyConsent, async (req, res) => {
     const { doctor_user_id, date_time, appointment_type, notes } = req.body;
     const patientUserId = req.user.user_id;
 
     if (!doctor_user_id || !date_time || !appointment_type) {
-      return res.status(400).json({ error: 'Doctor, date/time, and purpose are required.' });
+      return res.status(400).json({ error: 'doctor_user_id, date_time, and appointment_type are required.' });
     }
 
     const connection = await pool.getConnection();
-
     try {
       await connection.beginTransaction();
 
-      await connection.query('SELECT user_id FROM USERS WHERE user_id = ? FOR UPDATE', [doctor_user_id]);
-
+      // Check slot availability to prevent double-booking
       const [conflict] = await connection.query(
         `SELECT appointment_id FROM APPOINTMENTS
-         WHERE doctor_user_id = ?
-           AND date_time = ?
-           AND status IN ('scheduled', 'checked_in', 'serving')
-           AND deleted_at IS NULL`,
+         WHERE doctor_user_id = ? 
+           AND date_time = ? 
+           AND status NOT IN ('cancelled') 
+           AND deleted_at IS NULL FOR UPDATE`,
         [doctor_user_id, date_time]
       );
 
       if (conflict.length > 0) {
-        throw new Error('Selected time slot is already booked.');
-      }
-
-      const [patientConflict] = await connection.query(
-        `SELECT appointment_id FROM APPOINTMENTS
-         WHERE patient_user_id = ?
-           AND date_time = ?
-           AND status IN ('scheduled', 'checked_in', 'serving')
-           AND deleted_at IS NULL`,
-        [patientUserId, date_time]
-      );
-
-      if (patientConflict.length > 0) {
-        throw new Error('You already have an active appointment scheduled at this exact time.');
+        throw new Error('This time slot is already booked. Please choose an available time.');
       }
 
       const [insertResult] = await connection.query(
@@ -137,386 +158,624 @@ export default function appointmentRouter(io) {
         table: 'APPOINTMENTS',
         recordId: appointmentId,
         oldValue: null,
-        newValue: {
-          doctor_user_id,
-          date_time,
-          appointment_type,
-          notes,
-        },
+        newValue: { doctor_user_id, date_time, appointment_type },
         ipAddress: req.ip,
       });
 
       await connection.commit();
 
-      const [patientRows] = await connection.query(
-        'SELECT first_name, last_name, email FROM USERS WHERE user_id = ?',
-        [patientUserId]
-      );
-      const [doctorRows] = await connection.query(
-        `SELECT u.first_name, u.last_name, COALESCE(sp.specialty, 'General Practitioner') AS specialty
-         FROM USERS u
-         LEFT JOIN STAFF_PROFILES sp ON u.user_id = sp.user_id
-         WHERE u.user_id = ?`,
-        [doctor_user_id]
+      // Retrieve demographic details for confirmation email & socket notification
+      const [details] = await pool.query(
+        `SELECT u.email AS patient_email, u.first_name AS patient_first_name, u.last_name AS patient_last_name,
+                doc.first_name AS doc_first_name, doc.last_name AS doc_last_name,
+                COALESCE(sp.specialty, 'Campus Doctor') AS doc_specialty
+         FROM USERS u, USERS doc
+         LEFT JOIN STAFF_PROFILES sp ON doc.user_id = sp.user_id
+         WHERE u.user_id = ? AND doc.user_id = ?`,
+        [patientUserId, doctor_user_id]
       );
 
-      const patient = patientRows[0];
-      const doctor = doctorRows[0];
+      const patientName = details.length > 0 ? `${details[0].patient_first_name} ${details[0].patient_last_name}` : 'Student';
 
-      if (patient && doctor && typeof sendAppointmentEmail === 'function') {
+      if (details.length > 0) {
         sendAppointmentEmail({
-          toEmail: patient.email,
-          patientName: `${patient.first_name} ${patient.last_name}`,
-          doctorName: `${doctor.first_name} ${doctor.last_name}`,
-          specialty: doctor.specialty,
+          toEmail: details[0].patient_email,
+          patientName,
+          doctorName: `${details[0].doc_first_name} ${details[0].doc_last_name}`,
+          specialty: details[0].doc_specialty,
           dateTime: date_time,
           purpose: appointment_type,
           type: 'confirmation',
-        }).catch((err) => console.error('[Email Dispatch Error]:', err.message));
+        }).catch((err) => console.error('[Mailer Error]:', err.message));
       }
 
       if (io) {
         io.emit('appointment:booked', {
-          appointmentId,
-          doctor_user_id,
-          patientUserId,
-          patientName: patient ? `${patient.first_name} ${patient.last_name}` : 'Student Patient',
+          appointment_id: appointmentId,
+          patientName,
           date_time,
           appointment_type,
-          status: 'scheduled',
+          doctor_user_id,
         });
       }
 
       res.status(201).json({
-        message: 'Consultation appointment scheduled successfully.',
+        message: 'Consultation scheduled successfully.',
         appointmentId,
-        bookingSummary: {
-          date_time,
-          appointment_type,
-          status: 'scheduled',
-        },
       });
     } catch (error) {
       await connection.rollback();
-      if (
-        error.message === 'Selected time slot is already booked.' ||
-        error.message === 'You already have an active appointment scheduled at this exact time.'
-      ) {
-        return res.status(409).json({ error: error.message });
-      }
       console.error('[Appointments] Booking error:', error);
-      res.status(500).json({ error: 'Failed to book consultation.' });
+      res.status(400).json({ error: error.message || 'Failed to book appointment.' });
     } finally {
       connection.release();
     }
   });
 
-  // 4. GET /api/appointments/my
-  router.get('/my', authenticateToken, requirePrivacyConsent, async (req, res) => {
-    try {
-      const userId = req.user.user_id;
-      const [rows] = await pool.query(
-        `SELECT a.appointment_id,
-                DATE_FORMAT(a.date_time, '%Y-%m-%d %H:%i') as formatted_date_time,
-                a.date_time, a.appointment_type, a.status, a.notes, a.cancelled_reason,
-                u.first_name AS doctor_first_name,
-                u.last_name AS doctor_last_name,
-                COALESCE(sp.specialty, 'Campus Health Specialist') AS doctor_specialty
-         FROM APPOINTMENTS a
-         JOIN USERS u ON a.doctor_user_id = u.user_id
-         LEFT JOIN STAFF_PROFILES sp ON u.user_id = sp.user_id
-         WHERE a.patient_user_id = ? AND a.deleted_at IS NULL
-         ORDER BY a.date_time DESC`,
-        [userId]
-      );
-      res.json(rows);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to retrieve appointment history.' });
-    }
-  });
-
-  // 5. PATCH /api/appointments/:id/cancel
+  // PATCH /api/appointments/:id/cancel - Cancel a scheduled appointment
   router.patch('/:id/cancel', authenticateToken, async (req, res) => {
+    const appointmentId = Number(req.params.id);
+    const { cancelled_reason } = req.body;
+    const userId = req.user.user_id;
+    const userRoles = req.user.roles || [];
+    const isStaff = userRoles.some((r) => ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'].includes(r));
+
+    const connection = await pool.getConnection();
     try {
-      const appointmentId = req.params.id;
-      const userId = req.user.user_id;
-      const { cancelled_reason } = req.body;
+      await connection.beginTransaction();
 
-      const [existing] = await pool.query(
-        'SELECT appointment_id, status FROM APPOINTMENTS WHERE appointment_id = ? AND patient_user_id = ?',
-        [appointmentId, userId]
+      const [appRows] = await connection.query(
+        'SELECT * FROM APPOINTMENTS WHERE appointment_id = ? AND deleted_at IS NULL FOR UPDATE',
+        [appointmentId]
       );
 
-      if (existing.length === 0) {
-        return res.status(404).json({ error: 'Appointment not found or unauthorized.' });
+      if (appRows.length === 0) {
+        throw new Error('Appointment not found.');
       }
 
-      if (existing[0].status !== 'scheduled') {
-        return res.status(400).json({ error: `Cannot cancel appointment with status '${existing[0].status}'.` });
+      const app = appRows[0];
+      if (app.patient_user_id !== userId && !isStaff) {
+        return res.status(403).json({ error: 'Unauthorized to cancel this appointment.' });
       }
 
-      await pool.query(
-        `UPDATE APPOINTMENTS
-         SET status = 'cancelled', cancelled_reason = ?
-         WHERE appointment_id = ?`,
-        [cancelled_reason || 'Cancelled by patient via mobile app', appointmentId]
+      await connection.query(
+        "UPDATE APPOINTMENTS SET status = 'cancelled', cancelled_reason = ? WHERE appointment_id = ?",
+        [cancelled_reason || 'Cancelled by user', appointmentId]
       );
+
+      await connection.query(
+        "UPDATE QUEUE SET status = 'cancelled' WHERE appointment_id = ?",
+        [appointmentId]
+      );
+
+      await logAudit(connection, {
+        userId,
+        action: 'UPDATE',
+        table: 'APPOINTMENTS',
+        recordId: appointmentId,
+        oldValue: { status: app.status },
+        newValue: { status: 'cancelled', cancelled_reason },
+        ipAddress: req.ip,
+      });
+
+      await connection.commit();
+
+      await invalidateCache('queue:*');
 
       if (io) {
-        io.emit('appointment:cancelled', { appointmentId: Number(appointmentId) });
+        io.emit('appointment:cancelled', { appointment_id: appointmentId });
+        io.emit('queue:updated');
       }
 
       res.json({ message: 'Appointment cancelled successfully.' });
     } catch (error) {
-      res.status(500).json({ error: 'Failed to cancel appointment.' });
+      await connection.rollback();
+      console.error('[Appointments] Cancel error:', error);
+      res.status(400).json({ error: error.message || 'Failed to cancel appointment.' });
+    } finally {
+      connection.release();
     }
   });
 
-  // 6. GET /api/appointments/today (STRICT PRACTITIONER ISOLATION & DEDUPLICATION)
-  router.get('/today', authenticateToken, async (req, res) => {
+  // ===========================================================================
+  // 4. DOCTOR & CLINICAL DESK WORKSPACE
+  // ===========================================================================
+
+  // GET /api/appointments/today - Fetch appointments for doctor/clinic console
+  router.get('/today', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
+    const { filter } = req.query; // 'active', 'scheduled', 'history'
+    const userRoles = req.user.roles || [];
+    const isPractitionerOnly = (userRoles.includes('DOCTOR') || userRoles.includes('DENTIST')) && !userRoles.includes('ADMIN') && !userRoles.includes('NURSE');
+
+    let statusCondition = "a.status IN ('checked_in', 'serving')";
+    if (filter === 'scheduled') {
+      statusCondition = "a.status = 'scheduled'";
+    } else if (filter === 'history') {
+      statusCondition = "a.status IN ('completed', 'cancelled', 'no_show')";
+    }
+
+    let doctorCondition = '';
+    const params = [];
+    if (isPractitionerOnly) {
+      doctorCondition = 'AND a.doctor_user_id = ?';
+      params.push(req.user.user_id);
+    }
+
     try {
-      const { date, filter } = req.query;
-      const userRoles = req.user.roles || [];
-      const userId = req.user.user_id;
-
-      const isDoctorOrDentist = userRoles.some((r) => ['DOCTOR', 'DENTIST'].includes(r));
-      const isNurseOrAdmin = userRoles.some((r) => ['NURSE', 'ADMIN'].includes(r));
-
-      let whereClause = '';
-      const params = [];
-
-      if (filter === 'history') {
-        whereClause = `WHERE a.status IN ('completed', 'cancelled', 'no_show')`;
-      } else if (filter === 'scheduled') {
-        whereClause = `WHERE a.status = 'scheduled' AND a.date_time >= CURDATE()`;
-      } else if (filter === 'all') {
-        whereClause = `WHERE a.status IN ('scheduled', 'checked_in', 'serving')`;
-      } else if (date) {
-        whereClause = `WHERE DATE(a.date_time) = ? AND a.status IN ('checked_in', 'serving')`;
-        params.push(date);
-      } else {
-        whereClause = `WHERE a.status IN ('checked_in', 'serving')`;
-      }
-
-      // ISOLATION: DOCTOR and DENTIST accounts can only see patients assigned to their own user_id!
-      if (isDoctorOrDentist && !isNurseOrAdmin) {
-        whereClause += ' AND a.doctor_user_id = ?';
-        params.push(userId);
-      } else if (req.query.doctorId) {
-        // Triage nurses and admins can optionally filter by a specific doctor
-        whereClause += ' AND a.doctor_user_id = ?';
-        params.push(Number(req.query.doctorId));
-      }
-
-      whereClause += ' AND a.deleted_at IS NULL';
-
       const [rows] = await pool.query(
         `SELECT a.appointment_id,
+                a.patient_user_id AS patient_id,
+                a.doctor_user_id,
+                a.date_time,
                 DATE_FORMAT(a.date_time, '%h:%i %p') AS time_slot,
                 DATE_FORMAT(a.date_time, '%Y-%m-%d') AS date_str,
-                a.date_time, a.appointment_type, a.status, a.notes, a.cancelled_reason,
-                a.doctor_user_id,
-                u.user_id AS patient_id, u.first_name, u.last_name, u.phone,
-                sp.student_no, sp.course,
+                a.appointment_type,
+                a.status,
+                a.notes,
+                a.cancelled_reason,
+                u.first_name, u.last_name, u.phone,
+                COALESCE(sp.student_no, st.license_no, fp.position, 'PSU Member') AS student_no,
+                COALESCE(sp.course, st.department, fp.department, 'PSU Lingayen') AS course,
                 hp.blood_type, hp.allergies, hp.chronic_conditions,
                 hp.height, hp.weight,
-                (
-                  SELECT e2.chief_complaint 
-                  FROM EMR_RECORDS e2 
-                  WHERE e2.appointment_id = a.appointment_id AND e2.deleted_at IS NULL
-                  ORDER BY e2.emr_id DESC 
-                  LIMIT 1
-                ) AS past_chief_complaint,
-                (
-                  SELECT e2.diagnosis 
-                  FROM EMR_RECORDS e2 
-                  WHERE e2.appointment_id = a.appointment_id AND e2.deleted_at IS NULL
-                  ORDER BY e2.emr_id DESC 
-                  LIMIT 1
-                ) AS past_diagnosis,
-                (
-                  SELECT e2.treatment_plan 
-                  FROM EMR_RECORDS e2 
-                  WHERE e2.appointment_id = a.appointment_id AND e2.deleted_at IS NULL
-                  ORDER BY e2.emr_id DESC 
-                  LIMIT 1
-                ) AS past_treatment,
-                (
-                  SELECT e2.notes 
-                  FROM EMR_RECORDS e2 
-                  WHERE e2.appointment_id = a.appointment_id AND e2.deleted_at IS NULL
-                  ORDER BY e2.emr_id DESC 
-                  LIMIT 1
-                ) AS past_clinical_notes,
-                (
-                  SELECT rx.notes
-                  FROM PRESCRIPTIONS rx
-                  JOIN EMR_RECORDS e3 ON rx.emr_id = e3.emr_id
-                  WHERE e3.appointment_id = a.appointment_id AND rx.deleted_at IS NULL
-                  ORDER BY rx.prescription_id DESC
-                  LIMIT 1
-                ) AS past_dietary_notes,
-                COALESCE(
-                  (
-                    SELECT CONCAT('Q-', LPAD(q.queue_number, 2, '0'))
-                    FROM QUEUE q
-                    WHERE q.appointment_id = a.appointment_id
-                    ORDER BY q.queue_id DESC
-                    LIMIT 1
-                  ),
-                  'DONE'
-                ) AS queue_ticket,
-                COALESCE(
-                  (
-                    SELECT q.status
-                    FROM QUEUE q
-                    WHERE q.appointment_id = a.appointment_id
-                    ORDER BY q.queue_id DESC
-                    LIMIT 1
-                  ),
-                  'done'
-                ) AS queue_status
+                CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS queue_ticket,
+                q.status AS queue_status,
+                emr.chief_complaint AS past_chief_complaint,
+                emr.diagnosis AS past_diagnosis,
+                emr.treatment_plan AS past_treatment,
+                emr.notes AS past_clinical_notes,
+                rx.notes AS past_dietary_notes
          FROM APPOINTMENTS a
          JOIN USERS u ON a.patient_user_id = u.user_id
          LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+         LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
+         LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
          LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
-         ${whereClause}
-         ORDER BY a.date_time DESC`,
+         LEFT JOIN QUEUE q ON q.appointment_id = a.appointment_id AND q.queue_date = CURDATE()
+         LEFT JOIN EMR_RECORDS emr ON emr.appointment_id = a.appointment_id
+         LEFT JOIN PRESCRIPTIONS rx ON rx.emr_id = emr.emr_id
+         WHERE ${statusCondition}
+           ${doctorCondition}
+           AND a.deleted_at IS NULL
+         ORDER BY a.date_time ASC`,
         params
       );
 
-      const decryptedRows = rows.map((r) => ({
-        ...r,
-        allergies: decrypt(r.allergies),
-        chronic_conditions: decrypt(r.chronic_conditions),
-        past_chief_complaint: r.past_chief_complaint ? decrypt(r.past_chief_complaint) : '',
-        past_diagnosis: r.past_diagnosis ? decrypt(r.past_diagnosis) : '',
-        past_treatment: r.past_treatment ? decrypt(r.past_treatment) : '',
-        past_clinical_notes: r.past_clinical_notes ? decrypt(r.past_clinical_notes) : '',
-        past_dietary_notes: r.past_dietary_notes ? decrypt(r.past_dietary_notes) : '',
+      const decrypted = rows.map((app) => ({
+        ...app,
+        allergies: decrypt(app.allergies) || 'None reported',
+        chronic_conditions: decrypt(app.chronic_conditions) || 'None reported',
+        past_chief_complaint: decrypt(app.past_chief_complaint) || '',
+        past_diagnosis: decrypt(app.past_diagnosis) || '',
+        past_treatment: decrypt(app.past_treatment) || '',
+        past_clinical_notes: decrypt(app.past_clinical_notes) || '',
+        past_dietary_notes: decrypt(app.past_dietary_notes) || '',
       }));
 
-      res.json(decryptedRows);
+      res.json(decrypted);
     } catch (error) {
-      console.error('[Appointments] Today roster error:', error);
+      console.error('[Appointments] Error fetching roster:', error);
       res.status(500).json({ error: 'Failed to retrieve appointments roster.' });
     }
   });
 
-  // 7. PATCH /api/appointments/:id/status (PREVENTS ADMISSION BY UNAUTHORIZED PRACTITIONER)
-  router.patch('/:id/status', authenticateToken, async (req, res) => {
+  // ===========================================================================
+  // 5. LIVE CLINIC TRIAGE QUEUE (FEATURE 7 & REDIS CACHE)
+  // ===========================================================================
+
+  // GET /api/appointments/queue/today - Retrieve active queue tickets for clinic display
+  router.get('/queue/today', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'DENTIST', 'ADMIN'), async (req, res) => {
     try {
-      const appointmentId = req.params.id;
-      const { status } = req.body;
-      const userRoles = req.user.roles || [];
-      const userId = req.user.user_id;
-
-      if (!['serving', 'completed', 'no_show', 'checked_in'].includes(status)) {
-        return res.status(400).json({ error: 'Invalid appointment status transition.' });
+      const cachedQueue = await getCache('queue:today');
+      if (cachedQueue) {
+        return res.json(cachedQueue);
       }
 
-      // Check appointment ownership
-      const [appRows] = await pool.query('SELECT doctor_user_id FROM APPOINTMENTS WHERE appointment_id = ?', [appointmentId]);
-      if (appRows.length === 0) return res.status(404).json({ error: 'Appointment not found.' });
+      const [rows] = await pool.query(
+        `SELECT q.queue_id,
+                CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS ticket_no,
+                u.first_name, u.last_name,
+                sp.student_no,
+                COALESCE(a.appointment_type, 'General Walk-in') AS visit_type,
+                q.status,
+                DATE_FORMAT(q.checked_in_at, '%h:%i %p') AS arrival_time,
+                q.queue_number
+         FROM QUEUE q
+         JOIN USERS u ON q.patient_user_id = u.user_id
+         LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+         LEFT JOIN APPOINTMENTS a ON q.appointment_id = a.appointment_id
+         WHERE q.queue_date = CURDATE()
+           AND q.status IN ('waiting', 'in-consultation')
+         ORDER BY q.status = 'in-consultation' DESC, q.queue_number ASC`
+      );
 
-      const isDoctorOrDentist = userRoles.some((r) => ['DOCTOR', 'DENTIST'].includes(r));
-      const isNurseOrAdmin = userRoles.some((r) => ['NURSE', 'ADMIN'].includes(r));
-
-      if (isDoctorOrDentist && !isNurseOrAdmin && appRows[0].doctor_user_id !== userId) {
-        return res.status(403).json({ error: 'Access Denied: You cannot admit or consult patients assigned to another practitioner.' });
-      }
-
-      await pool.query('UPDATE APPOINTMENTS SET status = ? WHERE appointment_id = ?', [status, appointmentId]);
-
-      if (io) {
-        io.emit('appointment:status_changed', { appointmentId: Number(appointmentId), status });
-      }
-
-      res.json({ message: `Appointment #${appointmentId} status updated to ${status}.` });
+      await setCache('queue:today', rows, 60);
+      res.json(rows);
     } catch (error) {
-      res.status(500).json({ error: 'Failed to update appointment status.' });
+      console.error('[Appointments] Error fetching daily queue:', error);
+      res.status(500).json({ error: 'Failed to fetch daily triage queue.' });
     }
   });
 
-  // 8. POST /api/appointments/:id/complete (INSERTS APPOINTMENT_ID INTO EMR & PREVENTS UNAUTHORIZED DISCHARGE)
-  router.post('/:id/complete', authenticateToken, async (req, res) => {
+  // PATCH /api/appointments/queue/:queueId/status - Advance patient queue ticket status
+  router.patch('/queue/:queueId/status', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'DENTIST', 'ADMIN'), async (req, res) => {
+    const queueId = Number(req.params.queueId);
+    const { status } = req.body;
+
     const connection = await pool.getConnection();
     try {
-      const appointmentId = req.params.id;
-      const doctorUserId = req.user.user_id;
-      const userRoles = req.user.roles || [];
-      const { patient_user_id, chief_complaint, diagnosis, treatment_plan, notes, vitals } = req.body;
-
       await connection.beginTransaction();
 
-      // Check appointment ownership
-      const [appRows] = await connection.query('SELECT doctor_user_id FROM APPOINTMENTS WHERE appointment_id = ? FOR UPDATE', [appointmentId]);
+      await connection.query(
+        `UPDATE QUEUE
+         SET status = ?,
+             served_at = IF(? IN ('in-consultation', 'done'), CURRENT_TIMESTAMP, served_at)
+         WHERE queue_id = ?`,
+        [status, status, queueId]
+      );
+
+      // Keep appointment status in sync
+      if (status === 'in-consultation') {
+        await connection.query(
+          `UPDATE APPOINTMENTS SET status = 'serving'
+           WHERE appointment_id = (SELECT appointment_id FROM QUEUE WHERE queue_id = ?)`,
+          [queueId]
+        );
+      } else if (status === 'done') {
+        await connection.query(
+          `UPDATE APPOINTMENTS SET status = 'completed'
+           WHERE appointment_id = (SELECT appointment_id FROM QUEUE WHERE queue_id = ?)`,
+          [queueId]
+        );
+      }
+
+      await connection.commit();
+
+      await invalidateCache('queue:*');
+
+      if (io) {
+        io.emit('queue:updated');
+        io.emit('appointment:status_changed', { queue_id: queueId, status });
+      }
+
+      res.json({ message: 'Queue ticket updated successfully.' });
+    } catch (error) {
+      await connection.rollback();
+      console.error('[Queue Status Error]:', error);
+      res.status(500).json({ error: 'Failed to update queue ticket.' });
+    } finally {
+      connection.release();
+    }
+  });
+
+  // GET /api/appointments/queue/my - Active queue status for patient mobile app
+  router.get('/queue/my', authenticateToken, async (req, res) => {
+    const userId = req.user.user_id;
+
+    try {
+      const [rows] = await pool.query(
+        `SELECT q.queue_id,
+                CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS ticket_no,
+                q.queue_number,
+                q.status,
+                q.counter_id,
+                COALESCE(CONCAT('Dr. ', doc.first_name, ' ', doc.last_name), 'Campus Physician') AS doctor_name,
+                COALESCE(sp.department, 'Clinic Room 1') AS clinic_room
+         FROM QUEUE q
+         LEFT JOIN APPOINTMENTS a ON q.appointment_id = a.appointment_id
+         LEFT JOIN USERS doc ON a.doctor_user_id = doc.user_id
+         LEFT JOIN STAFF_PROFILES sp ON doc.user_id = sp.user_id
+         WHERE q.patient_user_id = ?
+           AND q.queue_date = CURDATE()
+           AND q.status IN ('waiting', 'in-consultation')
+         ORDER BY q.queue_id DESC
+         LIMIT 1`,
+        [userId]
+      );
+
+      if (rows.length === 0) {
+        return res.json({ hasActiveTicket: false });
+      }
+
+      const ticket = rows[0];
+
+      // Calculate how many waiting tickets precede this patient
+      const [aheadRows] = await pool.query(
+        `SELECT COUNT(*) AS ahead
+         FROM QUEUE
+         WHERE queue_date = CURDATE()
+           AND status = 'waiting'
+           AND queue_number < ?`,
+        [ticket.queue_number]
+      );
+
+      const patientsAhead = aheadRows[0]?.ahead || 0;
+
+      res.json({
+        hasActiveTicket: true,
+        ticket: {
+          queue_id: ticket.queue_id,
+          ticket_no: ticket.ticket_no,
+          status: ticket.status,
+          doctor_name: ticket.doctor_name,
+          clinic_room: ticket.clinic_room,
+          patients_ahead: patientsAhead,
+          estimated_wait_minutes: patientsAhead * 10,
+        },
+      });
+    } catch (error) {
+      console.error('[My Queue Error]:', error);
+      res.status(500).json({ error: 'Failed to fetch personal queue ticket.' });
+    }
+  });
+
+  // ===========================================================================
+  // 6. QR INTAKE & PATIENT LOOKUP
+  // ===========================================================================
+
+  // GET /api/appointments/lookup?query=... OR ?userId=...
+  router.get('/lookup', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+    const { query, userId } = req.query;
+
+    try {
+      let whereClause = '';
+      const params = [];
+
+      if (userId) {
+        whereClause = 'a.patient_user_id = ?';
+        params.push(Number(userId));
+      } else if (query) {
+        whereClause = `(
+          sp.student_no = ? OR
+          u.last_name LIKE ? OR
+          u.first_name LIKE ? OR
+          u.email = ?
+        )`;
+        const q = String(query).trim();
+        params.push(q, `%${q}%`, `%${q}%`, q);
+      } else {
+        return res.status(400).json({ error: 'query or userId parameter is required.' });
+      }
+
+      const [rows] = await pool.query(
+        `SELECT a.appointment_id,
+                a.patient_user_id AS user_id,
+                a.date_time,
+                DATE_FORMAT(a.date_time, '%Y-%m-%d %h:%i %p') AS formatted_schedule,
+                a.appointment_type,
+                a.status,
+                a.notes,
+                u.first_name, u.last_name, u.email, u.phone,
+                COALESCE(sp.student_no, 'N/A') AS student_no,
+                COALESCE(sp.course, 'PSU Lingayen') AS course,
+                hp.blood_type, hp.allergies, hp.chronic_conditions,
+                doc.last_name AS doc_last_name
+         FROM APPOINTMENTS a
+         JOIN USERS u ON a.patient_user_id = u.user_id
+         LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+         LEFT JOIN USERS doc ON a.doctor_user_id = doc.user_id
+         WHERE a.deleted_at IS NULL
+           AND a.status IN ('scheduled', 'checked_in', 'serving')
+           AND ${whereClause}
+         ORDER BY a.date_time ASC
+         LIMIT 10`,
+        params
+      );
+
+      const decrypted = rows.map((app) => ({
+        ...app,
+        allergies: decrypt(app.allergies) || 'None reported',
+        chronic_conditions: decrypt(app.chronic_conditions) || 'None reported',
+      }));
+
+      res.json(decrypted);
+    } catch (error) {
+      console.error('[Appointments] Lookup error:', error);
+      res.status(500).json({ error: 'Failed to look up appointment.' });
+    }
+  });
+
+  // POST /api/appointments/:id/checkin - Confirm arrival and assign queue ticket
+  router.post('/:id/checkin', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+    const appointmentId = Number(req.params.id);
+    const { blood_pressure, temperature, pulse } = req.body;
+
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      const [appRows] = await connection.query(
+        'SELECT * FROM APPOINTMENTS WHERE appointment_id = ? AND deleted_at IS NULL FOR UPDATE',
+        [appointmentId]
+      );
+
       if (appRows.length === 0) {
-        await connection.rollback();
-        return res.status(404).json({ error: 'Appointment not found.' });
+        throw new Error('Appointment not found.');
       }
 
-      const isDoctorOrDentist = userRoles.some((r) => ['DOCTOR', 'DENTIST'].includes(r));
-      const isNurseOrAdmin = userRoles.some((r) => ['NURSE', 'ADMIN'].includes(r));
+      const app = appRows[0];
 
-      if (isDoctorOrDentist && !isNurseOrAdmin && appRows[0].doctor_user_id !== doctorUserId) {
-        await connection.rollback();
-        return res.status(403).json({ error: 'Access Denied: You cannot finalize a consultation assigned to another doctor.' });
+      // Generate sequential daily queue number
+      const [numRows] = await connection.query(
+        'SELECT COALESCE(MAX(queue_number), 0) + 1 AS next_num FROM QUEUE WHERE queue_date = CURDATE()'
+      );
+      const nextNum = numRows[0].next_num;
+
+      await connection.query(
+        `INSERT INTO QUEUE (patient_user_id, appointment_id, queue_date, counter_id, queue_number, status, checked_in_at)
+         VALUES (?, ?, CURDATE(), 1, ?, 'waiting', CURRENT_TIMESTAMP)`,
+        [app.patient_user_id, appointmentId, nextNum]
+      );
+
+      const triageNote = `[TRIAGE VITALS] BP: ${blood_pressure || '120/80'}, Temp: ${temperature || '36.6'}°C, Pulse: ${pulse || '75'} bpm\n`;
+      const combinedNotes = triageNote + (app.notes || '');
+
+      await connection.query(
+        "UPDATE APPOINTMENTS SET status = 'checked_in', notes = ? WHERE appointment_id = ?",
+        [combinedNotes, appointmentId]
+      );
+
+      await logAudit(connection, {
+        userId: req.user.user_id,
+        action: 'UPDATE',
+        table: 'APPOINTMENTS',
+        recordId: appointmentId,
+        oldValue: { status: app.status },
+        newValue: { status: 'checked_in', queue_number: nextNum },
+        ipAddress: req.ip,
+      });
+
+      await connection.commit();
+
+      await invalidateCache('queue:*');
+
+      if (io) {
+        io.emit('queue:updated');
+        io.emit('appointment:status_changed', { appointment_id: appointmentId, status: 'checked_in' });
       }
 
-      const encComplaint = encrypt(chief_complaint);
-      const encDiagnosis = encrypt(diagnosis);
-      const encTreatment = encrypt(treatment_plan);
-      const encNotes = encrypt(notes || '');
+      const queueTicket = `Q-${String(nextNum).padStart(2, '0')}`;
+      const arrivalTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-      // Directly insert appointment_id to link this encounter to the appointment
+      res.json({
+        message: 'Patient arrival confirmed and admitted to queue.',
+        queueTicket,
+        arrivalTime,
+      });
+    } catch (error) {
+      await connection.rollback();
+      console.error('[Checkin Error]:', error);
+      res.status(400).json({ error: error.message || 'Failed to check in patient.' });
+    } finally {
+      connection.release();
+    }
+  });
+
+  // PATCH /api/appointments/:id/status - Update consultation status (e.g., serving)
+  router.patch('/:id/status', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
+    const appointmentId = Number(req.params.id);
+    const { status } = req.body;
+
+    const validStatuses = ['scheduled', 'checked_in', 'serving', 'completed', 'cancelled', 'no_show'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ error: `Invalid status: ${status}` });
+    }
+
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      await connection.query('UPDATE APPOINTMENTS SET status = ? WHERE appointment_id = ?', [status, appointmentId]);
+
+      if (status === 'serving') {
+        await connection.query(
+          "UPDATE QUEUE SET status = 'in-consultation' WHERE appointment_id = ?",
+          [appointmentId]
+        );
+      } else if (status === 'completed') {
+        await connection.query(
+          "UPDATE QUEUE SET status = 'done', served_at = CURRENT_TIMESTAMP WHERE appointment_id = ?",
+          [appointmentId]
+        );
+      }
+
+      await connection.commit();
+
+      await invalidateCache('queue:*');
+
+      if (io) {
+        io.emit('appointment:status_changed', { appointment_id: appointmentId, status });
+        io.emit('queue:updated');
+      }
+
+      res.json({ message: `Appointment status updated to ${status}.` });
+    } catch (error) {
+      await connection.rollback();
+      console.error('[Status Update Error]:', error);
+      res.status(500).json({ error: 'Failed to update appointment status.' });
+    } finally {
+      connection.release();
+    }
+  });
+
+  // ===========================================================================
+  // 7. CLINICAL ENCOUNTER COMPLETION & EMR RECORDING
+  // ===========================================================================
+
+  // POST /api/appointments/:id/complete - Finalize consultation and persist EMR record
+  router.post('/:id/complete', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'ADMIN'), async (req, res) => {
+    const appointmentId = Number(req.params.id);
+    const doctorUserId = req.user.user_id;
+    const {
+      patient_user_id,
+      chief_complaint,
+      diagnosis,
+      treatment_plan,
+      notes,
+      vitals,
+    } = req.body;
+
+    if (!diagnosis || !chief_complaint) {
+      return res.status(400).json({ error: 'Chief complaint and diagnosis are required.' });
+    }
+
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      // 1. Insert into EMR_RECORDS with AES-256-GCM encryption
       const [emrResult] = await connection.query(
         `INSERT INTO EMR_RECORDS (patient_user_id, doctor_user_id, appointment_id, chief_complaint, diagnosis, treatment_plan, notes)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [patient_user_id, doctorUserId, appointmentId, encComplaint, encDiagnosis, encTreatment, encNotes]
+        [
+          patient_user_id,
+          doctorUserId,
+          appointmentId,
+          encrypt(chief_complaint),
+          encrypt(diagnosis),
+          encrypt(treatment_plan || ''),
+          encrypt(notes || ''),
+        ]
       );
-
       const emrId = emrResult.insertId;
 
-      // Link any prescription issued for this patient and doctor today to this EMR record
-      await connection.query(
-        `UPDATE PRESCRIPTIONS 
-         SET emr_id = ? 
-         WHERE patient_user_id = ? AND doctor_user_id = ? AND DATE(issued_at) = CURDATE()`,
-        [emrId, patient_user_id, doctorUserId]
-      );
-
+      // 2. Persist Vitals to normalized VITAL_SIGNS table
       if (vitals && typeof vitals === 'object') {
-        const vitalEntries = [];
-        if (vitals.systolic_bp && !isNaN(Number(vitals.systolic_bp))) {
-          vitalEntries.push([emrId, 'systolic_bp', Number(vitals.systolic_bp), 'mmHg', doctorUserId]);
-        }
-        if (vitals.diastolic_bp && !isNaN(Number(vitals.diastolic_bp))) {
-          vitalEntries.push([emrId, 'diastolic_bp', Number(vitals.diastolic_bp), 'mmHg', doctorUserId]);
-        }
-        if (vitals.temperature && !isNaN(Number(vitals.temperature))) {
-          vitalEntries.push([emrId, 'temperature', Number(vitals.temperature), '°C', doctorUserId]);
-        }
-        if (vitals.pulse && !isNaN(Number(vitals.pulse))) {
-          vitalEntries.push([emrId, 'pulse', Number(vitals.pulse), 'bpm', doctorUserId]);
-        }
-        if (vitals.spo2 && !isNaN(Number(vitals.spo2))) {
-          vitalEntries.push([emrId, 'spo2', Number(vitals.spo2), '%', doctorUserId]);
-        }
-        if (vitals.resp_rate && !isNaN(Number(vitals.resp_rate))) {
-          vitalEntries.push([emrId, 'resp_rate', Number(vitals.resp_rate), 'cpm', doctorUserId]);
-        }
-        for (const entry of vitalEntries) {
-          await connection.query(
-            `INSERT INTO VITAL_SIGNS (emr_id, metric, value, unit, recorded_by) VALUES (?, ?, ?, ?, ?)`,
-            entry
-          );
+        const metricUnits = {
+          systolic_bp: 'mmHg',
+          diastolic_bp: 'mmHg',
+          temperature: '°C',
+          pulse: 'bpm',
+          spo2: '%',
+          resp_rate: 'cpm',
+        };
+
+        for (const [metric, val] of Object.entries(vitals)) {
+          if (val !== undefined && val !== null && val !== '' && !isNaN(Number(val))) {
+            const unit = metricUnits[metric] || 'units';
+            await connection.query(
+              `INSERT INTO VITAL_SIGNS (emr_id, metric, value, unit, recorded_by)
+               VALUES (?, ?, ?, ?, ?)`,
+              [emrId, metric, Number(val), unit, doctorUserId]
+            );
+          }
         }
       }
 
-      await connection.query(`UPDATE APPOINTMENTS SET status = 'completed' WHERE appointment_id = ?`, [appointmentId]);
-      await connection.query(`UPDATE QUEUE SET status = 'done', served_at = CURRENT_TIMESTAMP WHERE appointment_id = ?`, [appointmentId]);
+      // 3. Mark appointment as completed
+      await connection.query(
+        "UPDATE APPOINTMENTS SET status = 'completed' WHERE appointment_id = ?",
+        [appointmentId]
+      );
 
+      // 4. Mark queue ticket as done
+      await connection.query(
+        "UPDATE QUEUE SET status = 'done', served_at = CURRENT_TIMESTAMP WHERE appointment_id = ?",
+        [appointmentId]
+      );
+
+      // 5. Append event to cryptographic R.A. 10173 Audit Chain
       await logAudit(connection, {
         userId: doctorUserId,
         action: 'CREATE',
@@ -524,409 +783,151 @@ export default function appointmentRouter(io) {
         recordId: emrId,
         oldValue: null,
         newValue: {
-          patient_user_id,
+          operation: 'CONSULTATION_ENCOUNTER_COMPLETED',
           appointment_id: appointmentId,
-          vitals_logged: vitals ? Object.keys(vitals) : [],
-          encrypted: true,
+          patient_user_id,
+          emr_id: emrId,
         },
         ipAddress: req.ip,
       });
 
       await connection.commit();
 
-      if (io) {
-        io.emit('appointment:completed', { appointmentId: Number(appointmentId) });
-        io.emit('queue:updated');
-      }
-
-      const today = new Date().toISOString().split('T')[0];
-      await invalidateCache(`queue:today:${today}`);
-
-      res.json({ message: 'Consultation finalized and saved to patient EMR history!', emrId });
-    } catch (error) {
-      await connection.rollback();
-      console.error('Error completing consultation:', error);
-      res.status(500).json({ error: 'Failed to complete consultation encounter.' });
-    } finally {
-      connection.release();
-    }
-  });
-
-  // 9. GET /api/appointments/lookup
-  router.get('/lookup', authenticateToken, async (req, res) => {
-    try {
-      const { query, userId } = req.query;
-
-      let sql = `
-        SELECT a.appointment_id,
-               DATE_FORMAT(a.date_time, '%Y-%m-%d %h:%i %p') AS formatted_schedule,
-               a.date_time, a.appointment_type, a.status, a.notes,
-               u.user_id, u.first_name, u.last_name, u.phone,
-               sp.student_no, sp.course,
-               hp.blood_type, hp.allergies, hp.chronic_conditions,
-               doc.first_name AS doc_first_name, doc.last_name AS doc_last_name
-        FROM APPOINTMENTS a
-        JOIN USERS u ON a.patient_user_id = u.user_id
-        JOIN USERS doc ON a.doctor_user_id = doc.user_id
-        LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
-        LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
-        WHERE a.status IN ('scheduled', 'checked_in') AND a.deleted_at IS NULL
-      `;
-      const params = [];
-
-      if (userId) {
-        sql += ` AND a.patient_user_id = ? `;
-        params.push(userId);
-      } else if (query) {
-        sql += ` AND (sp.student_no LIKE ? OR u.last_name LIKE ? OR u.first_name LIKE ?) `;
-        params.push(`%${query}%`, `%${query}%`, `%${query}%`);
-      }
-
-      sql += ` ORDER BY a.date_time ASC LIMIT 5`;
-
-      const [results] = await pool.query(sql, params);
-
-      if (results.length > 0) {
-        logPhiAccess({
-          viewerUserId: req.user.user_id,
-          patientUserId: results[0].user_id,
-          table: 'HEALTH_PROFILES',
-          recordId: results[0].user_id,
-          purpose: 'Intake Triage & QR Verification',
-          ipAddress: req.ip,
-        });
-      }
-
-      const decryptedResults = results.map((item) => ({
-        ...item,
-        allergies: decrypt(item.allergies),
-        chronic_conditions: decrypt(item.chronic_conditions),
-      }));
-
-      res.json(decryptedResults);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to lookup patient appointments.' });
-    }
-  });
-
-  // 10. POST /api/appointments/:id/checkin
-  router.post('/:id/checkin', authenticateToken, async (req, res) => {
-    const connection = await pool.getConnection();
-    try {
-      const appointmentId = req.params.id;
-      const { blood_pressure, temperature, pulse, spo2 } = req.body;
-
-      await connection.beginTransaction();
-
-      const [appRows] = await connection.query(
-        `SELECT patient_user_id, doctor_user_id, notes FROM APPOINTMENTS WHERE appointment_id = ? FOR UPDATE`,
-        [appointmentId]
-      );
-
-      if (appRows.length === 0) {
-        await connection.rollback();
-        return res.status(404).json({ error: 'Appointment not found.' });
-      }
-
-      const patientUserId = appRows[0].patient_user_id;
-      const doctorUserId = appRows[0].doctor_user_id;
-      const existingNotes = appRows[0].notes || '';
-      const vitalsSummary = `[TRIAGE VITALS] BP: ${blood_pressure || 'N/A'} | Temp: ${temperature || 'N/A'}°C | Pulse: ${pulse || 'N/A'} bpm${spo2 ? ` | SpO2: ${spo2}%` : ''}`;
-      const updatedNotes = existingNotes ? `${vitalsSummary}\n${existingNotes}` : vitalsSummary;
-
-      await connection.query(
-        `UPDATE APPOINTMENTS SET status = 'checked_in', notes = ? WHERE appointment_id = ?`,
-        [updatedNotes, appointmentId]
-      );
-
-      const today = new Date().toISOString().split('T')[0];
-      const [queueCount] = await connection.query(`SELECT COUNT(*) as totalToday FROM QUEUE WHERE queue_date = ?`, [today]);
-      const nextQueueNo = (queueCount[0].totalToday || 0) + 1;
-
-      // Assign room counter based on practitioner role (Counter 2 = Dental, Counter 1 = Medical)
-      const [docRoles] = await connection.query(
-        `SELECT r.code FROM ROLES r JOIN USER_ROLES ur ON r.role_id = ur.role_id WHERE ur.user_id = ?`,
-        [doctorUserId]
-      );
-      const counterId = docRoles.some((r) => r.code === 'DENTIST') ? 2 : 1;
-
-      await connection.query(
-        `INSERT INTO QUEUE (patient_user_id, appointment_id, queue_date, counter_id, queue_number, status, checked_in_at)
-         VALUES (?, ?, ?, ?, ?, 'waiting', CURRENT_TIMESTAMP)`,
-        [patientUserId, appointmentId, today, counterId, nextQueueNo]
-      );
-
-      await connection.commit();
-      await invalidateCache(`queue:today:${today}`);
-
-      const arrivalTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const queueTicket = `Q-${nextQueueNo.toString().padStart(2, '0')}`;
+      await invalidateCache('queue:*');
 
       if (io) {
+        io.emit('appointment:status_changed', { appointment_id: appointmentId, status: 'completed' });
         io.emit('queue:updated');
-        io.emit('appointment:status_changed', { appointmentId: Number(appointmentId), status: 'checked_in' });
       }
 
       res.json({
-        message: `Patient checked in successfully at ${arrivalTime}!`,
-        queueTicket,
-        arrivalTime,
+        message: 'Encounter finalized, EMR record created, and patient discharged.',
+        emrId,
       });
     } catch (error) {
       await connection.rollback();
-      res.status(500).json({ error: 'Failed to process clinic intake check-in.' });
+      console.error('[Complete Encounter Error]:', error);
+      res.status(500).json({ error: error.message || 'Failed to complete encounter.' });
     } finally {
       connection.release();
     }
   });
 
-  // 11. GET /api/appointments/queue/today
-  router.get('/queue/today', authenticateToken, async (req, res) => {
+  // ===========================================================================
+  // 8. PATIENT EMR HISTORY & SEARCH DIRECTORY
+  // ===========================================================================
+
+  // GET /api/appointments/patient/:patientId/history - Chronological patient clinical history
+  router.get('/patient/:patientId/history', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
+    const patientId = Number(req.params.patientId);
+
     try {
-      const today = new Date().toISOString().split('T')[0];
-      const cacheKey = `queue:today:${today}`;
-
-      const cachedQueue = await getCache(cacheKey);
-      if (cachedQueue) {
-        res.setHeader('X-Cache', 'HIT');
-        return res.json(cachedQueue);
-      }
-
-      const [rows] = await pool.query(
-        `SELECT q.queue_id, q.queue_number, q.status, q.counter_id,
-                DATE_FORMAT(q.checked_in_at, '%h:%i %p') AS arrival_time,
-                CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS ticket_no,
-                u.first_name, u.last_name, sp.student_no,
-                COALESCE(a.appointment_type, 'Walk-in Intake') AS visit_type
-         FROM QUEUE q
-         JOIN USERS u ON q.patient_user_id = u.user_id
-         LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
-         LEFT JOIN APPOINTMENTS a ON q.appointment_id = a.appointment_id
-         WHERE q.queue_date = ? AND q.status != 'done'
-         ORDER BY q.queue_number ASC`,
-        [today]
-      );
-
-      await setCache(cacheKey, rows, 60);
-
-      res.setHeader('X-Cache', 'MISS');
-      res.json(rows);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to retrieve live queue.' });
-    }
-  });
-
-  // 12. PATCH /api/appointments/queue/:id/status
-  router.patch('/queue/:id/status', authenticateToken, async (req, res) => {
-    try {
-      const queueId = req.params.id;
-      const { status } = req.body;
-
-      await pool.query('UPDATE QUEUE SET status = ? WHERE queue_id = ?', [status, queueId]);
-
-      if (status === 'in-consultation') {
-        const [qRow] = await pool.query('SELECT appointment_id FROM QUEUE WHERE queue_id = ?', [queueId]);
-        if (qRow.length > 0 && qRow[0].appointment_id) {
-          await pool.query("UPDATE APPOINTMENTS SET status = 'serving' WHERE appointment_id = ?", [qRow[0].appointment_id]);
-          if (io) {
-            io.emit('appointment:status_changed', { appointmentId: qRow[0].appointment_id, status: 'serving' });
-          }
-        }
-      }
-
-      if (io) {
-        io.emit('queue:updated');
-      }
-      const today = new Date().toISOString().split('T')[0];
-      await invalidateCache(`queue:today:${today}`);
-
-      res.json({ message: `Queue ticket #${queueId} updated to ${status}.` });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to update queue status.' });
-    }
-  });
-
-  // 13. GET /api/appointments/patient/:userId/history
-  router.get('/patient/:userId/history', authenticateToken, async (req, res) => {
-    try {
-      const userId = Number(req.params.userId);
-
-      const [history] = await pool.query(
+      const [emrs] = await pool.query(
         `SELECT e.emr_id, e.encounter_date, e.chief_complaint, e.diagnosis, e.treatment_plan, e.notes,
-                doc.first_name as doctor_first_name, doc.last_name as doctor_last_name,
-                sp.license_no as doctor_license,
-                JSON_ARRAYAGG(
-                  IF(v.vital_id IS NULL, NULL,
-                    JSON_OBJECT('metric', v.metric, 'value', v.value, 'unit', v.unit, 'recorded_at', v.recorded_at)
-                  )
-                ) as vitals,
-                (
-                  SELECT COALESCE(JSON_ARRAYAGG(
-                    JSON_OBJECT(
-                      'attachment_id', att.attachment_id,
-                      'file_name', att.file_name,
-                      'file_size', att.file_size,
-                      'mime_type', att.mime_type,
-                      'created_at', att.created_at
-                    )
-                  ), JSON_ARRAY())
-                  FROM EMR_ATTACHMENTS att
-                  WHERE att.emr_id = e.emr_id
-                ) as attachments,
-                (
-                  SELECT COALESCE(JSON_ARRAYAGG(
-                    JSON_OBJECT(
-                      'prescription_id', p.prescription_id,
-                      'notes', p.notes,
-                      'status', p.status,
-                      'issued_at', p.issued_at
-                    )
-                  ), JSON_ARRAY())
-                  FROM PRESCRIPTIONS p
-                  WHERE p.emr_id = e.emr_id AND p.deleted_at IS NULL
-                ) as prescriptions
+                doc.first_name AS doctor_first_name, doc.last_name AS doctor_last_name,
+                COALESCE(sp.license_no, 'PRC-VERIFIED') AS doctor_license,
+                COALESCE(sp.specialty, 'Infirmary Physician') AS doctor_specialty
          FROM EMR_RECORDS e
          JOIN USERS doc ON e.doctor_user_id = doc.user_id
          LEFT JOIN STAFF_PROFILES sp ON doc.user_id = sp.user_id
-         LEFT JOIN VITAL_SIGNS v ON e.emr_id = v.emr_id
          WHERE e.patient_user_id = ? AND e.deleted_at IS NULL
-         GROUP BY e.emr_id
          ORDER BY e.encounter_date DESC`,
-        [userId]
+        [patientId]
       );
 
-      const decryptedHistory = history.map((item) => {
-        const rxList = (item.prescriptions || []).map((rx) => ({
-          ...rx,
-          notes: decrypt(rx.notes),
-        }));
-        return {
-          ...item,
-          chief_complaint: decrypt(item.chief_complaint),
-          diagnosis: decrypt(item.diagnosis),
-          treatment_plan: decrypt(item.treatment_plan),
-          notes: decrypt(item.notes),
-          prescriptions: rxList,
-        };
-      });
+      const history = await Promise.all(
+        emrs.map(async (emr) => {
+          const [vitals] = await pool.query(
+            'SELECT metric, value, unit FROM VITAL_SIGNS WHERE emr_id = ?',
+            [emr.emr_id]
+          );
+          const [attachments] = await pool.query(
+            'SELECT attachment_id, file_name, file_size, mime_type FROM EMR_ATTACHMENTS WHERE emr_id = ?',
+            [emr.emr_id]
+          );
+          const [rxRows] = await pool.query(
+            'SELECT prescription_id, status, notes FROM PRESCRIPTIONS WHERE emr_id = ?',
+            [emr.emr_id]
+          );
 
+          return {
+            emr_id: emr.emr_id,
+            encounter_date: emr.encounter_date,
+            doctor_first_name: emr.doctor_first_name,
+            doctor_last_name: emr.doctor_last_name,
+            doctor_license: emr.doctor_license,
+            doctor_specialty: emr.doctor_specialty,
+            chief_complaint: decrypt(emr.chief_complaint) || '',
+            diagnosis: decrypt(emr.diagnosis) || '',
+            treatment_plan: decrypt(emr.treatment_plan) || '',
+            notes: decrypt(emr.notes) || '',
+            vitals,
+            attachments,
+            prescriptions: rxRows.map((rx) => ({
+              ...rx,
+              notes: decrypt(rx.notes) || '',
+            })),
+          };
+        })
+      );
+
+      // Log statutory PHI read access
       logPhiAccess({
         viewerUserId: req.user.user_id,
-        patientUserId: userId,
+        patientUserId: patientId,
         table: 'EMR_RECORDS',
-        recordId: userId,
+        recordId: patientId,
         purpose: 'Clinical Encounter History Review',
         ipAddress: req.ip,
       });
 
-      res.json(decryptedHistory);
+      res.json(history);
     } catch (error) {
-      console.error('Failed to retrieve patient EMR history:', error);
+      console.error('[Appointments] Error fetching patient history:', error);
       res.status(500).json({ error: 'Failed to retrieve patient medical history.' });
     }
   });
 
-  // 14. GET /api/appointments/queue/my (PROVIDES ACCURATE CLINIC ROOM DESTINATION)
-  router.get('/queue/my', authenticateToken, async (req, res) => {
+  // GET /api/appointments/patients/search?query=... - Search patient directory
+  router.get('/patients/search', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
+    const rawQuery = req.query.query ? String(req.query.query).trim() : '';
+    if (!rawQuery) return res.json([]);
+
+    const queryPattern = `%${rawQuery}%`;
+
     try {
-      const userId = req.user.user_id;
-      const today = new Date().toISOString().split('T')[0];
-
-      const [tickets] = await pool.query(
-        `SELECT q.queue_id, q.queue_number, q.status, q.counter_id,
-                DATE_FORMAT(q.checked_in_at, '%h:%i %p') AS arrival_time,
-                CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS ticket_no,
-                COALESCE(a.appointment_type, 'Walk-in Intake') AS visit_type,
-                doc.first_name AS doc_first_name, doc.last_name AS doc_last_name,
-                COALESCE(sp.specialty, 'General Practitioner') AS doc_specialty,
-                CASE WHEN q.counter_id = 2 THEN 'Dental Clinic (Room 2)' ELSE 'Medical Clinic (Room 1)' END as clinic_room
-         FROM QUEUE q
-         LEFT JOIN APPOINTMENTS a ON q.appointment_id = a.appointment_id
-         LEFT JOIN USERS doc ON a.doctor_user_id = doc.user_id
-         LEFT JOIN STAFF_PROFILES sp ON doc.user_id = sp.user_id
-         WHERE q.patient_user_id = ?
-           AND q.queue_date = ?
-           AND q.status IN ('waiting', 'in-consultation')
-         ORDER BY q.queue_id DESC
-         LIMIT 1`,
-        [userId, today]
-      );
-
-      if (tickets.length === 0) {
-        return res.json({ hasActiveTicket: false, ticket: null });
-      }
-
-      const currentTicket = tickets[0];
-      let patientsAhead = 0;
-      let estimatedWaitMinutes = 0;
-
-      if (currentTicket.status === 'waiting') {
-        const [aheadRows] = await pool.query(
-          `SELECT COUNT(*) AS ahead_count
-           FROM QUEUE
-           WHERE queue_date = ?
-             AND counter_id = ?
-             AND status = 'waiting'
-             AND queue_number < ?`,
-          [today, currentTicket.counter_id, currentTicket.queue_number]
-        );
-        patientsAhead = aheadRows[0].ahead_count || 0;
-        estimatedWaitMinutes = patientsAhead * 10;
-      }
-
-      res.json({
-        hasActiveTicket: true,
-        ticket: {
-          ...currentTicket,
-          patients_ahead: patientsAhead,
-          estimated_wait_minutes: estimatedWaitMinutes,
-          doctor_name: currentTicket.doc_last_name
-            ? `Dr. ${currentTicket.doc_first_name} ${currentTicket.doc_last_name}`
-            : 'Attending Physician',
-        },
-      });
-    } catch (error) {
-      console.error('[Appointments] Error fetching student queue ticket:', error);
-      res.status(500).json({ error: 'Failed to retrieve active queue ticket.' });
-    }
-  });
-
-  // 15. GET /api/appointments/patients/search - Global patient directory for EMR lookup
-  router.get('/patients/search', authenticateToken, async (req, res) => {
-    try {
-      const { query } = req.query;
-      if (!query || !query.trim()) return res.json([]);
-
-      const q = `%${query.trim()}%`;
-      const [patients] = await pool.query(
+      const [rows] = await pool.query(
         `SELECT u.user_id, u.first_name, u.last_name, u.email, u.phone,
-                COALESCE(r.code, 'STUDENT') AS role_code,
                 COALESCE(sp.student_no, st.license_no, fp.position, 'PSU Member') AS identifier_no,
                 COALESCE(sp.course, st.department, fp.department, 'PSU Lingayen') AS affiliation,
-                hp.blood_type, hp.allergies, hp.chronic_conditions, hp.height, hp.weight
+                hp.blood_type, hp.allergies
          FROM USERS u
-         LEFT JOIN USER_ROLES ur ON u.user_id = ur.user_id
-         LEFT JOIN ROLES r ON ur.role_id = r.role_id
          LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
          LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
          LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
          LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
-         WHERE (u.first_name LIKE ? OR u.last_name LIKE ? OR sp.student_no LIKE ? OR u.email LIKE ?)
-           AND u.deleted_at IS NULL
-         LIMIT 8`,
-        [q, q, q, q]
+         WHERE u.deleted_at IS NULL
+           AND (
+             sp.student_no LIKE ? OR
+             u.first_name LIKE ? OR
+             u.last_name LIKE ? OR
+             u.email LIKE ? OR
+             CONCAT(u.first_name, ' ', u.last_name) LIKE ?
+           )
+         ORDER BY u.last_name ASC
+         LIMIT 30`,
+        [queryPattern, queryPattern, queryPattern, queryPattern, queryPattern]
       );
 
-      const decryptedPatients = patients.map((p) => ({
+      const decrypted = rows.map((p) => ({
         ...p,
-        allergies: decrypt(p.allergies) || 'None',
-        chronic_conditions: decrypt(p.chronic_conditions) || 'None',
+        allergies: decrypt(p.allergies) || 'None reported',
       }));
 
-      res.json(decryptedPatients);
-    } catch (err) {
-      console.error('[Patient Search Error]:', err);
-      res.status(500).json({ error: 'Failed to search patients.' });
+      res.json(decrypted);
+    } catch (error) {
+      console.error('[Appointments] Patient search error:', error);
+      res.status(500).json({ error: 'Patient search failed.' });
     }
   });
 

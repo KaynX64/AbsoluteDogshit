@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Valetudo HealthLink • Official Document Verification</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23284E3A'/><path d='M50 25 v50 M25 50 h50' stroke='white' stroke-width='14' stroke-linecap='round'/></svg>">
+  <style>
+    :root {
+      --primary-green: #284E3A;
+      --primary-green-dark: #1b3527;
+      --soft-sage: #E2EBE1;
+      --bg-light: #F7F9F6;
+      --text-main: #191C1A;
+      --text-sub: #5A635B;
+      --border-color: #D6DFD5;
+      --crimson: #7A2E26;
+      --crimson-bg: #FDE8E8;
+      --emerald: #15803D;
+      --emerald-bg: #DCFCE7;
+      --gold: #8C6826;
+      --gold-bg: #FEF3C7;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-light);
+      color: var(--text-main);
+      line-height: 1.5;
+      padding: 24px 16px 40px;
+    }
+
+    .wrapper {
+      max-width: 680px;
+      margin: 0 auto;
+    }
+
+    /* Top Brand Nav */
+    .top-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border-color);
+    }
+    .brand-mark {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+    }
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      background-color: var(--primary-green);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 900;
+      font-size: 20px;
+    }
+    .brand-text {
+      font-size: 18px;
+      font-weight: 900;
+      letter-spacing: -0.5px;
+      color: var(--text-main);
+    }
+    .brand-tag {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: var(--primary-green);
+      display: block;
+    }
+
+    /* Main Certificate Card */
+    .cert-card {
+      background: #FFFFFF;
+      border: 1px solid var(--border-color);
+      border-radius: 24px;
+      padding: 36px 32px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+      position: relative;
+    }
+
+    /* Institutional Letterhead */
+    .letterhead {
+      text-align: center;
+      margin-bottom: 24px;
+      position: relative;
+    }
+    .univ-title {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 2.2px;
+      color: var(--text-sub);
+      text-transform: uppercase;
+    }
+    .clinic-title {
+      font-size: 18px;
+      font-weight: 900;
+      color: var(--primary-green);
+      margin: 4px 0 2px;
+      letter-spacing: -0.2px;
+    }
+    .clinic-sub {
+      font-size: 11px;
+      color: var(--text-sub);
+    }
+    .divider {
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--primary-green), transparent);
+      margin: 18px auto 22px;
+      width: 80%;
+    }
+
+    /* Verification Badge */
+    .status-badge-wrap {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 24px;
+    }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 18px;
+      border-radius: 50px;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .status-badge.verified {
+      background-color: var(--emerald-bg);
+      color: var(--emerald);
+      border: 1px solid #86efac;
+    }
+    .status-badge.expired {
+      background-color: var(--crimson-bg);
+      color: var(--crimson);
+      border: 1px solid #fca5a5;
+    }
+
+    /* Document Type Title */
+    .doc-headline {
+      text-align: center;
+      font-size: 16px;
+      font-weight: 900;
+      letter-spacing: 1.4px;
+      color: var(--text-main);
+      text-transform: uppercase;
+      margin-bottom: 20px;
+    }
+
+    /* Info Fieldset Table */
+    .data-grid {
+      background-color: var(--bg-light);
+      border: 1px solid var(--border-color);
+      border-radius: 18px;
+      padding: 16px 20px;
+      margin-bottom: 20px;
+    }
+    .data-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 9px 0;
+      border-bottom: 1px solid #E8EFE8;
+      font-size: 13px;
+    }
+    .data-row:last-child {
+      border-bottom: none;
+    }
+    .data-label {
+      color: var(--text-sub);
+      font-weight: 600;
+      flex: 1;
+    }
+    .data-value {
+      color: var(--text-main);
+      font-weight: 700;
+      text-align: right;
+      flex: 1.4;
+    }
+    .data-value.highlight {
+      color: var(--primary-green);
+      font-size: 14px;
+    }
+
+    /* Clearance Specific Block */
+    .fitness-banner {
+      background-color: var(--soft-sage);
+      border: 1px solid #C4D5C2;
+      border-radius: 14px;
+      padding: 14px 18px;
+      margin-bottom: 22px;
+      text-align: center;
+    }
+    .fitness-banner h4 {
+      font-size: 14px;
+      font-weight: 900;
+      color: var(--primary-green);
+      letter-spacing: 0.5px;
+    }
+    .fitness-banner p {
+      font-size: 12px;
+      color: #334136;
+      margin-top: 4px;
+    }
+
+    /* Prescription Specific Line Items */
+    .rx-items-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0 20px;
+      font-size: 12.5px;
+    }
+    .rx-items-table th {
+      background: var(--soft-sage);
+      color: var(--primary-green);
+      text-align: left;
+      padding: 8px 12px;
+      font-weight: 800;
+    }
+    .rx-items-table th:first-child { border-radius: 10px 0 0 10px; }
+    .rx-items-table th:last-child { border-radius: 0 10px 10px 0; }
+    .rx-items-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border-color);
+      color: var(--text-main);
+    }
+
+    /* Cryptographic Seal Panel */
+    .seal-box {
+      background: linear-gradient(135deg, #F0F6F0 0%, #E2EBE1 100%);
+      border: 1px solid #BFD2BF;
+      border-radius: 16px;
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-top: 24px;
+    }
+    .seal-qr {
+      width: 80px;
+      height: 80px;
+      background: white;
+      border-radius: 10px;
+      padding: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+    }
+    .seal-qr img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    .seal-meta h5 {
+      font-size: 11px;
+      letter-spacing: 1.2px;
+      color: var(--primary-green);
+      font-weight: 800;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .seal-meta p {
+      font-size: 11.5px;
+      color: var(--text-sub);
+      line-height: 1.4;
+    }
+    .token-snippet {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 10px;
+      background: #FFFFFF;
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--border-color);
+      display: inline-block;
+      margin-top: 4px;
+      word-break: break-all;
+    }
+
+    /* Print / Action Buttons */
+    .actions-bar {
+      display: flex;
+      gap: 10px;
+      margin-top: 24px;
+    }
+    .btn {
+      flex: 1;
+      height: 46px;
+      border-radius: 50px;
+      font-size: 13.5px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      text-decoration: none;
+      transition: all 0.2s ease;
+      border: none;
+    }
+    .btn-primary {
+      background-color: var(--primary-green);
+      color: #FFFFFF;
+    }
+    .btn-primary:hover {
+      background-color: var(--primary-green-dark);
+    }
+    .btn-outline {
+      background-color: transparent;
+      color: var(--primary-green);
+      border: 1.5px solid var(--primary-green);
+    }
+    .btn-outline:hover {
+      background-color: var(--soft-sage);
+    }
+
+    /* Footer Legal */
+    .legal-footer {
+      text-align: center;
+      font-size: 11px;
+      color: var(--text-sub);
+      margin-top: 24px;
+      line-height: 1.5;
+    }
+
+    /* Print Stylesheet */
+    @media print {
+      body {
+        background: #FFFFFF !important;
+        padding: 0 !important;
+      }
+      .cert-card {
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+      }
+      .actions-bar, .top-nav {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <!-- Top Nav Brand -->
+    <header class="top-nav">
+      <div class="brand-mark">
+        <div class="brand-icon">+</div>
+        <div>
+          <span class="brand-text">valetudo.</span>
+          <span class="brand-tag">HEALTHLINK VERIFY</span>
+        </div>
+      </div>
+      <span style="font-size: 11px; color: var(--text-sub); font-weight: 600;">
+        Lingayen Campus Infirmary
+      </span>
+    </header>
+
+    <!-- Main Certificate -->
+    <main class="cert-card" id="main-content">
+      <!-- Loading Placeholder -->
+      <div id="loading-state" style="text-align: center; padding: 40px 0;">
+        <div style="font-size: 32px; margin-bottom: 12px;">⏳</div>
+        <p style="font-size: 14px; font-weight: bold; color: var(--primary-green);">
+          Verifying digital cryptographic seal...
+        </p>
+        <p style="font-size: 12px; color: var(--text-sub);">
+          Querying Pangasinan State University medical registry...
+        </p>
+      </div>
+
+      <!-- Injected Document View (Rendered by JS) -->
+      <div id="document-view" style="display: none;"></div>
+    </main>
+
+    <!-- Legal Footer -->
+    <footer class="legal-footer">
+      Protected under Republic Act No. 10173 (Data Privacy Act of 2012).<br>
+      Pangasinan State University • Lingayen Campus Infirmary Health Records.
+    </footer>
+  </div>
+
+  <script>
+    (async function initVerification() {
+      // 1. Extract token from URL path: /api/documents/verify/:qrToken OR query param: ?token=...
+      const pathParts = window.location.pathname.split('/');
+      let token = pathParts[pathParts.length - 1];
+
+      // Handle query param fallback: ?token=...
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('token')) {
+        token = urlParams.get('token');
+      }
+
+      if (!token || token === 'verify' || token.trim() === '') {
+        renderError('Missing or Invalid Document Token.');
+        return;
+      }
+
+      try {
+        // Query server API endpoint
+        const res = await fetch(`/api/documents/verify/${encodeURIComponent(token.trim())}`, {
+          headers: { 'Accept': 'application/json' }
+        });
+
+        const data = await res.json();
+        document.getElementById('loading-state').style.display = 'none';
+
+        if (!res.ok || (!data.valid && !data.verified)) {
+          renderInvalid(data.error || 'Document signature could not be verified in university records.', token);
+          return;
+        }
+
+        if (data.type === 'MEDICAL_CLEARANCE') {
+          renderClearance(data, token);
+        } else if (data.type === 'PRESCRIPTION') {
+          renderPrescription(data, token);
+        } else {
+          renderGeneric(data, token);
+        }
+      } catch (err) {
+        document.getElementById('loading-state').style.display = 'none';
+        renderError('Network connection error: ' + err.message);
+      }
+    })();
+
+    function formatDate(raw) {
+      if (!raw) return 'N/A';
+      try {
+        const d = new Date(raw);
+        return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+      } catch (_) {
+        return raw.split('T')[0];
+      }
+    }
+
+    function renderClearance(doc, token) {
+      const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(window.location.href)}`;
+      const isExpired = doc.status === 'expired' || new Date(doc.expiresAt) < new Date();
+
+      const html = `
+        <div class="letterhead">
+          <p class="univ-title">Pangasinan State University</p>
+          <h2 class="clinic-title">CAMPUS INFIRMARY MEDICAL SERVICES</h2>
+          <p class="clinic-sub">Lingayen Campus • Republic Act No. 10173 Official Medical Certificate</p>
+          <div class="divider"></div>
+        </div>
+
+        <div class="status-badge-wrap">
+          <span class="status-badge ${isExpired ? 'expired' : 'verified'}">
+            ${isExpired ? 'EXPIRED CLEARANCE' : 'VERIFIED AUTHENTIC CLEARANCE'}
+          </span>
+        </div>
+
+        <div class="doc-headline">Official Medical Clearance Certificate</div>
+
+        <div class="fitness-banner">
+          <h4>STATUS: PHYSICALLY FIT</h4>
+          <p>Cleared for: <b>${doc.purpose || 'General Academic / Practicum Requirements'}</b></p>
+        </div>
+
+        <div class="data-grid">
+          <div class="data-row">
+            <span class="data-label">Patient Full Name:</span>
+            <span class="data-value highlight">${doc.patient || 'PSU Student'}</span>
+          </div>
+          <div class="data-row">
+            <span class="data-label">Student / ID Number:</span>
+            <span class="data-value">${doc.studentNo || 'N/A'}</span>
+          </div>
+          <div class="data-row">
+            <span class="data-label">Course / Department:</span>
+            <span class="data-value">${doc.course || 'PSU Lingayen'}</span>
+          </div>
+          <div class="data-row">
+            <span class="data-label">Issued By:</span>
+            <span class="data-value">${doc.issuedBy}</span>
+          </div>
+          <div class="data-row">
+            <span class="data-label">Date of Issuance:</span>
+            <span class="data-value">${formatDate(doc.issuedAt)}</span>
+          </div>
+          <div class="data-row">
+            <span class="data-label">Valid Until:</span>
+            <span class="data-value" style="color: ${isExpired ? 'var(--crimson)' : 'var(--emerald)'};">${formatDate(doc.expiresAt)}</span>
+          </div>
+        </div>
+
+        <div class="seal-box">
+          <div class="seal-qr">
+            <img src="${qrApiUrl}" alt="Digital Seal QR">
+          </div>
+          <div class="seal-meta">
+            <h5>R.A. 10173 Cryptographic Seal</h5>
+            <p>Signed and sealed by PSU Campus Health Services. Verifiable by faculty deans and partner institutions.</p>
+            <span class="token-snippet">${token}</span>
+          </div>
+        </div>
+
+        <div class="actions-bar">
+          <button class="btn btn-outline" onclick="window.print()">🖨️ Print Certificate</button>
+          <a class="btn btn-primary" href="javascript:location.reload()">🔄 Re-verify Seal</a>
+        </div>
+      `;
+
+      const view = document.getElementById('document-view');
+      view.innerHTML = html;
+      view.style.display = 'block';
+    }
+
+    function renderPrescription(doc, token) {
+      const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(window.location.href)}`;
+      const items = doc.items || [];
+
+      let itemsRows = '';
+      if (items.length > 0) {
+        itemsRows = items.map(it => `
+          <tr>
+            <td><b>${it.medicine_name || 'Prescribed Med'}</b><br><small style="color:var(--text-sub);">${it.generic_name || ''}</small></td>
+            <td><b>${it.dosage || '500mg'}</b></td>
+            <td>${it.instructions || 'Take as directed'}<br><small style="color:var(--text-sub);">${it.frequency || 'Daily'} • ${it.duration_days || 3} days</small></td>
+            <td><b>${it.quantity_dispensed || 10} pcs</b></td>
+          </tr>
+        `).join('');
+      } else {
+        itemsRows = `<tr><td colspan="4" style="text-align:center; color:var(--text-sub);">Prescription formulary record attached to patient EMR.</td></tr>`;
+      }
+
+      const html = `
+        <div class="letterhead">
+          <p class="univ-title">Pangasinan State University</p>
+          <h2 class="clinic-title">CAMPUS INFIRMARY MEDICAL SERVICES</h2>
+          <p class="clinic-sub">Lingayen Campus • Republic Act No. 10173 Official Digital Prescription</p>
+          <div class="divider"></div>
+        </div>
+
+        <div class="status-badge-wrap">
+          <span class="status-badge verified">
+            ✅ VERIFIED CLINICAL PRESCRIPTION (℞)
+          </span>
+        </div>
+
+        <div class="data-grid">
+          <div class="data-row">
+            <span class="data-label">Patient Name:</span>
+            <span class="data-value highlight">${doc.patient || 'PSU Student'}</span>
+          </div>
+          <div class="data-row">
+            <span class="data-label">Student / ID Number:</span>
+            <span class="data-value">${doc.studentNo || 'N/A'}</span>
+          </div>
+          <div class="data-row">
+            <span class="data-label">Attending Physician:</span>
+            <span class="data-value">${doc.issuedBy}</span>
+          </div>
+          <div class="data-row">
+            <span class="data-label">Date Prescribed:</span>
+            <span class="data-value">${formatDate(doc.issuedAt)}</span>
+          </div>
+          ${doc.notes ? `
+          <div class="data-row">
+            <span class="data-label">Physician Notes:</span>
+            <span class="data-value" style="font-style: italic;">${doc.notes}</span>
+          </div>` : ''}
+        </div>
+
+        <h4 style="font-size: 13px; font-weight: 800; color: var(--primary-green); margin: 18px 0 8px;">
+          PRESCRIBED MEDICINES (FORMULARY):
+        </h4>
+        <table class="rx-items-table">
+          <thead>
+            <tr>
+              <th>Medicine</th>
+              <th>Dosage</th>
+              <th>Sig / Instructions</th>
+              <th>Qty</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsRows}
+          </tbody>
+        </table>
+
+        <div class="seal-box">
+          <div class="seal-qr">
+            <img src="${qrApiUrl}" alt="Digital Seal QR">
+          </div>
+          <div class="seal-meta">
+            <h5>R.A. 10173 Digital Prescription Seal</h5>
+            <p>Cryptographically signed and validated. Accepted at PSU Campus Pharmacy & partner dispensaries.</p>
+            <span class="token-snippet">${token}</span>
+          </div>
+        </div>
+
+        <div class="actions-bar">
+          <button class="btn btn-outline" onclick="window.print()">🖨️ Print Prescription</button>
+          <a class="btn btn-primary" href="javascript:location.reload()">🔄 Re-verify Seal</a>
+        </div>
+      `;
+
+      const view = document.getElementById('document-view');
+      view.innerHTML = html;
+      view.style.display = 'block';
+    }
+
+    function renderInvalid(message, token) {
+      const html = `
+        <div class="letterhead">
+          <p class="univ-title">Pangasinan State University</p>
+          <h2 class="clinic-title" style="color: var(--crimson);">DOCUMENT VERIFICATION FAILED</h2>
+          <div class="divider"></div>
+        </div>
+
+        <div class="status-badge-wrap">
+          <span class="status-badge expired">❌ UNVERIFIED OR EXPIRED TOKEN</span>
+        </div>
+
+        <div style="background: var(--crimson-bg); border: 1px solid #fca5a5; border-radius: 14px; padding: 20px; text-align: center; margin-bottom: 20px;">
+          <p style="font-size: 13.5px; color: var(--crimson); font-weight: 600;">
+            ${message}
+          </p>
+          <p style="font-size: 12px; color: var(--text-sub); margin-top: 8px;">
+            The QR code token may have expired, been revoked under R.A. 10173 retention rules, or belongs to another university system.
+          </p>
+          <div style="margin-top: 14px;">
+            <code style="font-size: 11px; color: #475569; word-break: break-all;">Ref: ${token}</code>
+          </div>
+        </div>
+
+        <div class="actions-bar">
+          <a class="btn btn-outline" href="javascript:history.back()">Back</a>
+          <button class="btn btn-primary" onclick="location.reload()">Try Again</button>
+        </div>
+      `;
+      const view = document.getElementById('document-view');
+      view.innerHTML = html;
+      view.style.display = 'block';
+    }
+
+    function renderError(message) {
+      renderInvalid(message, 'N/A');
+    }
+  </script>
+</body>
+</html>

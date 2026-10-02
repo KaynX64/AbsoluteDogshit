@@ -2,8 +2,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:http/http.dart' as http;
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../config/api_config.dart';
 
 class DocumentsViewerScreen extends StatefulWidget {
@@ -25,6 +25,12 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
   List<dynamic> _clearances = [];
   bool _loadingClearances = false;
 
+  static const primaryGreen = Color(0xFF284E3A);
+  static const softSage = Color(0xFFE5EDE4);
+  static const textMain = Color(0xFF191C1A);
+  static const textSub = Color(0xFF5A635B);
+  static const borderColor = Color(0xFFE2EBE2);
+
   @override
   void initState() {
     super.initState();
@@ -36,7 +42,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     setState(() => _loadingPrescriptions = true);
     final token = await _storage.read(key: 'jwt_token');
     try {
-      final res = await http.get(
+      final res = await ApiConfig.client.get(
         Uri.parse('${ApiConfig.baseUrl}/api/documents/prescriptions/my'),
         headers: {'Authorization': 'Bearer $token'},
       );
@@ -51,7 +57,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     setState(() => _loadingClearances = true);
     final token = await _storage.read(key: 'jwt_token');
     try {
-      final res = await http.get(
+      final res = await ApiConfig.client.get(
         Uri.parse('${ApiConfig.baseUrl}/api/documents/clearances/my'),
         headers: {'Authorization': 'Bearer $token'},
       );
@@ -66,257 +72,315 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     if (rawDate == null || rawDate.isEmpty) return 'N/A';
     try {
       final dt = DateTime.parse(rawDate).toLocal();
-      return "${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}";
+      const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      return "${months[dt.month - 1]} ${dt.day}, ${dt.year}";
     } catch (_) {
       return rawDate.split('T').first;
     }
   }
 
-  // --- Modal: Prescription QR Verification Details ---
-  void _showPrescriptionQrModal(Map<String, dynamic> rx) {
+  // --- MODAL 1: FULL OFFICIAL DIGITAL PRESCRIPTION (℞) ---
+  void _showPrescriptionDocumentModal(Map<String, dynamic> rx) {
     final qrToken = rx['qr_token'] ?? '';
-    showDialog(
+    final verificationUrl = '${ApiConfig.baseUrl}/api/documents/verify/$qrToken';
+    final items = rx['items'] as List<dynamic>? ?? [];
+
+    showModalBottomSheet(
       context: context,
-      builder: (ctx) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: SingleChildScrollView(
-            child: SizedBox(
-              width: double.maxFinite,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.9,
+        maxChildSize: 0.95,
+        minChildSize: 0.5,
+        builder: (_, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+          child: ListView(
+            controller: scrollController,
+            children: [
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 5,
+                  decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+              const SizedBox(height: 18),
+
+              // University Letterhead
+              const Center(
+                child: Column(
+                  children: [
+                    Text('PANGASINAN STATE UNIVERSITY', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 2.0, color: Color(0xFF4D6053))),
+                    SizedBox(height: 2),
+                    Text('CAMPUS INFIRMARY MEDICAL SERVICES', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: primaryGreen)),
+                    Text('Lingayen Campus · Republic Act No. 10173 Verified E-Prescription', style: TextStyle(fontSize: 10.5, color: textSub)),
+                  ],
+                ),
+              ),
+              const Divider(color: primaryGreen, height: 28, thickness: 1.5),
+
+              // Rx Emblem
+              const Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.qr_code_scanner, color: Color(0xFF0F766E)),
-                      SizedBox(width: 8),
-                      Text(
-                        'Digital Rx Verification',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  Text('℞', style: TextStyle(fontSize: 38, fontWeight: FontWeight.w900, color: primaryGreen, fontFamily: 'serif')),
+                  Text('OFFICIAL DIGITAL PRESCRIPTION', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.0, color: textSub)),
+                ],
+              ),
+              const SizedBox(height: 10),
+
+              // Prescribed Items
+              const Text('PRESCRIBED FORMULARY MEDICATION:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1.0, color: textSub)),
+              const SizedBox(height: 8),
+              if (items.isEmpty)
+                const Text('No line items recorded.', style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic, color: textSub))
+              else
+                ...items.map((it) => Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF7F9F6),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: borderColor),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    width: 210,
-                    height: 210,
-                    alignment: Alignment.center,
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.teal.shade100),
-                      boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text("${it['medicine_name']} (${it['generic_name']})", style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: textMain)),
+                              Text("${it['dosage'] ?? '500mg'}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: primaryGreen)),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text("Sig: ${it['instructions'] ?? 'Take as directed'} • ${it['frequency'] ?? 'Daily'}", style: const TextStyle(fontSize: 12, color: textSub)),
+                          Text("Duration: ${it['duration_days'] ?? 3} days (Qty: ${it['quantity_dispensed'] ?? 10} pcs)", style: const TextStyle(fontSize: 11.5, color: textSub)),
+                        ],
+                      ),
+                    )),
+
+              if (rx['notes'] != null && rx['notes'].toString().isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text("Doctor Dietary Notes: ${rx['notes']}", style: const TextStyle(fontSize: 12.5, fontStyle: FontStyle.italic, color: textSub)),
+              ],
+
+              const SizedBox(height: 20),
+
+              // Embedded Verification QR Seal & Signature
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(color: const Color(0xFFE2EBE1), borderRadius: BorderRadius.circular(18)),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+                      child: QrImageView(data: verificationUrl, version: QrVersions.auto, size: 90),
                     ),
-                    child: QrImageView(
-                      data: qrToken,
-                      version: QrVersions.auto,
-                      size: 190.0,
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('R.A. 10173 DIGITAL SEAL', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, letterSpacing: 1.2, color: primaryGreen)),
+                          const SizedBox(height: 4),
+                          Text("Dr. ${rx['doctor_first_name']} ${rx['doctor_last_name']}", style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: textMain)),
+                          Text("PRC License: ${rx['doctor_license']}", style: const TextStyle(fontSize: 11, color: textSub)),
+                          Text("Issued: ${_formatDate(rx['issued_at'])}", style: const TextStyle(fontSize: 11, color: textSub)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Actions
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: primaryGreen,
+                        side: const BorderSide(color: primaryGreen),
+                        shape: const StadiumBorder(),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      onPressed: () => launchUrl(Uri.parse(verificationUrl), mode: LaunchMode.externalApplication),
+                      icon: const Icon(Icons.open_in_browser, size: 16),
+                      label: const Text('Open Web Verify', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                     ),
                   ),
-                  const SizedBox(height: 14),
-                  Text(
-                    "Prescription #${rx['prescription_id']}",
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    "Attending: Dr. ${rx['doctor_first_name']} ${rx['doctor_last_name']} (${rx['doctor_license']})",
-                    style: const TextStyle(fontSize: 12, color: Colors.black54),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 10),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      "Verification Token:\n$qrToken",
-                      style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: Colors.black87),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  const Text(
-                    'Present this QR code to the university infirmary or accredited pharmacy to verify authenticity.',
-                    style: TextStyle(fontSize: 11, color: Colors.black54),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 18),
-                  SizedBox(
-                    width: double.infinity,
+                  const SizedBox(width: 10),
+                  Expanded(
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0F766E),
+                        backgroundColor: primaryGreen,
                         foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        shape: const StadiumBorder(),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
                       onPressed: () => Navigator.pop(ctx),
-                      child: const Text('Close'),
+                      child: const Text('Done', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                     ),
                   ),
                 ],
               ),
-            ),
+              const SizedBox(height: 12),
+            ],
           ),
         ),
       ),
     );
   }
 
-  // --- Modal: Official Clearance Certificate & Digital Seal ---
-  void _showClearanceCertificateModal(Map<String, dynamic> clearance) {
-    final qrToken = clearance['qr_token'] ?? '';
-    final rawExpiry = clearance['expires_at'];
-    DateTime? expiryDate;
-    bool isExpired = false;
-    if (rawExpiry != null) {
-      try {
-        expiryDate = DateTime.parse(rawExpiry);
-        isExpired = expiryDate.isBefore(DateTime.now());
-      } catch (_) {}
-    }
+  // --- MODAL 2: FULL OFFICIAL MEDICAL CLEARANCE CERTIFICATE ---
+  void _showClearanceCertificateModal(Map<String, dynamic> c) {
+    final qrToken = c['qr_token'] ?? '';
+    final verificationUrl = '${ApiConfig.baseUrl}/api/documents/verify/$qrToken';
 
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      builder: (ctx) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: SingleChildScrollView(
-            child: SizedBox(
-              width: double.maxFinite,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.9,
+        maxChildSize: 0.95,
+        minChildSize: 0.5,
+        builder: (_, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+          child: ListView(
+            controller: scrollController,
+            children: [
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 5,
+                  decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+              const SizedBox(height: 18),
+
+              // University Letterhead
+              const Center(
+                child: Column(
+                  children: [
+                    Text('PANGASINAN STATE UNIVERSITY', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 2.0, color: Color(0xFF4D6053))),
+                    SizedBox(height: 2),
+                    Text('CAMPUS INFIRMARY MEDICAL SERVICES', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: primaryGreen)),
+                    Text('Lingayen Campus · Republic Act No. 10173 Official Medical Certificate', style: TextStyle(fontSize: 10.5, color: textSub)),
+                  ],
+                ),
+              ),
+              const Divider(color: primaryGreen, height: 28, thickness: 1.5),
+
+              const Center(
+                child: Text('OFFICIAL MEDICAL CLEARANCE', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, letterSpacing: 1.2, color: textMain)),
+              ),
+              const SizedBox(height: 18),
+
+              // Certificate Body
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(color: const Color(0xFFF7F9F6), borderRadius: BorderRadius.circular(18), border: Border.all(color: borderColor)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('TO WHOM IT MAY CONCERN:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: textMain)),
+                    const SizedBox(height: 8),
+                    Text(
+                      "This certifies that ${c['patient_first_name'] ?? 'the student'} ${c['patient_last_name'] ?? ''} (${c['student_no'] ?? 'PSU Student'}), enrolled in ${c['course'] ?? 'PSU Lingayen'}, has undergone physical medical evaluation at the University Infirmary and is determined to be:",
+                      style: const TextStyle(fontSize: 13, color: textMain, height: 1.5),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(color: const Color(0xFFE2EBE1), borderRadius: BorderRadius.circular(12)),
+                      child: Text(
+                        "PURPOSE: ${c['purpose'] ?? 'General Medical Clearance'}\nSTATUS: PHYSICALLY FIT",
+                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: primaryGreen, height: 1.4),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text("Valid until: ${_formatDate(c['expires_at'])}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: textMain)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Verification Seal Box
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(color: const Color(0xFFE2EBE1), borderRadius: BorderRadius.circular(18)),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+                      child: QrImageView(data: verificationUrl, version: QrVersions.auto, size: 90),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('R.A. 10173 DIGITAL SEAL', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, letterSpacing: 1.2, color: primaryGreen)),
+                          const SizedBox(height: 4),
+                          Text("Dr. ${c['doctor_first_name']} ${c['doctor_last_name']}", style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: textMain)),
+                          Text("PRC License: ${c['doctor_license']}", style: const TextStyle(fontSize: 11, color: textSub)),
+                          Text("Issued: ${_formatDate(c['issued_at'])}", style: const TextStyle(fontSize: 11, color: textSub)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Actions
+              Row(
                 children: [
-                  const Text(
-                    'PANGASINAN STATE UNIVERSITY',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                      color: Color(0xFF0F766E),
-                      letterSpacing: 0.5,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const Text(
-                    'CAMPUS INFIRMARY MEDICAL SERVICES',
-                    style: TextStyle(fontSize: 10, color: Colors.black54, fontWeight: FontWeight.bold),
-                    textAlign: TextAlign.center,
-                  ),
-                  const Divider(height: 18),
-
-                  const Text(
-                    'OFFICIAL MEDICAL CLEARANCE',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, decoration: TextDecoration.underline),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 12),
-
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF0FDFA),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.teal.shade200),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          "Purpose: ${clearance['purpose']}",
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          "Issued: ${_formatDate(clearance['issued_at'])}",
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                        Text(
-                          "Valid Until: ${_formatDate(clearance['expires_at'])}",
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: isExpired ? Colors.red : Colors.green.shade800,
-                          ),
-                        ),
-                      ],
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: primaryGreen,
+                        side: const BorderSide(color: primaryGreen),
+                        shape: const StadiumBorder(),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      onPressed: () => launchUrl(Uri.parse(verificationUrl), mode: LaunchMode.externalApplication),
+                      icon: const Icon(Icons.open_in_browser, size: 16),
+                      label: const Text('Open Web Verify', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                     ),
                   ),
-                  const SizedBox(height: 14),
-
-                  Container(
-                    width: 180,
-                    height: 180,
-                    alignment: Alignment.center,
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.grey.shade300),
-                    ),
-                    child: QrImageView(
-                      data: qrToken,
-                      version: QrVersions.auto,
-                      size: 160.0,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    "Digital Seal Token: ${qrToken.substring(0, qrToken.length > 20 ? 20 : qrToken.length)}...",
-                    style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: Colors.black54),
-                  ),
-                  const SizedBox(height: 12),
-
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade50,
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: Colors.grey.shade200),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Text(
-                          "Dr. ${clearance['doctor_first_name']} ${clearance['doctor_last_name']}",
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                        ),
-                        Text(
-                          "Attending Physician • ${clearance['doctor_license']}",
-                          style: const TextStyle(fontSize: 11, color: Colors.black54),
-                        ),
-                        const Text(
-                          "Republic Act No. 10173 Verified E-Signature",
-                          style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic, color: Color(0xFF0F766E)),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  SizedBox(
-                    width: double.infinity,
+                  const SizedBox(width: 10),
+                  Expanded(
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0F766E),
+                        backgroundColor: primaryGreen,
                         foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        shape: const StadiumBorder(),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
                       onPressed: () => Navigator.pop(ctx),
-                      child: const Text('Dismiss'),
+                      child: const Text('Done', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                     ),
                   ),
                 ],
               ),
-            ),
+              const SizedBox(height: 12),
+            ],
           ),
         ),
       ),
@@ -326,38 +390,75 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
   @override
   Widget build(BuildContext context) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          color: Colors.white,
-          child: SizedBox(
-            width: double.infinity,
-            child: SegmentedButton<int>(
-              segments: const [
-                ButtonSegment<int>(
-                  value: 0,
-                  icon: Icon(Icons.medication_outlined),
-                  label: Text('Prescriptions (℞)'),
-                ),
-                ButtonSegment<int>(
-                  value: 1,
-                  icon: Icon(Icons.verified_outlined),
-                  label: Text('Clearances (📄)'),
-                ),
-              ],
-              selected: {_selectedSubTab},
-              onSelectionChanged: (newSelection) {
-                setState(() => _selectedSubTab = newSelection.first);
-              },
-              style: ButtonStyle(
-                shape: WidgetStateProperty.all(
-                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        // Header
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('YOUR RECORDS, ALL TOGETHER', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, letterSpacing: 1.8, color: textSub)),
+              const SizedBox(height: 4),
+              const Text('Care you can keep.', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: textMain, letterSpacing: -0.5)),
+              const SizedBox(height: 2),
+              const Text('Your prescriptions and clearances, whenever you need them.', style: TextStyle(fontSize: 13.5, color: textSub)),
+              const SizedBox(height: 14),
+
+              // Pill Switcher Bar
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(color: softSage, borderRadius: BorderRadius.circular(24)),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => setState(() => _selectedSubTab = 0),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 9),
+                          decoration: BoxDecoration(
+                            color: _selectedSubTab == 0 ? primaryGreen : Colors.transparent,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            'Prescriptions',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: _selectedSubTab == 0 ? Colors.white : primaryGreen,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => setState(() => _selectedSubTab = 1),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 9),
+                          decoration: BoxDecoration(
+                            color: _selectedSubTab == 1 ? primaryGreen : Colors.transparent,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            'Clearances',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: _selectedSubTab == 1 ? Colors.white : primaryGreen,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
+            ],
           ),
         ),
-        const Divider(height: 1),
 
         Expanded(
           child: _selectedSubTab == 0 ? _buildPrescriptionsList() : _buildClearancesList(),
@@ -369,300 +470,279 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
   // --- SUB-VIEW 0: PRESCRIPTIONS LIST ---
   Widget _buildPrescriptionsList() {
     if (_loadingPrescriptions) {
-      return const Center(child: CircularProgressIndicator(color: Color(0xFF0F766E)));
+      return const Center(child: CircularProgressIndicator(color: primaryGreen));
     }
 
     if (_prescriptions.isEmpty) {
       return RefreshIndicator(
+        color: primaryGreen,
         onRefresh: _fetchPrescriptions,
         child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(24),
           children: const [
-            SizedBox(height: 80),
-            Icon(Icons.medication_liquid_outlined, size: 64, color: Colors.grey),
+            SizedBox(height: 60),
+            Icon(Icons.medication_outlined, size: 54, color: Color(0xFFA4B0A6)),
             SizedBox(height: 12),
-            Center(child: Text('No digital prescriptions on record.', style: TextStyle(color: Colors.black54, fontSize: 15))),
-            SizedBox(height: 6),
-            Center(child: Text('Prescriptions issued during consultations appear here.', style: TextStyle(color: Colors.grey, fontSize: 12))),
+            Center(child: Text('No digital prescriptions on record.', style: TextStyle(color: textSub, fontSize: 14, fontWeight: FontWeight.w600))),
           ],
         ),
       );
     }
 
     return RefreshIndicator(
+      color: primaryGreen,
       onRefresh: _fetchPrescriptions,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(12),
-        itemCount: _prescriptions.length,
-        itemBuilder: (context, index) {
-          final rx = _prescriptions[index];
-          final items = rx['items'] as List<dynamic>? ?? [];
-          final status = (rx['status'] ?? 'active').toString().toLowerCase();
+      child: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        children: [
+          ..._prescriptions.map((rx) {
+            final items = rx['items'] as List<dynamic>? ?? [];
+            final status = (rx['status'] ?? 'active').toString().toLowerCase();
 
-          Color statusColor = Colors.green.shade700;
-          if (status == 'dispensed') statusColor = Colors.blue.shade700;
-          if (status == 'expired' || status == 'cancelled') statusColor = Colors.red.shade700;
+            final firstMed = items.isNotEmpty ? items[0] : null;
+            final medName = firstMed?['medicine_name'] ?? 'Prescribed medication';
+            final medStrength = firstMed != null ? "${firstMed['generic_name']} · ${firstMed['dosage'] ?? '500 mg'}" : '';
 
-          return Card(
-            elevation: 2,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-              side: BorderSide(color: Colors.teal.shade200, width: 1),
-            ),
-            margin: const EdgeInsets.only(bottom: 14),
-            child: Padding(
-              padding: const EdgeInsets.all(14),
+            return Container(
+              margin: const EdgeInsets.only(bottom: 14),
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: borderColor),
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Row(
-                        children: [
-                          const Text(
-                            '℞',
-                            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Color(0xFF0F766E)),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            "Prescription #${rx['prescription_id']}",
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                          ),
-                        ],
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(color: const Color(0xFFEDEBF7), borderRadius: BorderRadius.circular(10)),
+                        child: const Icon(Icons.medication_liquid_outlined, size: 20, color: Color(0xFF5B4EA1)),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color: statusColor.withAlpha(25),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: statusColor),
+                          color: status == 'active' ? const Color(0xFFE5EDE4) : const Color(0xFFE2EBE1),
+                          borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
                           status.toUpperCase(),
-                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: statusColor),
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                            color: status == 'active' ? primaryGreen : const Color(0xFF15803D),
+                          ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 14),
 
-                  Text(
-                    "Physician: Dr. ${rx['doctor_first_name']} ${rx['doctor_last_name']} (${rx['doctor_license']})",
-                    style: const TextStyle(fontSize: 13, color: Colors.black87),
-                  ),
-                  Text(
-                    "Issued: ${_formatDate(rx['issued_at'])}",
-                    style: const TextStyle(fontSize: 12, color: Colors.black54),
-                  ),
-                  const Divider(height: 18),
-
-                  const Text('Prescribed Medications:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F766E))),
-                  const SizedBox(height: 6),
-                  if (items.isEmpty)
-                    const Text('No line items recorded.', style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.grey))
-                  else
-                    ...items.map((item) {
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade50,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: Colors.grey.shade200),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  "${item['medicine_name']} (${item['strength'] ?? 'Standard'})",
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                                ),
-                                Text(
-                                  "${item['form'] ?? 'Tablet'}",
-                                  style: const TextStyle(fontSize: 11, color: Colors.black54),
-                                ),
-                              ],
-                            ),
-                            if (item['generic_name'] != null)
-                              Text(
-                                "Generic: ${item['generic_name']}",
-                                style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Colors.black54),
-                              ),
-                            const SizedBox(height: 3),
-                            Text(
-                              "Sig: ${item['dosage']} • ${item['frequency']}",
-                              style: const TextStyle(fontSize: 12, color: Colors.black87),
-                            ),
-                            if (item['instructions'] != null && item['instructions'].toString().isNotEmpty)
-                              Text(
-                                "Note: ${item['instructions']}",
-                                style: TextStyle(fontSize: 11, color: Colors.teal.shade800),
-                              ),
-                          ],
-                        ),
-                      );
-                    }),
-
-                  if (rx['notes'] != null && rx['notes'].toString().isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text("Doctor Notes: ${rx['notes']}", style: const TextStyle(fontSize: 12, color: Colors.black54)),
-                  ],
+                  Text(medName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textMain)),
+                  if (medStrength.isNotEmpty) Text(medStrength, style: const TextStyle(fontSize: 12.5, color: textSub)),
                   const SizedBox(height: 10),
 
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFF0F766E),
-                        side: const BorderSide(color: Color(0xFF0F766E)),
+                  Row(
+                    children: [
+                      const Icon(Icons.person_outline, size: 15, color: textSub),
+                      const SizedBox(width: 6),
+                      Text("Dr. ${rx['doctor_first_name']} ${rx['doctor_last_name']}", style: const TextStyle(fontSize: 12, color: textSub)),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.event_outlined, size: 15, color: textSub),
+                      const SizedBox(width: 6),
+                      Text("Issued ${_formatDate(rx['issued_at'])}", style: const TextStyle(fontSize: 12, color: textSub)),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  const Divider(color: borderColor, height: 1),
+                  const SizedBox(height: 12),
+
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      GestureDetector(
+                        onTap: () => _showPrescriptionDocumentModal(rx),
+                        child: const Row(
+                          children: [
+                            Text('View document', style: TextStyle(color: primaryGreen, fontSize: 13, fontWeight: FontWeight.w700)),
+                            SizedBox(width: 4),
+                            Icon(Icons.arrow_forward_rounded, size: 15, color: primaryGreen),
+                          ],
+                        ),
                       ),
-                      onPressed: () => _showPrescriptionQrModal(rx),
-                      icon: const Icon(Icons.qr_code, size: 16),
-                      label: const Text('Show Rx QR & Verification'),
-                    ),
+                      IconButton(
+                        icon: const Icon(Icons.description_outlined, size: 20, color: textSub),
+                        onPressed: () => _showPrescriptionDocumentModal(rx),
+                      ),
+                    ],
                   ),
                 ],
               ),
-            ),
-          );
-        },
+            );
+          }),
+
+          _buildSampleDisclaimer(),
+          const SizedBox(height: 20),
+        ],
       ),
     );
   }
 
-  // --- SUB-VIEW 1: MEDICAL CLEARANCES LIST ---
+  // --- SUB-VIEW 1: CLEARANCES LIST ---
   Widget _buildClearancesList() {
     if (_loadingClearances) {
-      return const Center(child: CircularProgressIndicator(color: Color(0xFF0F766E)));
+      return const Center(child: CircularProgressIndicator(color: primaryGreen));
     }
 
     if (_clearances.isEmpty) {
       return RefreshIndicator(
+        color: primaryGreen,
         onRefresh: _fetchClearances,
         child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(24),
           children: const [
-            SizedBox(height: 80),
-            Icon(Icons.verified_user_outlined, size: 64, color: Colors.grey),
+            SizedBox(height: 60),
+            Icon(Icons.verified_user_outlined, size: 54, color: Color(0xFFA4B0A6)),
             SizedBox(height: 12),
-            Center(child: Text('No medical clearances on record.', style: TextStyle(color: Colors.black54, fontSize: 15))),
-            SizedBox(height: 6),
-            Center(
-              child: Text(
-                'Clearances issued for OJT, sports, or academic requirements appear here.',
-                style: TextStyle(color: Colors.grey, fontSize: 12),
-                textAlign: TextAlign.center,
-              ),
-            ),
+            Center(child: Text('No medical clearances on record.', style: TextStyle(color: textSub, fontSize: 14, fontWeight: FontWeight.w600))),
           ],
         ),
       );
     }
 
     return RefreshIndicator(
+      color: primaryGreen,
       onRefresh: _fetchClearances,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(12),
-        itemCount: _clearances.length,
-        itemBuilder: (context, index) {
-          final c = _clearances[index];
-          final rawExpiry = c['expires_at'];
-          DateTime? expiryDate;
-          int daysRemaining = 999;
-          bool isExpired = false;
+      child: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        children: [
+          ..._clearances.map((c) {
+            final rawExpiry = c['expires_at'];
+            bool isExpired = false;
+            if (rawExpiry != null) {
+              try {
+                isExpired = DateTime.parse(rawExpiry).isBefore(DateTime.now());
+              } catch (_) {}
+            }
 
-          if (rawExpiry != null) {
-            try {
-              expiryDate = DateTime.parse(rawExpiry);
-              daysRemaining = expiryDate.difference(DateTime.now()).inDays;
-              isExpired = daysRemaining < 0;
-            } catch (_) {}
-          }
-
-          return Card(
-            elevation: 2,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-              side: BorderSide(color: isExpired ? Colors.red.shade200 : Colors.teal.shade200, width: 1),
-            ),
-            margin: const EdgeInsets.only(bottom: 14),
-            child: Padding(
-              padding: const EdgeInsets.all(14),
+            return Container(
+              margin: const EdgeInsets.only(bottom: 14),
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: borderColor),
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Expanded(
-                        child: Text(
-                          c['purpose'] ?? 'Medical Clearance',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                        ),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(color: const Color(0xFFF7F1E6), borderRadius: BorderRadius.circular(10)),
+                        child: const Icon(Icons.description_outlined, size: 20, color: Color(0xFF8C6826)),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color: (isExpired ? Colors.red : Colors.green).withAlpha(25),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: isExpired ? Colors.red : Colors.green),
+                          color: isExpired ? const Color(0xFFFDE8E8) : const Color(0xFFE2EBE1),
+                          borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
-                          isExpired ? 'EXPIRED' : (daysRemaining <= 30 ? 'EXPIRING SOON' : 'VALID'),
+                          isExpired ? 'EXPIRED' : 'APPROVED',
                           style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: isExpired ? Colors.red : Colors.green.shade800,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                            color: isExpired ? const Color(0xFF9B1C1C) : const Color(0xFF15803D),
                           ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 14),
 
-                  Text("Physician: Dr. ${c['doctor_first_name']} ${c['doctor_last_name']} (${c['doctor_license']})", style: const TextStyle(fontSize: 13)),
+                  Text(c['purpose'] ?? 'Medical clearance', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textMain)),
+                  Text("Valid until ${_formatDate(c['expires_at'])}", style: const TextStyle(fontSize: 12.5, color: textSub)),
+                  const SizedBox(height: 10),
+
+                  Row(
+                    children: [
+                      const Icon(Icons.person_outline, size: 15, color: textSub),
+                      const SizedBox(width: 6),
+                      Text("Dr. ${c['doctor_first_name']} ${c['doctor_last_name']}", style: const TextStyle(fontSize: 12, color: textSub)),
+                    ],
+                  ),
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      const Icon(Icons.event_available, size: 16, color: Color(0xFF0F766E)),
+                      const Icon(Icons.event_outlined, size: 15, color: textSub),
                       const SizedBox(width: 6),
-                      Text("Issued: ${_formatDate(c['issued_at'])}", style: const TextStyle(fontSize: 12, color: Colors.black87)),
-                      const SizedBox(width: 14),
-                      const Icon(Icons.event_busy, size: 16, color: Colors.red),
-                      const SizedBox(width: 6),
-                      Text("Expires: ${_formatDate(c['expires_at'])}", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isExpired ? Colors.red : Colors.black87)),
+                      Text("Issued ${_formatDate(c['issued_at'])}", style: const TextStyle(fontSize: 12, color: textSub)),
                     ],
                   ),
-                  const Divider(height: 18),
+                  const SizedBox(height: 14),
+                  const Divider(color: borderColor, height: 1),
+                  const SizedBox(height: 12),
 
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        isExpired ? 'Status: Inactive' : 'Status: Ready for University Submission',
-                        style: TextStyle(fontSize: 11, color: isExpired ? Colors.red : Colors.black54, fontWeight: FontWeight.bold),
-                      ),
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF0F766E),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      GestureDetector(
+                        onTap: () => _showClearanceCertificateModal(c),
+                        child: const Row(
+                          children: [
+                            Text('View document', style: TextStyle(color: primaryGreen, fontSize: 13, fontWeight: FontWeight.w700)),
+                            SizedBox(width: 4),
+                            Icon(Icons.arrow_forward_rounded, size: 15, color: primaryGreen),
+                          ],
                         ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.description_outlined, size: 20, color: textSub),
                         onPressed: () => _showClearanceCertificateModal(c),
-                        icon: const Icon(Icons.verified, size: 16),
-                        label: const Text('View Certificate & Seal', style: TextStyle(fontSize: 12)),
                       ),
                     ],
                   ),
                 ],
               ),
+            );
+          }),
+
+          _buildSampleDisclaimer(),
+          const SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSampleDisclaimer() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE2EBE1),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: const Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.verified_outlined, size: 18, color: primaryGreen),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'These are official medical records protected under R.A. 10173. For official credentials or changes to your clinical records, visit the campus infirmary.',
+              style: TextStyle(fontSize: 12, color: Color(0xFF424943), height: 1.4),
             ),
-          );
-        },
+          ),
+        ],
       ),
     );
   }

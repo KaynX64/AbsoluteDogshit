@@ -22,6 +22,10 @@ class _SessionTimeoutListenerState extends State<SessionTimeoutListener> {
   Timer? _inactivityTimer;
   final _storage = const FlutterSecureStorage();
 
+  static const primaryGreen = Color(0xFF284E3A);
+  static const textMain = Color(0xFF191C1A);
+  static const textSub = Color(0xFF5A635B);
+
   @override
   void initState() {
     super.initState();
@@ -51,18 +55,26 @@ class _SessionTimeoutListenerState extends State<SessionTimeoutListener> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        icon: const Icon(Icons.lock_clock, color: Colors.teal, size: 48),
-        title: const Text('Session Expired', style: TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        icon: const Icon(Icons.lock_clock_outlined, color: primaryGreen, size: 48),
+        title: const Text(
+          'Session Expired',
+          style: TextStyle(fontWeight: FontWeight.w800, color: textMain, fontSize: 18),
+        ),
         content: Text(
           'For your protection under Republic Act No. 10173 (Data Privacy Act of 2012), '
           'your session has ended due to $durationString of inactivity.',
           textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 13, color: textSub, height: 1.4),
         ),
         actions: [
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF0F766E),
+              backgroundColor: primaryGreen,
               foregroundColor: Colors.white,
+              elevation: 0,
+              shape: const StadiumBorder(),
             ),
             onPressed: () {
               Navigator.pop(ctx);
@@ -72,7 +84,7 @@ class _SessionTimeoutListenerState extends State<SessionTimeoutListener> {
                 (route) => false,
               );
             },
-            child: const Text('Log In Again'),
+            child: const Text('Log In Again', style: TextStyle(fontWeight: FontWeight.w700)),
           ),
         ],
       ),
