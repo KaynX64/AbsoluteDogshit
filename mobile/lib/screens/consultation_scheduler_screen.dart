@@ -23,7 +23,33 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   bool _loadingDoctors = false;
   int? _selectedDoctorId;
 
-  DateTime _selectedDate = DateTime.now().add(const Duration(days: 1));
+  static const List<String> _months = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  static const List<String> _monthsAbbr = [
+    'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
+    'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'
+  ];
+
+  // Helper to ensure dates always land on an open clinic weekday (Monday–Friday)
+  static DateTime _getNextValidWeekday([DateTime? fromDate]) {
+    DateTime start = fromDate ?? DateTime.now();
+    DateTime date = DateTime(start.year, start.month, start.day);
+    if (fromDate == null) {
+      date = date.add(const Duration(days: 1));
+    }
+    while (date.weekday == DateTime.saturday || date.weekday == DateTime.sunday) {
+      date = date.add(const Duration(days: 1));
+    }
+    return date;
+  }
+
+  late DateTime _selectedDate = _getNextValidWeekday();
+  late String _displayedMonthYear;
+  List<DateTime> _upcomingWeekdays = [];
+
   List<dynamic> _slots = [];
   bool _loadingSlots = false;
   String? _selectedSlotTime;
@@ -57,12 +83,19 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   static const softSage = Color(0xFFE5EDE4);
   static const textMain = Color(0xFF191C1A);
   static const textSub = Color(0xFF5A635B);
-  static const borderColor = Color(0xFFE2EBE2);
+  static const borderColor = Color(0xFFD6DFD5);
+  static const disabledSlotBg = Color(0xFFEDF2EC);
+  static const disabledSlotText = Color(0xFFA3B0A4);
+
+  final ScrollController _dateScrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
     _currentPurposes = _medicalPurposes;
+    _displayedMonthYear = "${_months[_selectedDate.month - 1]} ${_selectedDate.year}";
+    _generateWeekdaysList();
+    _dateScrollController.addListener(_onDateScroll);
     _fetchDoctors();
     _fetchMyAppointments();
   }
@@ -70,7 +103,68 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   @override
   void dispose() {
     _notesController.dispose();
+    _dateScrollController.removeListener(_onDateScroll);
+    _dateScrollController.dispose();
     super.dispose();
+  }
+
+  // Dynamically transitions the header (e.g. October 2026 -> November 2026) as the user scrolls
+  void _onDateScroll() {
+    if (!_dateScrollController.hasClients || _upcomingWeekdays.isEmpty) return;
+    const itemExtent = 72.0; // 62 card width + 10 margin
+    final index = ((_dateScrollController.offset + 36) / itemExtent)
+        .floor()
+        .clamp(0, _upcomingWeekdays.length - 1);
+
+    final visibleDate = _upcomingWeekdays[index];
+    final monthName = _months[visibleDate.month - 1];
+    final newMonthYear = "$monthName ${visibleDate.year}";
+
+    if (_displayedMonthYear != newMonthYear) {
+      setState(() {
+        _displayedMonthYear = newMonthYear;
+      });
+    }
+  }
+
+  void _generateWeekdaysList() {
+    final List<DateTime> list = [];
+    DateTime curr = DateTime.now();
+    curr = DateTime(curr.year, curr.month, curr.day);
+
+    // Generate upcoming 60 weekdays (approx. 12 weeks of clinical dates)
+    while (list.length < 60) {
+      if (curr.weekday != DateTime.saturday && curr.weekday != DateTime.sunday) {
+        list.add(curr);
+      }
+      curr = curr.add(const Duration(days: 1));
+    }
+
+    setState(() {
+      _upcomingWeekdays = list;
+      if (_selectedDate.weekday == DateTime.saturday || _selectedDate.weekday == DateTime.sunday) {
+        _selectedDate = list.first;
+      }
+      _displayedMonthYear = "${_months[_selectedDate.month - 1]} ${_selectedDate.year}";
+    });
+  }
+
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  String _formatSlotDisplay(String time24) {
+    try {
+      final parts = time24.split(':');
+      int hour = int.parse(parts[0]);
+      final minute = parts[1];
+      final period = hour >= 12 ? 'PM' : 'AM';
+      if (hour > 12) hour -= 12;
+      if (hour == 0) hour = 12;
+      return '$hour:$minute $period';
+    } catch (_) {
+      return time24;
+    }
   }
 
   void _updatePurposesForSelectedDoctor(int doctorId) {
@@ -319,29 +413,58 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
 
   Future<void> _pickDate() async {
     final now = DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _selectedDate.isBefore(now) ? now.add(const Duration(days: 1)) : _selectedDate,
-      firstDate: now,
-      lastDate: now.add(const Duration(days: 60)),
-      selectableDayPredicate: (day) => day.weekday != DateTime.saturday && day.weekday != DateTime.sunday,
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: primaryGreen,
-              onPrimary: Colors.white,
-              onSurface: textMain,
-            ),
-          ),
-          child: child!,
-        );
-      },
-    );
+    final firstDate = DateTime(now.year, now.month, now.day);
+    final lastDate = firstDate.add(const Duration(days: 90));
 
-    if (picked != null && picked != _selectedDate) {
-      setState(() => _selectedDate = picked);
-      _fetchAvailableSlots();
+    DateTime initial = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
+    if (initial.isBefore(firstDate) ||
+        initial.isAfter(lastDate) ||
+        initial.weekday == DateTime.saturday ||
+        initial.weekday == DateTime.sunday) {
+      initial = _getNextValidWeekday(firstDate);
+    }
+
+    try {
+      final picked = await showDatePicker(
+        context: context,
+        initialDate: initial,
+        firstDate: firstDate,
+        lastDate: lastDate,
+        selectableDayPredicate: (day) =>
+            day.weekday != DateTime.saturday && day.weekday != DateTime.sunday,
+        builder: (context, child) {
+          return Theme(
+            data: Theme.of(context).copyWith(
+              colorScheme: const ColorScheme.light(
+                primary: primaryGreen,
+                onPrimary: Colors.white,
+                onSurface: textMain,
+              ),
+            ),
+            child: child!,
+          );
+        },
+      );
+
+      if (picked != null && !_isSameDay(picked, _selectedDate)) {
+        setState(() {
+          _selectedDate = picked;
+          _displayedMonthYear = "${_months[picked.month - 1]} ${picked.year}";
+        });
+        _fetchAvailableSlots();
+
+        // Auto scroll horizontal carousel to matched date
+        final targetIndex = _upcomingWeekdays.indexWhere((d) => _isSameDay(d, picked));
+        if (targetIndex != -1 && _dateScrollController.hasClients) {
+          _dateScrollController.animateTo(
+            targetIndex * 72.0,
+            duration: const Duration(milliseconds: 320),
+            curve: Curves.easeOutCubic,
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('[DatePicker Error]: $e');
     }
   }
 
@@ -349,11 +472,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     if (raw == null || raw.isEmpty) return 'N/A';
     try {
       final dt = DateTime.parse(raw.replaceAll('/', '-'));
-      const months = [
-        'January', 'February', 'March', 'April', 'May', 'June',
-        'July', 'August', 'September', 'October', 'November', 'December'
-      ];
-      final month = months[dt.month - 1];
+      final month = _months[dt.month - 1];
       final hour = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
       final minute = dt.minute.toString().padLeft(2, '0');
       final period = dt.hour >= 12 ? 'PM' : 'AM';
@@ -471,7 +590,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     );
   }
 
-  // --- SUB-VIEW 0: BOOKING FORM ---
+  // --- SUB-VIEW 0: BOOKING FORM (FIGMA DESIGN ALIGNED WITH DYNAMIC MONTH) ---
   Widget _buildBookingTab() {
     if (_loadingDoctors) {
       return const Center(child: CircularProgressIndicator(color: primaryGreen));
@@ -569,55 +688,183 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
             );
           }).toList(),
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 22),
 
-        // 3. A day that works for you
+        // =====================================================================
+        // 3. A DAY THAT WORKS FOR YOU (AUTO-TRANSITIONING MONTH HEADER)
+        // =====================================================================
         _buildSectionHeader('3', 'A day that works for you'),
-        const SizedBox(height: 8),
-        GestureDetector(
-          onTap: _pickDate,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: borderColor),
+        const SizedBox(height: 12),
+
+        // "Choose a date" & Dynamically Updated Month/Year Header
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            const Text(
+              'Choose a date',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: textMain,
+                letterSpacing: -0.3,
+              ),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
+            InkWell(
+              onTap: _pickDate,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Row(
                   children: [
-                    const Icon(Icons.calendar_today_outlined, size: 18, color: primaryGreen),
-                    const SizedBox(width: 10),
-                    Text(
-                      "${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}",
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: textMain),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 200),
+                      child: Text(
+                        _displayedMonthYear,
+                        key: ValueKey<String>(_displayedMonthYear),
+                        style: const TextStyle(
+                          fontSize: 15.5,
+                          fontWeight: FontWeight.w700,
+                          color: primaryGreen,
+                        ),
+                      ),
                     ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.arrow_drop_down, color: primaryGreen, size: 20),
                   ],
                 ),
-                const Text('Change date', style: TextStyle(fontSize: 12.5, color: primaryGreen, fontWeight: FontWeight.w700)),
-              ],
+              ),
             ),
+          ],
+        ),
+        const SizedBox(height: 14),
+
+        // Horizontal Weekday Card Carousel
+        SizedBox(
+          height: 92,
+          child: ListView.builder(
+            controller: _dateScrollController,
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            itemCount: _upcomingWeekdays.length,
+            itemBuilder: (context, index) {
+              final date = _upcomingWeekdays[index];
+              final isSelected = _isSameDay(date, _selectedDate);
+
+              const weekdayAbbr = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+              final dayName = weekdayAbbr[date.weekday - 1];
+
+              // Identifies month transitions (e.g. crossing from October 30 to November 2)
+              final isMonthStart = index == 0 || date.month != _upcomingWeekdays[index - 1].month;
+              final monthBadge = _monthsAbbr[date.month - 1];
+
+              return GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _selectedDate = date;
+                    _displayedMonthYear = "${_months[date.month - 1]} ${date.year}";
+                  });
+                  _fetchAvailableSlots();
+                },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  width: 62,
+                  margin: EdgeInsets.only(right: index == _upcomingWeekdays.length - 1 ? 0 : 10),
+                  decoration: BoxDecoration(
+                    color: isSelected ? primaryGreen : Colors.white,
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(
+                      color: isSelected ? primaryGreen : borderColor,
+                      width: 1.2,
+                    ),
+                    boxShadow: isSelected
+                        ? [
+                            BoxShadow(
+                              color: primaryGreen.withValues(alpha: 0.22),
+                              blurRadius: 8,
+                              offset: const Offset(0, 4),
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // If it's the start of a new month, display a helpful mini tag (e.g. NOV)
+                      if (isMonthStart)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          margin: const EdgeInsets.only(bottom: 2),
+                          decoration: BoxDecoration(
+                            color: isSelected ? Colors.white.withValues(alpha: 0.25) : softSage,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            monthBadge,
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.6,
+                              color: isSelected ? Colors.white : primaryGreen,
+                            ),
+                          ),
+                        )
+                      else
+                        Text(
+                          dayName,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.5,
+                            color: isSelected ? Colors.white.withValues(alpha: 0.85) : const Color(0xFF6B7A6E),
+                          ),
+                        ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${date.day}',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          color: isSelected ? Colors.white : textMain,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 8),
+
         const Text(
           'Consultations are available Monday–Friday.',
-          style: TextStyle(fontSize: 11.5, color: textSub),
+          style: TextStyle(fontSize: 12.5, color: textSub),
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 24),
 
-        // 4. Choose your time
+        // =====================================================================
+        // 4. CHOOSE YOUR TIME (FIGMA 12-HOUR PILL GRID)
+        // =====================================================================
         _buildSectionHeader('4', 'Choose your time'),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
+
         if (_loadingSlots)
-          const Center(child: Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator(color: primaryGreen, strokeWidth: 2)))
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(20),
+              child: CircularProgressIndicator(color: primaryGreen, strokeWidth: 2),
+            ),
+          )
         else if (_slots.isEmpty)
           Container(
             padding: const EdgeInsets.all(16),
             alignment: Alignment.center,
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: borderColor)),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: borderColor),
+            ),
             child: const Text('No slots available on this date.', style: TextStyle(color: textSub, fontSize: 13)),
           )
         else
@@ -626,54 +873,55 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
             physics: const NeverScrollableScrollPhysics(),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 3,
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
-              childAspectRatio: 2.3,
+              mainAxisSpacing: 10,
+              crossAxisSpacing: 10,
+              childAspectRatio: 2.25,
             ),
             itemCount: _slots.length,
             itemBuilder: (context, index) {
               final slot = _slots[index];
-              final time = slot['time'];
+              final rawTime = slot['time'];
+              final displayTime = _formatSlotDisplay(rawTime);
               final isAvail = slot['isAvailable'] == true;
-              final isSelected = _selectedSlotTime == time;
+              final isSelected = _selectedSlotTime == rawTime;
 
               return GestureDetector(
-                onTap: isAvail ? () => setState(() => _selectedSlotTime = time) : null,
+                onTap: isAvail ? () => setState(() => _selectedSlotTime = rawTime) : null,
                 child: Container(
                   decoration: BoxDecoration(
                     color: isSelected
                         ? primaryGreen
                         : isAvail
                             ? Colors.white
-                            : const Color(0xFFF1F4F1),
-                    borderRadius: BorderRadius.circular(18),
+                            : disabledSlotBg,
+                    borderRadius: BorderRadius.circular(22),
                     border: Border.all(
                       color: isSelected
                           ? primaryGreen
                           : isAvail
                               ? borderColor
                               : Colors.transparent,
+                      width: 1.2,
                     ),
                   ),
                   alignment: Alignment.center,
                   child: Text(
-                    time,
+                    displayTime,
                     style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      fontWeight: isSelected || isAvail ? FontWeight.w700 : FontWeight.w600,
                       color: isSelected
                           ? Colors.white
                           : isAvail
                               ? textMain
-                              : const Color(0xFFA4B0A6),
-                      decoration: isAvail ? TextDecoration.none : TextDecoration.lineThrough,
+                              : disabledSlotText,
                     ),
                   ),
                 ),
               );
             },
           ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 22),
 
         // 5. Anything we should know?
         const Text(
@@ -765,7 +1013,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     );
   }
 
-  // --- SUB-VIEW 1: MY APPOINTMENTS LIST (FIXED: NO HORIZONTAL OVERFLOW) ---
+  // --- SUB-VIEW 1: MY APPOINTMENTS LIST ---
   Widget _buildHistoryTab() {
     if (_loadingHistory) {
       return const Center(child: CircularProgressIndicator(color: primaryGreen));
@@ -811,7 +1059,6 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Header Row (Fixed with Expanded to prevent 15px overflow)
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
@@ -841,9 +1088,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
-                        status == 'scheduled'
-                            ? 'Confirmed'
-                            : status.toUpperCase(),
+                        status == 'scheduled' ? 'Confirmed' : status.toUpperCase(),
                         style: TextStyle(
                           fontSize: 10.5,
                           fontWeight: FontWeight.w700,
@@ -922,14 +1167,14 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     return Row(
       children: [
         Container(
-          width: 20,
-          height: 20,
+          width: 22,
+          height: 22,
           decoration: const BoxDecoration(color: softSage, shape: BoxShape.circle),
           alignment: Alignment.center,
-          child: Text(number, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: primaryGreen)),
+          child: Text(number, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: primaryGreen)),
         ),
         const SizedBox(width: 8),
-        Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: textMain)),
+        Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: textMain)),
       ],
     );
   }

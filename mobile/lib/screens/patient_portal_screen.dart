@@ -46,7 +46,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   io.Socket? _socket;
   String _previousQueueStatus = '';
 
-  // Emergency SOS State - ValueNotifier prevents full-screen rebuilds on each 50ms tick
+  // Emergency SOS State
   bool _sosConsent = false;
   bool _isHolding = false;
   final ValueNotifier<double> _holdProgressNotifier = ValueNotifier<double>(0.0);
@@ -63,7 +63,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     _fetchActiveQueueTicket();
     _initQueueSocket();
 
-    // Relaxed fallback polling (30s) because Socket.IO handles live updates
     _queuePollingTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) => _fetchActiveQueueTicket(silent: true),
@@ -403,7 +402,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         _isHolding = false;
         _triggerEmergencySOS();
       } else {
-        // Fast isolated update without triggering setState()
         _holdProgressNotifier.value = next;
       }
     });
@@ -621,37 +619,58 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
           ),
         ),
         body: tabs[_currentIndex],
-        bottomNavigationBar: Container(
-          decoration: const BoxDecoration(
-            color: Color(0xFFF7F9F6),
-            border: Border(top: BorderSide(color: Color(0xFFE2EBE2), width: 1)),
-          ),
-          child: NavigationBar(
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            indicatorColor: const Color(0xFFE5EDE4),
-            selectedIndex: _currentIndex,
-            onDestinationSelected: (idx) => setState(() => _currentIndex = idx),
-            destinations: const [
-              NavigationDestination(
-                icon: Icon(Icons.grid_view_rounded, size: 22),
+        bottomNavigationBar: _buildCustomBottomNav(),
+      ),
+    );
+  }
+
+  // ===========================================================================
+  // 5. CUSTOM FIGMA-MATCHED BOTTOM NAVIGATION BAR
+  // ===========================================================================
+
+  Widget _buildCustomBottomNav() {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFFF7F9F6),
+        border: Border(
+          top: BorderSide(color: Color(0xFFE5EDE4), width: 1.0),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Container(
+          height: 66,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildNavItem(
+                index: 0,
                 label: 'Overview',
+                icon: Icons.home_outlined,
+                selectedIcon: Icons.home_rounded,
               ),
-              NavigationDestination(
-                icon: Icon(Icons.calendar_today_rounded, size: 20),
+              _buildNavItem(
+                index: 1,
                 label: 'Appointments',
+                icon: Icons.calendar_today_outlined,
+                selectedIcon: Icons.calendar_month_rounded,
               ),
-              NavigationDestination(
-                icon: Icon(Icons.emergency_rounded, size: 22, color: Color(0xFF7A2E26)),
-                label: 'SOS',
+              _buildSosNavItem(
+                index: 2,
+                isActive: _currentIndex == 2,
               ),
-              NavigationDestination(
-                icon: Icon(Icons.description_outlined, size: 22),
+              _buildNavItem(
+                index: 3,
                 label: 'Documents',
+                icon: Icons.article_outlined,
+                selectedIcon: Icons.article_rounded,
               ),
-              NavigationDestination(
-                icon: Icon(Icons.person_outline_rounded, size: 22),
+              _buildNavItem(
+                index: 4,
                 label: 'Profile',
+                icon: Icons.person_outline_rounded,
+                selectedIcon: Icons.person_rounded,
               ),
             ],
           ),
@@ -660,8 +679,111 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     );
   }
 
+  Widget _buildNavItem({
+    required int index,
+    required String label,
+    required IconData icon,
+    required IconData selectedIcon,
+  }) {
+    final isSelected = _currentIndex == index;
+    const primaryGreen = Color(0xFF284E3A);
+    const softSagePill = Color(0xFFE2EBE1);
+    const textSub = Color(0xFF5A635B);
+
+    return InkWell(
+      onTap: () => setState(() => _currentIndex = index),
+      borderRadius: BorderRadius.circular(18),
+      splashColor: Colors.transparent,
+      highlightColor: Colors.transparent,
+      child: SizedBox(
+        width: 66,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              width: 52,
+              height: 30,
+              decoration: BoxDecoration(
+                color: isSelected ? softSagePill : Colors.transparent,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Icon(
+                isSelected ? selectedIcon : icon,
+                size: 20,
+                color: isSelected ? primaryGreen : textSub,
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                color: isSelected ? primaryGreen : textSub,
+                letterSpacing: -0.2,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSosNavItem({
+    required int index,
+    required bool isActive,
+  }) {
+    const sosActiveRed = Color(0xFFA03B30);
+    const sosInactivePeach = Color(0xFFF6E2DB);
+
+    return InkWell(
+      onTap: () => setState(() => _currentIndex = index),
+      borderRadius: BorderRadius.circular(18),
+      splashColor: Colors.transparent,
+      highlightColor: Colors.transparent,
+      child: SizedBox(
+        width: 66,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              width: 52,
+              height: 30,
+              decoration: BoxDecoration(
+                color: isActive ? sosActiveRed : sosInactivePeach,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Icon(
+                Icons.notifications_active_rounded,
+                size: 19,
+                color: isActive ? Colors.white : sosActiveRed,
+              ),
+            ),
+            const SizedBox(height: 3),
+            const Text(
+              'SOS',
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: sosActiveRed,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ===========================================================================
-  // 5. TAB 0: OVERVIEW (QR CODE ISOLATED WITH REPAINTBOUNDARY)
+  // 6. TAB 0: OVERVIEW (QR CODE ISOLATED WITH REPAINTBOUNDARY)
   // ===========================================================================
 
   Widget _buildOverviewTab(String firstName) {
@@ -743,7 +865,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                 ),
                 const SizedBox(height: 18),
 
-                // White QR Box wrapped in RepaintBoundary for smooth 60fps scrolling
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -1202,13 +1323,23 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   // ===========================================================================
-  // 6. TAB 2: EMERGENCY SOS (ISOLATED PROGRESS NOTIFIER & OUTSIDE EMERGENCY)
+  // 7. TAB 2: EMERGENCY SOS (FIGMA CONCENTRIC CIRCLE DESIGN)
   // ===========================================================================
 
   Widget _buildSOSTab() {
-    const primaryCrimson = Color(0xFF7A2E26);
-    const softPeach = Color(0xFFF7EFE9);
     const textSub = Color(0xFF5A635B);
+    const textMain = Color(0xFF191C1A);
+    const primaryGreen = Color(0xFF284E3A);
+
+    // Exact Figma Palette
+    const peachCardBg = Color(0xFFF9EDE5);
+    const demoBadgeBg = Color(0xFFF2D9CE);
+    const demoBadgeText = Color(0xFF8D3F33);
+    const sirenCircleBg = Color(0xFFF1D8CC);
+    const activeCrimson = Color(0xFFA03B30);
+    const activeHalo = Color(0xFFF4C8C1);
+    const inactiveCircle = Color(0xFFBFA298);
+    const inactiveHalo = Color(0xFFE8D8CF);
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -1216,216 +1347,307 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  "WE'RE HERE WHEN YOU NEED US",
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.8,
-                    color: textSub,
-                  ),
-                ),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: primaryCrimson,
-                    side: const BorderSide(color: Color(0xFFD6DFD5)),
-                    shape: const StadiumBorder(),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                  ),
-                  onPressed: () => _launchDialer('911'),
-                  icon: const Icon(Icons.phone_in_talk, size: 14),
-                  label: const Text('Call 911', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                ),
-              ],
+            // Header Eyebrow & Title
+            const Text(
+              "WE'RE HERE WHEN YOU NEED US",
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.8,
+                color: textSub,
+              ),
             ),
             const SizedBox(height: 4),
             const Text(
               'Emergency SOS',
-              style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800, color: Color(0xFF191C1A), letterSpacing: -0.5),
+              style: TextStyle(
+                fontSize: 30,
+                fontWeight: FontWeight.w800,
+                color: textMain,
+                letterSpacing: -0.5,
+              ),
             ),
             const SizedBox(height: 18),
 
-            // Big SOS Panel
+            // Main Peach SOS Card
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(22),
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 26),
               decoration: BoxDecoration(
-                color: softPeach,
-                borderRadius: BorderRadius.circular(26),
+                color: peachCardBg,
+                borderRadius: BorderRadius.circular(28),
               ),
               child: Column(
                 children: [
+                  // "DEMO ONLY • NOT AN EMERGENCY SERVICE" Pill Badge
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.6),
-                      borderRadius: BorderRadius.circular(10),
+                      color: demoBadgeBg,
+                      borderRadius: BorderRadius.circular(20),
                     ),
                     child: const Text(
-                      'CAMPUS DISPATCH READY',
-                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.2, color: primaryCrimson),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      color: primaryCrimson.withValues(alpha: 0.12),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.emergency_outlined, size: 30, color: primaryCrimson),
-                  ),
-                  const SizedBox(height: 14),
-                  const Text(
-                    'Your campus SOS',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF191C1A)),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'In the connected app, your campus response team will receive your location and essential medical details.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 13, color: textSub, height: 1.4),
-                  ),
-                  const SizedBox(height: 18),
-
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Checkbox(
-                        value: _sosConsent,
-                        activeColor: primaryCrimson,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                        onChanged: (val) => setState(() => _sosConsent = val ?? false),
+                      'DEMO ONLY • NOT AN EMERGENCY SERVICE',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.0,
+                        color: demoBadgeText,
                       ),
-                      const Expanded(
-                        child: Text(
-                          'I consent to sharing my location and medical details with authorized campus responders.',
-                          style: TextStyle(fontSize: 12.5, color: textSub, height: 1.35),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Siren / Beacon Icon + Title
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: const BoxDecoration(
+                          color: sirenCircleBg,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.notifications_active_outlined,
+                          size: 20,
+                          color: demoBadgeText,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      const Text(
+                        'Your campus SOS',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          color: textMain,
+                          letterSpacing: -0.3,
                         ),
                       ),
                     ],
                   ),
+                  const SizedBox(height: 12),
+
+                  // Explanatory Subtitle
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 10),
+                    child: Text(
+                      'In the connected app, your campus response team would receive your location and essential medical details.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: textSub,
+                        height: 1.45,
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 20),
 
-                  // Hold Button with ValueListenableBuilder (Smooth 60/120 FPS hold without lag)
+                  // Consent Checkbox Row
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: Checkbox(
+                            value: _sosConsent,
+                            activeColor: activeCrimson,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            side: BorderSide(
+                              color: _sosConsent ? activeCrimson : const Color(0xFFC7AAA0),
+                              width: 1.8,
+                            ),
+                            onChanged: (val) => setState(() => _sosConsent = val ?? false),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            'I consent to sharing my location and medical details with authorized campus responders.',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: textSub,
+                              height: 1.4,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 26),
+
+                  // Concentric Circular Button with Hold Animation
                   GestureDetector(
                     onTapDown: (_) => _startHold(),
                     onTapUp: (_) => _cancelHold(),
                     onTapCancel: () => _cancelHold(),
-                    child: Container(
-                      width: double.infinity,
-                      height: 54,
-                      decoration: BoxDecoration(
-                        color: _sosConsent ? primaryCrimson : const Color(0xFFA7736D),
-                        borderRadius: BorderRadius.circular(28),
-                        boxShadow: [
-                          if (_isHolding)
-                            BoxShadow(
-                              color: primaryCrimson.withValues(alpha: 0.4),
-                              blurRadius: 18,
-                              spreadRadius: 2,
-                            ),
-                        ],
-                      ),
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          ValueListenableBuilder<double>(
-                            valueListenable: _holdProgressNotifier,
-                            builder: (context, progress, child) {
-                              if (progress <= 0.0) return const SizedBox.shrink();
-                              return Positioned.fill(
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(28),
-                                  child: LinearProgressIndicator(
+                    child: ValueListenableBuilder<double>(
+                      valueListenable: _holdProgressNotifier,
+                      builder: (context, progress, _) {
+                        return Container(
+                          width: 220,
+                          height: 220,
+                          decoration: BoxDecoration(
+                            color: _sosConsent ? activeHalo : inactiveHalo,
+                            shape: BoxShape.circle,
+                          ),
+                          alignment: Alignment.center,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              // Circular Hold Progress Arc
+                              if (progress > 0.0)
+                                SizedBox(
+                                  width: 176,
+                                  height: 176,
+                                  child: CircularProgressIndicator(
                                     value: progress,
+                                    strokeWidth: 5,
+                                    valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
                                     backgroundColor: Colors.transparent,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      Colors.white.withValues(alpha: 0.25),
-                                    ),
                                   ),
                                 ),
-                              );
-                            },
-                          ),
-                          _isDispatchingSOS
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                )
-                              : Text(
-                                  _isHolding ? 'Broadcasting in 2.5s...' : 'Hold for 2.5 seconds to try SOS',
-                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14.5),
+
+                              // Inner Circle Core
+                              Container(
+                                width: 162,
+                                height: 162,
+                                decoration: BoxDecoration(
+                                  color: _sosConsent ? activeCrimson : inactiveCircle,
+                                  shape: BoxShape.circle,
+                                  boxShadow: _isHolding
+                                      ? [
+                                          BoxShadow(
+                                            color: activeCrimson.withValues(alpha: 0.45),
+                                            blurRadius: 20,
+                                            spreadRadius: 4,
+                                          )
+                                        ]
+                                      : null,
                                 ),
-                        ],
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(
+                                      Icons.back_hand_rounded,
+                                      size: 30,
+                                      color: Colors.white,
+                                    ),
+                                    const SizedBox(height: 6),
+                                    const Text(
+                                      'HOLD TO',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 1.2,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    const Text(
+                                      'TRY SOS',
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: 0.8,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      _isHolding
+                                          ? '${((1.0 - progress) * 2.5).toStringAsFixed(1)}s remaining'
+                                          : 'for 2.5 seconds',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w500,
+                                        color: Colors.white.withValues(alpha: 0.85),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+
+                  // Bottom Preview Disclaimer / Status
+                  Text(
+                    _sosStatusMessage.isNotEmpty
+                        ? _sosStatusMessage
+                        : 'No location is collected or shared in this preview.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: _sosStatusMessage.isNotEmpty ? FontWeight.w700 : FontWeight.w500,
+                      color: _sosStatusMessage.contains('DISPATCHED')
+                          ? primaryGreen
+                          : _sosStatusMessage.isNotEmpty
+                              ? activeCrimson
+                              : textSub,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // Lower "Call 911" White Card
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: const Color(0xFFE2EBE2)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const Text(
+                    'For a real emergency, call emergency services now.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: textSub,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFE2EBE1),
+                        foregroundColor: primaryGreen,
+                        elevation: 0,
+                        shape: const StadiumBorder(),
+                      ),
+                      onPressed: () => _launchDialer('911'),
+                      icon: const Icon(Icons.phone_outlined, size: 18, color: primaryGreen),
+                      label: const Text(
+                        'Call 911',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: primaryGreen,
+                        ),
                       ),
                     ),
                   ),
-
-                  if (_sosStatusMessage.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      _sosStatusMessage,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: _sosStatusMessage.contains('DISPATCHED') ? const Color(0xFF284E3A) : primaryCrimson,
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),
             const SizedBox(height: 24),
-
-            // Emergency Outside Campus Card
-            InkWell(
-              borderRadius: BorderRadius.circular(20),
-              onTap: () => _launchDialer('911'),
-              child: Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: const Color(0xFFE2EBE2)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'For an emergency outside campus, call emergency services now.',
-                      style: TextStyle(fontSize: 13, color: textSub, height: 1.3),
-                    ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFE5EDE4),
-                          foregroundColor: const Color(0xFF284E3A),
-                          elevation: 0,
-                          shape: const StadiumBorder(),
-                        ),
-                        onPressed: () => _launchDialer('911'),
-                        icon: const Icon(Icons.phone, size: 16),
-                        label: const Text(
-                          'Call 911 (Emergency Helpline)',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
           ],
         ),
       ),
@@ -1433,7 +1655,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   // ===========================================================================
-  // 7. TAB 4: PROFILE
+  // 8. TAB 4: PROFILE
   // ===========================================================================
 
   Widget _buildProfileTab(String initials) {

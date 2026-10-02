@@ -3,4 +3,5 @@
     <!-- Exact sage green from your Valetudo welcome screen -->
     <color name="splash_color">#E2EBE2</color>
     <color name="transparent">#00000000</color>
+    <color name="ic_launcher_background">#fafaf0</color>
 </resources>

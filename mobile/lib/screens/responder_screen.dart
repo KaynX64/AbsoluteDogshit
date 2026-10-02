@@ -37,7 +37,6 @@ class _ResponderScreenState extends State<ResponderScreen> {
     _fetchActiveAlerts();
     EmergencyAlertService().startResponderListener();
 
-    // Throttled fallback polling from 4s to 15s to eliminate unnecessary CPU & battery draw
     _pollingTimer = Timer.periodic(
       const Duration(seconds: 15),
       (_) => _fetchActiveAlerts(silent: true),
@@ -118,10 +117,48 @@ class _ResponderScreenState extends State<ResponderScreen> {
     }
   }
 
+  // Crash-proof Google Maps launcher for Android & iOS
   Future<void> _openGoogleMaps(double lat, double lng) async {
-    final uri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (lat == 0.0 && lng == 0.0) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('GPS coordinates not available for this alert.'),
+            backgroundColor: primaryCrimson,
+          ),
+        );
+      }
+      return;
+    }
+
+    final geoUri = Uri.parse('geo:$lat,$lng?q=$lat,$lng');
+    final webUri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
+
+    try {
+      // 1. Try launching the native Google Maps app directly
+      if (await canLaunchUrl(geoUri)) {
+        await launchUrl(geoUri, mode: LaunchMode.externalApplication);
+        return;
+      }
+
+      // 2. Try launching the web URL in Google Maps or external browser
+      if (await canLaunchUrl(webUri)) {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+        return;
+      }
+
+      // 3. Fallback: attempt direct launch without pre-check
+      await launchUrl(webUri, mode: LaunchMode.platformDefault);
+    } catch (e) {
+      debugPrint('[Maps Error]: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not open Google Maps: $e'),
+            backgroundColor: primaryCrimson,
+          ),
+        );
+      }
     }
   }
 
@@ -341,31 +378,44 @@ class _ResponderScreenState extends State<ResponderScreen> {
                         ),
                         const SizedBox(height: 16),
 
-                        // Coordinates Box
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(color: const Color(0xFFE2EBE1), borderRadius: BorderRadius.circular(14)),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                        // Entire Coordinates Box is wrapped in InkWell with ripple feedback
+                        Material(
+                          color: const Color(0xFFE2EBE1),
+                          borderRadius: BorderRadius.circular(14),
+                          child: InkWell(
+                            onTap: () => _openGoogleMaps(lat, lng),
+                            borderRadius: BorderRadius.circular(14),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  const Text('GPS COORDINATES', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, letterSpacing: 1.2, color: textSub)),
-                                  Text("${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}", style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textMain)),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'GPS COORDINATES',
+                                        style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, letterSpacing: 1.2, color: textSub),
+                                      ),
+                                      Text(
+                                        "${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}",
+                                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textMain),
+                                      ),
+                                    ],
+                                  ),
+                                  const Row(
+                                    children: [
+                                      Text(
+                                        'Open maps',
+                                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: primaryGreen),
+                                      ),
+                                      SizedBox(width: 4),
+                                      Icon(Icons.north_east_rounded, size: 14, color: primaryGreen),
+                                    ],
+                                  ),
                                 ],
                               ),
-                              GestureDetector(
-                                onTap: () => _openGoogleMaps(lat, lng),
-                                child: const Row(
-                                  children: [
-                                    Text('Open maps', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: primaryGreen)),
-                                    SizedBox(width: 4),
-                                    Icon(Icons.north_east_rounded, size: 14, color: primaryGreen),
-                                  ],
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
                         ),
                         const SizedBox(height: 16),
