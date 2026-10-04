@@ -5,7 +5,6 @@ import AnalyticsDashboard from './AnalyticsDashboard';
 export default function AdminConsole() {
   const [activeTab, setActiveTab] = useState<'users' | 'audit' | 'telemetry' | 'analytics' | 'db'>('users');
   const [auditSubTab, setAuditSubTab] = useState<'mutations' | 'phi'>('phi');
-  
 
   const [usersList, setUsersList] = useState<any[]>([]);
   const [mutationLogs, setMutationLogs] = useState<any[]>([]);
@@ -36,6 +35,22 @@ export default function AdminConsole() {
 
   // Live System Telemetry State (MySQL, Redis, Socket.IO)
   const [telemetry, setTelemetry] = useState<any>(null);
+
+  // ── Users Tab Filters & Sorting ─────────────────────────────────────
+const [userRoleFilter, setUserRoleFilter] = useState<string>('ALL');
+const [userStatusFilter, setUserStatusFilter] = useState<'ALL' | 'Active' | 'Suspended'>('ALL');
+const [userSortKey, setUserSortKey] = useState<'id_asc' | 'id_desc' | 'name_asc' | 'name_desc' | 'role'>('id_asc');
+
+// ── PHI Access Logs Filters & Sorting ────────────────────────────────
+const [phiSearchTerm, setPhiSearchTerm] = useState<string>('');
+const [phiRoleFilter, setPhiRoleFilter] = useState<string>('ALL');
+const [phiTableFilter, setPhiTableFilter] = useState<string>('ALL');
+const [phiSortOrder, setPhiSortOrder] = useState<'desc' | 'asc' | 'patient_asc'>('desc');
+
+// ── Mutation Audit Logs Filters & Sorting ────────────────────────────
+const [mutationSearchTerm, setMutationSearchTerm] = useState<string>('');
+const [mutationActionFilter, setMutationActionFilter] = useState<string>('ALL');
+const [mutationSortOrder, setMutationSortOrder] = useState<'desc' | 'asc'>('desc');
 
   const fetchUsers = async () => {
     const token = localStorage.getItem('valetudo_token');
@@ -118,12 +133,84 @@ export default function AdminConsole() {
     fetchTelemetry();
   }, []);
 
-  const filteredUsers = usersList.filter(
-    (u) =>
+// 1. Processed Users (Filtered & Sorted)
+const processedUsers = usersList
+  .filter((u) => {
+    const matchesSearch =
       (u.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (u.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (u.role || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
+      (u.student_no || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (u.license_no || '').toLowerCase().includes(searchTerm.toLowerCase());
+
+    const matchesRole = userRoleFilter === 'ALL' || u.role === userRoleFilter;
+    const matchesStatus = userStatusFilter === 'ALL' || u.status === userStatusFilter;
+
+    return matchesSearch && matchesRole && matchesStatus;
+  })
+  .sort((a, b) => {
+    switch (userSortKey) {
+      case 'id_desc':
+        return Number(b.id) - Number(a.id);
+      case 'name_asc':
+        return (a.name || '').localeCompare(b.name || '');
+      case 'name_desc':
+        return (b.name || '').localeCompare(a.name || '');
+      case 'role':
+        return (a.role || '').localeCompare(b.role || '');
+      case 'id_asc':
+      default:
+        return Number(a.id) - Number(b.id);
+    }
+  });
+
+// 2. Processed PHI Access Logs (Filtered & Sorted)
+const processedPhiLogs = phiLogs
+  .filter((log) => {
+    const query = phiSearchTerm.trim().toLowerCase();
+    const matchesSearch =
+      !query ||
+      (log.viewer_name || '').toLowerCase().includes(query) ||
+      (log.patient_name || '').toLowerCase().includes(query) ||
+      (log.purpose || '').toLowerCase().includes(query) ||
+      (log.ip_address || '').toLowerCase().includes(query) ||
+      (log.student_no || '').toLowerCase().includes(query);
+
+    const matchesRole = phiRoleFilter === 'ALL' || log.viewer_role === phiRoleFilter;
+    const matchesTable = phiTableFilter === 'ALL' || log.table_affected === phiTableFilter;
+
+    return matchesSearch && matchesRole && matchesTable;
+  })
+  .sort((a, b) => {
+    if (phiSortOrder === 'asc') {
+      return new Date(a.accessed_at).getTime() - new Date(b.accessed_at).getTime();
+    }
+    if (phiSortOrder === 'patient_asc') {
+      return (a.patient_name || '').localeCompare(b.patient_name || '');
+    }
+    return new Date(b.accessed_at).getTime() - new Date(a.accessed_at).getTime(); // 'desc' default
+  });
+
+// 3. Processed Mutation Audit Logs (Filtered & Sorted)
+const processedMutationLogs = mutationLogs
+  .filter((log) => {
+    const query = mutationSearchTerm.trim().toLowerCase();
+    const matchesSearch =
+      !query ||
+      (log.user || '').toLowerCase().includes(query) ||
+      (log.target || '').toLowerCase().includes(query) ||
+      (log.action || '').toLowerCase().includes(query) ||
+      (log.hash || '').toLowerCase().includes(query);
+
+    const matchesAction = mutationActionFilter === 'ALL' || log.action === mutationActionFilter;
+
+    return matchesSearch && matchesAction;
+  })
+  .sort((a, b) => {
+    if (mutationSortOrder === 'asc') {
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    }
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime(); // 'desc' default
+  });
 
 
   const handleOpenEditModal = (u: any) => {
@@ -470,101 +557,199 @@ export default function AdminConsole() {
 
 {/* 2. TAB: USERS LIST */}
       {activeTab === 'users' && (
-        <div style={{ marginTop: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
-            <input
-              type="text"
-              placeholder="Search user by name, email, or role..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              style={{
-                padding: '8px 12px',
-                width: 'clamp(240px, 30vw, 400px)',
-                borderRadius: 6,
-                border: '1px solid #cbd5e1',
-                fontSize: 13,
-                outline: 'none',
-              }}
-            />
-            <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>
-              Showing {filteredUsers.length} of {usersList.length} Accounts
-            </span>
-          </div>
+  <div style={{ marginTop: 16 }}>
+    {/* SEARCH + SORT + STATUS TOOLBAR */}
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 10,
+        flexWrap: 'wrap',
+        gap: 10,
+      }}
+    >
+      <input
+        type="text"
+        placeholder="Search user by name, email, student ID, license..."
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
+        style={{
+          padding: '8px 12px',
+          width: 'clamp(240px, 28vw, 360px)',
+          borderRadius: 6,
+          border: '1px solid #cbd5e1',
+          fontSize: 13,
+          outline: 'none',
+          backgroundColor: '#ffffff',
+        }}
+      />
 
-          <div style={{ width: '100%', overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: 8, background: '#ffffff' }}>
-            <table style={{ width: '100%', minWidth: 780, borderCollapse: 'collapse', fontSize: 13, textAlign: 'left' }}>
-              <thead>
-                <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
-                  <th style={{ padding: '12px 14px' }}>User ID</th>
-                  <th style={{ padding: '12px 14px' }}>Full Name</th>
-                  <th style={{ padding: '12px 14px' }}>Institutional Email</th>
-                  <th style={{ padding: '12px 14px' }}>Assigned RBAC Role</th>
-                  <th style={{ padding: '12px 14px' }}>Account Status</th>
-                  <th style={{ padding: '12px 14px', textAlign: 'center' }}>Manage</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredUsers.map((u) => (
-                  <tr key={u.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '12px 14px', color: '#64748b', fontWeight: 600 }}>#{u.id}</td>
-                    <td style={{ padding: '12px 14px', fontWeight: 'bold', color: '#1e293b' }}>{u.name}</td>
-                    <td style={{ padding: '12px 14px', color: '#334155' }}>{u.email}</td>
-                    <td style={{ padding: '12px 14px' }}>
-                      <span
-                        style={{
-                          background: u.role === 'ADMIN' ? '#ede9fe' : u.role === 'DOCTOR' ? '#e0f2fe' : '#f0fdf4',
-                          color: u.role === 'ADMIN' ? '#6d28d9' : u.role === 'DOCTOR' ? '#0369a1' : '#15803d',
-                          padding: '3px 8px',
-                          borderRadius: 4,
-                          fontWeight: 'bold',
-                          fontSize: 11,
-                        }}
-                      >
-                        {u.role}
-                      </span>
-                    </td>
-                    <td
-                      style={{
-                        padding: '12px 14px',
-                        color: u.status === 'Active' ? '#16a34a' : '#dc2626',
-                        fontWeight: 600,
-                        fontSize: 12,
-                      }}
-                    >
-                      ● {u.status}
-                    </td>
-                    <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                      <button
-                        type="button"
-                        onClick={() => handleOpenEditModal(u)}
-                        style={{
-                          padding: '6px 14px',
-                          background: '#f8fafc',
-                          color: '#4f46e5',
-                          border: '1px solid #c7d2fe',
-                          borderRadius: 6,
-                          fontSize: 12,
-                          fontWeight: 'bold',
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 4,
-                        }}
-                      >
-                        ⚙️ Edit
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* Status Dropdown */}
+        <select
+          value={userStatusFilter}
+          onChange={(e) => setUserStatusFilter(e.target.value as any)}
+          style={{
+            padding: '7px 10px',
+            borderRadius: 6,
+            border: '1px solid #cbd5e1',
+            fontSize: 12,
+            fontWeight: 600,
+            background: '#ffffff',
+            color: '#334155',
+          }}
+        >
+          <option value="ALL">All Statuses</option>
+          <option value="Active">🟢 Active Only</option>
+          <option value="Suspended">🔴 Suspended Only</option>
+        </select>
 
+        {/* Sort Selector */}
+        <select
+          value={userSortKey}
+          onChange={(e) => setUserSortKey(e.target.value as any)}
+          style={{
+            padding: '7px 10px',
+            borderRadius: 6,
+            border: '1px solid #cbd5e1',
+            fontSize: 12,
+            fontWeight: 600,
+            background: '#ffffff',
+            color: '#334155',
+          }}
+        >
+          <option value="id_asc">Sort: ID (Low → High)</option>
+          <option value="id_desc">Sort: ID (High → Low)</option>
+          <option value="name_asc">Sort: Name (A → Z)</option>
+          <option value="name_desc">Sort: Name (Z → A)</option>
+          <option value="role">Sort: Role (A → Z)</option>
+        </select>
+
+        <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginLeft: 4 }}>
+          {processedUsers.length} of {usersList.length} Accounts
+        </span>
+      </div>
+    </div>
+
+    {/* ROLE FILTER PILLS BAR */}
+    <div
+      style={{
+        display: 'flex',
+        gap: 6,
+        flexWrap: 'wrap',
+        marginBottom: 14,
+        padding: '8px 12px',
+        background: '#f8fafc',
+        borderRadius: 8,
+        border: '1px solid #e2e8f0',
+        alignItems: 'center',
+      }}
+    >
+      <span style={{ fontSize: 11, fontWeight: 'bold', color: '#64748b', marginRight: 4 }}>
+        ROLE:
+      </span>
+      {[
+        { code: 'ALL', label: 'All Roles' },
+        { code: 'DOCTOR', label: '🩺 Doctor' },
+        { code: 'NURSE', label: '👩‍⚕️ Nurse' },
+        { code: 'DENTIST', label: '🦷 Dentist' },
+        { code: 'STUDENT', label: '🎓 Student' },
+        { code: 'FACULTY', label: '🏫 Faculty' },
+        { code: 'EMERGENCY_RESPONDER', label: '🚨 Responder' },
+        { code: 'ADMIN', label: '⚙️ Admin' },
+      ].map((r) => {
+        const isSelected = userRoleFilter === r.code;
+        return (
+          <button
+            key={r.code}
+            type="button"
+            onClick={() => setUserRoleFilter(r.code)}
+            style={{
+              padding: '4px 10px',
+              borderRadius: 20,
+              fontSize: 11.5,
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              border: `1px solid ${isSelected ? '#4f46e5' : '#cbd5e1'}`,
+              background: isSelected ? '#4f46e5' : '#ffffff',
+              color: isSelected ? '#ffffff' : '#475569',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            {r.label}
+          </button>
+        );
+      })}
+    </div>
+
+    {/* TABLE: Iterates over processedUsers instead of filteredUsers */}
+    <div style={{ width: '100%', overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: 8, background: '#ffffff' }}>
+      <table style={{ width: '100%', minWidth: 780, borderCollapse: 'collapse', fontSize: 13, textAlign: 'left' }}>
+        <thead>
+          <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
+            <th style={{ padding: '12px 14px' }}>User ID</th>
+            <th style={{ padding: '12px 14px' }}>Full Name</th>
+            <th style={{ padding: '12px 14px' }}>Institutional Email</th>
+            <th style={{ padding: '12px 14px' }}>Assigned RBAC Role</th>
+            <th style={{ padding: '12px 14px' }}>Account Status</th>
+            <th style={{ padding: '12px 14px', textAlign: 'center' }}>Manage</th>
+          </tr>
+        </thead>
+        <tbody>
+          {processedUsers.map((u) => (
+            <tr key={u.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+              <td style={{ padding: '12px 14px', color: '#64748b', fontWeight: 600 }}>#{u.id}</td>
+              <td style={{ padding: '12px 14px', fontWeight: 'bold', color: '#1e293b' }}>{u.name}</td>
+              <td style={{ padding: '12px 14px', color: '#334155' }}>{u.email}</td>
+              <td style={{ padding: '12px 14px' }}>
+                <span
+                  style={{
+                    background: u.role === 'ADMIN' ? '#ede9fe' : u.role === 'DOCTOR' ? '#e0f2fe' : '#f0fdf4',
+                    color: u.role === 'ADMIN' ? '#6d28d9' : u.role === 'DOCTOR' ? '#0369a1' : '#15803d',
+                    padding: '3px 8px',
+                    borderRadius: 4,
+                    fontWeight: 'bold',
+                    fontSize: 11,
+                  }}
+                >
+                  {u.role}
+                </span>
+              </td>
+              <td style={{ padding: '12px 14px', color: u.status === 'Active' ? '#16a34a' : '#dc2626', fontWeight: 600, fontSize: 12 }}>
+                ● {u.status}
+              </td>
+              <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => handleOpenEditModal(u)}
+                  style={{
+                    padding: '6px 14px',
+                    background: '#f8fafc',
+                    color: '#4f46e5',
+                    border: '1px solid #c7d2fe',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                  }}
+                >
+                  ⚙️ Edit
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+)}
+
+      {/* 3. TAB: AUDIT LOGS & PHI SURVEILLANCE */}
       {/* 3. TAB: AUDIT LOGS & PHI SURVEILLANCE */}
       {activeTab === 'audit' && (
         <div style={{ marginTop: 16 }}>
+          {/* SUB-TAB TOGGLES */}
           <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
             <button
               onClick={() => setAuditSubTab('phi')}
@@ -617,14 +802,130 @@ export default function AdminConsole() {
                 practitioner views a patient’s confidential health profile, EMR history, or clinical records.
               </div>
 
+              {/* FILTER & SORT TOOLBAR FOR PHI */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: 10,
+                  flexWrap: 'wrap',
+                  gap: 10,
+                }}
+              >
+                <input
+                  type="text"
+                  placeholder="Search practitioner, patient name, purpose, IP..."
+                  value={phiSearchTerm}
+                  onChange={(e) => setPhiSearchTerm(e.target.value)}
+                  style={{
+                    padding: '8px 12px',
+                    width: 'clamp(240px, 30vw, 380px)',
+                    borderRadius: 6,
+                    border: '1px solid #cbd5e1',
+                    fontSize: 13,
+                    outline: 'none',
+                    backgroundColor: '#ffffff',
+                  }}
+                />
+
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  {/* Table Affected Filter */}
+                  <select
+                    value={phiTableFilter}
+                    onChange={(e) => setPhiTableFilter(e.target.value)}
+                    style={{
+                      padding: '7px 10px',
+                      borderRadius: 6,
+                      border: '1px solid #cbd5e1',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      background: '#ffffff',
+                      color: '#334155',
+                    }}
+                  >
+                    <option value="ALL">All Clinical Tables</option>
+                    <option value="HEALTH_PROFILES">HEALTH_PROFILES</option>
+                    <option value="EMR_RECORDS">EMR_RECORDS</option>
+                    <option value="EMR_ATTACHMENTS">EMR_ATTACHMENTS</option>
+                  </select>
+
+                  {/* Sort Selector */}
+                  <select
+                    value={phiSortOrder}
+                    onChange={(e) => setPhiSortOrder(e.target.value as any)}
+                    style={{
+                      padding: '7px 10px',
+                      borderRadius: 6,
+                      border: '1px solid #cbd5e1',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      background: '#ffffff',
+                      color: '#334155',
+                    }}
+                  >
+                    <option value="desc">Sort: Newest First</option>
+                    <option value="asc">Sort: Oldest First</option>
+                    <option value="patient_asc">Sort: Patient Name (A → Z)</option>
+                  </select>
+
+                  <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>
+                    {processedPhiLogs.length} of {phiLogs.length} Entries
+                  </span>
+                </div>
+              </div>
+
+              {/* PRACTITIONER ROLE FILTER PILLS */}
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 6,
+                  flexWrap: 'wrap',
+                  marginBottom: 14,
+                  padding: '8px 12px',
+                  background: '#f8fafc',
+                  borderRadius: 8,
+                  border: '1px solid #e2e8f0',
+                  alignItems: 'center',
+                }}
+              >
+                <span style={{ fontSize: 11, fontWeight: 'bold', color: '#64748b', marginRight: 4 }}>
+                  PRACTITIONER ROLE:
+                </span>
+                {['ALL', 'DOCTOR', 'NURSE', 'DENTIST', 'ADMIN'].map((role) => {
+                  const isSelected = phiRoleFilter === role;
+                  return (
+                    <button
+                      key={role}
+                      type="button"
+                      onClick={() => setPhiRoleFilter(role)}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: 20,
+                        fontSize: 11.5,
+                        fontWeight: 'bold',
+                        cursor: 'pointer',
+                        border: `1px solid ${isSelected ? '#0f766e' : '#cbd5e1'}`,
+                        background: isSelected ? '#0f766e' : '#ffffff',
+                        color: isSelected ? '#ffffff' : '#475569',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      {role === 'ALL' ? 'All Roles' : role}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* PHI LOGS TABLE */}
               {loadingLogs ? (
                 <p style={{ color: '#64748b', fontSize: 13 }}>Loading PHI access records...</p>
-              ) : phiLogs.length === 0 ? (
+              ) : processedPhiLogs.length === 0 ? (
                 <div style={{ padding: 24, textAlign: 'center', color: '#64748b', background: '#f8fafc', borderRadius: 8 }}>
-                  No PHI read access events recorded yet.
+                  No PHI read access events matched your filter criteria.
                 </div>
               ) : (
-                <div style={{ width: '100%', overflowX: 'auto', maxHeight: 'calc(100vh - 340px)', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                <div style={{ width: '100%', overflowX: 'auto', maxHeight: 'calc(100vh - 380px)', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 8 }}>
                   <table style={{ width: '100%', minWidth: 800, borderCollapse: 'collapse', fontSize: 12, textAlign: 'left' }}>
                     <thead style={{ position: 'sticky', top: 0, background: '#f8fafc', zIndex: 2 }}>
                       <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
@@ -638,7 +939,7 @@ export default function AdminConsole() {
                       </tr>
                     </thead>
                     <tbody>
-                      {phiLogs.map((log) => (
+                      {processedPhiLogs.map((log) => (
                         <tr key={log.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                           <td style={{ padding: '10px 12px', fontWeight: 600 }}>#{log.id}</td>
                           <td style={{ padding: '10px 12px' }}>
@@ -676,48 +977,168 @@ export default function AdminConsole() {
                 linking directly to the preceding log record.
               </div>
 
-              <div style={{ width: '100%', overflowX: 'auto', maxHeight: 'calc(100vh - 340px)', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 8 }}>
-                <table style={{ width: '100%', minWidth: 780, borderCollapse: 'collapse', fontSize: 12, textAlign: 'left' }}>
-                  <thead style={{ position: 'sticky', top: 0, background: '#f8fafc', zIndex: 2 }}>
-                    <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
-                      <th style={{ padding: '10px 12px' }}>Log ID</th>
-                      <th style={{ padding: '10px 12px' }}>Actor</th>
-                      <th style={{ padding: '10px 12px' }}>Action</th>
-                      <th style={{ padding: '10px 12px' }}>Target Entity</th>
-                      <th style={{ padding: '10px 12px' }}>SHA-256 Verification Hash</th>
-                      <th style={{ padding: '10px 12px' }}>Timestamp</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {mutationLogs.map((log) => (
-                      <tr key={log.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td style={{ padding: '10px 12px', fontWeight: 600 }}>#{log.id}</td>
-                        <td style={{ padding: '10px 12px', color: '#4f46e5', fontWeight: 600 }}>{log.user}</td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <span
-                            style={{
-                              background: log.action === 'CREATE' ? '#dcfce7' : log.action === 'UPDATE' ? '#fef3c7' : '#f1f5f9',
-                              color: log.action === 'CREATE' ? '#15803d' : log.action === 'UPDATE' ? '#b45309' : '#334155',
-                              padding: '2px 6px',
-                              borderRadius: 4,
-                              fontWeight: 'bold',
-                            }}
-                          >
-                            {log.action}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 12px', color: '#334155' }}>{log.target}</td>
-                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontSize: 11, color: '#475569' }}>
-                          {log.hash ? `${log.hash.substring(0, 22)}…` : 'N/A'}
-                        </td>
-                        <td style={{ padding: '10px 12px', color: '#64748b', whiteSpace: 'nowrap' }}>
-                          {new Date(log.created_at).toLocaleString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              {/* FILTER & SORT TOOLBAR FOR MUTATION LEDGER */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: 10,
+                  flexWrap: 'wrap',
+                  gap: 10,
+                }}
+              >
+                <input
+                  type="text"
+                  placeholder="Search actor, target table, hash..."
+                  value={mutationSearchTerm}
+                  onChange={(e) => setMutationSearchTerm(e.target.value)}
+                  style={{
+                    padding: '8px 12px',
+                    width: 'clamp(240px, 30vw, 380px)',
+                    borderRadius: 6,
+                    border: '1px solid #cbd5e1',
+                    fontSize: 13,
+                    outline: 'none',
+                    backgroundColor: '#ffffff',
+                  }}
+                />
+
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {/* Sort Selector */}
+                  <select
+                    value={mutationSortOrder}
+                    onChange={(e) => setMutationSortOrder(e.target.value as any)}
+                    style={{
+                      padding: '7px 10px',
+                      borderRadius: 6,
+                      border: '1px solid #cbd5e1',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      background: '#ffffff',
+                      color: '#334155',
+                    }}
+                  >
+                    <option value="desc">Sort: Newest First</option>
+                    <option value="asc">Sort: Oldest First</option>
+                  </select>
+
+                  <span style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>
+                    {processedMutationLogs.length} of {mutationLogs.length} Blocks
+                  </span>
+                </div>
               </div>
+
+              {/* ACTION FILTER PILLS */}
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 6,
+                  flexWrap: 'wrap',
+                  marginBottom: 14,
+                  padding: '8px 12px',
+                  background: '#f8fafc',
+                  borderRadius: 8,
+                  border: '1px solid #e2e8f0',
+                  alignItems: 'center',
+                }}
+              >
+                <span style={{ fontSize: 11, fontWeight: 'bold', color: '#64748b', marginRight: 4 }}>
+                  ACTION:
+                </span>
+                {['ALL', 'CREATE', 'UPDATE', 'DELETE', 'LOGIN'].map((act) => {
+                  const isSelected = mutationActionFilter === act;
+                  let actColor = '#4f46e5';
+                  if (act === 'CREATE') actColor = '#15803d';
+                  if (act === 'UPDATE') actColor = '#b45309';
+                  if (act === 'DELETE') actColor = '#b91c1c';
+
+                  return (
+                    <button
+                      key={act}
+                      type="button"
+                      onClick={() => setMutationActionFilter(act)}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: 20,
+                        fontSize: 11.5,
+                        fontWeight: 'bold',
+                        cursor: 'pointer',
+                        border: `1px solid ${isSelected ? actColor : '#cbd5e1'}`,
+                        background: isSelected ? actColor : '#ffffff',
+                        color: isSelected ? '#ffffff' : '#475569',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      {act}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* MUTATION LEDGER TABLE */}
+              {processedMutationLogs.length === 0 ? (
+                <div style={{ padding: 24, textAlign: 'center', color: '#64748b', background: '#f8fafc', borderRadius: 8 }}>
+                  No mutation audit logs matched your search or action filter.
+                </div>
+              ) : (
+                <div style={{ width: '100%', overflowX: 'auto', maxHeight: 'calc(100vh - 380px)', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                  <table style={{ width: '100%', minWidth: 780, borderCollapse: 'collapse', fontSize: 12, textAlign: 'left' }}>
+                    <thead style={{ position: 'sticky', top: 0, background: '#f8fafc', zIndex: 2 }}>
+                      <tr style={{ borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
+                        <th style={{ padding: '10px 12px' }}>Log ID</th>
+                        <th style={{ padding: '10px 12px' }}>Actor</th>
+                        <th style={{ padding: '10px 12px' }}>Action</th>
+                        <th style={{ padding: '10px 12px' }}>Target Entity</th>
+                        <th style={{ padding: '10px 12px' }}>SHA-256 Verification Hash</th>
+                        <th style={{ padding: '10px 12px' }}>Timestamp</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {processedMutationLogs.map((log) => (
+                        <tr key={log.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '10px 12px', fontWeight: 600 }}>#{log.id}</td>
+                          <td style={{ padding: '10px 12px', color: '#4f46e5', fontWeight: 600 }}>{log.user}</td>
+                          <td style={{ padding: '10px 12px' }}>
+                            <span
+                              style={{
+                                background:
+                                  log.action === 'CREATE'
+                                    ? '#dcfce7'
+                                    : log.action === 'UPDATE'
+                                    ? '#fef3c7'
+                                    : log.action === 'DELETE'
+                                    ? '#fee2e2'
+                                    : '#f1f5f9',
+                                color:
+                                  log.action === 'CREATE'
+                                    ? '#15803d'
+                                    : log.action === 'UPDATE'
+                                    ? '#b45309'
+                                    : log.action === 'DELETE'
+                                    ? '#b91c1c'
+                                    : '#334155',
+                                padding: '2px 6px',
+                                borderRadius: 4,
+                                fontWeight: 'bold',
+                              }}
+                            >
+                              {log.action}
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px 12px', color: '#334155' }}>{log.target}</td>
+                          <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontSize: 11, color: '#475569' }}>
+                            {log.hash ? `${log.hash.substring(0, 22)}…` : 'N/A'}
+                          </td>
+                          <td style={{ padding: '10px 12px', color: '#64748b', whiteSpace: 'nowrap' }}>
+                            {new Date(log.created_at).toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
         </div>
