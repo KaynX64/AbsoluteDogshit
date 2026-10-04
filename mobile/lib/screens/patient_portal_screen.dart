@@ -1614,7 +1614,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   const Text(
-                    'For a real emergency, call emergency services now.',
+                    'For an out of campus emergency, call emergency services now.',
                     style: TextStyle(
                       fontSize: 13,
                       color: textSub,

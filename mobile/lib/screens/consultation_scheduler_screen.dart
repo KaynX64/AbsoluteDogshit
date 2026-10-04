@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:socket_io_client/socket_io_client.dart' as io;
 import '../config/api_config.dart';
 import '../services/emergency_alert_service.dart';
 
@@ -12,13 +13,14 @@ class ConsultationSchedulerScreen extends StatefulWidget {
   State<ConsultationSchedulerScreen> createState() => _ConsultationSchedulerScreenState();
 }
 
-class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScreen> {
+class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScreen>
+    with WidgetsBindingObserver {
   final _storage = const FlutterSecureStorage();
 
-  // 0 = Book Consultation, 1 = My Appointments
   int _activeSubTab = 0;
 
-  // Booking state
+  io.Socket? _socket;
+
   List<dynamic> _doctors = [];
   bool _loadingDoctors = false;
   int? _selectedDoctorId;
@@ -33,7 +35,6 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'
   ];
 
-  // Helper to ensure dates always land on an open clinic weekday (Monday–Friday)
   static DateTime _getNextValidWeekday([DateTime? fromDate]) {
     DateTime start = fromDate ?? DateTime.now();
     DateTime date = DateTime(start.year, start.month, start.day);
@@ -47,7 +48,10 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   }
 
   late DateTime _selectedDate = _getNextValidWeekday();
-  late String _displayedMonthYear;
+
+  // ValueNotifier isolates month-label rebuilds from the rest of the screen.
+  final ValueNotifier<String> _monthNotifier = ValueNotifier<String>('');
+
   List<DateTime> _upcomingWeekdays = [];
 
   List<dynamic> _slots = [];
@@ -75,7 +79,6 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   final _notesController = TextEditingController();
   bool _isSubmitting = false;
 
-  // History state
   List<dynamic> _myAppointments = [];
   bool _loadingHistory = false;
 
@@ -87,43 +90,84 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   static const disabledSlotBg = Color(0xFFEDF2EC);
   static const disabledSlotText = Color(0xFFA3B0A4);
 
+  // Hoisted constants to avoid per-frame Color allocation.
+  static const _selectedDoctorBg = Color(0xFFE2EBE1);
+  static const _selectedAvatarBg = Color(0x26284E3A); // primaryGreen @ 15%
+  static const _infoCardBg = Color(0xFFE2EBE1);
+  static const _dividerSoft = Color(0xFFC7D6C6);
+  static const _hintColor = Color(0xFF94A396);
+  static const _monthTagColor = Color(0xFF6B7A6E);
+
   final ScrollController _dateScrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _currentPurposes = _medicalPurposes;
-    _displayedMonthYear = "${_months[_selectedDate.month - 1]} ${_selectedDate.year}";
+    _monthNotifier.value = "${_months[_selectedDate.month - 1]} ${_selectedDate.year}";
     _generateWeekdaysList();
     _dateScrollController.addListener(_onDateScroll);
     _fetchDoctors();
     _fetchMyAppointments();
+    _initSlotSocket();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _notesController.dispose();
     _dateScrollController.removeListener(_onDateScroll);
     _dateScrollController.dispose();
+    _monthNotifier.dispose();
+    _socket?.disconnect();
     super.dispose();
   }
 
-  // Dynamically transitions the header (e.g. October 2026 -> November 2026) as the user scrolls
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _selectedDoctorId != null) {
+      _fetchAvailableSlots();
+    }
+  }
+
+  Future<void> _initSlotSocket() async {
+    final token = await _storage.read(key: 'jwt_token');
+    try {
+      _socket = io.io(
+        ApiConfig.socketUrl,
+        io.OptionBuilder()
+            .setTransports(['websocket', 'polling'])
+            .setAuth({'token': token})
+            .enableAutoConnect()
+            .build(),
+      );
+
+      _socket?.on('appointment:booked', (data) {
+        if (!mounted || _selectedDoctorId == null) return;
+        _fetchAvailableSlots();
+      });
+
+      _socket?.on('appointment:cancelled', (_) {
+        if (!mounted) return;
+        _fetchAvailableSlots();
+      });
+    } catch (_) {}
+  }
+
   void _onDateScroll() {
     if (!_dateScrollController.hasClients || _upcomingWeekdays.isEmpty) return;
-    const itemExtent = 72.0; // 62 card width + 10 margin
+    const itemExtent = 72.0;
     final index = ((_dateScrollController.offset + 36) / itemExtent)
         .floor()
         .clamp(0, _upcomingWeekdays.length - 1);
 
     final visibleDate = _upcomingWeekdays[index];
-    final monthName = _months[visibleDate.month - 1];
-    final newMonthYear = "$monthName ${visibleDate.year}";
+    final newMonthYear = "${_months[visibleDate.month - 1]} ${visibleDate.year}";
 
-    if (_displayedMonthYear != newMonthYear) {
-      setState(() {
-        _displayedMonthYear = newMonthYear;
-      });
+    // No setState → no full-screen rebuild. Only the month label updates.
+    if (_monthNotifier.value != newMonthYear) {
+      _monthNotifier.value = newMonthYear;
     }
   }
 
@@ -132,7 +176,6 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     DateTime curr = DateTime.now();
     curr = DateTime(curr.year, curr.month, curr.day);
 
-    // Generate upcoming 60 weekdays (approx. 12 weeks of clinical dates)
     while (list.length < 60) {
       if (curr.weekday != DateTime.saturday && curr.weekday != DateTime.sunday) {
         list.add(curr);
@@ -140,13 +183,11 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
       curr = curr.add(const Duration(days: 1));
     }
 
-    setState(() {
-      _upcomingWeekdays = list;
-      if (_selectedDate.weekday == DateTime.saturday || _selectedDate.weekday == DateTime.sunday) {
-        _selectedDate = list.first;
-      }
-      _displayedMonthYear = "${_months[_selectedDate.month - 1]} ${_selectedDate.year}";
-    });
+    _upcomingWeekdays = list;
+    if (_selectedDate.weekday == DateTime.saturday || _selectedDate.weekday == DateTime.sunday) {
+      _selectedDate = list.first;
+    }
+    _monthNotifier.value = "${_months[_selectedDate.month - 1]} ${_selectedDate.year}";
   }
 
   bool _isSameDay(DateTime a, DateTime b) {
@@ -292,8 +333,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
       final data = jsonDecode(res.body);
       if (res.statusCode == 201) {
         _notesController.clear();
-        _fetchAvailableSlots();
-        _fetchMyAppointments();
+        await _fetchAvailableSlots();
+        await _fetchMyAppointments();
 
         EmergencyAlertService().showAppointmentConfirmedNotification(
           '📅 Consultation Confirmed',
@@ -449,11 +490,10 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
       if (picked != null && !_isSameDay(picked, _selectedDate)) {
         setState(() {
           _selectedDate = picked;
-          _displayedMonthYear = "${_months[picked.month - 1]} ${picked.year}";
         });
+        _monthNotifier.value = "${_months[picked.month - 1]} ${picked.year}";
         _fetchAvailableSlots();
 
-        // Auto scroll horizontal carousel to matched date
         final targetIndex = _upcomingWeekdays.indexWhere((d) => _isSameDay(d, picked));
         if (targetIndex != -1 && _dateScrollController.hasClients) {
           _dateScrollController.animateTo(
@@ -497,92 +537,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Title Header
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'A MOMENT FOR YOUR HEALTH',
-                style: TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.8,
-                  color: textSub,
-                ),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                "Let's plan your care.",
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: textMain, letterSpacing: -0.5),
-              ),
-              const SizedBox(height: 2),
-              const Text(
-                "Find a time that works for you. We'll take care of the rest.",
-                style: TextStyle(fontSize: 13.5, color: textSub),
-              ),
-              const SizedBox(height: 14),
-
-              // Pill Switcher Bar
-              Container(
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  color: softSage,
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () => setState(() => _activeSubTab = 0),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 9),
-                          decoration: BoxDecoration(
-                            color: _activeSubTab == 0 ? primaryGreen : Colors.transparent,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            'Book a consultation',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: _activeSubTab == 0 ? Colors.white : primaryGreen,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () => setState(() => _activeSubTab = 1),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 9),
-                          decoration: BoxDecoration(
-                            color: _activeSubTab == 1 ? primaryGreen : Colors.transparent,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            'My appointments',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: _activeSubTab == 1 ? Colors.white : primaryGreen,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
+        _buildHeader(),
         const SizedBox(height: 4),
-
         Expanded(
           child: _activeSubTab == 0 ? _buildBookingTab() : _buildHistoryTab(),
         ),
@@ -590,317 +546,484 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     );
   }
 
-  // --- SUB-VIEW 0: BOOKING FORM (FIGMA DESIGN ALIGNED WITH DYNAMIC MONTH) ---
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'A MOMENT FOR YOUR HEALTH',
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.8,
+              color: textSub,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            "Let's plan your care.",
+            style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: textMain, letterSpacing: -0.5),
+          ),
+          const SizedBox(height: 2),
+          const Text(
+            "Find a time that works for you. We'll take care of the rest.",
+            style: TextStyle(fontSize: 13.5, color: textSub),
+          ),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: softSage,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => setState(() => _activeSubTab = 0),
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 9),
+                      decoration: BoxDecoration(
+                        color: _activeSubTab == 0 ? primaryGreen : Colors.transparent,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        'Book a consultation',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: _activeSubTab == 0 ? Colors.white : primaryGreen,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => setState(() => _activeSubTab = 1),
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 9),
+                      decoration: BoxDecoration(
+                        color: _activeSubTab == 1 ? primaryGreen : Colors.transparent,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        'My appointments',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: _activeSubTab == 1 ? Colors.white : primaryGreen,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBookingTab() {
     if (_loadingDoctors) {
       return const Center(child: CircularProgressIndicator(color: primaryGreen));
     }
 
-    return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      children: [
-        // 1. Your Care Team
-        _buildSectionHeader('1', 'Your care team'),
-        const SizedBox(height: 8),
-        ..._doctors.map((doc) {
-          final isSelected = _selectedDoctorId == doc['user_id'];
-          final initials = "${doc['first_name'][0]}${doc['last_name'][0]}";
-
-          return GestureDetector(
-            onTap: () {
-              setState(() => _selectedDoctorId = doc['user_id']);
-              _updatePurposesForSelectedDoctor(doc['user_id']);
-              _fetchAvailableSlots();
-            },
-            child: Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(
-                color: isSelected ? const Color(0xFFE2EBE1) : Colors.white,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: isSelected ? primaryGreen : borderColor, width: isSelected ? 1.5 : 1),
+    return RefreshIndicator(
+      color: primaryGreen,
+      onRefresh: _fetchAvailableSlots,
+      child: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        cacheExtent: 300,
+        addAutomaticKeepAlives: false,
+        addRepaintBoundaries: true,
+        addSemanticIndexes: false,
+        children: [
+          _buildSectionHeader('1', 'Your care team'),
+          const SizedBox(height: 8),
+          RepaintBoundary(child: _buildDoctorList()),
+          const SizedBox(height: 18),
+          _buildSectionHeader('2', 'What brings you in?'),
+          const SizedBox(height: 8),
+          RepaintBoundary(child: _buildPurposeChips()),
+          const SizedBox(height: 22),
+          _buildSectionHeader('3', 'A day that works for you'),
+          const SizedBox(height: 12),
+          _buildDateHeader(),
+          const SizedBox(height: 14),
+          RepaintBoundary(child: _buildDateCarousel()),
+          const SizedBox(height: 8),
+          const Text(
+            'Consultations are available Monday–Friday.',
+            style: TextStyle(fontSize: 12.5, color: textSub),
+          ),
+          const SizedBox(height: 24),
+          _buildSectionHeader('4', 'Choose your time'),
+          const SizedBox(height: 12),
+          RepaintBoundary(child: _buildSlotGrid()),
+          const SizedBox(height: 22),
+          const Text(
+            'Anything we should know? (optional)',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textMain),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _notesController,
+            maxLines: 3,
+            style: const TextStyle(fontSize: 13),
+            decoration: InputDecoration(
+              hintText: 'Tell your care team a little about your visit…',
+              hintStyle: const TextStyle(color: _hintColor, fontSize: 13),
+              filled: true,
+              fillColor: Colors.white,
+              contentPadding: const EdgeInsets.all(14),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: const BorderSide(color: borderColor)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: const BorderSide(color: borderColor)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: const BorderSide(color: primaryGreen)),
+            ),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primaryGreen,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: const StadiumBorder(),
               ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: isSelected ? primaryGreen.withValues(alpha: 0.15) : softSage,
-                      shape: BoxShape.circle,
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      initials,
-                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: primaryGreen),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+              onPressed: _isSubmitting ? null : _submitBooking,
+              child: _isSubmitting
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  : const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Text(
-                          "Dr. ${doc['first_name']} ${doc['last_name']}",
-                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textMain),
-                        ),
-                        Text(
-                          doc['specialty'] ?? 'General & family medicine',
-                          style: const TextStyle(fontSize: 12, color: textSub),
-                        ),
+                        Text('Confirm appointment', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                        SizedBox(width: 8),
+                        Icon(Icons.arrow_forward_rounded, size: 18),
                       ],
                     ),
-                  ),
-                  if (isSelected) const Icon(Icons.check, size: 18, color: primaryGreen),
-                ],
-              ),
             ),
-          );
-        }),
-        const SizedBox(height: 18),
+          ),
+          const SizedBox(height: 24),
+          RepaintBoundary(child: _buildInfoCard()),
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
 
-        // 2. What brings you in?
-        _buildSectionHeader('2', 'What brings you in?'),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: _currentPurposes.map((purpose) {
-            final isSelected = _selectedPurpose == purpose;
-            return GestureDetector(
-              onTap: () => setState(() => _selectedPurpose = purpose),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                decoration: BoxDecoration(
-                  color: isSelected ? primaryGreen : Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: isSelected ? primaryGreen : borderColor),
-                ),
-                child: Text(
-                  purpose,
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: isSelected ? Colors.white : textMain,
-                  ),
-                ),
-              ),
-            );
-          }).toList(),
-        ),
-        const SizedBox(height: 22),
+  Widget _buildDoctorList() {
+    final items = <Widget>[];
+    for (final doc in _doctors) {
+      final isSelected = _selectedDoctorId == doc['user_id'];
+      final initials = "${doc['first_name'][0]}${doc['last_name'][0]}";
 
-        // =====================================================================
-        // 3. A DAY THAT WORKS FOR YOU (AUTO-TRANSITIONING MONTH HEADER)
-        // =====================================================================
-        _buildSectionHeader('3', 'A day that works for you'),
-        const SizedBox(height: 12),
-
-        // "Choose a date" & Dynamically Updated Month/Year Header
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            const Text(
-              'Choose a date',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
-                color: textMain,
-                letterSpacing: -0.3,
-              ),
+      items.add(
+        GestureDetector(
+          onTap: () {
+            setState(() => _selectedDoctorId = doc['user_id']);
+            _updatePurposesForSelectedDoctor(doc['user_id']);
+            _fetchAvailableSlots();
+          },
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: isSelected ? _selectedDoctorBg : Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: isSelected ? primaryGreen : borderColor, width: isSelected ? 1.5 : 1),
             ),
-            InkWell(
-              onTap: _pickDate,
-              borderRadius: BorderRadius.circular(8),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                child: Row(
-                  children: [
-                    AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 200),
-                      child: Text(
-                        _displayedMonthYear,
-                        key: ValueKey<String>(_displayedMonthYear),
-                        style: const TextStyle(
-                          fontSize: 15.5,
-                          fontWeight: FontWeight.w700,
-                          color: primaryGreen,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    const Icon(Icons.arrow_drop_down, color: primaryGreen, size: 20),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-
-        // Horizontal Weekday Card Carousel
-        SizedBox(
-          height: 92,
-          child: ListView.builder(
-            controller: _dateScrollController,
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            itemCount: _upcomingWeekdays.length,
-            itemBuilder: (context, index) {
-              final date = _upcomingWeekdays[index];
-              final isSelected = _isSameDay(date, _selectedDate);
-
-              const weekdayAbbr = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
-              final dayName = weekdayAbbr[date.weekday - 1];
-
-              // Identifies month transitions (e.g. crossing from October 30 to November 2)
-              final isMonthStart = index == 0 || date.month != _upcomingWeekdays[index - 1].month;
-              final monthBadge = _monthsAbbr[date.month - 1];
-
-              return GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _selectedDate = date;
-                    _displayedMonthYear = "${_months[date.month - 1]} ${date.year}";
-                  });
-                  _fetchAvailableSlots();
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  width: 62,
-                  margin: EdgeInsets.only(right: index == _upcomingWeekdays.length - 1 ? 0 : 10),
+            child: Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
                   decoration: BoxDecoration(
-                    color: isSelected ? primaryGreen : Colors.white,
-                    borderRadius: BorderRadius.circular(22),
-                    border: Border.all(
-                      color: isSelected ? primaryGreen : borderColor,
-                      width: 1.2,
-                    ),
-                    boxShadow: isSelected
-                        ? [
-                            BoxShadow(
-                              color: primaryGreen.withValues(alpha: 0.22),
-                              blurRadius: 8,
-                              offset: const Offset(0, 4),
-                            ),
-                          ]
-                        : null,
+                    color: isSelected ? _selectedAvatarBg : softSage,
+                    shape: BoxShape.circle,
                   ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    initials,
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: primaryGreen),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
                   child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // If it's the start of a new month, display a helpful mini tag (e.g. NOV)
-                      if (isMonthStart)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                          margin: const EdgeInsets.only(bottom: 2),
-                          decoration: BoxDecoration(
-                            color: isSelected ? Colors.white.withValues(alpha: 0.25) : softSage,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            monthBadge,
-                            style: TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 0.6,
-                              color: isSelected ? Colors.white : primaryGreen,
-                            ),
-                          ),
-                        )
-                      else
-                        Text(
-                          dayName,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.5,
-                            color: isSelected ? Colors.white.withValues(alpha: 0.85) : const Color(0xFF6B7A6E),
-                          ),
-                        ),
-                      const SizedBox(height: 4),
                       Text(
-                        '${date.day}',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                          color: isSelected ? Colors.white : textMain,
-                        ),
+                        "Dr. ${doc['first_name']} ${doc['last_name']}",
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textMain),
+                      ),
+                      Text(
+                        doc['specialty'] ?? 'General & family medicine',
+                        style: const TextStyle(fontSize: 12, color: textSub),
                       ),
                     ],
                   ),
                 ),
-              );
-            },
+                if (isSelected) const Icon(Icons.check, size: 18, color: primaryGreen),
+              ],
+            ),
           ),
         ),
-        const SizedBox(height: 8),
+      );
+    }
+    return Column(children: items);
+  }
 
-        const Text(
-          'Consultations are available Monday–Friday.',
-          style: TextStyle(fontSize: 12.5, color: textSub),
-        ),
-        const SizedBox(height: 24),
-
-        // =====================================================================
-        // 4. CHOOSE YOUR TIME (FIGMA 12-HOUR PILL GRID)
-        // =====================================================================
-        _buildSectionHeader('4', 'Choose your time'),
-        const SizedBox(height: 12),
-
-        if (_loadingSlots)
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(20),
-              child: CircularProgressIndicator(color: primaryGreen, strokeWidth: 2),
-            ),
-          )
-        else if (_slots.isEmpty)
-          Container(
-            padding: const EdgeInsets.all(16),
-            alignment: Alignment.center,
+  Widget _buildPurposeChips() {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: _currentPurposes.map((purpose) {
+        final isSelected = _selectedPurpose == purpose;
+        return GestureDetector(
+          onTap: () => setState(() => _selectedPurpose = purpose),
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: borderColor),
+              color: isSelected ? primaryGreen : Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: isSelected ? primaryGreen : borderColor),
             ),
-            child: const Text('No slots available on this date.', style: TextStyle(color: textSub, fontSize: 13)),
-          )
-        else
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              mainAxisSpacing: 10,
-              crossAxisSpacing: 10,
-              childAspectRatio: 2.25,
+            child: Text(
+              purpose,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: isSelected ? Colors.white : textMain,
+              ),
             ),
-            itemCount: _slots.length,
-            itemBuilder: (context, index) {
-              final slot = _slots[index];
-              final rawTime = slot['time'];
-              final displayTime = _formatSlotDisplay(rawTime);
-              final isAvail = slot['isAvailable'] == true;
-              final isSelected = _selectedSlotTime == rawTime;
+          ),
+        );
+      }).toList(),
+    );
+  }
 
-              return GestureDetector(
-                onTap: isAvail ? () => setState(() => _selectedSlotTime = rawTime) : null,
+  Widget _buildDateHeader() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        const Text(
+          'Choose a date',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w800,
+            color: textMain,
+            letterSpacing: -0.3,
+          ),
+        ),
+        InkWell(
+          onTap: _pickDate,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            child: Row(
+              children: [
+                ValueListenableBuilder<String>(
+                  valueListenable: _monthNotifier,
+                  builder: (context, month, _) => AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 200),
+                    child: Text(
+                      month,
+                      key: ValueKey<String>(month),
+                      style: const TextStyle(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w700,
+                        color: primaryGreen,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                const Icon(Icons.arrow_drop_down, color: primaryGreen, size: 20),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDateCarousel() {
+    return SizedBox(
+      height: 92,
+      child: ListView.builder(
+        controller: _dateScrollController,
+        scrollDirection: Axis.horizontal,
+        itemExtent: 72.0,
+        itemCount: _upcomingWeekdays.length,
+        cacheExtent: 200,
+        addAutomaticKeepAlives: false,
+        addRepaintBoundaries: true,
+        itemBuilder: (context, index) {
+          final date = _upcomingWeekdays[index];
+          final isSelected = _isSameDay(date, _selectedDate);
+
+          const weekdayAbbr = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+          final dayName = weekdayAbbr[date.weekday - 1];
+
+          final isMonthStart = index == 0 || date.month != _upcomingWeekdays[index - 1].month;
+          final monthBadge = _monthsAbbr[date.month - 1];
+
+          return GestureDetector(
+            onTap: () {
+              setState(() => _selectedDate = date);
+              _monthNotifier.value = "${_months[date.month - 1]} ${date.year}";
+              _fetchAvailableSlots();
+            },
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: EdgeInsets.only(right: index == _upcomingWeekdays.length - 1 ? 0 : 10),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                decoration: BoxDecoration(
+                  color: isSelected ? primaryGreen : Colors.white,
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(
+                    color: isSelected ? primaryGreen : borderColor,
+                    width: 1.2,
+                  ),
+                  boxShadow: isSelected
+                      ? [
+                          BoxShadow(
+                            color: primaryGreen.withValues(alpha: 0.22),
+                            blurRadius: 8,
+                            offset: const Offset(0, 4),
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (isMonthStart)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                        margin: const EdgeInsets.only(bottom: 2),
+                        decoration: BoxDecoration(
+                          color: isSelected ? Colors.white.withValues(alpha: 0.25) : softSage,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          monthBadge,
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.6,
+                            color: isSelected ? Colors.white : primaryGreen,
+                          ),
+                        ),
+                      )
+                    else
+                      Text(
+                        dayName,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.5,
+                          color: isSelected ? Colors.white.withValues(alpha: 0.85) : _monthTagColor,
+                        ),
+                      ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${date.day}',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        color: isSelected ? Colors.white : textMain,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // Uses a Wrap instead of a nested GridView so the slot area never enters
+  // the gesture arena and never fights the outer ListView for scroll.
+  Widget _buildSlotGrid() {
+    if (_loadingSlots) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: CircularProgressIndicator(color: primaryGreen, strokeWidth: 2),
+        ),
+      );
+    }
+    if (_slots.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: borderColor),
+        ),
+        child: const Text('No slots available on this date.', style: TextStyle(color: textSub, fontSize: 13)),
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const crossAxisCount = 3;
+        const gap = 10.0;
+        final slotWidth =
+            (constraints.maxWidth - (crossAxisCount - 1) * gap) / crossAxisCount;
+        final slotHeight = slotWidth / 2.25;
+
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: _slots.map((slot) {
+            final rawTime = slot['time'];
+            final displayTime = _formatSlotDisplay(rawTime);
+            final isAvail = slot['isAvailable'] == true;
+            final isSelected = _selectedSlotTime == rawTime;
+            final isDisabled = !isAvail;
+
+            return SizedBox(
+              width: slotWidth,
+              height: slotHeight,
+              child: GestureDetector(
+                onTap: isDisabled
+                    ? null
+                    : () => setState(() => _selectedSlotTime = rawTime),
+                behavior: HitTestBehavior.opaque,
                 child: Container(
                   decoration: BoxDecoration(
                     color: isSelected
                         ? primaryGreen
-                        : isAvail
-                            ? Colors.white
-                            : disabledSlotBg,
+                        : isDisabled
+                            ? disabledSlotBg
+                            : Colors.white,
                     borderRadius: BorderRadius.circular(22),
                     border: Border.all(
                       color: isSelected
                           ? primaryGreen
-                          : isAvail
-                              ? borderColor
-                              : Colors.transparent,
+                          : isDisabled
+                              ? Colors.transparent
+                              : borderColor,
                       width: 1.2,
                     ),
                   ),
@@ -909,111 +1032,63 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                     displayTime,
                     style: TextStyle(
                       fontSize: 13,
-                      fontWeight: isSelected || isAvail ? FontWeight.w700 : FontWeight.w600,
+                      fontWeight: isSelected || !isDisabled
+                          ? FontWeight.w700
+                          : FontWeight.w600,
                       color: isSelected
                           ? Colors.white
-                          : isAvail
-                              ? textMain
-                              : disabledSlotText,
+                          : isDisabled
+                              ? disabledSlotText
+                              : textMain,
                     ),
                   ),
                 ),
-              );
-            },
-          ),
-        const SizedBox(height: 22),
-
-        // 5. Anything we should know?
-        const Text(
-          'Anything we should know? (optional)',
-          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textMain),
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _notesController,
-          maxLines: 3,
-          style: const TextStyle(fontSize: 13),
-          decoration: InputDecoration(
-            hintText: 'Tell your care team a little about your visit…',
-            hintStyle: const TextStyle(color: Color(0xFF94A396), fontSize: 13),
-            filled: true,
-            fillColor: Colors.white,
-            contentPadding: const EdgeInsets.all(14),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: const BorderSide(color: borderColor)),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: const BorderSide(color: borderColor)),
-            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: const BorderSide(color: primaryGreen)),
-          ),
-        ),
-        const SizedBox(height: 20),
-
-        // Confirm Button
-        SizedBox(
-          width: double.infinity,
-          height: 52,
-          child: ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: primaryGreen,
-              foregroundColor: Colors.white,
-              elevation: 0,
-              shape: const StadiumBorder(),
-            ),
-            onPressed: _isSubmitting ? null : _submitBooking,
-            child: _isSubmitting
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                : const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text('Confirm appointment', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                      SizedBox(width: 8),
-                      Icon(Icons.arrow_forward_rounded, size: 18),
-                    ],
-                  ),
-          ),
-        ),
-        const SizedBox(height: 24),
-
-        // "A smoother visit." Info Card
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: const Color(0xFFE2EBE1),
-            borderRadius: BorderRadius.circular(22),
-          ),
-          child: const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.healing_outlined, size: 18, color: primaryGreen),
-                  SizedBox(width: 8),
-                  Text('A smoother visit.', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Color(0xFF191C1A))),
-                ],
               ),
-              SizedBox(height: 12),
-              _CheckItem('Bring your university ID and health pass.'),
-              _CheckItem('Arrive 10 minutes before your appointment.'),
-              _CheckItem('Keep a list of any medications you take.'),
-              Divider(color: Color(0xFFC7D6C6), height: 24),
-              Row(
-                children: [
-                  Icon(Icons.location_on_outlined, size: 15, color: textSub),
-                  SizedBox(width: 6),
-                  Text('PSU Lingayen Campus Infirmary', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textMain)),
-                ],
-              ),
-              Padding(
-                padding: EdgeInsets.only(left: 21, top: 2),
-                child: Text('Monday–Friday · 8 AM–5 PM', style: TextStyle(fontSize: 11.5, color: textSub)),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 24),
-      ],
+            );
+          }).toList(),
+        );
+      },
     );
   }
 
-  // --- SUB-VIEW 1: MY APPOINTMENTS LIST ---
+  Widget _buildInfoCard() {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: _infoCardBg,
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.healing_outlined, size: 18, color: primaryGreen),
+              SizedBox(width: 8),
+              Text('A smoother visit.', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Color(0xFF191C1A))),
+            ],
+          ),
+          SizedBox(height: 12),
+          _CheckItem('Bring your university ID and health pass.'),
+          _CheckItem('Arrive 10 minutes before your appointment.'),
+          _CheckItem('Keep a list of any medications you take.'),
+          Divider(color: _dividerSoft, height: 24),
+          Row(
+            children: [
+              Icon(Icons.location_on_outlined, size: 15, color: textSub),
+              SizedBox(width: 6),
+              Text('PSU Lingayen Campus Infirmary', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textMain)),
+            ],
+          ),
+          Padding(
+            padding: EdgeInsets.only(left: 21, top: 2),
+            child: Text('Monday–Friday · 8 AM–5 PM', style: TextStyle(fontSize: 11.5, color: textSub)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildHistoryTab() {
     if (_loadingHistory) {
       return const Center(child: CircularProgressIndicator(color: primaryGreen));
@@ -1041,6 +1116,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
       child: ListView.builder(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
         itemCount: _myAppointments.length,
+        addAutomaticKeepAlives: false,
+        addRepaintBoundaries: true,
+        addSemanticIndexes: false,
         itemBuilder: (context, index) {
           final item = _myAppointments[index];
           final status = (item['status'] ?? 'scheduled').toString().toLowerCase();
@@ -1048,114 +1126,113 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
           final isConfirmed = status == 'scheduled' || status == 'checked_in';
           final isCompleted = status == 'completed';
 
-          return Container(
-            margin: const EdgeInsets.only(bottom: 14),
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: borderColor),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(color: softSage, borderRadius: BorderRadius.circular(8)),
-                      child: const Icon(Icons.calendar_today_outlined, size: 16, color: primaryGreen),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        item['appointment_type'] ?? 'General consultation',
-                        style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: textMain),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+          return RepaintBoundary(
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 14),
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: borderColor),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(color: softSage, borderRadius: BorderRadius.circular(8)),
+                        child: const Icon(Icons.calendar_today_outlined, size: 16, color: primaryGreen),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: isConfirmed
-                            ? const Color(0xFFE5EDE4)
-                            : isCompleted
-                                ? const Color(0xFFE2EBE1)
-                                : const Color(0xFFFDE8E8),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        status == 'scheduled' ? 'Confirmed' : status.toUpperCase(),
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w700,
-                          color: isConfirmed
-                              ? primaryGreen
-                              : isCompleted
-                                  ? const Color(0xFF15803D)
-                                  : const Color(0xFF9B1C1C),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          item['appointment_type'] ?? 'General consultation',
+                          style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: textMain),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-
-                Text(
-                  "Dr. ${item['doctor_first_name']} ${item['doctor_last_name']}",
-                  style: const TextStyle(fontSize: 13, color: textSub, fontWeight: FontWeight.w500),
-                ),
-                const SizedBox(height: 6),
-
-                Row(
-                  children: [
-                    const Icon(Icons.event_outlined, size: 15, color: textSub),
-                    const SizedBox(width: 6),
-                    Expanded(
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isConfirmed
+                              ? const Color(0xFFE5EDE4)
+                              : isCompleted
+                                  ? const Color(0xFFE2EBE1)
+                                  : const Color(0xFFFDE8E8),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          status == 'scheduled' ? 'Confirmed' : status.toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                            color: isConfirmed
+                                ? primaryGreen
+                                : isCompleted
+                                    ? const Color(0xFF15803D)
+                                    : const Color(0xFF9B1C1C),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    "Dr. ${item['doctor_first_name']} ${item['doctor_last_name']}",
+                    style: const TextStyle(fontSize: 13, color: textSub, fontWeight: FontWeight.w500),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      const Icon(Icons.event_outlined, size: 15, color: textSub),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          _formatDateTime(item['formatted_date_time'] ?? item['date_time']),
+                          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: textMain),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  const Row(
+                    children: [
+                      Icon(Icons.location_on_outlined, size: 15, color: textSub),
+                      SizedBox(width: 6),
+                      Text('Medical Clinic · Room 1', style: TextStyle(fontSize: 12, color: textSub)),
+                    ],
+                  ),
+                  if (item['notes'] != null && item['notes'].toString().isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(color: const Color(0xFFF7F9F6), borderRadius: BorderRadius.circular(12)),
                       child: Text(
-                        _formatDateTime(item['formatted_date_time'] ?? item['date_time']),
-                        style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: textMain),
-                        overflow: TextOverflow.ellipsis,
+                        item['notes'],
+                        style: const TextStyle(fontSize: 12, color: textSub),
                       ),
                     ),
                   ],
-                ),
-                const SizedBox(height: 4),
-                const Row(
-                  children: [
-                    Icon(Icons.location_on_outlined, size: 15, color: textSub),
-                    SizedBox(width: 6),
-                    Text('Medical Clinic · Room 1', style: TextStyle(fontSize: 12, color: textSub)),
+                  if (status == 'scheduled') ...[
+                    const SizedBox(height: 12),
+                    GestureDetector(
+                      onTap: () => _cancelAppointment(item['appointment_id']),
+                      behavior: HitTestBehavior.opaque,
+                      child: const Text(
+                        'Cancel appointment',
+                        style: TextStyle(color: Color(0xFF7A2E26), fontSize: 13, fontWeight: FontWeight.w700),
+                      ),
+                    ),
                   ],
-                ),
-
-                if (item['notes'] != null && item['notes'].toString().isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(color: const Color(0xFFF7F9F6), borderRadius: BorderRadius.circular(12)),
-                    child: Text(
-                      item['notes'],
-                      style: const TextStyle(fontSize: 12, color: textSub),
-                    ),
-                  ),
                 ],
-
-                if (status == 'scheduled') ...[
-                  const SizedBox(height: 12),
-                  GestureDetector(
-                    onTap: () => _cancelAppointment(item['appointment_id']),
-                    child: const Text(
-                      'Cancel appointment',
-                      style: TextStyle(color: Color(0xFF7A2E26), fontSize: 13, fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                ],
-              ],
+              ),
             ),
           );
         },

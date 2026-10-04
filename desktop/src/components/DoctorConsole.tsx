@@ -902,8 +902,178 @@ export default function DoctorConsole() {
           )}
 
           {/* 3. MAIN WORKSPACE */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 1fr', gap: 20 }}>
-            {/* LEFT: Clinical Consultation Form */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.15fr', gap: 20 }}>
+            {/* LEFT: Document Issuance (now on left) */}
+            <section style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff', textAlign: 'left' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <h3 style={{ margin: 0, color: '#0f766e', fontSize: 16 }}>Official Document Issuance</h3>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <button
+                    type="button"
+                    onClick={() => setDocType('rx')}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: 4,
+                      fontSize: 12,
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      border: '1px solid #0f766e',
+                      background: docType === 'rx' ? '#0f766e' : '#fff',
+                      color: docType === 'rx' ? '#fff' : '#0f766e',
+                    }}
+                  >
+                    ℞ Prescription
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDocType('clearance')}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: 4,
+                      fontSize: 12,
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      border: '1px solid #0f766e',
+                      background: docType === 'clearance' ? '#0f766e' : '#fff',
+                      color: docType === 'clearance' ? '#fff' : '#0f766e',
+                    }}
+                  >
+                    📄 Clearance
+                  </button>
+                </div>
+              </div>
+
+              {docType === 'rx' ? (
+                <PrescriptionGenerator
+                  key={selectedApp?.appointment_id}
+                  patientUserId={selectedApp?.patient_id || 5}
+                  verifiedPatient={{
+                    first_name: selectedApp?.first_name || 'Daniella',
+                    last_name: selectedApp?.last_name || 'Movida',
+                    student_no: selectedApp?.student_no || '22-LN-0123',
+                    course: selectedApp?.course || 'BS Information Technology',
+                    allergies: selectedApp?.allergies || 'None',
+                  }}
+                  initialNotes={selectedApp?.past_dietary_notes}
+                  isArchived={isArchivedMode}
+                  onPrescriptionIssued={() => {
+                    setFeedbackMsg({ text: '✅ Prescription successfully issued to patient.', type: 'success' });
+                  }}
+                />
+              ) : (
+                <div>
+                  <div style={{ marginBottom: 12 }}>
+                    <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
+                      Clearance Purpose:
+                    </label>
+                    <select
+                      value={clearancePurpose}
+                      disabled={isArchivedMode}
+                      onChange={(e) => setClearancePurpose(e.target.value)}
+                      style={inputStyle}
+                    >
+                      <option value="On-the-Job Training (OJT) Medical Clearance">On-the-Job Training (OJT) Medical Clearance</option>
+                      <option value="SCUAA / Sports Athletic Meet Participation">SCUAA / Sports Athletic Meet Participation</option>
+                      <option value="Academic Readmission / Excuse Certificate">Academic Readmission / Excuse Certificate</option>
+                      <option value="Annual Campus Physical Examination">Annual Campus Physical Examination</option>
+                    </select>
+                  </div>
+
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155' }}>
+                        Validity / Expiration Date:
+                      </label>
+                      {!isArchivedMode && (
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const d = new Date();
+                              d.setDate(d.getDate() + 30);
+                              setClearanceExpiryDate(d.toISOString().split('T')[0]);
+                            }}
+                            style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
+                          >
+                            +30 Days
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const d = new Date();
+                              d.setMonth(d.getMonth() + 6);
+                              setClearanceExpiryDate(d.toISOString().split('T')[0]);
+                            }}
+                            style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
+                          >
+                            +6 Months
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const d = new Date();
+                              d.setFullYear(d.getFullYear() + 1);
+                              setClearanceExpiryDate(d.toISOString().split('T')[0]);
+                            }}
+                            style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
+                          >
+                            +1 Year
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <input
+                      type="date"
+                      value={clearanceExpiryDate}
+                      disabled={isArchivedMode}
+                      readOnly={isArchivedMode}
+                      onChange={(e) => setClearanceExpiryDate(e.target.value)}
+                      style={inputStyle}
+                      required
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
+                      Clinical Fitness Statement:
+                    </label>
+                    <textarea
+                      rows={4}
+                      value={clearanceRemarks}
+                      disabled={isArchivedMode}
+                      readOnly={isArchivedMode}
+                      onChange={(e) => setClearanceRemarks(e.target.value)}
+                      style={{ ...inputStyle, resize: 'vertical' }}
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handlePrintClearance}
+                    disabled={!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled' || isArchivedMode}
+                    style={{
+                      width: '100%',
+                      padding: 10,
+                      background: (!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled' || isArchivedMode) ? '#94a3b8' : '#0284c7',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: 6,
+                      cursor: (!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled' || isArchivedMode) ? 'not-allowed' : 'pointer',
+                      fontWeight: 'bold',
+                      fontSize: 14,
+                    }}
+                  >
+                    {isArchivedMode
+                      ? '🔒 Clearance Already Archived'
+                      : isIssuingClearance
+                      ? 'Signing & Spooling...'
+                      : '🖨️ Issue, Sign & Print Clearance'}
+                  </button>
+                </div>
+              )}  
+            </section>
+
+            {/* RIGHT: Clinical Consultation Form (now on right) */}
             <section style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff', textAlign: 'left' }}>
               <h3 style={{ margin: '0 0 14px 0', color: '#0284c7', fontSize: 16 }}>🩺 Encounter Diagnosis & Vitals Logging</h3>
 
@@ -1095,176 +1265,6 @@ export default function DoctorConsole() {
                   </p>
                 )}
               </form>
-            </section>
-
-            {/* RIGHT: Document Issuance */}
-            <section style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff', textAlign: 'left' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <h3 style={{ margin: 0, color: '#0f766e', fontSize: 16 }}>Official Document Issuance</h3>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <button
-                    type="button"
-                    onClick={() => setDocType('rx')}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: 4,
-                      fontSize: 12,
-                      fontWeight: 'bold',
-                      cursor: 'pointer',
-                      border: '1px solid #0f766e',
-                      background: docType === 'rx' ? '#0f766e' : '#fff',
-                      color: docType === 'rx' ? '#fff' : '#0f766e',
-                    }}
-                  >
-                    ℞ Prescription
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDocType('clearance')}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: 4,
-                      fontSize: 12,
-                      fontWeight: 'bold',
-                      cursor: 'pointer',
-                      border: '1px solid #0f766e',
-                      background: docType === 'clearance' ? '#0f766e' : '#fff',
-                      color: docType === 'clearance' ? '#fff' : '#0f766e',
-                    }}
-                  >
-                    📄 Clearance
-                  </button>
-                </div>
-              </div>
-
-              {docType === 'rx' ? (
-                <PrescriptionGenerator
-                  key={selectedApp?.appointment_id}
-                  patientUserId={selectedApp?.patient_id || 5}
-                  verifiedPatient={{
-                    first_name: selectedApp?.first_name || 'Daniella',
-                    last_name: selectedApp?.last_name || 'Movida',
-                    student_no: selectedApp?.student_no || '22-LN-0123',
-                    course: selectedApp?.course || 'BS Information Technology',
-                    allergies: selectedApp?.allergies || 'None',
-                  }}
-                  initialNotes={selectedApp?.past_dietary_notes}
-                  isArchived={isArchivedMode}
-                  onPrescriptionIssued={() => {
-                    setFeedbackMsg({ text: '✅ Prescription successfully issued to patient.', type: 'success' });
-                  }}
-                />
-              ) : (
-                <div>
-                  <div style={{ marginBottom: 12 }}>
-                    <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
-                      Clearance Purpose:
-                    </label>
-                    <select
-                      value={clearancePurpose}
-                      disabled={isArchivedMode}
-                      onChange={(e) => setClearancePurpose(e.target.value)}
-                      style={inputStyle}
-                    >
-                      <option value="On-the-Job Training (OJT) Medical Clearance">On-the-Job Training (OJT) Medical Clearance</option>
-                      <option value="SCUAA / Sports Athletic Meet Participation">SCUAA / Sports Athletic Meet Participation</option>
-                      <option value="Academic Readmission / Excuse Certificate">Academic Readmission / Excuse Certificate</option>
-                      <option value="Annual Campus Physical Examination">Annual Campus Physical Examination</option>
-                    </select>
-                  </div>
-
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                      <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155' }}>
-                        Validity / Expiration Date:
-                      </label>
-                      {!isArchivedMode && (
-                        <div style={{ display: 'flex', gap: 4 }}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const d = new Date();
-                              d.setDate(d.getDate() + 30);
-                              setClearanceExpiryDate(d.toISOString().split('T')[0]);
-                            }}
-                            style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
-                          >
-                            +30 Days
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const d = new Date();
-                              d.setMonth(d.getMonth() + 6);
-                              setClearanceExpiryDate(d.toISOString().split('T')[0]);
-                            }}
-                            style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
-                          >
-                            +6 Months
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const d = new Date();
-                              d.setFullYear(d.getFullYear() + 1);
-                              setClearanceExpiryDate(d.toISOString().split('T')[0]);
-                            }}
-                            style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
-                          >
-                            +1 Year
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                    <input
-                      type="date"
-                      value={clearanceExpiryDate}
-                      disabled={isArchivedMode}
-                      readOnly={isArchivedMode}
-                      onChange={(e) => setClearanceExpiryDate(e.target.value)}
-                      style={inputStyle}
-                      required
-                    />
-                  </div>
-
-                  <div style={{ marginBottom: 16 }}>
-                    <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
-                      Clinical Fitness Statement:
-                    </label>
-                    <textarea
-                      rows={4}
-                      value={clearanceRemarks}
-                      disabled={isArchivedMode}
-                      readOnly={isArchivedMode}
-                      onChange={(e) => setClearanceRemarks(e.target.value)}
-                      style={{ ...inputStyle, resize: 'vertical' }}
-                    />
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handlePrintClearance}
-                    disabled={!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled' || isArchivedMode}
-                    style={{
-                      width: '100%',
-                      padding: 10,
-                      background: (!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled' || isArchivedMode) ? '#94a3b8' : '#0284c7',
-                      color: '#fff',
-                      border: 'none',
-                      borderRadius: 6,
-                      cursor: (!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled' || isArchivedMode) ? 'not-allowed' : 'pointer',
-                      fontWeight: 'bold',
-                      fontSize: 14,
-                    }}
-                  >
-                    {isArchivedMode
-                      ? '🔒 Clearance Already Archived'
-                      : isIssuingClearance
-                      ? 'Signing & Spooling...'
-                      : '🖨️ Issue, Sign & Print Clearance'}
-                  </button>
-                </div>
-              )}  
             </section>
           </div>
         </>

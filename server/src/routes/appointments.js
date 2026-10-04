@@ -13,11 +13,28 @@ import { sendAppointmentEmail } from '../utils/mailer.js';
 export default function appointmentRoutes(io) {
   const router = express.Router();
 
+  // Symmetric consultation buffer: a booking at HH:MM blocks
+  // HH:MM-30 and HH:MM+30 as well.
+  const CONSULTATION_BUFFER_MINUTES = 30;
+
+  function subtractMinutes(hhmm, minutes) {
+    const [h, m] = hhmm.split(':').map(Number);
+    const total = h * 60 + m - minutes;
+    if (total < 0) return null;
+    return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+  }
+
+  function addMinutes(hhmm, minutes) {
+    const [h, m] = hhmm.split(':').map(Number);
+    const total = h * 60 + m + minutes;
+    if (total >= 24 * 60) return null;
+    return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+  }
+
   // ===========================================================================
   // 1. DOCTOR & PRACTITIONER ROSTER
   // ===========================================================================
 
-  // GET /api/appointments/doctors - Retrieve practitioners available for bookings
   router.get('/doctors', authenticateToken, async (req, res) => {
     try {
       const [doctors] = await pool.query(
@@ -43,10 +60,9 @@ export default function appointmentRoutes(io) {
   });
 
   // ===========================================================================
-  // 2. TIME SLOT AVAILABILITY
+  // 2. TIME SLOT AVAILABILITY (symmetric 30-minute buffer)
   // ===========================================================================
 
-  // GET /api/appointments/slots?doctorId=...&date=YYYY-MM-DD
   router.get('/slots', authenticateToken, async (req, res) => {
     const { doctorId, date } = req.query;
 
@@ -71,10 +87,19 @@ export default function appointmentRoutes(io) {
       );
 
       const bookedSet = new Set(booked.map((b) => b.time_slot));
-      const slots = defaultSlots.map((time) => ({
-        time,
-        isAvailable: !bookedSet.has(time),
-      }));
+
+      const slots = defaultSlots.map((time) => {
+        const prevSlot = subtractMinutes(time, CONSULTATION_BUFFER_MINUTES);
+        const nextSlot = addMinutes(time, CONSULTATION_BUFFER_MINUTES);
+
+        const isBlockedByPrevious = prevSlot !== null && bookedSet.has(prevSlot);
+        const isBlockedByNext = nextSlot !== null && bookedSet.has(nextSlot);
+
+        return {
+          time,
+          isAvailable: !bookedSet.has(time) && !isBlockedByPrevious && !isBlockedByNext,
+        };
+      });
 
       res.json({ slots });
     } catch (error) {
@@ -87,7 +112,6 @@ export default function appointmentRoutes(io) {
   // 3. PATIENT APPOINTMENT BOOKING & HISTORY
   // ===========================================================================
 
-  // GET /api/appointments/my - Retrieve personal appointments for logged-in patient
   router.get('/my', authenticateToken, requirePrivacyConsent, async (req, res) => {
     try {
       const [rows] = await pool.query(
@@ -117,7 +141,6 @@ export default function appointmentRoutes(io) {
     }
   });
 
-  // POST /api/appointments - Book a consultation
   router.post('/', authenticateToken, requirePrivacyConsent, async (req, res) => {
     const { doctor_user_id, date_time, appointment_type, notes } = req.body;
     const patientUserId = req.user.user_id;
@@ -130,18 +153,35 @@ export default function appointmentRoutes(io) {
     try {
       await connection.beginTransaction();
 
-      // Check slot availability to prevent double-booking
+      // Symmetric buffer collision check:
+      //   reject if the requested time, 30 min before, or 30 min after
+      //   already has a live appointment with the same doctor.
+      // FOR UPDATE locks the range to prevent concurrent races.
       const [conflict] = await connection.query(
         `SELECT appointment_id FROM APPOINTMENTS
-         WHERE doctor_user_id = ? 
-           AND date_time = ? 
-           AND status NOT IN ('cancelled') 
-           AND deleted_at IS NULL FOR UPDATE`,
-        [doctor_user_id, date_time]
+         WHERE doctor_user_id = ?
+           AND (
+             date_time = ?
+             OR date_time = DATE_SUB(?, INTERVAL ? MINUTE)
+             OR date_time = DATE_ADD(?, INTERVAL ? MINUTE)
+           )
+           AND status NOT IN ('cancelled')
+           AND deleted_at IS NULL
+         FOR UPDATE`,
+        [
+          doctor_user_id,
+          date_time,
+          date_time,
+          CONSULTATION_BUFFER_MINUTES,
+          date_time,
+          CONSULTATION_BUFFER_MINUTES,
+        ]
       );
 
       if (conflict.length > 0) {
-        throw new Error('This time slot is already booked. Please choose an available time.');
+        throw new Error(
+          'This time slot conflicts with another consultation (30-minute buffer). Please choose a different time.'
+        );
       }
 
       const [insertResult] = await connection.query(
@@ -164,7 +204,6 @@ export default function appointmentRoutes(io) {
 
       await connection.commit();
 
-      // Retrieve demographic details for confirmation email & socket notification
       const [details] = await pool.query(
         `SELECT u.email AS patient_email, u.first_name AS patient_first_name, u.last_name AS patient_last_name,
                 doc.first_name AS doc_first_name, doc.last_name AS doc_last_name,
@@ -212,7 +251,6 @@ export default function appointmentRoutes(io) {
     }
   });
 
-  // PATCH /api/appointments/:id/cancel - Cancel a scheduled appointment
   router.patch('/:id/cancel', authenticateToken, async (req, res) => {
     const appointmentId = Number(req.params.id);
     const { cancelled_reason } = req.body;
@@ -281,9 +319,8 @@ export default function appointmentRoutes(io) {
   // 4. DOCTOR & CLINICAL DESK WORKSPACE
   // ===========================================================================
 
-  // GET /api/appointments/today - Fetch appointments for doctor/clinic console
   router.get('/today', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
-    const { filter } = req.query; // 'active', 'scheduled', 'history'
+    const { filter } = req.query;
     const userRoles = req.user.roles || [];
     const isPractitionerOnly = (userRoles.includes('DOCTOR') || userRoles.includes('DENTIST')) && !userRoles.includes('ADMIN') && !userRoles.includes('NURSE');
 
@@ -360,10 +397,9 @@ export default function appointmentRoutes(io) {
   });
 
   // ===========================================================================
-  // 5. LIVE CLINIC TRIAGE QUEUE (FEATURE 7 & REDIS CACHE)
+  // 5. LIVE CLINIC TRIAGE QUEUE
   // ===========================================================================
 
-  // GET /api/appointments/queue/today - Retrieve active queue tickets for clinic display
   router.get('/queue/today', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'DENTIST', 'ADMIN'), async (req, res) => {
     try {
       const cachedQueue = await getCache('queue:today');
@@ -397,7 +433,6 @@ export default function appointmentRoutes(io) {
     }
   });
 
-  // PATCH /api/appointments/queue/:queueId/status - Advance patient queue ticket status
   router.patch('/queue/:queueId/status', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'DENTIST', 'ADMIN'), async (req, res) => {
     const queueId = Number(req.params.queueId);
     const { status } = req.body;
@@ -414,7 +449,6 @@ export default function appointmentRoutes(io) {
         [status, status, queueId]
       );
 
-      // Keep appointment status in sync
       if (status === 'in-consultation') {
         await connection.query(
           `UPDATE APPOINTMENTS SET status = 'serving'
@@ -448,7 +482,6 @@ export default function appointmentRoutes(io) {
     }
   });
 
-  // GET /api/appointments/queue/my - Active queue status for patient mobile app
   router.get('/queue/my', authenticateToken, async (req, res) => {
     const userId = req.user.user_id;
 
@@ -479,7 +512,6 @@ export default function appointmentRoutes(io) {
 
       const ticket = rows[0];
 
-      // Calculate how many waiting tickets precede this patient
       const [aheadRows] = await pool.query(
         `SELECT COUNT(*) AS ahead
          FROM QUEUE
@@ -513,7 +545,6 @@ export default function appointmentRoutes(io) {
   // 6. QR INTAKE & PATIENT LOOKUP
   // ===========================================================================
 
-  // GET /api/appointments/lookup?query=... OR ?userId=...
   router.get('/lookup', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
     const { query, userId } = req.query;
 
@@ -576,7 +607,6 @@ export default function appointmentRoutes(io) {
     }
   });
 
-  // POST /api/appointments/:id/checkin - Confirm arrival and assign queue ticket
   router.post('/:id/checkin', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
     const appointmentId = Number(req.params.id);
     const { blood_pressure, temperature, pulse } = req.body;
@@ -596,7 +626,6 @@ export default function appointmentRoutes(io) {
 
       const app = appRows[0];
 
-      // Generate sequential daily queue number
       const [numRows] = await connection.query(
         'SELECT COALESCE(MAX(queue_number), 0) + 1 AS next_num FROM QUEUE WHERE queue_date = CURDATE()'
       );
@@ -652,7 +681,6 @@ export default function appointmentRoutes(io) {
     }
   });
 
-  // PATCH /api/appointments/:id/status - Update consultation status (e.g., serving)
   router.patch('/:id/status', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
     const appointmentId = Number(req.params.id);
     const { status } = req.body;
@@ -703,7 +731,6 @@ export default function appointmentRoutes(io) {
   // 7. CLINICAL ENCOUNTER COMPLETION & EMR RECORDING
   // ===========================================================================
 
-  // POST /api/appointments/:id/complete - Finalize consultation and persist EMR record
   router.post('/:id/complete', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'ADMIN'), async (req, res) => {
     const appointmentId = Number(req.params.id);
     const doctorUserId = req.user.user_id;
@@ -724,7 +751,6 @@ export default function appointmentRoutes(io) {
     try {
       await connection.beginTransaction();
 
-      // 1. Insert into EMR_RECORDS with AES-256-GCM encryption
       const [emrResult] = await connection.query(
         `INSERT INTO EMR_RECORDS (patient_user_id, doctor_user_id, appointment_id, chief_complaint, diagnosis, treatment_plan, notes)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -740,7 +766,6 @@ export default function appointmentRoutes(io) {
       );
       const emrId = emrResult.insertId;
 
-      // 2. Persist Vitals to normalized VITAL_SIGNS table
       if (vitals && typeof vitals === 'object') {
         const metricUnits = {
           systolic_bp: 'mmHg',
@@ -763,19 +788,16 @@ export default function appointmentRoutes(io) {
         }
       }
 
-      // 3. Mark appointment as completed
       await connection.query(
         "UPDATE APPOINTMENTS SET status = 'completed' WHERE appointment_id = ?",
         [appointmentId]
       );
 
-      // 4. Mark queue ticket as done
       await connection.query(
         "UPDATE QUEUE SET status = 'done', served_at = CURRENT_TIMESTAMP WHERE appointment_id = ?",
         [appointmentId]
       );
 
-      // 5. Append event to cryptographic R.A. 10173 Audit Chain
       await logAudit(connection, {
         userId: doctorUserId,
         action: 'CREATE',
@@ -817,7 +839,6 @@ export default function appointmentRoutes(io) {
   // 8. PATIENT EMR HISTORY & SEARCH DIRECTORY
   // ===========================================================================
 
-  // GET /api/appointments/patient/:patientId/history - Chronological patient clinical history
   router.get('/patient/:patientId/history', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
     const patientId = Number(req.params.patientId);
 
@@ -871,7 +892,6 @@ export default function appointmentRoutes(io) {
         })
       );
 
-      // Log statutory PHI read access
       logPhiAccess({
         viewerUserId: req.user.user_id,
         patientUserId: patientId,
@@ -888,7 +908,6 @@ export default function appointmentRoutes(io) {
     }
   });
 
-  // GET /api/appointments/patients/search?query=... - Search patient directory
   router.get('/patients/search', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
     const rawQuery = req.query.query ? String(req.query.query).trim() : '';
     if (!rawQuery) return res.json([]);
