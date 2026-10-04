@@ -376,6 +376,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   void _startHold() {
+    // Prevent re-triggering while a dispatch is already in flight.
+    if (_isDispatchingSOS) return;
+
     if (!_sosConsent) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(

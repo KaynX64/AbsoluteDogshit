@@ -642,6 +642,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
       onRefresh: _fetchAvailableSlots,
       child: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        // ignore: deprecated_member_use
         cacheExtent: 300,
         addAutomaticKeepAlives: false,
         addRepaintBoundaries: true,
@@ -869,6 +870,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
         scrollDirection: Axis.horizontal,
         itemExtent: 72.0,
         itemCount: _upcomingWeekdays.length,
+        // ignore: deprecated_member_use
         cacheExtent: 200,
         addAutomaticKeepAlives: false,
         addRepaintBoundaries: true,
