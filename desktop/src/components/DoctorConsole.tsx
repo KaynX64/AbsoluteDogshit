@@ -25,6 +25,7 @@ interface AppointmentItem {
   chronic_conditions: string;
   height: number;
   weight: number;
+  health_profile_updated_at?: string;
   queue_ticket?: string;
   queue_status?: string;
   past_chief_complaint?: string;
@@ -60,6 +61,8 @@ export default function DoctorConsole() {
   const [pulseRate, setPulseRate] = useState('75');
   const [spo2, setSpo2] = useState('98');
   const [respRate, setRespRate] = useState('18');
+  const [height, setHeight] = useState('');
+  const [weight, setWeight] = useState('');
 
   // Document Issuance Tab
   const [docType, setDocType] = useState<'rx' | 'clearance'>('rx');
@@ -201,6 +204,8 @@ export default function DoctorConsole() {
     setDiagnosis(app.past_diagnosis || '');
     setTreatmentPlan(app.past_treatment || '');
     setClinicalNotes(app.past_clinical_notes || '');
+    setHeight(app.height ? String(app.height) : '');
+    setWeight(app.weight ? String(app.weight) : '');
     setAttachedFile(null);
     setFeedbackMsg(null);
 
@@ -266,6 +271,8 @@ export default function DoctorConsole() {
         pulse: pulseRate,
         spo2,
         resp_rate: respRate,
+        height,
+        weight,
       },
     };
 
@@ -449,7 +456,7 @@ export default function DoctorConsole() {
             <div class="patient-box">
               <b>Student Name:</b> ${selectedApp.first_name} ${selectedApp.last_name} &nbsp;|&nbsp; <b>ID No:</b> ${selectedApp.student_no || 'N/A'}<br/>
               <b>Course / Department:</b> ${selectedApp.course || 'PSU Student'}<br/>
-              <b>Vital Signs:</b> Height: ${selectedApp.height || '162'} cm &nbsp;|&nbsp; Weight: ${selectedApp.weight || '54'} kg &nbsp;|&nbsp; Blood Type: ${selectedApp.blood_type || 'O+'}
+              <b>Vital Signs:</b> Height: ${height || selectedApp.height || '162'} cm &nbsp;|&nbsp; Weight: ${weight || selectedApp.weight || '54'} kg &nbsp;|&nbsp; Blood Type: ${selectedApp.blood_type || 'O+'}
             </div>
             <p class="body-text">
               To Whom It May Concern:<br/><br/>
@@ -864,6 +871,13 @@ export default function DoctorConsole() {
                     </span>
                   </span>
                   <span><b>Conditions:</b> {selectedApp.chronic_conditions || 'None'}</span>
+                  <span><b>H:</b> {selectedApp.height ? `${selectedApp.height} cm` : '—'}</span>
+                  <span><b>W:</b> {selectedApp.weight ? `${selectedApp.weight} kg` : '—'}</span>
+                  {selectedApp.health_profile_updated_at && (
+                    <span style={{ color: '#64748b', fontStyle: 'italic' }}>
+                      <b>Last verified:</b> {new Date(selectedApp.health_profile_updated_at).toLocaleDateString()}
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -903,7 +917,7 @@ export default function DoctorConsole() {
 
           {/* 3. MAIN WORKSPACE */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.15fr', gap: 20 }}>
-            {/* LEFT: Document Issuance (now on left) */}
+            {/* LEFT: Document Issuance */}
             <section style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff', textAlign: 'left' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <h3 style={{ margin: 0, color: '#0f766e', fontSize: 16 }}>Official Document Issuance</h3>
@@ -1073,7 +1087,7 @@ export default function DoctorConsole() {
               )}  
             </section>
 
-            {/* RIGHT: Clinical Consultation Form (now on right) */}
+            {/* RIGHT: Clinical Consultation Form */}
             <section style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff', textAlign: 'left' }}>
               <h3 style={{ margin: '0 0 14px 0', color: '#0284c7', fontSize: 16 }}>🩺 Encounter Diagnosis & Vitals Logging</h3>
 
@@ -1090,12 +1104,12 @@ export default function DoctorConsole() {
               )}
 
               <form onSubmit={handleFinishConsultation}>
-                {/* Vitals Input Grid */}
+                {/* Vitals Input Grid (4 cols x 2 rows) */}
                 <div style={{ background: '#f8fafc', padding: 10, borderRadius: 6, marginBottom: 12, border: '1px solid #e2e8f0' }}>
                   <small style={{ fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: 6 }}>
                     Encounter Vitals (Persists to Normalized VITAL_SIGNS table):
                   </small>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
                     <div>
                       <label style={{ fontSize: 11, color: '#64748b' }}>BP (Systolic):</label>
                       <input
@@ -1154,6 +1168,32 @@ export default function DoctorConsole() {
                         readOnly={isArchivedMode}
                         value={respRate}
                         onChange={(e) => setRespRate(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#64748b' }}>Height (cm):</label>
+                      <input
+                        style={inputStyle}
+                        disabled={isArchivedMode}
+                        readOnly={isArchivedMode}
+                        type="number"
+                        step="0.5"
+                        placeholder="e.g. 162.5"
+                        value={height}
+                        onChange={(e) => setHeight(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#64748b' }}>Weight (kg):</label>
+                      <input
+                        style={inputStyle}
+                        disabled={isArchivedMode}
+                        readOnly={isArchivedMode}
+                        type="number"
+                        step="0.1"
+                        placeholder="e.g. 54.0"
+                        value={weight}
+                        onChange={(e) => setWeight(e.target.value)}
                       />
                     </div>
                   </div>

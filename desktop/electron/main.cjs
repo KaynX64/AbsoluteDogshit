@@ -3,18 +3,23 @@ const { app, BrowserWindow, ipcMain, Notification, Menu } = require('electron');
 const path = require('path');
 
 function createWindow() {
+  const isDev = !app.isPackaged; // true during `npm run dev`, false in packaged .exe
+
   const win = new BrowserWindow({
-    title: 'Valetudo HealthLink', // Changes "desktop" to the actual app name
+    title: 'Valetudo HealthLink',
     width: 1300,
     height: 880,
     minWidth: 1024,
     minHeight: 720,
-    autoHideMenuBar: true,       // Hides the top menu bar
-    show: false,                 // Prevent white flash before content loads
+    autoHideMenuBar: true, // Hides the top menu bar
+    show: false,           // Prevent white flash before content loads
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.cjs'),
+      // Hard-disable DevTools in packaged/production builds.
+      // Still allowed during development so you can inspect state.
+      devTools: isDev,
     },
   });
 
@@ -22,9 +27,13 @@ function createWindow() {
   win.removeMenu();
   Menu.setApplicationMenu(null);
 
-  // Use HTTPS on 127.0.0.1 to match Vite's host
-  const devUrl = 'https://127.0.0.1:5173';
-  win.loadURL(devUrl);
+  if (isDev) {
+    // Development: load from the Vite dev server (HTTPS + HMR)
+    win.loadURL('https://127.0.0.1:5173');
+  } else {
+    // Production: load the built static bundle
+    win.loadFile(path.join(__dirname, '../dist/index.html'));
+  }
 
   // Focus window on startup and ensure clean title
   win.once('ready-to-show', () => {
@@ -33,16 +42,40 @@ function createWindow() {
     win.focus();
   });
 
-  // Keep F12 and Ctrl + Shift + I available for DevTools anytime
+  // ── DevTools Shortcut Guard ──────────────────────────────────────────────
+  // In development:  allow F12 / Ctrl+Shift+I to toggle DevTools (helpful).
+  // In production:   swallow every known DevTools shortcut.
   win.webContents.on('before-input-event', (event, input) => {
-    if (
-      input.key === 'F12' ||
-      (input.control && input.shift && input.key.toLowerCase() === 'i')
-    ) {
+    const key = (input.key || '').toLowerCase();
+
+    const isDevToolsShortcut =
+      input.key === 'F12' ||                            // Windows/Linux
+      (input.control && input.shift && key === 'i') ||  // Ctrl+Shift+I
+      (input.control && input.shift && key === 'j') ||  // Ctrl+Shift+J (console)
+      (input.control && input.shift && key === 'c') ||  // Ctrl+Shift+C (inspect)
+      (input.meta && input.alt && key === 'i') ||       // Cmd+Opt+I (macOS)
+      (input.meta && input.alt && key === 'j') ||       // Cmd+Opt+J (macOS)
+      (input.meta && input.alt && key === 'c');         // Cmd+Opt+C (macOS)
+
+    if (!isDevToolsShortcut) return;
+
+    if (isDev) {
+      // Toggle DevTools normally during development
       win.webContents.toggleDevTools();
-      event.preventDefault();
+    }
+    // Always prevent the shortcut from bubbling further.
+    event.preventDefault();
+  });
+
+  // Belt-and-braces: if DevTools somehow opens, close it in production
+  win.webContents.on('devtools-opened', () => {
+    if (!isDev) {
+      win.webContents.closeDevTools();
     }
   });
+
+  // Block window.open(...) calls to arbitrary URLs (extra hardening)
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 }
 
 // 1. PRINT HANDLER (Native OS Print Spooler)

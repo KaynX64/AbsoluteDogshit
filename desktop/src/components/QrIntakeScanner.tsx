@@ -21,6 +21,9 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
   const [bp, setBp] = useState('120/80');
   const [temp, setTemp] = useState('36.6');
   const [pulse, setPulse] = useState('78');
+  const [height, setHeight] = useState('');
+  const [weight, setWeight] = useState('');
+  const [lastVerifiedAt, setLastVerifiedAt] = useState<string>('');
 
   // Camera stream refs
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -54,6 +57,12 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
         setVerifiedPatient(data.patient);
         onPatientVerified(data.patient, tokenToVerify.trim());
         setScanStatus('✅ Patient identity verified.');
+
+        // Prefill latest clinical vitals + freshness marker from the master health profile
+        setHeight(data.patient?.height ? String(data.patient.height) : '');
+        setWeight(data.patient?.weight ? String(data.patient.weight) : '');
+        setLastVerifiedAt(data.patient?.health_profile_updated_at || '');
+
         stopCamera();
         // Check if patient has any appointment to check in
         checkPatientAppointments(data.patient.user_id);
@@ -91,9 +100,16 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
           blood_type: app.blood_type,
           allergies: app.allergies,
           chronic_conditions: app.chronic_conditions,
+          height: app.height,
+          weight: app.weight,
         });
         setPendingAppointment(app);
         setScanStatus(`✅ Patient record located: ${app.first_name} ${app.last_name}`);
+
+        // Prefill latest measured vitals for the nurse
+        setHeight(app.height ? String(app.height) : '');
+        setWeight(app.weight ? String(app.weight) : '');
+        setLastVerifiedAt(app.health_profile_updated_at || '');
       } else {
         setScanStatus('❌ No scheduled appointments found matching that query.');
       }
@@ -112,6 +128,12 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
       const data = await res.json();
       if (Array.isArray(data) && data.length > 0) {
         setPendingAppointment(data[0]);
+        // If the appointment carries a fresher health profile timestamp, use it
+        if (data[0]?.health_profile_updated_at) {
+          setLastVerifiedAt(data[0].health_profile_updated_at);
+        }
+        if (data[0]?.height && !height) setHeight(String(data[0].height));
+        if (data[0]?.weight && !weight) setWeight(String(data[0].weight));
       } else {
         setPendingAppointment(null);
       }
@@ -134,6 +156,8 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
           blood_pressure: bp,
           temperature: temp,
           pulse: pulse,
+          height: height || null,
+          weight: weight || null,
         }),
       });
 
@@ -211,6 +235,23 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
   };
 
   useEffect(() => () => stopCamera(), []);
+
+  // Format the "last verified" timestamp as a friendly string
+  const formatLastVerified = (raw: string): string => {
+    if (!raw) return '';
+    try {
+      const dt = new Date(raw);
+      const diff = Date.now() - dt.getTime();
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const dateStr = dt.toLocaleDateString();
+      if (days < 1) return `Today (${dateStr})`;
+      if (days < 7) return `${days}d ago (${dateStr})`;
+      if (days < 365) return `${Math.floor(days / 30)}mo ago (${dateStr})`;
+      return `${(days / 365).toFixed(1)}y ago (${dateStr})`;
+    } catch {
+      return raw;
+    }
+  };
 
   return (
     <section style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff' }}>
@@ -321,7 +362,9 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
 
           <p style={{ margin: '6px 0', fontSize: 13 }}>
             <b>Allergies:</b> <span style={{ color: verifiedPatient.allergies ? '#dc2626' : '#16a34a', fontWeight: 'bold' }}>{verifiedPatient.allergies || 'None reported'}</span> &nbsp;|&nbsp;
-            <b>Blood:</b> {verifiedPatient.blood_type || 'O+'}
+            <b>Blood:</b> {verifiedPatient.blood_type || 'O+'} &nbsp;|&nbsp;
+            <b>H:</b> {verifiedPatient.height ? `${verifiedPatient.height} cm` : '—'} &nbsp;|&nbsp;
+            <b>W:</b> {verifiedPatient.weight ? `${verifiedPatient.weight} kg` : '—'}
           </p>
 
           {/* If patient has an active appointment */}
@@ -342,20 +385,53 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
 
               {/* Triage Vitals Input by Nurse */}
               {pendingAppointment.status !== 'checked_in' && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 'bold', color: '#475569' }}>Blood Pressure:</label>
-                    <input style={{ width: '100%', padding: 4, fontSize: 12, boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: 4, background: '#fff', color: '#0f172a' }} value={bp} onChange={(e) => setBp(e.target.value)} />
+                <>
+                  {lastVerifiedAt && (
+                    <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8, fontStyle: 'italic' }}>
+                      Last measured: {formatLastVerified(lastVerifiedAt)}
+                    </div>
+                  )}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, marginBottom: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 'bold', color: '#475569' }}>Blood Pressure:</label>
+                      <input style={{ width: '100%', padding: 4, fontSize: 12, boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: 4, background: '#fff', color: '#0f172a' }} value={bp} onChange={(e) => setBp(e.target.value)} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 'bold', color: '#475569' }}>Temp (°C):</label>
+                      <input style={{ width: '100%', padding: 4, fontSize: 12, boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: 4, background: '#fff', color: '#0f172a' }} value={temp} onChange={(e) => setTemp(e.target.value)} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 'bold', color: '#475569' }}>Pulse (bpm):</label>
+                      <input style={{ width: '100%', padding: 4, fontSize: 12, boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: 4, background: '#fff', color: '#0f172a' }} value={pulse} onChange={(e) => setPulse(e.target.value)} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 'bold', color: '#475569' }}>Height (cm):</label>
+                      <input
+                        type="number"
+                        min="50"
+                        max="250"
+                        step="0.5"
+                        placeholder="e.g. 162.5"
+                        style={{ width: '100%', padding: 4, fontSize: 12, boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: 4, background: '#fff', color: '#0f172a' }}
+                        value={height}
+                        onChange={(e) => setHeight(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 'bold', color: '#475569' }}>Weight (kg):</label>
+                      <input
+                        type="number"
+                        min="10"
+                        max="300"
+                        step="0.1"
+                        placeholder="e.g. 54.0"
+                        style={{ width: '100%', padding: 4, fontSize: 12, boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: 4, background: '#fff', color: '#0f172a' }}
+                        value={weight}
+                        onChange={(e) => setWeight(e.target.value)}
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 'bold', color: '#475569' }}>Temp (°C):</label>
-                    <input style={{ width: '100%', padding: 4, fontSize: 12, boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: 4, background: '#fff', color: '#0f172a' }} value={temp} onChange={(e) => setTemp(e.target.value)} />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 'bold', color: '#475569' }}>Pulse (bpm):</label>
-                    <input style={{ width: '100%', padding: 4, fontSize: 12, boxSizing: 'border-box', border: '1px solid #cbd5e1', borderRadius: 4, background: '#fff', color: '#0f172a' }} value={pulse} onChange={(e) => setPulse(e.target.value)} />
-                  </div>
-                </div>
+                </>
               )}
 
               {/* Check-In Confirm Button */}

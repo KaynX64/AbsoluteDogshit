@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
+import '../widgets/valetudo_logo.dart';
 import 'login_screen.dart';
 import 'patient_portal_screen.dart';
 import 'responder_screen.dart';
@@ -135,27 +136,8 @@ class _SplashScreenState extends State<SplashScreen> {
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            // + Logo Container
-                            Container(
-                              width: 92,
-                              height: 92,
-                              decoration: BoxDecoration(
-                                color: primaryGreen,
-                                borderRadius: BorderRadius.circular(28),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.08),
-                                    blurRadius: 18,
-                                    offset: const Offset(0, 8),
-                                  ),
-                                ],
-                              ),
-                              child: const Icon(
-                                Icons.add_rounded,
-                                size: 48,
-                                color: Colors.white,
-                              ),
-                            ),
+                            // Valetudo brand logo (lion + cross + heart)
+                            const ValetudoLogo(size: 130, padded: true),
                             const SizedBox(height: 24),
 
                             // Main Brand Text

@@ -354,7 +354,7 @@ export default function appointmentRoutes(io) {
                 COALESCE(sp.student_no, st.license_no, fp.position, 'PSU Member') AS student_no,
                 COALESCE(sp.course, st.department, fp.department, 'PSU Lingayen') AS course,
                 hp.blood_type, hp.allergies, hp.chronic_conditions,
-                hp.height, hp.weight,
+                hp.height, hp.weight, hp.updated_at AS health_profile_updated_at,
                 CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS queue_ticket,
                 q.status AS queue_status,
                 emr.chief_complaint AS past_chief_complaint,
@@ -580,6 +580,7 @@ export default function appointmentRoutes(io) {
                 COALESCE(sp.student_no, 'N/A') AS student_no,
                 COALESCE(sp.course, 'PSU Lingayen') AS course,
                 hp.blood_type, hp.allergies, hp.chronic_conditions,
+                hp.height, hp.weight, hp.updated_at AS health_profile_updated_at,
                 doc.last_name AS doc_last_name
          FROM APPOINTMENTS a
          JOIN USERS u ON a.patient_user_id = u.user_id
@@ -607,9 +608,12 @@ export default function appointmentRoutes(io) {
     }
   });
 
+  // ===========================================================================
+  // NURSE QR INTAKE CHECK-IN (now captures height & weight)
+  // ===========================================================================
   router.post('/:id/checkin', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
     const appointmentId = Number(req.params.id);
-    const { blood_pressure, temperature, pulse } = req.body;
+    const { blood_pressure, temperature, pulse, height, weight } = req.body;
 
     const connection = await pool.getConnection();
     try {
@@ -637,7 +641,7 @@ export default function appointmentRoutes(io) {
         [app.patient_user_id, appointmentId, nextNum]
       );
 
-      const triageNote = `[TRIAGE VITALS] BP: ${blood_pressure || '120/80'}, Temp: ${temperature || '36.6'}°C, Pulse: ${pulse || '75'} bpm\n`;
+      const triageNote = `[TRIAGE VITALS] BP: ${blood_pressure || '120/80'}, Temp: ${temperature || '36.6'}°C, Pulse: ${pulse || '75'} bpm, Height: ${height || '—'} cm, Weight: ${weight || '—'} kg\n`;
       const combinedNotes = triageNote + (app.notes || '');
 
       await connection.query(
@@ -645,13 +649,43 @@ export default function appointmentRoutes(io) {
         [combinedNotes, appointmentId]
       );
 
+      // Persist latest measured height/weight to the patient's master health profile.
+      // updated_at is forced to bump even if the values are unchanged,
+      // so "last verified" stays accurate for triage freshness.
+      if (height || weight) {
+        const [hpRows] = await connection.query(
+          'SELECT profile_id FROM HEALTH_PROFILES WHERE user_id = ?',
+          [app.patient_user_id]
+        );
+        if (hpRows.length > 0) {
+          await connection.query(
+            `UPDATE HEALTH_PROFILES
+             SET height = COALESCE(?, height),
+                 weight = COALESCE(?, weight),
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE user_id = ?`,
+            [height ? Number(height) : null, weight ? Number(weight) : null, app.patient_user_id]
+          );
+        } else {
+          await connection.query(
+            `INSERT INTO HEALTH_PROFILES (user_id, height, weight) VALUES (?, ?, ?)`,
+            [app.patient_user_id, height ? Number(height) : null, weight ? Number(weight) : null]
+          );
+        }
+      }
+
       await logAudit(connection, {
         userId: req.user.user_id,
         action: 'UPDATE',
         table: 'APPOINTMENTS',
         recordId: appointmentId,
         oldValue: { status: app.status },
-        newValue: { status: 'checked_in', queue_number: nextNum },
+        newValue: {
+          status: 'checked_in',
+          queue_number: nextNum,
+          height: height || null,
+          weight: weight || null,
+        },
         ipAddress: req.ip,
       });
 
@@ -728,7 +762,7 @@ export default function appointmentRoutes(io) {
   });
 
   // ===========================================================================
-  // 7. CLINICAL ENCOUNTER COMPLETION & EMR RECORDING
+  // 7. CLINICAL ENCOUNTER COMPLETION & EMR RECORDING (now with height/weight)
   // ===========================================================================
 
   router.post('/:id/complete', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'ADMIN'), async (req, res) => {
@@ -774,6 +808,8 @@ export default function appointmentRoutes(io) {
           pulse: 'bpm',
           spo2: '%',
           resp_rate: 'cpm',
+          height: 'cm',
+          weight: 'kg',
         };
 
         for (const [metric, val] of Object.entries(vitals)) {
@@ -785,6 +821,38 @@ export default function appointmentRoutes(io) {
               [emrId, metric, Number(val), unit, doctorUserId]
             );
           }
+        }
+      }
+
+      // Persist latest height/weight to master health profile if the doctor updated them.
+      // updated_at is forced to bump even if the values are unchanged.
+      if (vitals && (vitals.height || vitals.weight)) {
+        const [hpRows] = await connection.query(
+          'SELECT profile_id FROM HEALTH_PROFILES WHERE user_id = ?',
+          [patient_user_id]
+        );
+        if (hpRows.length > 0) {
+          await connection.query(
+            `UPDATE HEALTH_PROFILES
+             SET height = COALESCE(?, height),
+                 weight = COALESCE(?, weight),
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE user_id = ?`,
+            [
+              vitals.height ? Number(vitals.height) : null,
+              vitals.weight ? Number(vitals.weight) : null,
+              patient_user_id,
+            ]
+          );
+        } else {
+          await connection.query(
+            `INSERT INTO HEALTH_PROFILES (user_id, height, weight) VALUES (?, ?, ?)`,
+            [
+              patient_user_id,
+              vitals.height ? Number(vitals.height) : null,
+              vitals.weight ? Number(vitals.weight) : null,
+            ]
+          );
         }
       }
 

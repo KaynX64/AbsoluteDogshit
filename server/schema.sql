@@ -183,7 +183,7 @@ CREATE TABLE `EMR_RECORDS` (
 CREATE TABLE `VITAL_SIGNS` (
   `vital_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `emr_id` BIGINT NOT NULL,
-  `metric` VARCHAR(50) NOT NULL COMMENT 'systolic_bp, diastolic_bp, pulse, temperature, spo2, resp_rate',
+  `metric` VARCHAR(50) NOT NULL COMMENT 'systolic_bp, diastolic_bp, pulse, temperature, spo2, resp_rate, height, weight',
   `value` DECIMAL(6,2) NOT NULL,
   `unit` VARCHAR(20) NOT NULL,
   `recorded_by` BIGINT NOT NULL,

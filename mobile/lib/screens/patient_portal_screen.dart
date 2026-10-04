@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../config/api_config.dart';
 import '../widgets/session_timeout_listener.dart';
+import '../widgets/valetudo_logo.dart';
 import '../services/emergency_alert_service.dart';
 import 'login_screen.dart';
 import 'edit_profile_screen.dart';
@@ -531,6 +532,24 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     return '$f$l'.isEmpty ? 'PS' : '$f$l';
   }
 
+  // Format a raw timestamp as "Xmo ago (YYYY-MM-DD)" for the profile freshness chip.
+  String _formatRelativeDate(String? raw) {
+    if (raw == null || raw.isEmpty) return 'Unknown';
+    try {
+      final dt = DateTime.parse(raw).toLocal();
+      final diff = DateTime.now().difference(dt);
+      final dateStr =
+          '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+
+      if (diff.inDays < 1) return 'Today ($dateStr)';
+      if (diff.inDays < 7) return '${diff.inDays}d ago ($dateStr)';
+      if (diff.inDays < 365) return '${(diff.inDays / 30).floor()}mo ago ($dateStr)';
+      return '${(diff.inDays / 365).toStringAsFixed(1)}y ago ($dateStr)';
+    } catch (_) {
+      return raw;
+    }
+  }
+
   // ===========================================================================
   // 4. MAIN BUILD
   // ===========================================================================
@@ -564,15 +583,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                 children: [
                   Row(
                     children: [
-                      Container(
-                        width: 34,
-                        height: 34,
-                        decoration: BoxDecoration(
-                          color: primaryGreen,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Icon(Icons.add_rounded, size: 20, color: Colors.white),
-                      ),
+                      const ValetudoLogo(size: 34),
                       const SizedBox(width: 8),
                       const Text(
                         'valetudo.',
@@ -1868,7 +1879,21 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                     Text('${hp['weight'] ?? '54'} kg', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF191C1A))),
                   ],
                 ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 14),
+                // ▼ NEW: freshness line showing when a nurse/doctor last verified these
+                Row(
+                  children: [
+                    const Icon(Icons.update, size: 13, color: textSub),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                        'Last verified by clinic staff: ${_formatRelativeDate(hp['updated_at']?.toString())}',
+                        style: const TextStyle(fontSize: 11, color: textSub, fontStyle: FontStyle.italic),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(

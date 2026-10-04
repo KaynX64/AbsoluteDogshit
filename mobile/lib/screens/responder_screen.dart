@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/api_config.dart';
+import '../widgets/valetudo_logo.dart';
 import '../services/emergency_alert_service.dart';
 import 'login_screen.dart';
 import 'change_password_screen.dart';
@@ -176,12 +177,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
               children: [
                 Row(
                   children: [
-                    Container(
-                      width: 34,
-                      height: 34,
-                      decoration: BoxDecoration(color: primaryCrimson, borderRadius: BorderRadius.circular(10)),
-                      child: const Icon(Icons.add_rounded, size: 20, color: Colors.white),
-                    ),
+                    const ValetudoLogo(size: 34),
                     const SizedBox(width: 8),
                     const Text(
                       'valetudo.',

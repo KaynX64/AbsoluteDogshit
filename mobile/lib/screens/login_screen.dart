@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../config/api_config.dart';
+import '../widgets/valetudo_logo.dart';
 import 'patient_portal_screen.dart';
 import 'responder_screen.dart';
 import '../services/emergency_alert_service.dart';
@@ -110,15 +111,7 @@ class _LoginScreenState extends State<LoginScreen> {
               // Top Brand Tag
               Row(
                 children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: primaryGreen,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Icon(Icons.add_rounded, size: 22, color: Colors.white),
-                  ),
+                  const ValetudoLogo(size: 36),
                   const SizedBox(width: 10),
                   const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
