@@ -6,10 +6,106 @@ import AdminConsole from './components/AdminConsole';
 import ResponderConsole from './components/ResponderConsole';
 import { getOfflineQueue, replayOfflineQueue } from './services/offlineSync';
 
+/* ── Inline SVG icons ──────────────────────────────────────────── */
+const I = {
+  Users: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  ),
+  Shield: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      <path d="M9 12l2 2 4-4" />
+    </svg>
+  ),
+  Activity: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+    </svg>
+  ),
+  Chart: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 3v18h18" />
+      <path d="M7 15l4-6 3 4 4-7" />
+    </svg>
+  ),
+  Database: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <ellipse cx="12" cy="5" rx="9" ry="3" />
+      <path d="M3 5v14a9 3 0 0 0 18 0V5" />
+      <path d="M3 12a9 3 0 0 0 18 0" />
+    </svg>
+  ),
+  Stethoscope: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 2v6a6 6 0 0 0 12 0V2" />
+      <path d="M12 14v4a4 4 0 0 0 4 4h0a4 4 0 0 0 4-4v-2" />
+      <circle cx="20" cy="10" r="2" />
+    </svg>
+  ),
+  Calendar: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <path d="M16 2v4M8 2v4M3 10h18" />
+    </svg>
+  ),
+  History: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+      <path d="M3 3v5h5" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  ),
+  Folder: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    </svg>
+  ),
+  Pill: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10.5 20.5a7 7 0 0 1-9.9-9.9l6.4-6.4a7 7 0 0 1 9.9 9.9z" />
+      <path d="M8.5 8.5l7 7" />
+    </svg>
+  ),
+  Alert: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
+      <path d="M12 9v4M12 17h.01" />
+    </svg>
+  ),
+  Key: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="7.5" cy="15.5" r="5.5" />
+      <path d="M21 2l-9.6 9.6" />
+      <path d="M15.5 7.5l3 3" />
+    </svg>
+  ),
+  Logout: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="M16 17l5-5-5-5" />
+      <path d="M21 12H9" />
+    </svg>
+  ),
+  Help: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3" />
+      <path d="M12 17h.01" />
+    </svg>
+  ),
+};
+
+/* ================================================================= */
+/* SESSION TIMEOUT HOOK                                               */
+/* ================================================================= */
 export function useSessionTimeout(isActive: boolean, timeoutMinutes = 480) {
   useEffect(() => {
     if (!isActive) return;
-
     let timeoutId: ReturnType<typeof setTimeout>;
     const resetTimer = () => {
       clearTimeout(timeoutId);
@@ -20,11 +116,9 @@ export function useSessionTimeout(isActive: boolean, timeoutMinutes = 480) {
         window.location.reload();
       }, timeoutMinutes * 60 * 1000);
     };
-
     const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
     events.forEach((event) => window.addEventListener(event, resetTimer));
     resetTimer();
-
     return () => {
       clearTimeout(timeoutId);
       events.forEach((event) => window.removeEventListener(event, resetTimer));
@@ -32,21 +126,361 @@ export function useSessionTimeout(isActive: boolean, timeoutMinutes = 480) {
   }, [isActive, timeoutMinutes]);
 }
 
+/* ================================================================= */
+/* SIDEBAR — compact icon rail                                        */
+/* ================================================================= */
+interface SidebarProps {
+  role: string;
+  onSignOut: () => void;
+  onChangePassword: () => void;
+  activeItem?: string;
+  onItemClick?: (key: string) => void;
+}
+
+function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick }: SidebarProps) {
+const navByRole: Record<string, { key: string; label: string; icon: React.ReactNode }[]> = {
+  ADMIN: [
+    { key: 'users',     label: 'Users',      icon: <I.Users /> },
+    { key: 'audit',     label: 'Audit',      icon: <I.Shield /> },
+    { key: 'telemetry', label: 'Health',     icon: <I.Activity /> },
+    { key: 'analytics', label: 'Analytics',  icon: <I.Chart /> },
+    { key: 'db',        label: 'Database',   icon: <I.Database /> },
+  ],
+  NURSE: [
+    { 
+      key: 'triage', 
+      label: 'Triage', 
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+        </svg>
+      ) 
+    },
+    { 
+      key: 'inventory', 
+      label: 'Inventory', 
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M10.5 20.5a7 7 0 0 1-9.9-9.9l6.4-6.4a7 7 0 0 1 9.9 9.9z" />
+          <path d="M8.5 8.5l7 7" />
+        </svg>
+      ) 
+    },
+  ],
+  DOCTOR: [
+    { key: 'active',    label: 'Queue',     icon: <I.Stethoscope /> },
+    { key: 'scheduled', label: 'Bookings',  icon: <I.Calendar /> },
+    { key: 'history',   label: 'History',   icon: <I.History /> },
+    { key: 'archive',   label: 'EMR',       icon: <I.Folder /> },
+    { key: 'analytics', label: 'Analytics', icon: <I.Chart /> },
+  ],
+  DENTIST: [
+    { key: 'active',    label: 'Queue',     icon: <I.Stethoscope /> },
+    { key: 'scheduled', label: 'Bookings',  icon: <I.Calendar /> },
+    { key: 'history',   label: 'History',   icon: <I.History /> },
+    { key: 'archive',   label: 'EMR',       icon: <I.Folder /> },
+    { key: 'analytics', label: 'Analytics', icon: <I.Chart /> },
+  ],
+  EMERGENCY_RESPONDER: [
+    { key: 'dispatch', label: 'Dispatch', icon: <I.Alert /> },
+  ],
+};
+
+  const navItems = navByRole[role] ?? navByRole.ADMIN;
+
+  return (
+    <aside className="sb">
+      <div className="sb-logo-block">
+        <div className="sb-logo-lg">+</div>
+      </div>
+
+      <nav className="sb-nav">
+        {navItems.map((item) => {
+          const isActive = activeItem === item.key;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              className={`sb-item${isActive ? ' is-active' : ''}`}
+              onClick={() => onItemClick?.(item.key)}
+              style={{ cursor: onItemClick ? 'pointer' : 'default' }}
+            >
+              {item.icon}
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+      </nav>
+
+      <div className="sb-spacer" />
+
+      <div className="sb-links">
+        <button
+          type="button"
+          className="sb-link"
+          onClick={onChangePassword}
+          title="Change password"
+        >
+          <I.Key />
+        </button>
+        <button
+          type="button"
+          className="sb-link"
+          onClick={onSignOut}
+          title="Sign out"
+        >
+          <I.Logout />
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+/* ================================================================= */
+/* TOP BAR — greeting header                                          */
+/* ================================================================= */
+interface TopBarProps {
+  user: any;
+  role: string;
+  isOnline: boolean;
+  offlineQueueCount: number;
+  isReplaying: boolean;
+  onManualReplay: () => void;
+  roleView: string;
+  roles: string[];
+  onChangeRoleView: (v: string) => void;
+}
+
+// Inside TopBar in desktop/src/App.tsx
+function TopBar({
+  user, role, isOnline, offlineQueueCount, isReplaying, onManualReplay,
+  roleView, roles, onChangeRoleView,
+}: TopBarProps) {
+  const initials =
+    `${(user.first_name?.[0] ?? '').toUpperCase()}${(user.last_name?.[0] ?? '').toUpperCase()}` || 'DA';
+
+  // Dynamic greeting — computed on every render
+  const hour = new Date().getHours();
+  const greeting =
+    hour >= 5 && hour < 12 ? 'Good morning'
+    : hour >= 12 && hour < 18 ? 'Good afternoon'
+    : 'Good evening';
+
+  return (
+    <header className="tb">
+      <div className="tb-left">
+        <div className="tb-eyebrow">Valetudo HealthLink Console</div>
+        <h1 className="tb-greeting">{greeting}, {user.first_name}</h1>
+      </div>
+
+      {/* ...rest of the tb-right block stays exactly as it was... */}
+
+      <div className="tb-right">
+        {roles.length > 1 && (
+          <select
+            className="tb-role-select"
+            value={roleView}
+            onChange={(e) => onChangeRoleView(e.target.value)}
+          >
+            {roles.map((r: string) => (
+              <option key={r} value={r}>View as {r}</option>
+            ))}
+          </select>
+        )}
+
+        <span className={`tb-online ${isOnline ? 'is-on' : 'is-off'}`}>
+          <span style={{ fontSize: 8 }}>●</span>
+          {isOnline ? 'Online' : 'Offline'}
+        </span>
+
+        {offlineQueueCount > 0 && (
+          <button
+            type="button"
+            className="tb-replay"
+            onClick={onManualReplay}
+            disabled={isReplaying}
+          >
+            {isReplaying ? '⏳ Syncing…' : `⏳ ${offlineQueueCount} queued`}
+          </button>
+        )}
+
+        <span className="tb-role-pill">{role}</span>
+
+        <div className="tb-user-chip">
+          <div className="tb-avatar">{initials}</div>
+          <div>
+            <div className="tb-user-name">{user.first_name} {user.last_name}</div>
+            <div className="tb-user-email">{user.email}</div>
+          </div>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+/* ================================================================= */
+/* LOGIN SCREEN — two-panel split                                     */
+/* ================================================================= */
+interface LoginScreenProps {
+  email: string;
+  setEmail: (v: string) => void;
+  password: string;
+  setPassword: (v: string) => void;
+  error: string;
+  onSubmit: (e: React.FormEvent) => void;
+}
+
+function LoginScreen({ email, setEmail, password, setPassword, error, onSubmit }: LoginScreenProps) {
+  return (
+    <div className="login-split">
+      {/* LEFT — sage hero panel */}
+      <div className="login-left">
+        <div className="login-left-brand">
+          <div className="login-left-logo">+</div>
+          <div>
+            <div className="login-left-brand-name">Valetudo</div>
+            <div className="login-left-brand-sub">HealthLink</div>
+          </div>
+        </div>
+
+        <div className="login-left-hero">
+          <div className="login-left-eyebrow">PSU · Lingayen Campus</div>
+          <h1 className="login-left-headline">
+            Better care.<br />
+            Thoughtful<br />
+            administration.
+          </h1>
+          <p className="login-left-sub">
+            A considered workspace for the people who keep our campus clinic running.
+          </p>
+          <div className="login-left-tag">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              <path d="M9 12l2 2 4-4" />
+            </svg>
+            <span>Secure access · Responsible health data stewardship</span>
+          </div>
+        </div>
+
+        <div className="login-left-footer">
+          <div className="login-left-footer-logo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ width: 26, height: 26 }}>
+              <path d="M3 21h18" />
+              <path d="M5 21V10l7-5 7 5v11" />
+              <path d="M9 21v-6h6v6" />
+            </svg>
+          </div>
+          <div>
+            <div className="login-left-footer-name">Pangasinan State University</div>
+            <div className="login-left-footer-sub">Lingayen Campus · University Infirmary</div>
+          </div>
+        </div>
+      </div>
+
+      {/* RIGHT — cream sign-in panel */}
+      <div className="login-right">
+        <div className="login-right-topbar">
+          <span className="login-sample-pill">Sample design · Admin access</span>
+        </div>
+
+        <div className="login-right-body">
+          <div className="login-right-eyebrow">Admin workspace</div>
+          <h2 className="login-right-title">Valetudo Clinic Portal</h2>
+          <p className="login-right-sub">
+            Sign in with your institutional account to manage clinic systems and governance.
+          </p>
+
+          <form onSubmit={onSubmit}>
+            <label className="field-label">Staff PSU email</label>
+            <input
+              type="email"
+              className="field-input"
+              placeholder="Enter your @psu.edu.ph email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              style={{ marginBottom: 18 }}
+            />
+
+            <label className="field-label">Password</label>
+            <input
+              type="password"
+              className="field-input"
+              placeholder="Enter your password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+
+            {error && <div className="login-error">{error}</div>}
+
+            <button type="submit" className="login-submit">
+              Sign in to clinic terminal
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 16, height: 16 }}>
+                <path d="M5 12h14" />
+                <path d="M13 6l6 6-6 6" />
+              </svg>
+            </button>
+
+            <p className="login-note">
+              Authorized personnel only. Your role determines access.
+              Sessions expire after 8 hours of inactivity to protect clinic information.
+            </p>
+
+            {import.meta.env.DEV && (
+              <div className="dev-chips">
+                <p className="dev-chips-label">Quick select test role (dev only)</p>
+                <div className="dev-chip-grid">
+                  <button type="button" className="dev-chip" onClick={() => { setEmail('nurse@psu.edu.ph'); setPassword('Password123!'); }}>
+                    👩‍⚕️ Clinic Nurse
+                  </button>
+                  <button type="button" className="dev-chip" onClick={() => { setEmail('doctor@psu.edu.ph'); setPassword('Password123!'); }}>
+                    🩺 Campus Doctor
+                  </button>
+                  <button type="button" className="dev-chip" onClick={() => { setEmail('admin@psu.edu.ph'); setPassword('Password123!'); }}>
+                    ⚙️ System Admin
+                  </button>
+                  <button type="button" className="dev-chip" onClick={() => { setEmail('responder@psu.edu.ph'); setPassword('Password123!'); }}>
+                    🚨 SOS Responder
+                  </button>
+                </div>
+              </div>
+            )}
+          </form>
+        </div>
+
+        <div className="login-right-footer">
+          <strong>Need account assistance?</strong> Contact your campus administrator.<br />
+          Valetudo HealthLink · R.A. 10173 Data Privacy Act
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================= */
+/* APP ROOT                                                           */
+/* ================================================================= */
 export default function App() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [user, setUser] = useState<any>(null);
   const [error, setError] = useState('');
-
-  // Allows switching perspectives if the account has multi-roles
   const [activeRoleView, setActiveRoleView] = useState<string>('');
 
-  // Offline Sync & Connectivity States
+  /* ── Workspace state (driven by sidebar) ─────────────────────── */
+  const [adminTab, setAdminTab] = useState<'users' | 'audit' | 'telemetry' | 'analytics' | 'db'>('users');
+  const [doctorViewMode, setDoctorViewMode] = useState<
+    'active' | 'scheduled' | 'history' | 'archive' | 'analytics'
+  >('active');
+  const [nurseViewMode, setNurseViewMode] = useState<'triage' | 'inventory'>('triage');
+
+  /* ── Connectivity & offline queue ────────────────────────────── */
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [offlineQueueCount, setOfflineQueueCount] = useState<number>(() => getOfflineQueue().length);
   const [isReplaying, setIsReplaying] = useState(false);
 
-  // Change Password Modal States
+  /* ── Change password modal ──────────────────────────────────── */
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -54,7 +488,6 @@ export default function App() {
   const [passwordMsg, setPasswordMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const [isSubmittingPassword, setIsSubmittingPassword] = useState(false);
 
-  // Activate the single 8-hour timeout for non-responders
   const isResponder =
     activeRoleView === 'EMERGENCY_RESPONDER' ||
     (user?.roles?.length === 1 && user.roles[0] === 'EMERGENCY_RESPONDER');
@@ -92,7 +525,6 @@ export default function App() {
         const userRoles: string[] = data.user.roles || [];
         const staffRoles = ['NURSE', 'DOCTOR', 'DENTIST', 'ADMIN', 'EMERGENCY_RESPONDER'];
 
-        // GATEKEEPER: Prevent student-only accounts from logging into clinic desktop terminals
         const isAuthorizedStaff = userRoles.some((r) => staffRoles.includes(r));
         if (!isAuthorizedStaff) {
           setError('⛔ Access Denied: Student accounts are restricted to the Valetudo Mobile App.');
@@ -102,7 +534,6 @@ export default function App() {
         localStorage.setItem('valetudo_token', data.token);
         setUser(data.user);
 
-        // Select the primary authorized staff role
         const defaultRole = userRoles.find((r) => staffRoles.includes(r)) || staffRoles[0];
         setActiveRoleView(defaultRole);
       } else {
@@ -133,7 +564,6 @@ export default function App() {
       setPasswordMsg({ text: 'New passwords do not match.', isError: true });
       return;
     }
-
     if (newPassword.length < 8) {
       setPasswordMsg({ text: 'New password must be at least 8 characters long.', isError: true });
       return;
@@ -145,10 +575,7 @@ export default function App() {
     try {
       const res = await fetch('https://localhost:5000/api/auth/change-password', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ currentPassword, newPassword }),
       });
 
@@ -172,358 +599,151 @@ export default function App() {
     }
   };
 
-  // ---------------------------------------------------------------------------
-  // LOGIN SCREEN
-  // ---------------------------------------------------------------------------
   if (!user) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc' }}>
-        <div
-          style={{
-            width: 400,
-            padding: 32,
-            background: '#ffffff',
-            border: '1px solid #cbd5e1',
-            borderRadius: 10,
-            boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
-            fontFamily: 'sans-serif',
-          }}
-        >
-          <h2 style={{ textAlign: 'center', color: '#0f766e', margin: '0 0 6px 0' }}>Valetudo Clinic Portal</h2>
-          <p style={{ textAlign: 'center', color: '#64748b', fontSize: 13, marginBottom: 20 }}>
-            Pangasinan State University • Lingayen Campus
-          </p>
-
-          <form onSubmit={handleLogin}>
-            <div style={{ marginBottom: 14, textAlign: 'left' }}>
-              <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155' }}>Staff PSU Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                style={{
-                  width: '100%',
-                  boxSizing: 'border-box',
-                  padding: '10px 12px',
-                  fontSize: 14,
-                  marginTop: 6,
-                  color: '#111827',
-                  backgroundColor: '#ffffff',
-                  border: '1px solid #cbd5e1',
-                  borderRadius: 6,
-                  outline: 'none',
-                }}
-              />
-            </div>
-
-            <div style={{ marginBottom: 16, textAlign: 'left' }}>
-              <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155' }}>Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                style={{
-                  width: '100%',
-                  boxSizing: 'border-box',
-                  padding: '10px 12px',
-                  fontSize: 14,
-                  marginTop: 6,
-                  color: '#111827',
-                  backgroundColor: '#ffffff',
-                  border: '1px solid #cbd5e1',
-                  borderRadius: 6,
-                  outline: 'none',
-                }}
-              />
-            </div>
-
-            {error && (
-              <div
-                style={{
-                  color: '#dc2626',
-                  fontSize: 12,
-                  marginBottom: 14,
-                  padding: '8px 10px',
-                  borderRadius: 6,
-                  background: '#fef2f2',
-                  border: '1px solid #fecaca',
-                  fontWeight: 600,
-                  lineHeight: 1.4,
-                }}
-              >
-                {error}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              style={{
-                width: '100%',
-                padding: '12px',
-                background: '#0f766e',
-                color: '#ffffff',
-                border: 'none',
-                borderRadius: 6,
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                fontSize: 14,
-              }}
-            >
-              Sign In to Clinic Terminal
-            </button>
-          </form>
-
-{/* Quick preset buttons for testing each role (F05: Only compiled in development) */}
-          {import.meta.env.DEV && (
-            <div style={{ marginTop: 24, borderTop: '1px dashed #cbd5e1', paddingTop: 14 }}>
-              <small style={{ color: '#64748b', display: 'block', marginBottom: 8, fontWeight: 'bold' }}>
-                Quick Select Test Role (Dev Only):
-              </small>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                <button
-                  type="button"
-                  onClick={() => { setEmail('nurse@psu.edu.ph'); setPassword('Password123!'); }}
-                  style={{ padding: '6px 8px', fontSize: 12, cursor: 'pointer', background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 4, color: '#0f766e' }}
-                >
-                  👩‍⚕️ Clinic Nurse
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setEmail('doctor@psu.edu.ph'); setPassword('Password123!'); }}
-                  style={{ padding: '6px 8px', fontSize: 12, cursor: 'pointer', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 4, color: '#0284c7' }}
-                >
-                  🩺 Campus Doctor
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setEmail('admin@psu.edu.ph'); setPassword('Password123!'); }}
-                  style={{ padding: '6px 8px', fontSize: 12, cursor: 'pointer', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 4, color: '#6d28d9' }}
-                >
-                  ⚙️ System Admin
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setEmail('responder@psu.edu.ph'); setPassword('Password123!'); }}
-                  style={{ padding: '6px 8px', fontSize: 12, cursor: 'pointer', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 4, color: '#b91c1c' }}
-                >
-                  🚨 SOS Responder
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+      <LoginScreen
+        email={email}
+        setEmail={setEmail}
+        password={password}
+        setPassword={setPassword}
+        error={error}
+        onSubmit={handleLogin}
+      />
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // ROLE-BASED CONSOLE ROUTING
-  // ---------------------------------------------------------------------------
   return (
-    <div style={{ padding: 'clamp(14px, 2vw, 28px)', fontFamily: 'sans-serif', width: '100%', boxSizing: 'border-box', maxWidth: '1600px', margin: '0 auto' }}>
-      {/* Top Header */}
-      <header
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          borderBottom: '1px solid #e2e8f0',
-          paddingBottom: 16,
-          marginBottom: 16,
-          flexWrap: 'wrap',
-          gap: 12,
-        }}
-      >
-        <div>
-          <h2 style={{ margin: 0, color: '#0f766e' }}>Valetudo HealthLink Console</h2>
-          <small style={{ color: '#475569' }}>
-            Logged in: <b>{user.first_name} {user.last_name}</b> ({user.email}) &nbsp;|&nbsp; Active Interface: <b style={{ color: '#0f766e' }}>{activeRoleView}</b>
-          </small>
+    <div className="app-shell">
+      <Sidebar
+        role={activeRoleView}
+        onSignOut={() => setUser(null)}
+        onChangePassword={() => { setShowPasswordModal(true); setPasswordMsg(null); }}
+        activeItem={
+          activeRoleView === 'ADMIN' ? adminTab
+          : (activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST') ? doctorViewMode
+          : activeRoleView === 'NURSE' ? nurseViewMode
+          : undefined
+        }
+        onItemClick={
+          activeRoleView === 'ADMIN'
+            ? (key) => setAdminTab(key as typeof adminTab)
+            : (activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST')
+            ? (key) => setDoctorViewMode(key as typeof doctorViewMode)
+            : activeRoleView === 'NURSE'
+            ? (key) => setNurseViewMode(key as typeof nurseViewMode)
+            : undefined
+        }
+      />
 
-          {/* Live Connectivity & Offline Replay Queue Indicator */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6, flexWrap: 'wrap' }}>
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                fontSize: 11,
-                fontWeight: 'bold',
-                padding: '2px 8px',
-                borderRadius: 12,
-                background: isOnline ? '#dcfce7' : '#fee2e2',
-                color: isOnline ? '#15803d' : '#b91c1c',
-                border: `1px solid ${isOnline ? '#bbf7d0' : '#fecaca'}`,
-              }}
-            >
-              <span style={{ fontSize: 8 }}>●</span> {isOnline ? 'Online (Connected)' : 'Offline Mode (Local Storage)'}
-            </span>
+      <div className="app-main">
+        <TopBar
+          user={user}
+          role={activeRoleView}
+          isOnline={isOnline}
+          offlineQueueCount={offlineQueueCount}
+          isReplaying={isReplaying}
+          onManualReplay={handleManualReplay}
+          roleView={activeRoleView}
+          roles={user.roles}
+          onChangeRoleView={setActiveRoleView}
+        />
 
-            {offlineQueueCount > 0 && (
-              <button
-                type="button"
-                onClick={handleManualReplay}
-                disabled={isReplaying}
-                style={{
-                  fontSize: 11,
-                  fontWeight: 'bold',
-                  padding: '2px 10px',
-                  borderRadius: 12,
-                  background: '#fef3c7',
-                  color: '#b45309',
-                  border: '1px solid #fde68a',
-                  cursor: isReplaying ? 'not-allowed' : 'pointer',
-                }}
-              >
-                {isReplaying ? '⏳ Syncing...' : `⏳ ${offlineQueueCount} Queued Offline Replays (Sync Now)`}
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          {/* Switch view if user holds multiple roles */}
-          {user.roles.length > 1 && (
-            <select
-              value={activeRoleView}
-              onChange={(e) => setActiveRoleView(e.target.value)}
-              style={{ padding: '6px 10px', borderRadius: 4, border: '1px solid #cbd5e1', fontSize: 13 }}
-            >
-              {user.roles.map((r: string) => (
-                <option key={r} value={r}>View as {r}</option>
-              ))}
-            </select>
+        <main className="app-content">
+          {activeRoleView === 'NURSE' && (
+            <NurseConsole
+              viewMode={nurseViewMode}
+              onViewModeChange={setNurseViewMode}
+            />
           )}
+          {(activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST') && (
+            <DoctorConsole
+              viewMode={doctorViewMode}
+              onViewModeChange={setDoctorViewMode}
+            />
+          )}
+          {activeRoleView === 'ADMIN' && (
+            <AdminConsole activeTab={adminTab} onTabChange={setAdminTab} />
+          )}
+          {activeRoleView === 'EMERGENCY_RESPONDER' && <ResponderConsole />}
+        </main>
+      </div>
 
-          {/* Password Change Button */}
-          <button
-            onClick={() => {
-              setShowPasswordModal(true);
-              setPasswordMsg(null);
-            }}
-            style={{
-              padding: '6px 12px',
-              background: '#f0fdfa',
-              border: '1px solid #99f6e4',
-              color: '#0f766e',
-              borderRadius: 4,
-              cursor: 'pointer',
-              fontWeight: 'bold',
-              fontSize: 12,
-            }}
-          >
-            🔑 Change Password
-          </button>
-
-          <button
-            onClick={() => setUser(null)}
-            style={{ padding: '6px 14px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
-          >
-            Sign Out
-          </button>
-        </div>
-      </header>
-
-      {/* Render Role-Specific Interface */}
-      {activeRoleView === 'NURSE' && <NurseConsole />}
-      {(activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST') && <DoctorConsole />}
-      {activeRoleView === 'ADMIN' && <AdminConsole />}
-      {activeRoleView === 'EMERGENCY_RESPONDER' && <ResponderConsole />}
-
-      {/* --------------------------------------------------------------------- */}
-      {/* CHANGE PASSWORD MODAL DIALOG                                          */}
-      {/* --------------------------------------------------------------------- */}
       {showPasswordModal && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000,
-          }}
-        >
-          <div
-            style={{
-              width: 380,
-              background: '#ffffff',
-              borderRadius: 8,
-              padding: 24,
-              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)',
-              border: '1px solid #cbd5e1',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-              <h3 style={{ margin: 0, color: '#0f766e', fontSize: 16 }}>🔑 Update Account Password</h3>
+        <div className="modal-backdrop" onClick={() => setShowPasswordModal(false)}>
+          <div className="modal-card" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+              <h3 style={{ margin: 0, color: 'var(--primary)', fontSize: 17, fontWeight: 800 }}>
+                🔑 Update account password
+              </h3>
               <button
                 type="button"
                 onClick={() => setShowPasswordModal(false)}
-                style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                ✕
-              </button>
+                style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-sub)' }}
+              >✕</button>
             </div>
 
             <form onSubmit={handleChangePassword}>
-              <div style={{ marginBottom: 10 }}>
-                <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Current Password:</label>
-                <input
-                  type="password"
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  required
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', marginTop: 4, borderRadius: 5, border: '1px solid #cbd5e1', fontSize: 13 }}
-                />
-              </div>
+              <label className="field-label">Current password</label>
+              <input
+                type="password"
+                className="field-input"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                required
+                style={{ marginBottom: 14 }}
+              />
 
-              <div style={{ marginBottom: 10 }}>
-                <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>New Password (min 8 chars):</label>
-                <input
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  required
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', marginTop: 4, borderRadius: 5, border: '1px solid #cbd5e1', fontSize: 13 }}
-                />
-              </div>
+              <label className="field-label">New password (min 8 chars)</label>
+              <input
+                type="password"
+                className="field-input"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                required
+                style={{ marginBottom: 14 }}
+              />
 
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Confirm New Password:</label>
-                <input
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  required
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', marginTop: 4, borderRadius: 5, border: '1px solid #cbd5e1', fontSize: 13 }}
-                />
-              </div>
+              <label className="field-label">Confirm new password</label>
+              <input
+                type="password"
+                className="field-input"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                required
+              />
 
               {passwordMsg && (
                 <div
                   style={{
-                    padding: '8px 10px',
-                    borderRadius: 5,
-                    fontSize: 12,
-                    fontWeight: 'bold',
-                    marginBottom: 12,
-                    background: passwordMsg.isError ? '#fef2f2' : '#f0fdf4',
-                    color: passwordMsg.isError ? '#dc2626' : '#15803d',
-                    border: `1px solid ${passwordMsg.isError ? '#fecaca' : '#bbf7d0'}`,
+                    marginTop: 14,
+                    padding: '10px 14px',
+                    borderRadius: 'var(--r-md)',
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    background: passwordMsg.isError ? 'var(--danger-soft)' : 'var(--success-soft)',
+                    color: passwordMsg.isError ? 'var(--danger)' : 'var(--success)',
+                    border: `1px solid ${passwordMsg.isError ? 'var(--danger-border)' : 'var(--success-border)'}`,
                   }}
                 >
                   {passwordMsg.text}
                 </div>
               )}
 
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
                 <button
                   type="button"
                   onClick={() => setShowPasswordModal(false)}
-                  style={{ flex: 1, padding: 10, background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}
+                  style={{
+                    flex: 1,
+                    padding: 12,
+                    borderRadius: 'var(--r-pill)',
+                    background: 'var(--sage-100)',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontWeight: 700,
+                    color: 'var(--text)',
+                    fontFamily: 'var(--font)',
+                  }}
                 >
                   Cancel
                 </button>
@@ -532,16 +752,18 @@ export default function App() {
                   disabled={isSubmittingPassword}
                   style={{
                     flex: 1,
-                    padding: 10,
-                    background: isSubmittingPassword ? '#94a3b8' : '#0f766e',
-                    color: '#ffffff',
+                    padding: 12,
+                    borderRadius: 'var(--r-pill)',
+                    background: 'var(--primary)',
+                    color: '#fff',
                     border: 'none',
-                    borderRadius: 5,
                     cursor: isSubmittingPassword ? 'not-allowed' : 'pointer',
-                    fontWeight: 'bold',
+                    fontWeight: 700,
+                    fontFamily: 'var(--font)',
+                    opacity: isSubmittingPassword ? 0.6 : 1,
                   }}
                 >
-                  {isSubmittingPassword ? 'Updating...' : 'Save Password'}
+                  {isSubmittingPassword ? 'Updating…' : 'Save password'}
                 </button>
               </div>
             </form>

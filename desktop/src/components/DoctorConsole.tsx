@@ -4,6 +4,9 @@ import PrescriptionGenerator from './PrescriptionGenerator';
 import { io } from 'socket.io-client';
 import AnalyticsDashboard from './AnalyticsDashboard';
 import { queueOfflineMutation } from '../services/offlineSync';
+import { T, btnPrimary, btnGhost, inputStyle } from '../theme';
+
+export type DoctorViewMode = 'active' | 'scheduled' | 'history' | 'archive' | 'analytics';
 
 interface AppointmentItem {
   appointment_id: number;
@@ -35,15 +38,36 @@ interface AppointmentItem {
   past_dietary_notes?: string;
 }
 
-export default function DoctorConsole() {
+interface DoctorConsoleProps {
+  /** Optional controlled view mode — sidebar drives it. Falls back to internal state. */
+  viewMode?: DoctorViewMode;
+  onViewModeChange?: (m: DoctorViewMode) => void;
+}
+
+const STATUS_STYLE = (status: string) => {
+  switch (status) {
+    case 'scheduled':  return { text: 'AWAITING NURSE',      bg: T.warningSoft, color: T.warning };
+    case 'serving':    return { text: 'IN CONSULTATION',     bg: T.successSoft, color: T.success };
+    case 'checked_in': return { text: 'TRIAGED · READY',     bg: T.infoSoft,    color: T.info };
+    case 'completed':  return { text: 'COMPLETED',           bg: T.successSoft, color: T.success };
+    case 'cancelled':  return { text: 'CANCELLED',           bg: T.dangerSoft,  color: T.danger };
+    case 'no_show':    return { text: 'NO SHOW',             bg: T.sage100,     color: T.textSub };
+    default:           return { text: status.toUpperCase(),  bg: T.sage100,     color: T.textSub };
+  }
+};
+
+export default function DoctorConsole({
+  viewMode: controlledView,
+  onViewModeChange,
+}: DoctorConsoleProps = {}) {
+  const [internalView] = useState<DoctorViewMode>('active');
+  const viewMode = controlledView ?? internalView;
+
   const [appointments, setAppointments] = useState<AppointmentItem[]>([]);
   const [selectedApp, setSelectedApp] = useState<AppointmentItem | null>(null);
   const [loadingAppointments, setLoadingAppointments] = useState(false);
 
-  // 'active' = Triaged & Ready; 'scheduled' = Booked on app; 'history' = Discharged
-  const [viewMode, setViewMode] = useState<'active' | 'scheduled' | 'history' | 'archive' | 'analytics'>('active');
-
-  // Form fields
+  /* ── Form fields (unchanged) ─────────────────────────────────── */
   const [chiefComplaint, setChiefComplaint] = useState('');
   const [diagnosis, setDiagnosis] = useState('');
   const [treatmentPlan, setTreatmentPlan] = useState('');
@@ -51,10 +75,8 @@ export default function DoctorConsole() {
   const [isSubmittingEMR, setIsSubmittingEMR] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
-  // Lab / Diagnostic File Attachment (MinIO S3)
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
 
-  // Encounter Vitals
   const [bpSystolic, setBpSystolic] = useState('120');
   const [bpDiastolic, setBpDiastolic] = useState('80');
   const [temperature, setTemperature] = useState('36.6');
@@ -64,19 +86,17 @@ export default function DoctorConsole() {
   const [height, setHeight] = useState('');
   const [weight, setWeight] = useState('');
 
-  // Document Issuance Tab
   const [docType, setDocType] = useState<'rx' | 'clearance'>('rx');
   const [clearancePurpose, setClearancePurpose] = useState('On-the-Job Training (OJT) Medical Clearance');
   const [clearanceRemarks, setClearanceRemarks] = useState('Physically fit to undergo university practicum requirements.');
   const [isIssuingClearance, setIsIssuingClearance] = useState(false);
-
   const [clearanceExpiryDate, setClearanceExpiryDate] = useState<string>(() => {
     const d = new Date();
     d.setMonth(d.getMonth() + 6);
     return d.toISOString().split('T')[0];
   });
 
-  // Patient EMR History State
+  /* ── History & archive state (unchanged) ─────────────────────── */
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [patientHistory, setPatientHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -87,55 +107,28 @@ export default function DoctorConsole() {
   const [directoryTimeline, setDirectoryTimeline] = useState<any[]>([]);
   const [loadingTimeline, setLoadingTimeline] = useState(false);
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'scheduled':
-        return { text: 'AWAITING NURSE', bg: '#fef3c7', color: '#b45309' };
-      case 'serving':
-        return { text: 'IN CONSULTATION', bg: '#dcfce7', color: '#15803d' };
-      case 'checked_in':
-        return { text: 'TRIAGED / READY', bg: '#e0f2fe', color: '#0369a1' };
-      case 'completed':
-        return { text: 'COMPLETED', bg: '#dcfce7', color: '#15803d' };
-      case 'cancelled':
-        return { text: 'CANCELLED', bg: '#fee2e2', color: '#b91c1c' };
-      case 'no_show':
-        return { text: 'NO SHOW', bg: '#f1f5f9', color: '#475569' };
-      default:
-        return { text: status.toUpperCase(), bg: '#f1f5f9', color: '#475569' };
-    }
-  };
-
+  /* ── Data fetchers (identical) ───────────────────────────────── */
   const fetchAppointments = async (mode = viewMode, retainSelection = true) => {
     if (mode === 'analytics') return;
     setLoadingAppointments(true);
     const token = localStorage.getItem('valetudo_token');
-
     let url = 'https://localhost:5000/api/appointments/today?filter=active';
-    if (mode === 'history') {
-      url = 'https://localhost:5000/api/appointments/today?filter=history';
-    } else if (mode === 'scheduled') {
-      url = 'https://localhost:5000/api/appointments/today?filter=scheduled';
-    }
+    if (mode === 'history')        url = 'https://localhost:5000/api/appointments/today?filter=history';
+    else if (mode === 'scheduled') url = 'https://localhost:5000/api/appointments/today?filter=scheduled';
 
     try {
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (Array.isArray(data)) {
         const uniqueAppointments = Array.from(
           new Map(data.map((item: AppointmentItem) => [item.appointment_id, item])).values()
         );
         setAppointments(uniqueAppointments);
-
         if (uniqueAppointments.length > 0) {
-          if (!retainSelection || !selectedApp) {
-            selectPatient(uniqueAppointments[0]);
-          } else {
+          if (!retainSelection || !selectedApp) selectPatient(uniqueAppointments[0]);
+          else {
             const updated = uniqueAppointments.find((a) => a.appointment_id === selectedApp.appointment_id);
-            if (updated) selectPatient(updated);
-            else selectPatient(uniqueAppointments[0]);
+            selectPatient(updated || uniqueAppointments[0]);
           }
         } else {
           setSelectedApp(null);
@@ -151,13 +144,11 @@ export default function DoctorConsole() {
 
   useEffect(() => {
     fetchAppointments(viewMode, false);
-
     const token = localStorage.getItem('valetudo_token');
     const socket = io('https://localhost:5000', {
       auth: { token },
       transports: ['websocket', 'polling'],
     });
-
     socket.on('appointment:booked', () => fetchAppointments(viewMode, true));
     socket.on('appointment:status_changed', (evt: any) => {
       fetchAppointments(viewMode, true);
@@ -170,18 +161,8 @@ export default function DoctorConsole() {
     });
     socket.on('queue:updated', () => fetchAppointments(viewMode, true));
     socket.on('appointment:cancelled', () => fetchAppointments(viewMode, true));
-
-    return () => {
-      socket.disconnect();
-    };
+    return () => { socket.disconnect(); };
   }, [viewMode]);
-
-  const handleSwitchView = (mode: 'active' | 'scheduled' | 'history' | 'analytics' | 'archive') => {
-    setViewMode(mode);
-    if (mode !== 'analytics' && mode !== 'archive') {
-      fetchAppointments(mode, false);
-    }
-  };
 
   const resetForm = () => {
     setChiefComplaint('');
@@ -194,13 +175,11 @@ export default function DoctorConsole() {
 
   const selectPatient = (app: AppointmentItem) => {
     setSelectedApp(app);
-
     let rawComplaint = app.past_chief_complaint || app.notes || `${app.appointment_type} requested`;
     if (rawComplaint.includes('[TRIAGE VITALS]')) {
       rawComplaint = rawComplaint.replace(/\[TRIAGE VITALS\][^\n]*\n?/, '').trim();
     }
     setChiefComplaint(rawComplaint || `${app.appointment_type} requested`);
-
     setDiagnosis(app.past_diagnosis || '');
     setTreatmentPlan(app.past_treatment || '');
     setClinicalNotes(app.past_clinical_notes || '');
@@ -211,10 +190,7 @@ export default function DoctorConsole() {
 
     if (app.notes && app.notes.includes('[TRIAGE VITALS]')) {
       const bpMatch = app.notes.match(/BP:\s*(\d+)\/(\d+)/);
-      if (bpMatch) {
-        setBpSystolic(bpMatch[1]);
-        setBpDiastolic(bpMatch[2]);
-      }
+      if (bpMatch) { setBpSystolic(bpMatch[1]); setBpDiastolic(bpMatch[2]); }
       const tempMatch = app.notes.match(/Temp:\s*([0-9.]+)/);
       if (tempMatch) setTemperature(tempMatch[1]);
       const pulseMatch = app.notes.match(/Pulse:\s*(\d+)/);
@@ -247,12 +223,10 @@ export default function DoctorConsole() {
   const handleFinishConsultation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedApp) return;
-
     if (!diagnosis.trim()) {
       setFeedbackMsg({ text: '⚠️ Please enter a clinical diagnosis before finalizing.', type: 'error' });
       return;
     }
-
     setIsSubmittingEMR(true);
     setFeedbackMsg(null);
     const token = localStorage.getItem('valetudo_token');
@@ -265,18 +239,12 @@ export default function DoctorConsole() {
       treatment_plan: treatmentPlan,
       notes: clinicalNotes,
       vitals: {
-        systolic_bp: bpSystolic,
-        diastolic_bp: bpDiastolic,
-        temperature,
-        pulse: pulseRate,
-        spo2,
-        resp_rate: respRate,
-        height,
-        weight,
+        systolic_bp: bpSystolic, diastolic_bp: bpDiastolic,
+        temperature, pulse: pulseRate, spo2, resp_rate: respRate,
+        height, weight,
       },
     };
 
-    // OFFLINE CHECK & QUEUEING (Process 3.0 Compliance)
     if (!navigator.onLine) {
       queueOfflineMutation({
         table_name: 'EMR_RECORDS',
@@ -284,7 +252,6 @@ export default function DoctorConsole() {
         action: 'CREATE',
         payload: encounterPayload,
       });
-
       setSelectedApp({ ...selectedApp, status: 'completed' });
       resetForm();
       setIsSubmittingEMR(false);
@@ -301,11 +268,9 @@ export default function DoctorConsole() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(encounterPayload),
       });
-
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to complete encounter.');
 
-      // Attach file to MinIO S3 if provided
       let fileSuccess = false;
       if (attachedFile && data.emrId) {
         try {
@@ -335,7 +300,6 @@ export default function DoctorConsole() {
         action: 'CREATE',
         payload: encounterPayload,
       });
-
       resetForm();
       setFeedbackMsg({
         text: '⚠️ Server unreachable. Encounter queued locally in offline storage. Will replay automatically when online.',
@@ -356,20 +320,14 @@ export default function DoctorConsole() {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      if (Array.isArray(data)) {
-        setPatientHistory(data);
-      }
-    } catch (err) {
-      console.error('History fetch error:', err);
-    } finally {
-      setLoadingHistory(false);
-    }
+      if (Array.isArray(data)) setPatientHistory(data);
+    } catch (err) { console.error('History fetch error:', err); }
+    finally { setLoadingHistory(false); }
   };
 
   const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!patientSearchQuery.trim()) return;
-
     setIsSearchingPatients(true);
     const token = localStorage.getItem('valetudo_token');
     try {
@@ -377,15 +335,9 @@ export default function DoctorConsole() {
         `https://localhost:5000/api/appointments/patients/search?query=${encodeURIComponent(patientSearchQuery.trim())}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      if (res.ok) {
-        const data = await res.json();
-        setSearchResults(data);
-      }
-    } catch (err) {
-      console.error('Failed to search patients:', err);
-    } finally {
-      setIsSearchingPatients(false);
-    }
+      if (res.ok) setSearchResults(await res.json());
+    } catch (err) { console.error('Failed to search patients:', err); }
+    finally { setIsSearchingPatients(false); }
   };
 
   const loadPatientTimeline = async (patient: any) => {
@@ -396,15 +348,9 @@ export default function DoctorConsole() {
       const res = await fetch(`https://localhost:5000/api/appointments/patient/${patient.user_id}/history`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.ok) {
-        const data = await res.json();
-        setDirectoryTimeline(data);
-      }
-    } catch (err) {
-      console.error('Failed to load patient timeline:', err);
-    } finally {
-      setLoadingTimeline(false);
-    }
+      if (res.ok) setDirectoryTimeline(await res.json());
+    } catch (err) { console.error('Failed to load patient timeline:', err); }
+    finally { setLoadingTimeline(false); }
   };
 
   const handlePrintClearance = async () => {
@@ -422,7 +368,6 @@ export default function DoctorConsole() {
           expires_at: clearanceExpiryDate,
         }),
       });
-
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to issue medical clearance.');
 
@@ -466,7 +411,6 @@ export default function DoctorConsole() {
               <b>Valid Until:</b> <span style="color: #0f766e; font-weight: bold;">${new Date(clearanceExpiryDate).toLocaleDateString()}</span><br/>
               <b>Clinical Assessment / Remarks:</b> ${clearanceRemarks}
             </p>
-
             <div class="verification-panel">
               <img src="${qrImageUrl}" width="110" height="110" alt="Clearance QR Verification" />
               <div>
@@ -477,7 +421,6 @@ export default function DoctorConsole() {
                 <code style="font-size: 10px; background: #fff; padding: 2px 6px; border: 1px solid #cbd5e1; border-radius: 4px;">${realQrToken}</code>
               </div>
             </div>
-
             <div class="footer">
               <div>
                 <p>Issued Date: ${new Date().toLocaleDateString()}</p>
@@ -513,301 +456,293 @@ export default function DoctorConsole() {
     }
   };
 
-  const inputStyle: React.CSSProperties = {
-    width: '100%',
-    boxSizing: 'border-box',
-    padding: '8px 10px',
-    border: '1px solid #cbd5e1',
-    borderRadius: 6,
-    fontSize: 13,
-    color: '#0f172a',
-    backgroundColor: '#ffffff',
-  };
-
   const isArchivedMode = viewMode === 'history' || selectedApp?.status === 'completed' || selectedApp?.status === 'cancelled';
 
+  /* ═══════════════════════════════════════════════════════════════ */
+  /* RENDER                                                          */
+  /* ═══════════════════════════════════════════════════════════════ */
+
+  const headerTitle: Record<DoctorViewMode, string> = {
+    active: 'My consultation queue',
+    scheduled: 'My upcoming bookings',
+    history: 'My consultation history',
+    archive: 'Patient EMR directory',
+    analytics: 'Epidemiological analytics',
+  };
+  const headerSub: Record<DoctorViewMode, string> = {
+    active: 'Triaged patients assigned to your department',
+    scheduled: 'Bookings awaiting clinic nurse triage check-in',
+    history: 'Completed encounters discharged by your department',
+    archive: 'Search and inspect a chronological encounter timeline',
+    analytics: 'Campus illness trajectories, seasonal spike monitoring & health reports',
+  };
+
   return (
-    <div>
-      {/* 1. TOP ROSTER */}
-      <div style={{ background: '#ffffff', padding: 16, borderRadius: 8, border: '1px solid #cbd5e1', marginBottom: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
-          <div style={{ minWidth: 280, flex: '1 1 auto' }}>
-            <h3 style={{ margin: 0, color: '#0284c7', fontSize: 17 }}>
-              {viewMode === 'active'
-                ? "🩺 My Consultation Queue (Triaged & Assigned to Me)"
-                : viewMode === 'scheduled'
-                ? "📅 My Upcoming Bookings"
-                : viewMode === 'history'
-                ? '📜 My Consultation History Archive'
-                : viewMode === 'archive'
-                ? '📁 Searchable Patient EMR Directory'
-                : '📊 Epidemiological Analytics & Visual Charts'}
-            </h3>
-            <small style={{ color: '#64748b' }}>
-              {viewMode === 'active'
-                ? 'Patients triaged and awaiting consultation with your department only'
-                : viewMode === 'scheduled'
-                ? 'Bookings awaiting clinic nurse triage check-in'
-                : viewMode === 'analytics'
-                ? 'Campus illness trajectories, seasonal spike monitoring & health reports'
-                : 'Completed encounters discharged by your department'}
-            </small>
-          </div>
-
-          {/* TAB CONTROLS */}
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flexShrink: 0 }}>
-            <button
-              onClick={() => handleSwitchView('active')}
-              style={{
-                padding: '6px 14px',
-                borderRadius: 4,
-                fontSize: 12,
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                border: '1px solid #0284c7',
-                background: viewMode === 'active' ? '#0284c7' : '#ffffff',
-                color: viewMode === 'active' ? '#ffffff' : '#0284c7',
-              }}
-            >
-              🩺 My Active Queue
-            </button>
-            <button
-              onClick={() => handleSwitchView('scheduled')}
-              style={{
-                padding: '6px 14px',
-                borderRadius: 4,
-                fontSize: 12,
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                border: '1px solid #d97706',
-                background: viewMode === 'scheduled' ? '#d97706' : '#ffffff',
-                color: viewMode === 'scheduled' ? '#ffffff' : '#d97706',
-              }}
-            >
-              📅 My Bookings
-            </button>
-            <button
-              onClick={() => handleSwitchView('history')}
-              style={{
-                padding: '6px 14px',
-                borderRadius: 4,
-                fontSize: 12,
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                border: '1px solid #64748b',
-                background: viewMode === 'history' ? '#64748b' : '#ffffff',
-                color: viewMode === 'history' ? '#ffffff' : '#64748b',
-              }}
-            >
-              📜 My History Archive
-            </button>
-            <button
-              onClick={() => handleSwitchView('archive')}
-              style={{
-                padding: '6px 14px',
-                borderRadius: 4,
-                fontSize: 12,
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                border: '1px solid #4f46e5',
-                background: viewMode === 'archive' ? '#4f46e5' : '#ffffff',
-                color: viewMode === 'archive' ? '#ffffff' : '#4f46e5',
-              }}
-            >
-              📁 Patient EMR Archive
-            </button>
-            <button
-              onClick={() => handleSwitchView('analytics')}
-              style={{
-                padding: '6px 14px',
-                borderRadius: 4,
-                fontSize: 12,
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                border: '1px solid #0f766e',
-                background: viewMode === 'analytics' ? '#0f766e' : '#ffffff',
-                color: viewMode === 'analytics' ? '#fff' : '#334155',
-              }}
-            >
-              📊 Health Analytics
-            </button>
-            <button
-              onClick={() => fetchAppointments(viewMode, true)}
-              style={{ padding: '6px 10px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
-            >
-              🔄
-            </button>
-          </div>
+    <div style={{ width: '100%' }}>
+      {/* ── Page header ─────────────────────────────────────── */}
+      {viewMode !== 'analytics' && (
+        <div style={{ marginBottom: 20 }}>
+          <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: -0.6, color: T.text, margin: 0 }}>
+            {headerTitle[viewMode]}
+          </h1>
+          <p style={{ fontSize: 13.5, color: T.textSub, margin: '6px 0 0' }}>{headerSub[viewMode]}</p>
         </div>
+      )}
 
-        {/* Patient card grid */}
-        {viewMode !== 'analytics' && viewMode !== 'archive' && (
-          loadingAppointments ? (
-            <p style={{ color: '#64748b', fontSize: 13 }}>Loading isolated roster...</p>
+      {/* ── Queue grid (hidden on analytics/archive) ────────── */}
+      {viewMode !== 'analytics' && viewMode !== 'archive' && (
+        <div style={{
+          background: T.surface,
+          border: `1px solid ${T.border}`,
+          borderRadius: T.radius.lg,
+          padding: 22,
+          marginBottom: 22,
+          boxShadow: T.shadow.xs,
+        }}>
+          {loadingAppointments ? (
+            <div style={{ padding: 24, textAlign: 'center', color: T.textSub, fontSize: 13 }}>
+              Loading roster…
+            </div>
           ) : appointments.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '16px 0', color: '#64748b', fontSize: 13 }}>
+            <div style={{
+              padding: '28px 20px', textAlign: 'center',
+              color: T.textSub, fontSize: 13, lineHeight: 1.6,
+            }}>
               {viewMode === 'active'
-                ? 'ℹ️ No patients currently waiting in your consultation queue. Other medical or dental departments manage their own respective queues.'
+                ? 'No patients currently waiting in your consultation queue.'
                 : viewMode === 'scheduled'
-                ? 'No pending mobile bookings assigned to your practitioner schedule.'
+                ? 'No pending mobile bookings assigned to your schedule.'
                 : 'No archived consultations found for your department.'}
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+              gap: 12,
+            }}>
               {appointments.map((app) => {
                 const isSelected = selectedApp?.appointment_id === app.appointment_id;
-                const badge = getStatusBadge(app.status);
+                const badge = STATUS_STYLE(app.status);
                 return (
-                  <div
+                  <button
                     key={app.appointment_id}
+                    type="button"
                     onClick={() => selectPatient(app)}
                     style={{
-                      padding: 12,
-                      borderRadius: 6,
-                      border: isSelected ? '2px solid #0284c7' : '1px solid #e2e8f0',
-                      background: isSelected ? '#f0f9ff' : '#ffffff',
+                      textAlign: 'left',
+                      padding: '14px 16px',
+                      borderRadius: T.radius.lg,
+                      border: `1.5px solid ${isSelected ? T.primary : T.border}`,
+                      background: isSelected ? T.primaryTint : T.surface,
                       cursor: 'pointer',
+                      fontFamily: T.font,
+                      transition: 'all 120ms ease',
+                      boxShadow: isSelected ? T.shadow.sm : 'none',
                     }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontWeight: 'bold', color: '#0284c7', fontSize: 13 }}>
-                        🎫 {app.queue_ticket || 'DONE'} &nbsp;•&nbsp; ⏰ {app.time_slot}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                        fontFamily: T.mono, fontSize: 11.5, fontWeight: 700,
+                        color: T.primary,
+                        background: T.surface, padding: '3px 8px', borderRadius: T.radius.xs,
+                        border: `1px solid ${T.primaryTint}`,
+                      }}>
+                        🎫 {app.queue_ticket || 'DONE'}
                       </span>
-                      <span
-                        style={{
-                          fontSize: 10,
-                          padding: '2px 8px',
-                          borderRadius: 4,
-                          background: badge.bg,
-                          color: badge.color,
-                          fontWeight: 'bold',
-                        }}
-                      >
+                      <span style={{
+                        padding: '3px 10px', borderRadius: T.radius.pill,
+                        background: badge.bg, color: badge.color,
+                        fontSize: 10, fontWeight: 800, letterSpacing: 0.3,
+                      }}>
                         {badge.text}
                       </span>
                     </div>
-                    <p style={{ margin: '6px 0 2px', fontWeight: 'bold', fontSize: 14, color: '#1e293b' }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: T.text, marginBottom: 4 }}>
                       {app.first_name} {app.last_name}
-                    </p>
-                    <div style={{ fontSize: 12, color: '#64748b' }}>{app.appointment_type}</div>
-                  </div>
+                    </div>
+                    <div style={{ fontSize: 12, color: T.textSub, marginBottom: 2 }}>
+                      {app.appointment_type}
+                    </div>
+                    <div style={{ fontSize: 11, color: T.textMuted, fontFamily: T.mono }}>
+                      ⏰ {app.time_slot}
+                    </div>
+                  </button>
                 );
               })}
             </div>
-          )
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
-      {viewMode === 'analytics' ? (
-        <AnalyticsDashboard />
-      ) : viewMode === 'archive' ? (
-        /* Patient EMR Directory View */
-        <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: 8, padding: 18, marginTop: 10 }}>
-          <h4 style={{ margin: '0 0 10px 0', color: '#4f46e5' }}>📁 Searchable Patient EMR Directory & Chronological Timeline</h4>
-          <form onSubmit={handleSearchPatientDirectory} style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+      {/* ── Analytics tab ───────────────────────────────────── */}
+      {viewMode === 'analytics' && <AnalyticsDashboard />}
+
+      {/* ── Archive (patient EMR directory) ────────────────── */}
+      {viewMode === 'archive' && (
+        <div style={{
+          background: T.surface,
+          border: `1px solid ${T.border}`,
+          borderRadius: T.radius.lg,
+          padding: 22,
+          boxShadow: T.shadow.xs,
+        }}>
+          <form onSubmit={handleSearchPatientDirectory} style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
             <input
-              style={{ ...inputStyle, flex: 1, marginTop: 0 }}
-              placeholder="Search by Student ID (e.g. 22-LN-0123), First/Last Name, or Email..."
+              style={{ ...inputStyle, flex: 1 }}
+              placeholder="Student ID (e.g. 22-LN-0451), first/last name, or email"
               value={patientSearchQuery}
               onChange={(e) => setPatientSearchQuery(e.target.value)}
             />
-            <button
-              type="submit"
-              disabled={isSearchingPatients}
-              style={{ padding: '8px 18px', background: '#4f46e5', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer' }}
-            >
-              {isSearchingPatients ? 'Searching...' : '🔍 Search Records'}
+            <button type="submit" disabled={isSearchingPatients} style={btnPrimary}>
+              {isSearchingPatients ? 'Searching…' : 'Search'}
             </button>
           </form>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 16 }}>
-            {/* Results List */}
-            <div style={{ borderRight: '1px solid #e2e8f0', paddingRight: 12 }}>
-              <span style={{ fontSize: 12, fontWeight: 'bold', color: '#64748b' }}>Matched Patients ({searchResults.length}):</span>
+          <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 24 }}>
+            <aside style={{ borderRight: `1px solid ${T.border}`, paddingRight: 18 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.4, color: T.textMuted, textTransform: 'uppercase', marginBottom: 10 }}>
+                Matched patients ({searchResults.length})
+              </div>
               {searchResults.length === 0 ? (
-                <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 12 }}>Type a query and press Search.</p>
+                <p style={{ fontSize: 12, color: T.textMuted, lineHeight: 1.5 }}>
+                  Type a query and press Search. Leave empty to list all.
+                </p>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
-                  {searchResults.map((p) => (
-                    <div
-                      key={p.user_id}
-                      onClick={() => loadPatientTimeline(p)}
-                      style={{
-                        padding: 10,
-                        borderRadius: 6,
-                        border: selectedDirectoryPatient?.user_id === p.user_id ? '2px solid #4f46e5' : '1px solid #cbd5e1',
-                        background: selectedDirectoryPatient?.user_id === p.user_id ? '#eef2ff' : '#f8fafc',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <b style={{ color: '#1e293b' }}>{p.first_name} {p.last_name}</b>
-                      <div style={{ fontSize: 11, color: '#4f46e5', fontWeight: 'bold' }}>{p.identifier_no}</div>
-                      <div style={{ fontSize: 11, color: '#64748b' }}>{p.affiliation}</div>
-                    </div>
-                  ))}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {searchResults.map((p) => {
+                    const isSel = selectedDirectoryPatient?.user_id === p.user_id;
+                    return (
+                      <button
+                        key={p.user_id}
+                        type="button"
+                        onClick={() => loadPatientTimeline(p)}
+                        style={{
+                          textAlign: 'left',
+                          padding: '10px 12px',
+                          borderRadius: T.radius.md,
+                          border: `1.5px solid ${isSel ? T.primary : T.border}`,
+                          background: isSel ? T.primaryTint : T.surface,
+                          cursor: 'pointer',
+                          fontFamily: T.font,
+                        }}
+                      >
+                        <div style={{ fontSize: 13.5, fontWeight: 700, color: T.text }}>
+                          {p.first_name} {p.last_name}
+                        </div>
+                        <div style={{ fontSize: 11.5, color: T.primary, fontWeight: 700, marginTop: 2 }}>
+                          {p.identifier_no}
+                        </div>
+                        <div style={{ fontSize: 11, color: T.textSub, marginTop: 2 }}>
+                          {p.affiliation}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
-            </div>
+            </aside>
 
-            {/* Chronological Timeline */}
             <div>
               {!selectedDirectoryPatient ? (
-                <div style={{ textAlign: 'center', padding: '40px 0', color: '#94a3b8' }}>
+                <div style={{ padding: '60px 20px', textAlign: 'center', color: T.textMuted, fontSize: 13, lineHeight: 1.6 }}>
                   Select a patient from the search results to inspect their chronological EMR timeline.
                 </div>
               ) : loadingTimeline ? (
-                <p style={{ color: '#64748b' }}>Loading clinical timeline...</p>
+                <p style={{ color: T.textSub, fontSize: 13 }}>Loading clinical timeline…</p>
               ) : (
                 <div>
-                  <div style={{ background: '#f8fafc', padding: 12, borderRadius: 6, marginBottom: 14, border: '1px solid #e2e8f0' }}>
-                    <h4 style={{ margin: 0, color: '#1e293b' }}>
-                      👤 {selectedDirectoryPatient.first_name} {selectedDirectoryPatient.last_name} ({selectedDirectoryPatient.identifier_no})
+                  <div style={{
+                    background: T.sage100, padding: '14px 18px',
+                    borderRadius: T.radius.md, marginBottom: 18,
+                  }}>
+                    <h4 style={{ margin: 0, color: T.text, fontSize: 15, fontWeight: 800 }}>
+                      {selectedDirectoryPatient.first_name} {selectedDirectoryPatient.last_name}
+                      <span style={{ color: T.primary, marginLeft: 8, fontSize: 13 }}>
+                        ({selectedDirectoryPatient.identifier_no})
+                      </span>
                     </h4>
-                    <p style={{ margin: '4px 0 0', fontSize: 12, color: '#475569' }}>
-                      <b>Affiliation:</b> {selectedDirectoryPatient.affiliation} | <b>Blood:</b> {selectedDirectoryPatient.blood_type || 'Unknown'} | <b>Allergies:</b> {selectedDirectoryPatient.allergies}
+                    <p style={{ margin: '4px 0 0', fontSize: 12, color: T.textSub }}>
+                      <b>Affiliation:</b> {selectedDirectoryPatient.affiliation} ·{' '}
+                      <b>Blood:</b> {selectedDirectoryPatient.blood_type || 'Unknown'} ·{' '}
+                      <b>Allergies:</b>{' '}
+                      <span style={{ color: T.danger, fontWeight: 700 }}>
+                        {selectedDirectoryPatient.allergies}
+                      </span>
                     </p>
                   </div>
 
-                  <h5 style={{ margin: '0 0 10px', color: '#0f766e' }}>Chronological Encounter History ({directoryTimeline.length} Encounters):</h5>
+                  <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.4, color: T.textMuted, textTransform: 'uppercase', marginBottom: 10 }}>
+                    Chronological encounter history ({directoryTimeline.length})
+                  </div>
+
                   {directoryTimeline.length === 0 ? (
-                    <p style={{ fontSize: 13, color: '#64748b' }}>No prior encounters on record for this patient.</p>
+                    <p style={{ fontSize: 13, color: T.textSub }}>No prior encounters on record.</p>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                       {directoryTimeline.map((item) => (
-                        <div key={item.emr_id} style={{ border: '1px solid #e2e8f0', borderRadius: 6, padding: 12, background: '#ffffff', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                            <span style={{ fontWeight: 'bold', color: '#0f766e', fontSize: 13 }}>
-                              🗓️ {new Date(item.encounter_date).toLocaleDateString()} at {new Date(item.encounter_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        <div key={item.emr_id} style={{
+                          border: `1px solid ${T.border}`,
+                          borderRadius: T.radius.md,
+                          padding: 16,
+                          background: T.surface,
+                          boxShadow: T.shadow.xs,
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                            <span style={{ fontSize: 13, fontWeight: 800, color: T.primary }}>
+                              {new Date(item.encounter_date).toLocaleDateString()} ·{' '}
+                              {new Date(item.encounter_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </span>
-                            <span style={{ fontSize: 11, color: '#64748b' }}>Attending: Dr. {item.doctor_last_name}</span>
+                            <span style={{ fontSize: 11.5, color: T.textSub }}>
+                              Dr. {item.doctor_last_name}
+                            </span>
                           </div>
-                          <div style={{ fontSize: 13, marginBottom: 3 }}><b>Complaint:</b> {item.chief_complaint}</div>
-                          <div style={{ fontSize: 13, marginBottom: 3, color: '#0284c7' }}><b>Diagnosis:</b> {item.diagnosis}</div>
-                          {item.treatment_plan && <div style={{ fontSize: 12, color: '#334155', marginBottom: 3 }}><b>Plan:</b> {item.treatment_plan}</div>}
+                          <div style={{ fontSize: 13, marginBottom: 4, color: T.text }}>
+                            <b>Complaint:</b> {item.chief_complaint}
+                          </div>
+                          <div style={{ fontSize: 13, marginBottom: 4, color: T.info }}>
+                            <b>Diagnosis:</b> {item.diagnosis}
+                          </div>
+                          {item.treatment_plan && (
+                            <div style={{ fontSize: 12.5, color: T.textSub, marginBottom: 4 }}>
+                              <b>Plan:</b> {item.treatment_plan}
+                            </div>
+                          )}
 
-                          {/* Normalized Vitals Pills */}
                           {item.vitals && item.vitals.filter(Boolean).length > 0 && (
-                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6, marginBottom: 6 }}>
-                              {item.vitals.filter(Boolean).map((v: any, vIdx: number) => (
-                                <span key={vIdx} style={{ fontSize: 11, background: '#f1f5f9', padding: '2px 6px', borderRadius: 4, color: '#475569' }}>
-                                  {v.metric}: <b>{v.value} {v.unit}</b>
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                              {item.vitals.filter(Boolean).map((v: any, vi: number) => (
+                                <span key={vi} style={{
+                                  fontSize: 11, background: T.sage100, color: T.textSub,
+                                  padding: '3px 8px', borderRadius: T.radius.xs,
+                                  fontFamily: T.mono, fontWeight: 600,
+                                }}>
+                                  {v.metric}: <b style={{ color: T.text }}>{v.value} {v.unit}</b>
                                 </span>
                               ))}
                             </div>
                           )}
 
-                          {/* MinIO S3 Attachments */}
                           {item.attachments && item.attachments.length > 0 && (
-                            <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px dashed #e2e8f0', display: 'flex', gap: 8 }}>
+                            <div style={{
+                              marginTop: 10, paddingTop: 10,
+                              borderTop: `1px dashed ${T.border}`,
+                              display: 'flex', gap: 8, flexWrap: 'wrap',
+                            }}>
                               {item.attachments.map((att: any) => (
                                 <a
                                   key={att.attachment_id}
                                   href={`https://localhost:5000/api/documents/attachments/${att.attachment_id}/download`}
                                   target="_blank"
                                   rel="noreferrer"
-                                  style={{ fontSize: 11, color: '#0284c7', textDecoration: 'underline', fontWeight: 'bold' }}
+                                  style={{
+                                    fontSize: 11.5, color: T.info,
+                                    fontWeight: 700, textDecoration: 'none',
+                                    background: T.infoSoft, padding: '4px 10px',
+                                    borderRadius: T.radius.xs,
+                                  }}
                                 >
-                                  📎 Download {att.file_name}
+                                  📎 {att.file_name}
                                 </a>
                               ))}
                             </div>
@@ -821,139 +756,169 @@ export default function DoctorConsole() {
             </div>
           </div>
         </div>
-      ) : (
+      )}
+
+      {/* ── Active / Scheduled / History ───────────────────── */}
+      {viewMode !== 'analytics' && viewMode !== 'archive' && (
         <>
-          {/* 2. PATIENT SAFETY & VITALS BANNER */}
+          {/* Patient safety strip */}
           {selectedApp && (
-            <div
-              style={{
-                background: '#ffffff',
-                border: '1px solid #cbd5e1',
-                borderLeft: `5px solid ${selectedApp.status === 'scheduled' ? '#f59e0b' : selectedApp.status === 'completed' ? '#10b981' : '#0284c7'}`,
-                borderRadius: 8,
-                padding: '12px 18px',
-                marginBottom: 20,
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: 12,
-              }}
-            >
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <h4 style={{ margin: 0, fontSize: 16, color: '#0f172a' }}>
-                    {selectedApp.first_name} {selectedApp.last_name} ({selectedApp.student_no || 'Staff'})
-                  </h4>
-                  <span style={{ background: '#f1f5f9', color: '#475569', fontSize: 12, padding: '2px 8px', borderRadius: 4 }}>
+            <div style={{
+              background: T.surface,
+              border: `1px solid ${T.border}`,
+              borderLeft: `5px solid ${
+                selectedApp.status === 'scheduled' ? T.warning
+                : selectedApp.status === 'completed' ? T.success
+                : T.info
+              }`,
+              borderRadius: T.radius.lg,
+              padding: '18px 22px',
+              marginBottom: 22,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 16,
+              boxShadow: T.shadow.xs,
+            }}>
+              <div style={{ minWidth: 260 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: T.text }}>
+                    {selectedApp.first_name} {selectedApp.last_name}
+                    <span style={{ color: T.textSub, fontSize: 13, fontWeight: 600, marginLeft: 8 }}>
+                      {selectedApp.student_no || 'Staff'}
+                    </span>
+                  </h3>
+                  <span style={{
+                    background: T.sage100, color: T.textSub,
+                    fontSize: 11.5, fontWeight: 700,
+                    padding: '3px 10px', borderRadius: T.radius.pill,
+                  }}>
                     {selectedApp.course || 'PSU Lingayen'}
                   </span>
-                  <span
-                    style={{
-                      background: getStatusBadge(selectedApp.status).bg,
-                      color: getStatusBadge(selectedApp.status).color,
-                      fontSize: 11,
-                      fontWeight: 'bold',
-                      padding: '2px 8px',
-                      borderRadius: 4,
-                    }}
-                  >
-                    {getStatusBadge(selectedApp.status).text}
+                  <span style={{
+                    background: STATUS_STYLE(selectedApp.status).bg,
+                    color: STATUS_STYLE(selectedApp.status).color,
+                    fontSize: 10.5, fontWeight: 800, letterSpacing: 0.3,
+                    padding: '3px 10px', borderRadius: T.radius.pill,
+                  }}>
+                    {STATUS_STYLE(selectedApp.status).text}
                   </span>
                 </div>
 
-                <div style={{ display: 'flex', gap: 18, marginTop: 8, fontSize: 13, flexWrap: 'wrap' }}>
-                  <span><b>Blood:</b> {selectedApp.blood_type || 'O+'}</span>
+                <div style={{ display: 'flex', gap: 18, marginTop: 10, fontSize: 12.5, flexWrap: 'wrap' }}>
+                  <span><b style={{ color: T.textSub }}>Blood:</b> {selectedApp.blood_type || 'O+'}</span>
                   <span>
-                    <b>Allergies:</b>{' '}
-                    <span style={{ color: selectedApp.allergies && selectedApp.allergies !== 'None' ? '#dc2626' : '#16a34a', fontWeight: 'bold' }}>
+                    <b style={{ color: T.textSub }}>Allergies:</b>{' '}
+                    <span style={{
+                      color: selectedApp.allergies && selectedApp.allergies !== 'None' ? T.danger : T.success,
+                      fontWeight: 700,
+                    }}>
                       {selectedApp.allergies ? `⚠️ ${selectedApp.allergies}` : 'None reported'}
                     </span>
                   </span>
-                  <span><b>Conditions:</b> {selectedApp.chronic_conditions || 'None'}</span>
-                  <span><b>H:</b> {selectedApp.height ? `${selectedApp.height} cm` : '—'}</span>
-                  <span><b>W:</b> {selectedApp.weight ? `${selectedApp.weight} kg` : '—'}</span>
+                  <span><b style={{ color: T.textSub }}>Conditions:</b> {selectedApp.chronic_conditions || 'None'}</span>
+                  <span><b style={{ color: T.textSub }}>H:</b> {selectedApp.height ? `${selectedApp.height} cm` : '—'}</span>
+                  <span><b style={{ color: T.textSub }}>W:</b> {selectedApp.weight ? `${selectedApp.weight} kg` : '—'}</span>
                   {selectedApp.health_profile_updated_at && (
-                    <span style={{ color: '#64748b', fontStyle: 'italic' }}>
-                      <b>Last verified:</b> {new Date(selectedApp.health_profile_updated_at).toLocaleDateString()}
+                    <span style={{ color: T.textMuted, fontStyle: 'italic' }}>
+                      Last verified: {new Date(selectedApp.health_profile_updated_at).toLocaleDateString()}
                     </span>
                   )}
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                 <button
                   type="button"
                   onClick={handleViewPatientHistory}
-                  style={{ padding: '8px 14px', background: '#f8fafc', color: '#0284c7', border: '1px solid #0284c7', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer', fontSize: 13 }}
+                  style={{ ...btnGhost, color: T.info, borderColor: T.infoBorder }}
                 >
-                  📜 Past EMR History
+                  📜 Past EMR history
                 </button>
 
                 {selectedApp.status === 'completed' ? (
-                  <span style={{ background: '#dcfce7', color: '#15803d', padding: '8px 14px', borderRadius: 6, fontWeight: 'bold', fontSize: 12, border: '1px solid #bbf7d0' }}>
-                    ✅ Encounter Discharged
+                  <span style={{
+                    background: T.successSoft, color: T.success,
+                    padding: '10px 16px', borderRadius: T.radius.pill,
+                    fontWeight: 700, fontSize: 12.5,
+                    border: `1px solid ${T.successBorder}`,
+                  }}>
+                    ✅ Encounter discharged
                   </span>
                 ) : selectedApp.status === 'scheduled' ? (
-                  <span style={{ background: '#fef3c7', color: '#b45309', padding: '8px 14px', borderRadius: 6, fontWeight: 'bold', fontSize: 12, border: '1px solid #fde68a' }}>
-                    ⏳ Awaiting Nurse Triage
+                  <span style={{
+                    background: T.warningSoft, color: T.warning,
+                    padding: '10px 16px', borderRadius: T.radius.pill,
+                    fontWeight: 700, fontSize: 12.5,
+                    border: `1px solid ${T.warningBorder}`,
+                  }}>
+                    ⏳ Awaiting nurse triage
                   </span>
                 ) : selectedApp.status === 'serving' ? (
-                  <span style={{ background: '#dcfce7', color: '#15803d', padding: '8px 14px', borderRadius: 6, fontWeight: 'bold', fontSize: 13, border: '1px solid #bbf7d0' }}>
-                    🩺 In Consultation
+                  <span style={{
+                    background: T.successSoft, color: T.success,
+                    padding: '10px 16px', borderRadius: T.radius.pill,
+                    fontWeight: 700, fontSize: 13,
+                    border: `1px solid ${T.successBorder}`,
+                  }}>
+                    🩺 In consultation
                   </span>
                 ) : (
                   <button
                     type="button"
                     onClick={handleStartConsultation}
-                    style={{ padding: '8px 16px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer', fontSize: 13 }}
+                    style={{ ...btnPrimary }}
                   >
-                    ▶ Begin Consultation
+                    ▶ Begin consultation
                   </button>
                 )}
               </div>
             </div>
           )}
 
-          {/* 3. MAIN WORKSPACE */}
+          {/* Two-column workspace */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.15fr', gap: 20 }}>
-            {/* LEFT: Document Issuance */}
-            <section style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff', textAlign: 'left' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <h3 style={{ margin: 0, color: '#0f766e', fontSize: 16 }}>Official Document Issuance</h3>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <button
-                    type="button"
-                    onClick={() => setDocType('rx')}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: 4,
-                      fontSize: 12,
-                      fontWeight: 'bold',
-                      cursor: 'pointer',
-                      border: '1px solid #0f766e',
-                      background: docType === 'rx' ? '#0f766e' : '#fff',
-                      color: docType === 'rx' ? '#fff' : '#0f766e',
-                    }}
-                  >
-                    ℞ Prescription
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDocType('clearance')}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: 4,
-                      fontSize: 12,
-                      fontWeight: 'bold',
-                      cursor: 'pointer',
-                      border: '1px solid #0f766e',
-                      background: docType === 'clearance' ? '#0f766e' : '#fff',
-                      color: docType === 'clearance' ? '#fff' : '#0f766e',
-                    }}
-                  >
-                    📄 Clearance
-                  </button>
+            {/* LEFT: Document issuance */}
+            <section style={{
+              background: T.surface,
+              border: `1px solid ${T.border}`,
+              borderRadius: T.radius.lg,
+              padding: 22,
+              boxShadow: T.shadow.xs,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+                <h3 style={{ margin: 0, color: T.primary, fontSize: 16, fontWeight: 800 }}>
+                  Official document issuance
+                </h3>
+                <div style={{
+                  display: 'flex', gap: 4, padding: 3,
+                  background: T.sage100, borderRadius: T.radius.pill,
+                }}>
+                  {[
+                    { id: 'rx' as const, label: 'Prescription' },
+                    { id: 'clearance' as const, label: 'Clearance' },
+                  ].map((tab) => {
+                    const isActive = docType === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setDocType(tab.id)}
+                        style={{
+                          padding: '6px 14px', borderRadius: T.radius.pill,
+                          border: 'none',
+                          background: isActive ? T.surface : 'transparent',
+                          color: isActive ? T.primary : T.textSub,
+                          fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                          fontFamily: T.font,
+                          boxShadow: isActive ? T.shadow.xs : 'none',
+                        }}
+                      >
+                        {tab.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -975,10 +940,10 @@ export default function DoctorConsole() {
                   }}
                 />
               ) : (
-                <div>
-                  <div style={{ marginBottom: 12 }}>
-                    <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
-                      Clearance Purpose:
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: T.textSub, marginBottom: 6 }}>
+                      Clearance purpose
                     </label>
                     <select
                       value={clearancePurpose}
@@ -993,46 +958,40 @@ export default function DoctorConsole() {
                     </select>
                   </div>
 
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                      <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155' }}>
-                        Validity / Expiration Date:
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub }}>
+                        Validity / expiration date
                       </label>
                       {!isArchivedMode && (
-                        <div style={{ display: 'flex', gap: 4 }}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const d = new Date();
-                              d.setDate(d.getDate() + 30);
-                              setClearanceExpiryDate(d.toISOString().split('T')[0]);
-                            }}
-                            style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
-                          >
-                            +30 Days
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const d = new Date();
-                              d.setMonth(d.getMonth() + 6);
-                              setClearanceExpiryDate(d.toISOString().split('T')[0]);
-                            }}
-                            style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
-                          >
-                            +6 Months
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const d = new Date();
-                              d.setFullYear(d.getFullYear() + 1);
-                              setClearanceExpiryDate(d.toISOString().split('T')[0]);
-                            }}
-                            style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f766e', cursor: 'pointer', fontWeight: 'bold' }}
-                          >
-                            +1 Year
-                          </button>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          {[
+                            { label: '+30d', days: 30 },
+                            { label: '+6mo', months: 6 },
+                            { label: '+1y', years: 1 },
+                          ].map((opt) => (
+                            <button
+                              key={opt.label}
+                              type="button"
+                              onClick={() => {
+                                const d = new Date();
+                                if (opt.days)   d.setDate(d.getDate() + opt.days);
+                                if (opt.months) d.setMonth(d.getMonth() + opt.months);
+                                if (opt.years)  d.setFullYear(d.getFullYear() + opt.years);
+                                setClearanceExpiryDate(d.toISOString().split('T')[0]);
+                              }}
+                              style={{
+                                fontSize: 10.5, padding: '3px 8px',
+                                borderRadius: T.radius.xs,
+                                border: `1px solid ${T.border}`,
+                                background: T.sage50, color: T.primary,
+                                cursor: 'pointer', fontWeight: 700,
+                                fontFamily: T.font,
+                              }}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
                         </div>
                       )}
                     </div>
@@ -1047,17 +1006,17 @@ export default function DoctorConsole() {
                     />
                   </div>
 
-                  <div style={{ marginBottom: 16 }}>
-                    <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
-                      Clinical Fitness Statement:
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: T.textSub, marginBottom: 6 }}>
+                      Clinical fitness statement
                     </label>
                     <textarea
-                      rows={4}
+                      rows={5}
                       value={clearanceRemarks}
                       disabled={isArchivedMode}
                       readOnly={isArchivedMode}
                       onChange={(e) => setClearanceRemarks(e.target.value)}
-                      style={{ ...inputStyle, resize: 'vertical' }}
+                      style={{ ...inputStyle, resize: 'vertical', fontFamily: T.font }}
                     />
                   </div>
 
@@ -1066,207 +1025,170 @@ export default function DoctorConsole() {
                     onClick={handlePrintClearance}
                     disabled={!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled' || isArchivedMode}
                     style={{
+                      ...btnPrimary,
                       width: '100%',
-                      padding: 10,
-                      background: (!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled' || isArchivedMode) ? '#94a3b8' : '#0284c7',
-                      color: '#fff',
-                      border: 'none',
-                      borderRadius: 6,
+                      padding: 12,
+                      opacity: (!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled' || isArchivedMode) ? 0.5 : 1,
                       cursor: (!selectedApp || isIssuingClearance || selectedApp.status === 'scheduled' || isArchivedMode) ? 'not-allowed' : 'pointer',
-                      fontWeight: 'bold',
-                      fontSize: 14,
                     }}
                   >
                     {isArchivedMode
-                      ? '🔒 Clearance Already Archived'
+                      ? '🔒 Clearance already archived'
                       : isIssuingClearance
-                      ? 'Signing & Spooling...'
-                      : '🖨️ Issue, Sign & Print Clearance'}
+                      ? 'Signing & spooling…'
+                      : '🖨️ Issue, sign & print clearance'}
                   </button>
                 </div>
-              )}  
+              )}
             </section>
 
-            {/* RIGHT: Clinical Consultation Form */}
-            <section style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff', textAlign: 'left' }}>
-              <h3 style={{ margin: '0 0 14px 0', color: '#0284c7', fontSize: 16 }}>🩺 Encounter Diagnosis & Vitals Logging</h3>
+            {/* RIGHT: Encounter diagnosis & vitals */}
+            <section style={{
+              background: T.surface,
+              border: `1px solid ${T.border}`,
+              borderRadius: T.radius.lg,
+              padding: 22,
+              boxShadow: T.shadow.xs,
+            }}>
+              <h3 style={{ margin: '0 0 16px 0', color: T.info, fontSize: 16, fontWeight: 800 }}>
+                🩺 Encounter diagnosis & vitals
+              </h3>
 
               {isArchivedMode && (
-                <div style={{ padding: '10px 14px', background: '#f1f5f9', color: '#475569', borderRadius: 6, marginBottom: 14, fontSize: 12, border: '1px solid #cbd5e1' }}>
-                  🔒 <b>Archived Record:</b> This encounter is completed and permanently signed. The fields below reflect the recorded EMR entry.
+                <div style={{
+                  padding: '12px 16px', background: T.sage100, color: T.textSub,
+                  borderRadius: T.radius.md, marginBottom: 16,
+                  fontSize: 12.5, border: `1px solid ${T.border}`,
+                }}>
+                  🔒 <b>Archived record.</b> This encounter is completed and permanently signed. Fields below reflect the recorded EMR entry.
                 </div>
               )}
 
               {selectedApp?.status === 'scheduled' && (
-                <div style={{ padding: '10px 14px', background: '#fef3c7', color: '#92400e', borderRadius: 6, marginBottom: 14, fontSize: 12, border: '1px solid #fde68a' }}>
-                  ⚠️ <b>Patient Not Yet Triaged:</b> This booking was placed on the mobile app. The student must first present their QR Health Pass at the intake desk for the Clinic Nurse to record initial vitals.
+                <div style={{
+                  padding: '12px 16px', background: T.warningSoft, color: '#92400E',
+                  borderRadius: T.radius.md, marginBottom: 16,
+                  fontSize: 12.5, border: `1px solid ${T.warningBorder}`,
+                }}>
+                  ⚠️ <b>Patient not yet triaged.</b> The student must first present their QR Health Pass at the intake desk for the clinic nurse to record initial vitals.
                 </div>
               )}
 
               <form onSubmit={handleFinishConsultation}>
-                {/* Vitals Input Grid (4 cols x 2 rows) */}
-                <div style={{ background: '#f8fafc', padding: 10, borderRadius: 6, marginBottom: 12, border: '1px solid #e2e8f0' }}>
-                  <small style={{ fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: 6 }}>
-                    Encounter Vitals (Persists to Normalized VITAL_SIGNS table):
-                  </small>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-                    <div>
-                      <label style={{ fontSize: 11, color: '#64748b' }}>BP (Systolic):</label>
-                      <input
-                        style={inputStyle}
-                        disabled={isArchivedMode}
-                        readOnly={isArchivedMode}
-                        value={bpSystolic}
-                        onChange={(e) => setBpSystolic(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 11, color: '#64748b' }}>BP (Diastolic):</label>
-                      <input
-                        style={inputStyle}
-                        disabled={isArchivedMode}
-                        readOnly={isArchivedMode}
-                        value={bpDiastolic}
-                        onChange={(e) => setBpDiastolic(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 11, color: '#64748b' }}>Temp (°C):</label>
-                      <input
-                        style={inputStyle}
-                        disabled={isArchivedMode}
-                        readOnly={isArchivedMode}
-                        value={temperature}
-                        onChange={(e) => setTemperature(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 11, color: '#64748b' }}>Pulse (bpm):</label>
-                      <input
-                        style={inputStyle}
-                        disabled={isArchivedMode}
-                        readOnly={isArchivedMode}
-                        value={pulseRate}
-                        onChange={(e) => setPulseRate(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 11, color: '#64748b' }}>SpO2 (%):</label>
-                      <input
-                        style={inputStyle}
-                        disabled={isArchivedMode}
-                        readOnly={isArchivedMode}
-                        value={spo2}
-                        onChange={(e) => setSpo2(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 11, color: '#64748b' }}>Resp (cpm):</label>
-                      <input
-                        style={inputStyle}
-                        disabled={isArchivedMode}
-                        readOnly={isArchivedMode}
-                        value={respRate}
-                        onChange={(e) => setRespRate(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 11, color: '#64748b' }}>Height (cm):</label>
-                      <input
-                        style={inputStyle}
-                        disabled={isArchivedMode}
-                        readOnly={isArchivedMode}
-                        type="number"
-                        step="0.5"
-                        placeholder="e.g. 162.5"
-                        value={height}
-                        onChange={(e) => setHeight(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 11, color: '#64748b' }}>Weight (kg):</label>
-                      <input
-                        style={inputStyle}
-                        disabled={isArchivedMode}
-                        readOnly={isArchivedMode}
-                        type="number"
-                        step="0.1"
-                        placeholder="e.g. 54.0"
-                        value={weight}
-                        onChange={(e) => setWeight(e.target.value)}
-                      />
-                    </div>
+                {/* Vitals grid */}
+                <div style={{
+                  background: T.sage50, padding: 14, borderRadius: T.radius.md,
+                  marginBottom: 16, border: `1px solid ${T.borderSoft}`,
+                }}>
+                  <div style={{
+                    fontSize: 10.5, fontWeight: 800, letterSpacing: 1.4,
+                    color: T.textSub, textTransform: 'uppercase',
+                    marginBottom: 10,
+                  }}>
+                    Encounter vitals
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+                    {[
+                      { label: 'BP systolic',   value: bpSystolic,   set: setBpSystolic },
+                      { label: 'BP diastolic',  value: bpDiastolic,  set: setBpDiastolic },
+                      { label: 'Temp (°C)',     value: temperature,  set: setTemperature },
+                      { label: 'Pulse bpm',     value: pulseRate,    set: setPulseRate },
+                      { label: 'SpO₂ %',        value: spo2,         set: setSpo2 },
+                      { label: 'Resp cpm',      value: respRate,     set: setRespRate },
+                      { label: 'Height cm',     value: height,       set: setHeight, placeholder: '162.5' },
+                      { label: 'Weight kg',     value: weight,       set: setWeight, placeholder: '54.0' },
+                    ].map((f) => (
+                      <div key={f.label}>
+                        <label style={{ fontSize: 10.5, color: T.textSub, fontWeight: 600 }}>{f.label}</label>
+                        <input
+                          style={{ ...inputStyle, marginTop: 4, padding: '8px 10px', fontSize: 13 }}
+                          disabled={isArchivedMode}
+                          readOnly={isArchivedMode}
+                          placeholder={f.placeholder}
+                          value={f.value}
+                          onChange={(e) => f.set(e.target.value)}
+                        />
+                      </div>
+                    ))}
                   </div>
                 </div>
 
-                <div style={{ marginBottom: 12 }}>
-                  <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
-                    Chief Complaint:
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: T.textSub, marginBottom: 6 }}>
+                    Chief complaint
                   </label>
                   <textarea
                     rows={2}
                     disabled={isArchivedMode}
                     readOnly={isArchivedMode}
-                    style={{ ...inputStyle, resize: 'vertical' }}
+                    style={{ ...inputStyle, resize: 'vertical', fontFamily: T.font }}
                     value={chiefComplaint}
                     onChange={(e) => setChiefComplaint(e.target.value)}
                     required
                   />
                 </div>
 
-                <div style={{ marginBottom: 12 }}>
-                  <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
-                    Clinical Diagnosis:
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: T.textSub, marginBottom: 6 }}>
+                    Clinical diagnosis
                   </label>
                   <input
                     style={inputStyle}
                     disabled={isArchivedMode}
                     readOnly={isArchivedMode}
                     value={diagnosis}
-                    placeholder="e.g. Fit for OJT / Acute Viral Pharyngitis"
+                    placeholder="e.g. Fit for OJT / Acute viral pharyngitis"
                     onChange={(e) => setDiagnosis(e.target.value)}
                     required
                   />
                 </div>
 
-                <div style={{ marginBottom: 12 }}>
-                  <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
-                    Treatment Plan:
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: T.textSub, marginBottom: 6 }}>
+                    Treatment plan
                   </label>
                   <textarea
                     rows={3}
                     disabled={isArchivedMode}
                     readOnly={isArchivedMode}
-                    style={{ ...inputStyle, resize: 'vertical' }}
+                    style={{ ...inputStyle, resize: 'vertical', fontFamily: T.font }}
                     value={treatmentPlan}
-                    placeholder="Prescribed medicine regimen, rest recommendations..."
+                    placeholder="Prescribed regimen, rest recommendations…"
                     onChange={(e) => setTreatmentPlan(e.target.value)}
                   />
                 </div>
 
-                {/* Lab File Attachment Input (MinIO S3 Integration) */}
                 {!isArchivedMode && (
-                  <div style={{ marginBottom: 16, padding: 12, background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: 6 }}>
-                    <label style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', display: 'block', marginBottom: 4 }}>
-                      📎 Attach Diagnostic Lab Result (CBC, Urinalysis, X-ray PDF/Image):
+                  <div style={{
+                    marginBottom: 16, padding: 14,
+                    background: T.sage50, border: `1px dashed ${T.border}`,
+                    borderRadius: T.radius.md,
+                  }}>
+                    <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: T.textSub, marginBottom: 8 }}>
+                      📎 Attach diagnostic lab result (CBC, urinalysis, X-ray PDF/image)
                     </label>
                     <input
                       type="file"
                       accept=".pdf,image/png,image/jpeg,.jpg"
                       onChange={(e) => {
-                        if (e.target.files && e.target.files[0]) {
-                          setAttachedFile(e.target.files[0]);
-                        }
+                        if (e.target.files && e.target.files[0]) setAttachedFile(e.target.files[0]);
                       }}
-                      style={{ fontSize: 12, color: '#334155' }}
+                      style={{ fontSize: 12, color: T.textSub }}
                     />
                     {attachedFile && (
-                      <div style={{ fontSize: 12, color: '#0f766e', fontWeight: 'bold', marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{
+                        fontSize: 12, color: T.primary, fontWeight: 700,
+                        marginTop: 8, display: 'flex', alignItems: 'center', gap: 10,
+                      }}>
                         <span>📄 {attachedFile.name} ({(attachedFile.size / 1024).toFixed(1)} KB)</span>
                         <button
                           type="button"
                           onClick={() => setAttachedFile(null)}
-                          style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontWeight: 'bold', fontSize: 12 }}
+                          style={{
+                            background: 'none', border: 'none', color: T.danger,
+                            cursor: 'pointer', fontWeight: 700, fontSize: 12,
+                          }}
                         >
                           ✕ Remove
                         </button>
@@ -1279,28 +1201,28 @@ export default function DoctorConsole() {
                   type="submit"
                   disabled={isSubmittingEMR || !selectedApp || selectedApp.status === 'scheduled' || isArchivedMode}
                   style={{
-                    width: '100%',
-                    padding: 12,
-                    background: (isArchivedMode || !selectedApp || selectedApp.status === 'scheduled') ? '#94a3b8' : '#059669',
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: 6,
+                    ...btnPrimary,
+                    width: '100%', padding: 13,
+                    background: (isArchivedMode || !selectedApp || selectedApp.status === 'scheduled') ? T.sage400 : T.primary,
+                    opacity: (isArchivedMode || !selectedApp || selectedApp.status === 'scheduled') ? 0.6 : 1,
                     cursor: (isArchivedMode || !selectedApp || selectedApp.status === 'scheduled') ? 'not-allowed' : 'pointer',
-                    fontWeight: 'bold',
-                    fontSize: 14,
                   }}
                 >
                   {isSubmittingEMR
-                    ? 'Finalizing Encounter & Uploading to MinIO...'
+                    ? 'Finalizing encounter & uploading to MinIO…'
                     : isArchivedMode
-                    ? '🔒 Encounter Already Finalized & Discharged'
+                    ? '🔒 Encounter already finalized & discharged'
                     : selectedApp?.status === 'scheduled'
-                    ? '⏳ Patient Not Triaged by Nurse'
-                    : '✅ Finish Consultation & Discharge'}
+                    ? '⏳ Patient not triaged by nurse'
+                    : '✅ Finish consultation & discharge'}
                 </button>
 
                 {feedbackMsg && (
-                  <p style={{ color: feedbackMsg.type === 'success' ? '#16a34a' : '#dc2626', fontSize: 13, fontWeight: 'bold', textAlign: 'center', marginTop: 10 }}>
+                  <p style={{
+                    textAlign: 'center', marginTop: 12,
+                    fontSize: 13, fontWeight: 700,
+                    color: feedbackMsg.type === 'success' ? T.success : T.danger,
+                  }}>
                     {feedbackMsg.text}
                   </p>
                 )}
@@ -1310,81 +1232,72 @@ export default function DoctorConsole() {
         </>
       )}
 
-      {/* 4. MODAL: EMR HISTORY & LAB ATTACHMENTS */}
+      {/* ── EMR History modal ───────────────────────────────── */}
       {showHistoryModal && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 100,
-          }}
-        >
-          <div
-            style={{
-              background: '#fff',
-              width: '85%',
-              maxWidth: 750,
-              maxHeight: '80vh',
-              borderRadius: 8,
-              padding: 24,
-              overflowY: 'auto',
-              boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: 12 }}>
-              <h3 style={{ margin: 0, color: '#0284c7' }}>
-                📜 Medical History: {selectedApp?.first_name} {selectedApp?.last_name}
+        <div className="modal-backdrop" onClick={() => setShowHistoryModal(false)}>
+          <div className="modal-card" style={{ maxWidth: 780 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid ${T.border}`, paddingBottom: 14, marginBottom: 18 }}>
+              <h3 style={{ margin: 0, color: T.info, fontSize: 17, fontWeight: 800 }}>
+                📜 Medical history: {selectedApp?.first_name} {selectedApp?.last_name}
               </h3>
               <button
+                type="button"
                 onClick={() => setShowHistoryModal(false)}
-                style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', fontWeight: 'bold' }}
-              >
-                ✕
-              </button>
+                style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: T.textSub }}
+              >✕</button>
             </div>
 
             {loadingHistory ? (
-              <p style={{ textAlign: 'center', padding: '20px 0', color: '#64748b' }}>Loading records...</p>
+              <div style={{ padding: '40px 20px', textAlign: 'center', color: T.textSub }}>Loading records…</div>
             ) : patientHistory.length === 0 ? (
-              <p style={{ textAlign: 'center', padding: '20px 0', color: '#64748b' }}>No prior encounters recorded.</p>
+              <div style={{ padding: '40px 20px', textAlign: 'center', color: T.textMuted }}>No prior encounters recorded.</div>
             ) : (
-              <div style={{ marginTop: 16 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 {patientHistory.map((item) => (
-                  <div
-                    key={item.emr_id}
-                    style={{
-                      border: '1px solid #e2e8f0',
-                      borderRadius: 6,
-                      padding: 14,
-                      marginBottom: 12,
-                      background: '#f8fafc',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                      <b style={{ color: '#0f766e', fontSize: 14 }}>{new Date(item.encounter_date).toLocaleDateString()}</b>
-                      <small style={{ color: '#64748b' }}>Attending: Dr. {item.doctor_last_name} ({item.doctor_license})</small>
+                  <div key={item.emr_id} style={{
+                    border: `1px solid ${T.border}`,
+                    borderRadius: T.radius.md,
+                    padding: 16,
+                    background: T.sage50,
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <b style={{ color: T.primary, fontSize: 13.5 }}>
+                        {new Date(item.encounter_date).toLocaleDateString()}
+                      </b>
+                      <small style={{ color: T.textSub }}>
+                        Attending: Dr. {item.doctor_last_name} ({item.doctor_license})
+                      </small>
                     </div>
                     <div style={{ fontSize: 13, marginBottom: 4 }}><b>Diagnosis:</b> {item.diagnosis}</div>
                     <div style={{ fontSize: 13, marginBottom: 4 }}><b>Complaint:</b> {item.chief_complaint}</div>
-                    {item.treatment_plan && <div style={{ fontSize: 13, color: '#334155', marginBottom: 4 }}><b>Treatment:</b> {item.treatment_plan}</div>}
-
-                    {item.notes && <div style={{ fontSize: 13, color: '#334155', marginBottom: 4 }}><b>Clinical Notes:</b> {item.notes}</div>}
-                    {item.prescriptions && item.prescriptions.length > 0 && item.prescriptions[0].notes && (
-                      <div style={{ fontSize: 13, color: '#0f766e', marginBottom: 4 }}>
-                        <b>Physician Dietary / Rx Notes:</b> {item.prescriptions[0].notes}
+                    {item.treatment_plan && (
+                      <div style={{ fontSize: 13, color: T.textSub, marginBottom: 4 }}>
+                        <b>Treatment:</b> {item.treatment_plan}
+                      </div>
+                    )}
+                    {item.notes && (
+                      <div style={{ fontSize: 13, color: T.textSub, marginBottom: 4 }}>
+                        <b>Clinical notes:</b> {item.notes}
+                      </div>
+                    )}
+                    {item.prescriptions?.[0]?.notes && (
+                      <div style={{ fontSize: 13, color: T.primary, marginBottom: 4 }}>
+                        <b>Physician dietary / Rx notes:</b> {item.prescriptions[0].notes}
                       </div>
                     )}
 
-                    {/* Diagnostic Lab Attachments from MinIO S3 */}
                     {item.attachments && item.attachments.length > 0 && (
-                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #cbd5e1' }}>
-                        <small style={{ fontWeight: 'bold', color: '#0f766e', display: 'block', marginBottom: 4 }}>
-                          📎 Diagnostic Lab Attachments (MinIO S3):
-                        </small>
+                      <div style={{
+                        marginTop: 10, paddingTop: 10,
+                        borderTop: `1px dashed ${T.border}`,
+                      }}>
+                        <div style={{
+                          fontSize: 10.5, fontWeight: 800, letterSpacing: 1.2,
+                          color: T.primary, textTransform: 'uppercase',
+                          marginBottom: 8,
+                        }}>
+                          📎 Diagnostic lab attachments
+                        </div>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           {item.attachments.map((att: any) => (
                             <a
@@ -1393,17 +1306,13 @@ export default function DoctorConsole() {
                               target="_blank"
                               rel="noreferrer"
                               style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 4,
-                                padding: '4px 8px',
-                                background: '#e0f2fe',
-                                color: '#0369a1',
-                                borderRadius: 4,
-                                fontSize: 11,
-                                fontWeight: 'bold',
+                                display: 'inline-flex', alignItems: 'center', gap: 6,
+                                padding: '5px 12px',
+                                background: T.infoSoft, color: T.info,
+                                borderRadius: T.radius.xs,
+                                fontSize: 11.5, fontWeight: 700,
                                 textDecoration: 'none',
-                                border: '1px solid #bae6fd',
+                                border: `1px solid ${T.infoBorder}`,
                               }}
                             >
                               📄 {att.file_name} ({(att.file_size / 1024).toFixed(0)} KB)

@@ -1,5 +1,5 @@
 // desktop/electron/main.cjs
-const { app, BrowserWindow, ipcMain, Notification, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, Notification, Menu, shell } = require('electron');
 const path = require('path');
 
 function createWindow() {
@@ -74,8 +74,17 @@ function createWindow() {
     }
   });
 
-  // Block window.open(...) calls to arbitrary URLs (extra hardening)
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // Security hardening: never spawn new Electron windows from arbitrary URLs.
+  // BUT — allow http(s) links to open in the OS default browser
+  // (Google Maps, doc verification URLs, external tools).
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https://') || url.startsWith('http://')) {
+      shell.openExternal(url).catch((err) => {
+        console.error('[main.cjs] Failed to open external URL:', err.message);
+      });
+    }
+    return { action: 'deny' };
+  });
 }
 
 // 1. PRINT HANDLER (Native OS Print Spooler)
