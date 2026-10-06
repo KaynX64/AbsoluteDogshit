@@ -48,4 +48,44 @@ export function startReminderScheduler(io) {
       console.error('[Reminder Worker Error]:', err.message);
     }
   }, 15 * 60 * 1000); // 15 mins
+
+  // ── Auto-no-show worker: runs every 60 seconds ────────────────────
+  // Marks any appointment still in 'scheduled' state as 'no_show'
+  // if 20+ minutes have passed since the scheduled time.
+  // Only looks at the last 24 hours to avoid mass-marking old records
+  // after a long server downtime.
+    setInterval(async () => {
+    try {
+      const [expired] = await pool.query(
+        `SELECT appointment_id FROM APPOINTMENTS
+         WHERE status = 'scheduled'
+           AND date_time < DATE_SUB(NOW(), INTERVAL 20 MINUTE)
+           AND date_time > DATE_SUB(NOW(), INTERVAL 24 HOUR)
+           AND deleted_at IS NULL`
+      );
+
+      if (expired.length === 0) return;
+
+      const ids = expired.map((r) => r.appointment_id);
+
+      await pool.query(
+        `UPDATE APPOINTMENTS SET status = 'no_show' WHERE appointment_id IN (?)`,
+        [ids]
+      );
+
+      console.log(`[Auto-No-Show] Marked ${ids.length} appointment(s) as no-show.`);
+
+      if (io) {
+        for (const id of ids) {
+          io.emit('appointment:status_changed', {
+            appointment_id: id,
+            status: 'no_show',
+          });
+        }
+        io.emit('queue:updated');
+      }
+    } catch (err) {
+      console.error('[Auto-No-Show Worker Error]:', err.message);
+    }
+  }, 60 * 1000); // every 60 seconds
 }

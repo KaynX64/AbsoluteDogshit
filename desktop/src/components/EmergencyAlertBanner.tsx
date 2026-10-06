@@ -1,6 +1,7 @@
 // desktop/src/components/EmergencyAlertBanner.tsx
 import React, { useEffect, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { API_BASE_URL, SOCKET_URL } from '../config/api';
 
 interface EmergencyAlert {
   alertId: number;
@@ -46,7 +47,7 @@ export default function EmergencyAlertBanner() {
       const token = localStorage.getItem('valetudo_token');
       if (!token) return;
       try {
-        const res = await fetch('https://localhost:5000/api/emergency/active', {
+        const res = await fetch(`${API_BASE_URL}/api/emergency/active`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         const data = await res.json();
@@ -89,7 +90,7 @@ export default function EmergencyAlertBanner() {
 
     // 2. Connect Socket.IO with token authentication
     const token = localStorage.getItem('valetudo_token');
-    const socket: Socket = io('https://localhost:5000', {
+    const socket: Socket = io(SOCKET_URL, {
       auth: { token },
       transports: ['websocket', 'polling'],
     });
@@ -134,7 +135,7 @@ export default function EmergencyAlertBanner() {
   const updateStatus = async (alertId: number, status: string) => {
     const token = localStorage.getItem('valetudo_token');
     try {
-      await fetch(`https://localhost:5000/api/emergency/${alertId}/status`, {
+      await fetch(`${API_BASE_URL}/api/emergency/${alertId}/status`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -164,7 +165,7 @@ export default function EmergencyAlertBanner() {
   const handleTestFullStackSOS = async () => {
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('https://localhost:5000/api/emergency/sos', {
+      const res = await fetch(`${API_BASE_URL}/api/emergency/sos`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

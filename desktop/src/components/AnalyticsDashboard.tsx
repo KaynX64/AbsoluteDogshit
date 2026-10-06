@@ -1,6 +1,7 @@
 // desktop/src/components/AnalyticsDashboard.tsx
 import { useEffect, useState } from 'react';
 import { T, btnGhost, btnPrimary } from '../theme';
+import { API_BASE_URL } from '../config/api';
 
 interface TimePoint {
   date: string;
@@ -505,7 +506,7 @@ export default function AnalyticsDashboard() {
     setLoading(true);
     const token = localStorage.getItem('valetudo_token') || localStorage.getItem('token');
     try {
-      const res = await fetch('https://localhost:5000/api/analytics/summary', {
+      const res = await fetch(`${API_BASE_URL}/api/analytics/summary`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setData(await res.json());
@@ -521,7 +522,7 @@ export default function AnalyticsDashboard() {
   const handleDownloadExcelCSV = async () => {
     const token = localStorage.getItem('valetudo_token') || localStorage.getItem('token');
     try {
-      const res = await fetch('https://localhost:5000/api/analytics/export/csv', {
+      const res = await fetch(`${API_BASE_URL}/api/analytics/export/csv`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Export failed');

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
 import { T, btnPrimary, btnGhost } from '../theme';
+import { API_BASE_URL, SOCKET_URL } from '../config/api';
 
 export default function ResponderConsole() {
   const [activeAlerts, setActiveAlerts] = useState<any[]>([]);
@@ -27,7 +28,7 @@ export default function ResponderConsole() {
     if (!silent) setLoading(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('https://localhost:5000/api/emergency/active', {
+      const res = await fetch(`${API_BASE_URL}/api/emergency/active`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
@@ -43,7 +44,7 @@ export default function ResponderConsole() {
     fetchAlerts(false);
 
     const token = localStorage.getItem('valetudo_token');
-    const socket = io('https://localhost:5000', {
+    const socket = io(SOCKET_URL, {
       auth: { token },
       transports: ['websocket', 'polling'],
     });
@@ -92,7 +93,7 @@ export default function ResponderConsole() {
 
     const token = localStorage.getItem('valetudo_token');
     try {
-      await fetch(`https://localhost:5000/api/emergency/${alertId}/status`, {
+      await fetch(`${API_BASE_URL}/api/emergency/${alertId}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ status }),
@@ -119,7 +120,7 @@ export default function ResponderConsole() {
   const handleTestFullStackSOS = async () => {
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('https://localhost:5000/api/emergency/sos', {
+      const res = await fetch(`${API_BASE_URL}/api/emergency/sos`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({

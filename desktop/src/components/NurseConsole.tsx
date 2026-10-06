@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import QrIntakeScanner from './QrIntakeScanner';
 import InventoryManager from './InventoryManager';
 import { io } from 'socket.io-client';
+import { API_BASE_URL, SOCKET_URL } from '../config/api';
 
 interface QueueItem {
   queue_id: number;
@@ -61,7 +62,7 @@ export default function NurseConsole({
     setLoadingQueue(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('https://localhost:5000/api/appointments/queue/today', {
+      const res = await fetch(`${API_BASE_URL}/api/appointments/queue/today`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
@@ -76,7 +77,7 @@ export default function NurseConsole({
   useEffect(() => {
     fetchLiveQueue();
     const token = localStorage.getItem('valetudo_token');
-    const socket = io('https://localhost:5000', {
+    const socket = io(SOCKET_URL, {
       auth: { token },
       transports: ['websocket', 'polling'],
     });
@@ -103,7 +104,7 @@ export default function NurseConsole({
     const token = localStorage.getItem('valetudo_token');
     try {
       const res = await fetch(
-        `https://localhost:5000/api/appointments/queue/${nextPatient.queue_id}/status`,
+        `${API_BASE_URL}/api/appointments/queue/${nextPatient.queue_id}/status`,
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },

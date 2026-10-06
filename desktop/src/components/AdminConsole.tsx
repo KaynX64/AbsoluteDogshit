@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import AnalyticsDashboard from './AnalyticsDashboard';
 import { T, rolePill, inputStyle, btnPrimary, btnGhost } from '../theme';
+import { API_BASE_URL, SOCKET_URL } from '../config/api';
 
 /* ── Icons (inline, no dependency) ─────────────────────────────── */
 const I = {
@@ -88,7 +89,7 @@ export default function AdminConsole({
   const fetchUsers = async () => {
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('https://localhost:5000/api/admin/users', {
+      const res = await fetch(`${API_BASE_URL}/api/admin/users`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setUsersList(await res.json());
@@ -99,7 +100,7 @@ export default function AdminConsole({
     setLoadingLogs(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('https://localhost:5000/api/admin/audit-logs', {
+      const res = await fetch(`${API_BASE_URL}/api/admin/audit-logs`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setMutationLogs(await res.json());
@@ -111,7 +112,7 @@ export default function AdminConsole({
     setLoadingLogs(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('https://localhost:5000/api/admin/phi-access-logs', {
+      const res = await fetch(`${API_BASE_URL}/api/admin/phi-access-logs`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setPhiLogs(await res.json());
@@ -122,7 +123,7 @@ export default function AdminConsole({
   const fetchRetention = async () => {
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('https://localhost:5000/api/privacy/retention/status', {
+      const res = await fetch(`${API_BASE_URL}/api/privacy/retention/status`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setRetentionInfo(await res.json());
@@ -132,7 +133,7 @@ export default function AdminConsole({
   const fetchTelemetry = async () => {
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('https://localhost:5000/api/admin/telemetry', {
+      const res = await fetch(`${API_BASE_URL}/api/admin/telemetry`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setTelemetry(await res.json());
@@ -144,7 +145,7 @@ export default function AdminConsole({
     setSweeping(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('https://localhost:5000/api/privacy/retention/sweep', {
+      const res = await fetch(`${API_BASE_URL}/api/privacy/retention/sweep`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -250,7 +251,7 @@ export default function AdminConsole({
     setModalFeedback(null);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`https://localhost:5000/api/admin/users/${editingUser.id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/admin/users/${editingUser.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -295,7 +296,7 @@ export default function AdminConsole({
     }
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`https://localhost:5000/api/admin/users/${editingUser.id}/reset-password`, {
+      const res = await fetch(`${API_BASE_URL}/api/admin/users/${editingUser.id}/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ newPassword: adminPasswordInput.trim() }),
@@ -315,7 +316,7 @@ export default function AdminConsole({
   const fetchDbTables = async () => {
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('https://localhost:5000/api/admin/db/tables', {
+      const res = await fetch(`${API_BASE_URL}/api/admin/db/tables`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setDbTablesList(await res.json());
@@ -328,7 +329,7 @@ export default function AdminConsole({
     setLoadingDbTable(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`https://localhost:5000/api/admin/db/tables/${table}?page=${page}&limit=15`, {
+      const res = await fetch(`${API_BASE_URL}/api/admin/db/tables/${table}?page=${page}&limit=15`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -365,7 +366,7 @@ export default function AdminConsole({
             delete currentData[col.columnName];
           }
         });
-        res = await fetch(`https://localhost:5000/api/admin/db/tables/${selectedDbTable}/rows`, {
+        res = await fetch(`${API_BASE_URL}/api/admin/db/tables/${selectedDbTable}/rows`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify(currentData),
@@ -373,7 +374,7 @@ export default function AdminConsole({
       } else {
         const updates = { ...currentData };
         pkCols.forEach((col) => delete updates[col]);
-        res = await fetch(`https://localhost:5000/api/admin/db/tables/${selectedDbTable}/rows`, {
+        res = await fetch(`${API_BASE_URL}/api/admin/db/tables/${selectedDbTable}/rows`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({ primaryKey: primaryKeyObj, updates }),
@@ -398,7 +399,7 @@ export default function AdminConsole({
     if (!confirm(`Are you sure you want to DELETE record (${pkDescription}) from table \`${selectedDbTable}\`?`)) return;
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`https://localhost:5000/api/admin/db/tables/${selectedDbTable}/rows`, {
+      const res = await fetch(`${API_BASE_URL}/api/admin/db/tables/${selectedDbTable}/rows`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ primaryKey: primaryKeyObj }),

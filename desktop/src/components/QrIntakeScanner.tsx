@@ -1,6 +1,7 @@
 // desktop/src/components/QrIntakeScanner.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import jsQR from 'jsqr';
+import { API_BASE_URL } from '../config/api';
 
 interface QrIntakeScannerProps {
   onPatientVerified: (patient: any, token: string) => void;
@@ -64,7 +65,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
     setCheckInSuccess(null);
     const jwt = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('https://localhost:5000/api/health-pass/verify', {
+      const res = await fetch(`${API_BASE_URL}/api/health-pass/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
         body: JSON.stringify({ qrToken: tokenToVerify.trim() }),
@@ -94,7 +95,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
     setCheckInSuccess(null);
     const jwt = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`https://localhost:5000/api/appointments/lookup?query=${encodeURIComponent(searchQuery.trim())}`, {
+      const res = await fetch(`${API_BASE_URL}/api/appointments/lookup?query=${encodeURIComponent(searchQuery.trim())}`, {
         headers: { Authorization: `Bearer ${jwt}` },
       });
       const data = await res.json();
@@ -128,7 +129,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
   const checkPatientAppointments = async (userId: number) => {
     const jwt = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`https://localhost:5000/api/appointments/lookup?userId=${userId}`, {
+      const res = await fetch(`${API_BASE_URL}/api/appointments/lookup?userId=${userId}`, {
         headers: { Authorization: `Bearer ${jwt}` },
       });
       const data = await res.json();
@@ -147,7 +148,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
     if (!pendingAppointment) return;
     const jwt = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`https://localhost:5000/api/appointments/${pendingAppointment.appointment_id}/checkin`, {
+      const res = await fetch(`${API_BASE_URL}/api/appointments/${pendingAppointment.appointment_id}/checkin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
         body: JSON.stringify({

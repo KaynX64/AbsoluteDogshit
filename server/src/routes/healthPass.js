@@ -24,7 +24,7 @@ router.get('/token', authenticateToken, requirePrivacyConsent, (req, res) => {
     const hmac = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
 
     const qrToken = `${payload}.${hmac}`;
-    res.json({ qrToken, expiresInSeconds: 300 });
+    res.json({ qrToken, expiresInSeconds: 900 });
   } catch (error) {
     console.error('[HealthPass] QR generation error:', error);
     res.status(500).json({ error: 'Failed to generate QR token.' });

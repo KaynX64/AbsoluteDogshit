@@ -76,15 +76,15 @@ export default function appointmentRoutes(io) {
         '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30',
       ];
 
-      const [booked] = await pool.query(
-        `SELECT DATE_FORMAT(date_time, '%H:%i') AS time_slot
-         FROM APPOINTMENTS
-         WHERE doctor_user_id = ?
-           AND DATE(date_time) = ?
-           AND status NOT IN ('cancelled')
-           AND deleted_at IS NULL`,
-        [doctorId, date]
-      );
+    const [booked] = await pool.query(
+      `SELECT DATE_FORMAT(date_time, '%H:%i') AS time_slot
+       FROM APPOINTMENTS
+       WHERE doctor_user_id = ?
+         AND DATE(date_time) = ?
+         AND status IN ('scheduled', 'checked_in', 'serving')
+         AND deleted_at IS NULL`,
+      [doctorId, date]
+    );
 
       const bookedSet = new Set(booked.map((b) => b.time_slot));
 
@@ -165,7 +165,7 @@ export default function appointmentRoutes(io) {
              OR date_time = DATE_SUB(?, INTERVAL ? MINUTE)
              OR date_time = DATE_ADD(?, INTERVAL ? MINUTE)
            )
-           AND status NOT IN ('cancelled')
+           AND status IN ('scheduled', 'checked_in', 'serving')
            AND deleted_at IS NULL
          FOR UPDATE`,
         [

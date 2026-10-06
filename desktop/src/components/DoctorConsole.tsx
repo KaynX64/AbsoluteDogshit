@@ -5,6 +5,7 @@ import { io } from 'socket.io-client';
 import AnalyticsDashboard from './AnalyticsDashboard';
 import { queueOfflineMutation } from '../services/offlineSync';
 import { T, btnPrimary, btnGhost, inputStyle } from '../theme';
+import { API_BASE_URL, SOCKET_URL } from '../config/api';
 
 export type DoctorViewMode = 'active' | 'scheduled' | 'history' | 'archive' | 'analytics';
 
@@ -112,9 +113,9 @@ export default function DoctorConsole({
     if (mode === 'analytics') return;
     setLoadingAppointments(true);
     const token = localStorage.getItem('valetudo_token');
-    let url = 'https://localhost:5000/api/appointments/today?filter=active';
-    if (mode === 'history')        url = 'https://localhost:5000/api/appointments/today?filter=history';
-    else if (mode === 'scheduled') url = 'https://localhost:5000/api/appointments/today?filter=scheduled';
+    let url = `${API_BASE_URL}/api/appointments/today?filter=active`;
+    if (mode === 'history')        url = `${API_BASE_URL}/api/appointments/today?filter=history`;
+    else if (mode === 'scheduled') url = `${API_BASE_URL}/api/appointments/today?filter=scheduled`;
 
     try {
       const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
@@ -145,7 +146,7 @@ export default function DoctorConsole({
   useEffect(() => {
     fetchAppointments(viewMode, false);
     const token = localStorage.getItem('valetudo_token');
-    const socket = io('https://localhost:5000', {
+    const socket = io(SOCKET_URL, {
       auth: { token },
       transports: ['websocket', 'polling'],
     });
@@ -202,7 +203,7 @@ export default function DoctorConsole({
     if (!selectedApp) return;
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`https://localhost:5000/api/appointments/${selectedApp.appointment_id}/status`, {
+      const res = await fetch(`${API_BASE_URL}/api/appointments/${selectedApp.appointment_id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ status: 'serving' }),
@@ -263,7 +264,7 @@ export default function DoctorConsole({
     }
 
     try {
-      const res = await fetch(`https://localhost:5000/api/appointments/${selectedApp.appointment_id}/complete`, {
+      const res = await fetch(`${API_BASE_URL}/api/appointments/${selectedApp.appointment_id}/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(encounterPayload),
@@ -276,7 +277,7 @@ export default function DoctorConsole({
         try {
           const formData = new FormData();
           formData.append('file', attachedFile);
-          const uploadRes = await fetch(`https://localhost:5000/api/documents/emr/${data.emrId}/attachments`, {
+          const uploadRes = await fetch(`${API_BASE_URL}/api/documents/emr/${data.emrId}/attachments`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${token}` },
             body: formData,
@@ -316,7 +317,7 @@ export default function DoctorConsole({
     setLoadingHistory(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`https://localhost:5000/api/appointments/patient/${selectedApp.patient_id}/history`, {
+      const res = await fetch(`${API_BASE_URL}/api/appointments/patient/${selectedApp.patient_id}/history`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
@@ -332,7 +333,7 @@ export default function DoctorConsole({
     const token = localStorage.getItem('valetudo_token');
     try {
       const res = await fetch(
-        `https://localhost:5000/api/appointments/patients/search?query=${encodeURIComponent(patientSearchQuery.trim())}`,
+        `${API_BASE_URL}/api/appointments/patients/search?query=${encodeURIComponent(patientSearchQuery.trim())}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (res.ok) setSearchResults(await res.json());
@@ -345,7 +346,7 @@ export default function DoctorConsole({
     setLoadingTimeline(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`https://localhost:5000/api/appointments/patient/${patient.user_id}/history`, {
+      const res = await fetch(`${API_BASE_URL}/api/appointments/patient/${patient.user_id}/history`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setDirectoryTimeline(await res.json());
@@ -358,7 +359,7 @@ export default function DoctorConsole({
     setIsIssuingClearance(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('https://localhost:5000/api/documents/clearances', {
+      const res = await fetch(`${API_BASE_URL}/api/documents/clearances`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -732,7 +733,7 @@ export default function DoctorConsole({
                               {item.attachments.map((att: any) => (
                                 <a
                                   key={att.attachment_id}
-                                  href={`https://localhost:5000/api/documents/attachments/${att.attachment_id}/download`}
+                                  href={`${API_BASE_URL}/api/documents/attachments/${att.attachment_id}/download`}
                                   target="_blank"
                                   rel="noreferrer"
                                   style={{
@@ -1302,7 +1303,7 @@ export default function DoctorConsole({
                           {item.attachments.map((att: any) => (
                             <a
                               key={att.attachment_id}
-                              href={`https://localhost:5000/api/documents/attachments/${att.attachment_id}/download`}
+                              href={`${API_BASE_URL}/api/documents/attachments/${att.attachment_id}/download`}
                               target="_blank"
                               rel="noreferrer"
                               style={{

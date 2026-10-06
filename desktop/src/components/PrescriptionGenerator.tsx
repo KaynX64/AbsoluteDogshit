@@ -1,6 +1,7 @@
 // desktop/src/components/PrescriptionGenerator.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { T, btnPrimary, inputStyle } from '../theme';
+import { API_BASE_URL } from '../config/api';
 
 interface MedicineMaster {
   medicine_id: number;
@@ -22,6 +23,153 @@ interface PrescriptionGeneratorProps {
   initialNotes?: string;
   isArchived?: boolean;
   onPrescriptionIssued?: () => void;
+}
+
+/* ── Custom themed dropdown (replaces native <select>) ─────────── */
+function FormularySelect({
+  medicines,
+  value,
+  onChange,
+  disabled,
+}: {
+  medicines: MedicineMaster[];
+  value: number;
+  onChange: (id: number) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  const selected = medicines.find((m) => m.medicine_id === value);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  return (
+    <div ref={wrapperRef} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => !disabled && setOpen((v) => !v)}
+        style={{
+          ...inputStyle,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          textAlign: 'left',
+          opacity: disabled ? 0.6 : 1,
+        }}
+      >
+        <span
+          style={{
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            color: selected ? T.text : T.textMuted,
+          }}
+        >
+          {selected
+            ? `${selected.name} (${selected.generic_name}) · ${selected.strength} [${selected.form}]`
+            : 'Select medicine…'}
+        </span>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={T.textSub}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{
+            width: 14,
+            height: 14,
+            flexShrink: 0,
+            marginLeft: 8,
+            transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 140ms ease',
+          }}
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+
+      {open && !disabled && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            left: 0,
+            right: 0,
+            zIndex: 50,
+            maxHeight: 260,
+            overflowY: 'auto',
+            background: T.surface,
+            border: `1px solid ${T.border}`,
+            borderRadius: T.radius.md,
+            boxShadow: T.shadow.lg,
+            padding: 4,
+          }}
+        >
+          {medicines.length === 0 ? (
+            <div
+              style={{
+                padding: '10px 12px',
+                fontSize: 12.5,
+                color: T.textMuted,
+                fontStyle: 'italic',
+              }}
+            >
+              Loading formulary…
+            </div>
+          ) : (
+            medicines.map((m) => {
+              const isSelected = m.medicine_id === value;
+              return (
+                <button
+                  key={m.medicine_id}
+                  type="button"
+                  onClick={() => {
+                    onChange(m.medicine_id);
+                    setOpen(false);
+                  }}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '10px 12px',
+                    borderRadius: T.radius.sm,
+                    border: 'none',
+                    background: isSelected ? T.primaryTint : 'transparent',
+                    color: isSelected ? T.primary : T.text,
+                    fontSize: 13,
+                    fontWeight: isSelected ? 700 : 500,
+                    cursor: 'pointer',
+                    fontFamily: T.font,
+                    transition: 'background 100ms ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isSelected) e.currentTarget.style.background = T.sage100;
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isSelected) e.currentTarget.style.background = 'transparent';
+                  }}
+                >
+                  {m.name} ({m.generic_name}) · {m.strength} [{m.form}]
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function PrescriptionGenerator({
@@ -61,7 +209,7 @@ export default function PrescriptionGenerator({
     const fetchCatalog = async () => {
       const token = localStorage.getItem('valetudo_token');
       try {
-        const res = await fetch('https://localhost:5000/api/inventory/medicines', {
+        const res = await fetch(`${API_BASE_URL}/api/inventory/medicines`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.ok) {
@@ -99,7 +247,7 @@ export default function PrescriptionGenerator({
     const token = localStorage.getItem('valetudo_token');
 
     try {
-      const res = await fetch('https://localhost:5000/api/documents/prescriptions', {
+      const res = await fetch(`${API_BASE_URL}/api/documents/prescriptions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -223,20 +371,14 @@ export default function PrescriptionGenerator({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* Formulary picker */}
+      {/* Formulary picker (custom themed dropdown) */}
       <Field label="Medicine (formulary)">
-        <select
-          style={inputStyle}
-          disabled={isArchived}
+        <FormularySelect
+          medicines={medicines}
           value={selectedMedicineId}
-          onChange={(e) => handleSelectMedicine(Number(e.target.value))}
-        >
-          {medicines.map((m) => (
-            <option key={m.medicine_id} value={m.medicine_id}>
-              {m.name} ({m.generic_name}) · {m.strength} [{m.form}]
-            </option>
-          ))}
-        </select>
+          onChange={handleSelectMedicine}
+          disabled={isArchived}
+        />
       </Field>
 
       {/* Dosage & quantity */}

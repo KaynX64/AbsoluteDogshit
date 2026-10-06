@@ -5,6 +5,7 @@ import DoctorConsole from './components/DoctorConsole';
 import AdminConsole from './components/AdminConsole';
 import ResponderConsole from './components/ResponderConsole';
 import { getOfflineQueue, replayOfflineQueue } from './services/offlineSync';
+import { API_BASE_URL } from './config/api';
 
 /* ── Inline SVG icons ──────────────────────────────────────────── */
 const I = {
@@ -514,7 +515,7 @@ export default function App() {
     setError('');
 
     try {
-      const res = await fetch('https://localhost:5000/api/auth/login', {
+      const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), password: password.trim() }),
@@ -573,7 +574,7 @@ export default function App() {
     const token = localStorage.getItem('valetudo_token');
 
     try {
-      const res = await fetch('https://localhost:5000/api/auth/change-password', {
+      const res = await fetch(`${API_BASE_URL}/api/auth/change-password`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ currentPassword, newPassword }),

@@ -1,6 +1,7 @@
 // desktop/src/components/InventoryManager.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { T, btnPrimary, btnGhost, inputStyle } from '../theme';
+import { API_BASE_URL } from '../config/api';
 
 interface MedicineMaster {
   medicine_id: number;
@@ -69,7 +70,7 @@ export default function InventoryManager() {
   const fetchBatches = async () => {
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('https://localhost:5000/api/inventory/batches', {
+      const res = await fetch(`${API_BASE_URL}/api/inventory/batches`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setBatches(await res.json());
@@ -79,7 +80,7 @@ export default function InventoryManager() {
   const fetchMedicines = async () => {
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('https://localhost:5000/api/inventory/medicines', {
+      const res = await fetch(`${API_BASE_URL}/api/inventory/medicines`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -94,8 +95,8 @@ export default function InventoryManager() {
     const token = localStorage.getItem('valetudo_token');
     try {
       const [resSug, resExp] = await Promise.all([
-        fetch('https://localhost:5000/api/inventory/reorder-suggestions', { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('https://localhost:5000/api/inventory/expiring-soon', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_BASE_URL}/api/inventory/reorder-suggestions`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_BASE_URL}/api/inventory/expiring-soon`, { headers: { Authorization: `Bearer ${token}` } }),
       ]);
       if (resSug.ok) setReorderSuggestions(await resSug.json());
       if (resExp.ok) setExpiringLots(await resExp.json());
@@ -106,7 +107,7 @@ export default function InventoryManager() {
     setLoadingLogs(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('https://localhost:5000/api/inventory/logs', {
+      const res = await fetch(`${API_BASE_URL}/api/inventory/logs`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setInventoryLogs(await res.json());
@@ -157,7 +158,7 @@ export default function InventoryManager() {
     setStatusMessage('');
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('https://localhost:5000/api/inventory/deduct', {
+      const res = await fetch(`${API_BASE_URL}/api/inventory/deduct`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -186,7 +187,7 @@ export default function InventoryManager() {
     setStatusMessage('Logging shipment receipt...');
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('https://localhost:5000/api/inventory/receive', {
+      const res = await fetch(`${API_BASE_URL}/api/inventory/receive`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -219,7 +220,7 @@ export default function InventoryManager() {
     setStatusMessage('Processing inventory adjustment...');
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('https://localhost:5000/api/inventory/adjust', {
+      const res = await fetch(`${API_BASE_URL}/api/inventory/adjust`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -249,7 +250,7 @@ export default function InventoryManager() {
     setStatusMessage('Registering new formulary medicine...');
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch('https://localhost:5000/api/inventory/medicines', {
+      const res = await fetch(`${API_BASE_URL}/api/inventory/medicines`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
