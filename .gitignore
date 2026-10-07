@@ -29,4 +29,4 @@ server/certs/*.crt
 
 #googleFirebaseCredentials.json
 server/serviceAccountKey.json
-mobile/android/app/google-services.jsonmobile/android/app/google-services.json
+mobile/android/app/google-services.json
