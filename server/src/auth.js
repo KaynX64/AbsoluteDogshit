@@ -8,7 +8,9 @@ import { redis, isRedisActive } from './utils/redisClient.js';
 import { LOGIN_LIMIT } from './config/limits.js';
 
 // S-09: Pre-computed dummy hash to prevent user-enumeration timing attacks
-const DUMMY_HASH = bcrypt.hashSync('timing-equalizer', 10);
+// bcrypt.compare against this hash takes the same ~100ms as a real check,
+// so an attacker cannot measure response latency to detect registered emails.
+const DUMMY_HASH = bcrypt.hashSync('timing-equalizer-valetudo-2026', 10);
 
 // ─────────────────────────────────────────────────────────────────────────
 // RATE LIMITING (brute-force protection on the login endpoint)
@@ -77,25 +79,54 @@ export async function loginUser(req, res) {
     return res.status(400).json({ error: 'Email and password are required.' });
   }
 
+  const normalizedEmail = String(email).trim().toLowerCase();
+
   try {
+    // 1. Fetch user by email (regardless of active status to perform post-auth checks)
     const [users] = await pool.query(
-      'SELECT * FROM USERS WHERE email = ? AND is_active = TRUE AND deleted_at IS NULL',
-      [email]
+      'SELECT * FROM USERS WHERE LOWER(email) = ?',
+      [normalizedEmail]
     );
 
+    // =========================================================================
+    // PHASE 1: PRE-AUTHENTICATION (Zero Information Leakage)
+    // =========================================================================
+
+    // Scenario A: Email does not exist
     if (users.length === 0) {
+      // Run dummy compare so response time is identical to a real password check
       await bcrypt.compare(password, DUMMY_HASH);
-      return res.status(401).json({ error: 'Invalid credentials.' });
+      return res.status(401).json({ error: 'Invalid institutional email or password.' });
     }
 
     const user = users[0];
 
+    // Scenario B: Password incorrect
     const isMatch = await bcrypt.compare(password, user.password_hash);
 
     if (!isMatch) {
-      return res.status(401).json({ error: 'Invalid credentials.' });
+      return res.status(401).json({ error: 'Invalid institutional email or password.' });
     }
 
+    // =========================================================================
+    // PHASE 2: POST-AUTHENTICATION (User proved identity, safe to give status)
+    // =========================================================================
+
+    // Scenario C: Account archived/soft-deleted
+    if (user.deleted_at !== null) {
+      return res.status(403).json({
+        error: 'Account record is archived. Please contact the campus administrator.',
+      });
+    }
+
+    // Scenario D: Account suspended/deactivated
+    if (!Boolean(user.is_active)) {
+      return res.status(403).json({
+        error: 'Account suspended. Please visit the campus infirmary to reactivate access.',
+      });
+    }
+
+    // 2. Fetch user's assigned roles
     const [roles] = await pool.query(
       `SELECT r.code, r.name 
        FROM ROLES r 
@@ -106,6 +137,14 @@ export async function loginUser(req, res) {
 
     const roleCodes = roles.map((r) => r.code);
 
+    // Scenario E: Valid account, but no role linked
+    if (roleCodes.length === 0) {
+      return res.status(403).json({
+        error: 'No active role assigned to this account. Please contact PSU IT Administrator.',
+      });
+    }
+
+    // 3. Issue JWT Token (Valid 24 hours)
     const token = jwt.sign(
       {
         user_id: user.user_id,
@@ -116,6 +155,7 @@ export async function loginUser(req, res) {
       { expiresIn: '24h' }
     );
 
+    // 4. Record to R.A. 10173 Immutable Audit Ledger
     const connection = await pool.getConnection();
     try {
       await logAudit(connection, {
@@ -128,7 +168,7 @@ export async function loginUser(req, res) {
         ipAddress: req.ip,
       });
     } catch (auditErr) {
-      console.error('[Auth Audit Error]:', auditErr.message);
+      console.error('[Auth Audit Warning]:', auditErr.message);
     } finally {
       connection.release();
     }
@@ -148,7 +188,7 @@ export async function loginUser(req, res) {
       },
     });
   } catch (error) {
-    console.error('[Auth Error]:', error);
+    console.error('Login error:', error);
     return res.status(500).json({ error: 'Internal server error.' });
   }
 }
@@ -198,9 +238,7 @@ export async function changePassword(req, res) {
 
     const user = users[0];
 
-    const isMatch =
-      (await bcrypt.compare(currentPassword, user.password_hash)) ||
-      (user.password_hash === SEED_DEFAULT_HASH && currentPassword === 'Password123!');
+    const isMatch = await bcrypt.compare(currentPassword, user.password_hash);
 
     if (!isMatch) {
       return res.status(400).json({ error: 'Incorrect current password.' });
