@@ -34,6 +34,7 @@ interface AppointmentItem {
   past_chief_complaint?: string;
   past_diagnosis?: string;
   past_treatment?: string;
+  past_dental_chart?: Record<number, ToothRecord> | null;
   past_clinical_notes?: string;
   past_dietary_notes?: string;
 }
@@ -278,26 +279,8 @@ export default function DoctorConsole({
     setFeedbackMsg(null);
     setSelectedTooth(null);
 
-    // Try restoring past odontogram entries if present in past treatment record
-    const pastChart: Record<number, ToothRecord> = {};
-    if (app.past_treatment && app.past_treatment.includes('[DENTAL ODONTOGRAM CHART]:')) {
-      const match = app.past_treatment.match(/\[DENTAL ODONTOGRAM CHART\]:\s*([^\n]+)/);
-      if (match) {
-        const parts = match[1].split(';');
-        parts.forEach((p) => {
-          const tMatch = p.trim().match(/Tooth #(\d+):\s*(.*)/i);
-          if (tMatch) {
-            const num = parseInt(tMatch[1], 10);
-            const label = tMatch[2].trim().toLowerCase();
-            const foundCond = (Object.keys(CONDITION_COLORS) as ToothCondition[]).find(
-              (c) => CONDITION_COLORS[c].label.toLowerCase() === label
-            ) || 'sound';
-            pastChart[num] = { number: num, condition: foundCond };
-          }
-        });
-      }
-    }
-    setDentalChartData(pastChart);
+    // Restore the dentist-only odontogram (the server only sends this to DENTIST users)
+    setDentalChartData(isDentist && app.past_dental_chart ? app.past_dental_chart : {});
 
     if (app.notes && app.notes.includes('[TRIAGE VITALS]')) {
       const bpMatch = app.notes.match(/BP:\s*(\d+)\/(\d+)/);
@@ -479,24 +462,16 @@ export default function DoctorConsole({
     const token = localStorage.getItem('valetudo_token');
 
     // Summarize dental chart entries if teeth were marked
-    const chartedTeeth = Object.values(dentalChartData).filter((t) => t.condition !== 'sound');
-    let finalTreatmentPlan = treatmentPlan;
-    if (chartedTeeth.length > 0) {
-      const dentalSummary = chartedTeeth
-        .map((t) => `Tooth #${t.number}: ${CONDITION_COLORS[t.condition].label}`)
-        .join('; ');
-      finalTreatmentPlan = finalTreatmentPlan
-        ? `${finalTreatmentPlan}\n\n[DENTAL ODONTOGRAM CHART]: ${dentalSummary}`
-        : `[DENTAL ODONTOGRAM CHART]: ${dentalSummary}`;
-    }
+      const chartedTeeth = Object.values(dentalChartData).filter((t) => t.condition !== 'sound');
 
-    const encounterPayload = {
-      patient_user_id: selectedApp.patient_id,
-      appointment_id: selectedApp.appointment_id,
-      chief_complaint: chiefComplaint,
-      diagnosis,
-      treatment_plan: finalTreatmentPlan,
-      notes: clinicalNotes,
+      const encounterPayload = {
+        patient_user_id: selectedApp.patient_id,
+        appointment_id: selectedApp.appointment_id,
+        chief_complaint: chiefComplaint,
+        diagnosis,
+        treatment_plan: treatmentPlan,
+        notes: clinicalNotes,
+        dental_chart: isDentist && chartedTeeth.length > 0 ? dentalChartData : undefined,
       vitals: {
         systolic_bp: bpSystolic, diastolic_bp: bpDiastolic,
         temperature, pulse: pulseRate, spo2, resp_rate: respRate,

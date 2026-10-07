@@ -61,10 +61,10 @@ router.post('/replay', authenticateToken, async (req, res) => {
 
         // 2. DISPATCH MUTATION BASED ON TABLE
         if (table_name === 'EMR_RECORDS' && action === 'CREATE') {
-          const { patient_user_id, chief_complaint, diagnosis, treatment_plan, notes, appointment_id, vitals } = payload;
-          const [emrResult] = await connection.query(
-            `INSERT INTO EMR_RECORDS (patient_user_id, doctor_user_id, appointment_id, chief_complaint, diagnosis, treatment_plan, notes)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            const { patient_user_id, chief_complaint, diagnosis, treatment_plan, notes, appointment_id, vitals, dental_chart } = payload;
+            const [emrResult] = await connection.query(
+              `INSERT INTO EMR_RECORDS (patient_user_id, doctor_user_id, appointment_id, chief_complaint, diagnosis, treatment_plan, notes)
+              VALUES (?, ?, ?, ?, ?, ?, ?)`,
             [
               patient_user_id,
               userId,
@@ -76,6 +76,15 @@ router.post('/replay', authenticateToken, async (req, res) => {
             ]
           );
           serverRecordId = emrResult.insertId;
+          
+          // Dentist-only odontogram from an offline-queued encounter
+          if (dental_chart && typeof dental_chart === 'object' && (req.user.roles || []).includes('DENTIST')) {
+            await connection.query(
+              `INSERT INTO DENTAL_CHARTS (emr_id, patient_user_id, dentist_user_id, chart_data)
+               VALUES (?, ?, ?, ?)`,
+              [serverRecordId, patient_user_id, userId, encrypt(JSON.stringify(dental_chart))]
+            );
+          }
 
           // If linked to an appointment, complete it
           if (appointment_id) {
@@ -110,7 +119,7 @@ router.post('/replay', authenticateToken, async (req, res) => {
             serverRecordId,
             record_uuid || client_mutation_id,
             action,
-            JSON.stringify(payload),
+            JSON.stringify({ ...payload, dental_chart: undefined }),
             local_version,
           ]
         );
@@ -143,7 +152,7 @@ router.post('/replay', authenticateToken, async (req, res) => {
             table_name,
             record_uuid || client_mutation_id,
             action,
-            JSON.stringify(payload),
+            JSON.stringify({ ...payload, dental_chart: undefined }),
             local_version,
             mutationErr.message,
           ]

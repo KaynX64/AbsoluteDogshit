@@ -10,6 +10,15 @@ import { logPhiAccess } from '../utils/phiLogger.js';
 import { getCache, setCache, invalidateCache } from '../utils/redisClient.js';
 import { sendAppointmentEmail } from '../utils/mailer.js';
 
+// Odontogram helpers (the chart lives in DENTAL_CHARTS, never in treatment_plan)
+function stripLegacyOdontogram(text) {
+  return (text || '').replace(/\n*\[DENTAL ODONTOGRAM CHART\]:[^\n]*/g, '').trim();
+}
+function readDentalChart(cipher) {
+  if (!cipher) return null;
+  try { return JSON.parse(decrypt(cipher)); } catch { return null; }
+}
+
 export default function appointmentRoutes(io) {
   const router = express.Router();
 
@@ -322,6 +331,7 @@ export default function appointmentRoutes(io) {
   router.get('/today', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
     const { filter } = req.query;
     const userRoles = req.user.roles || [];
+    const canViewDental = userRoles.includes('DENTIST');
     const isPractitionerOnly = (userRoles.includes('DOCTOR') || userRoles.includes('DENTIST')) && !userRoles.includes('ADMIN') && !userRoles.includes('NURSE');
 
     let statusCondition = "a.status IN ('checked_in', 'serving')";
@@ -361,7 +371,8 @@ export default function appointmentRoutes(io) {
                 emr.diagnosis AS past_diagnosis,
                 emr.treatment_plan AS past_treatment,
                 emr.notes AS past_clinical_notes,
-                rx.notes AS past_dietary_notes
+                rx.notes AS past_dietary_notes,
+                dc.chart_data AS past_dental_chart
          FROM APPOINTMENTS a
          JOIN USERS u ON a.patient_user_id = u.user_id
          LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
@@ -370,6 +381,7 @@ export default function appointmentRoutes(io) {
          LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
          LEFT JOIN QUEUE q ON q.appointment_id = a.appointment_id AND q.queue_date = CURDATE()
          LEFT JOIN EMR_RECORDS emr ON emr.appointment_id = a.appointment_id
+         LEFT JOIN DENTAL_CHARTS dc ON dc.emr_id = emr.emr_id
          LEFT JOIN PRESCRIPTIONS rx ON rx.emr_id = emr.emr_id
          WHERE ${statusCondition}
            ${doctorCondition}
@@ -384,9 +396,10 @@ export default function appointmentRoutes(io) {
         chronic_conditions: decrypt(app.chronic_conditions) || 'None reported',
         past_chief_complaint: decrypt(app.past_chief_complaint) || '',
         past_diagnosis: decrypt(app.past_diagnosis) || '',
-        past_treatment: decrypt(app.past_treatment) || '',
+        past_treatment: stripLegacyOdontogram(decrypt(app.past_treatment)),
         past_clinical_notes: decrypt(app.past_clinical_notes) || '',
         past_dietary_notes: decrypt(app.past_dietary_notes) || '',
+        past_dental_chart: canViewDental ? readDentalChart(app.past_dental_chart) : null,
       }));
 
       res.json(decrypted);
@@ -775,6 +788,7 @@ export default function appointmentRoutes(io) {
       treatment_plan,
       notes,
       vitals,
+      dental_chart,
     } = req.body;
 
     if (!diagnosis || !chief_complaint) {
@@ -799,6 +813,19 @@ export default function appointmentRoutes(io) {
         ]
       );
       const emrId = emrResult.insertId;
+      
+      // Dentist-only odontogram: stored separately, silently ignored for any other role
+      if (
+        dental_chart &&
+        typeof dental_chart === 'object' &&
+        (req.user.roles || []).includes('DENTIST')
+      ) {
+        await connection.query(
+          `INSERT INTO DENTAL_CHARTS (emr_id, patient_user_id, dentist_user_id, chart_data)
+           VALUES (?, ?, ?, ?)`,
+          [emrId, patient_user_id, doctorUserId, encrypt(JSON.stringify(dental_chart))]
+        );
+      }
 
       if (vitals && typeof vitals === 'object') {
         const metricUnits = {
@@ -909,6 +936,7 @@ export default function appointmentRoutes(io) {
 
   router.get('/patient/:patientId/history', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
     const patientId = Number(req.params.patientId);
+    const canViewDental = (req.user.roles || []).includes('DENTIST');
 
     try {
       const [emrs] = await pool.query(
@@ -939,6 +967,15 @@ export default function appointmentRoutes(io) {
             [emr.emr_id]
           );
 
+          let dentalChart = null;
+          if (canViewDental) {
+            const [dcRows] = await pool.query(
+              'SELECT chart_data FROM DENTAL_CHARTS WHERE emr_id = ?',
+              [emr.emr_id]
+            );
+            dentalChart = dcRows.length ? readDentalChart(dcRows[0].chart_data) : null;
+          }
+
           return {
             emr_id: emr.emr_id,
             encounter_date: emr.encounter_date,
@@ -948,8 +985,9 @@ export default function appointmentRoutes(io) {
             doctor_specialty: emr.doctor_specialty,
             chief_complaint: decrypt(emr.chief_complaint) || '',
             diagnosis: decrypt(emr.diagnosis) || '',
-            treatment_plan: decrypt(emr.treatment_plan) || '',
+            treatment_plan: stripLegacyOdontogram(decrypt(emr.treatment_plan)),
             notes: decrypt(emr.notes) || '',
+            dental_chart: dentalChart,
             vitals,
             attachments,
             prescriptions: rxRows.map((rx) => ({
