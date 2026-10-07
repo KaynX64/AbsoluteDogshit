@@ -97,7 +97,8 @@ export async function loginUser(req, res) {
 // Middleware to verify JWT token
 export function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Format: Bearer <token>
+  // Support both HTTP Authorization header and URL query parameter (?token=...)
+  const token = (authHeader && authHeader.split(' ')[1]) || req.query.token;
 
   if (!token) {
     return res.status(401).json({ error: 'Access token required.' });

@@ -398,6 +398,40 @@ router.get('/verify/:qrToken', async (req, res) => {
   }
 });
 
+// GET /api/documents/attachments/my (Fetch all diagnostic attachments for patient)
+router.get('/attachments/my', authenticateToken, requirePrivacyConsent, async (req, res) => {
+  try {
+    const userId = req.user.user_id;
+
+    const [rows] = await pool.query(
+      `SELECT a.attachment_id, a.emr_id, a.file_name, a.file_size, a.mime_type, a.created_at,
+              e.encounter_date,
+              doc.first_name AS doctor_first_name, doc.last_name AS doctor_last_name,
+              COALESCE(sp.specialty, 'Infirmary Physician') AS doctor_specialty
+       FROM EMR_ATTACHMENTS a
+       JOIN EMR_RECORDS e ON a.emr_id = e.emr_id
+       JOIN USERS doc ON e.doctor_user_id = doc.user_id
+       LEFT JOIN STAFF_PROFILES sp ON doc.user_id = sp.user_id
+       WHERE e.patient_user_id = ? AND e.deleted_at IS NULL
+       ORDER BY a.created_at DESC`,
+      [userId]
+    );
+
+    logPhiAccess({
+      viewerUserId: userId,
+      patientUserId: userId,
+      table: 'EMR_ATTACHMENTS',
+      recordId: userId,
+      purpose: 'Patient Mobile Lab Results Review',
+      ipAddress: req.ip,
+    });
+
+    res.json(rows);
+  } catch (error) {
+    console.error('[Documents] Error fetching patient attachments:', error);
+    res.status(500).json({ error: 'Failed to retrieve diagnostic attachments.' });
+  }
+});
 
 // Alias route with retention check (AND mc.deleted_at IS NULL)
 router.get('/clearances/verify/:token', async (req, res) => {

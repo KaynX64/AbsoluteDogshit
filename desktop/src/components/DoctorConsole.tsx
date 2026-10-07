@@ -1,4 +1,3 @@
-// desktop/src/components/DoctorConsole.tsx
 import React, { useState, useEffect } from 'react';
 import PrescriptionGenerator from './PrescriptionGenerator';
 import { io } from 'socket.io-client';
@@ -43,6 +42,7 @@ interface DoctorConsoleProps {
   /** Optional controlled view mode — sidebar drives it. Falls back to internal state. */
   viewMode?: DoctorViewMode;
   onViewModeChange?: (m: DoctorViewMode) => void;
+  currentRole?: string;   /* 👈 ADD THIS */
 }
 
 const STATUS_STYLE = (status: string) => {
@@ -57,12 +57,62 @@ const STATUS_STYLE = (status: string) => {
   }
 };
 
+/* Quick-add catalogue — common university vaccines */
+const COMMON_VACCINES = [
+  'COVID-19 Primary Series',
+  'COVID-19 Booster',
+  'Influenza (Flu) 2026',
+  'Hepatitis B',
+  'Tetanus Toxoid',
+  'Measles-Mumps-Rubella (MMR)',
+  'Varicella (Chickenpox)',
+  'HPV',
+  'Pneumococcal',
+  'Rabies (Post-exposure)',
+  'Meningococcal',
+  'Typhoid',
+];
+
+/* ── ODONTOGRAM DENTAL CHART TYPES & CONFIGURATION ────────────────────────── */
+export type ToothCondition = 'sound' | 'caries' | 'filled' | 'missing' | 'extraction_needed' | 'prophylaxis';
+
+export interface ToothRecord {
+  number: number;
+  condition: ToothCondition;
+  notes?: string;
+}
+
+const CONDITION_COLORS: Record<ToothCondition, { bg: string; text: string; label: string; border: string }> = {
+  sound:             { bg: '#EEF3EC', text: '#2E5C43', border: '#C9D9C7', label: 'Sound' },
+  caries:            { bg: '#FDE8E8', text: '#7A2E26', border: '#F8B4B4', label: 'Caries (Decay)' },
+  filled:            { bg: '#E0F2FE', text: '#0369A1', border: '#BAE6FD', label: 'Restored / Filled' },
+  missing:           { bg: '#F3F4F6', text: '#6B7280', border: '#D1D5DB', label: 'Missing / Extracted' },
+  extraction_needed: { bg: '#FEF3C7', text: '#92400E', border: '#FDE68A', label: 'Needs Extraction' },
+  prophylaxis:       { bg: '#F0FDFA', text: '#0F766E', border: '#99F6E4', label: 'Calculus / Prophylaxis' },
+};
+
+const UPPER_TEETH = Array.from({ length: 16 }, (_, i) => i + 1); // 1-16
+const LOWER_TEETH = Array.from({ length: 16 }, (_, i) => 32 - i); // 32-17
+
 export default function DoctorConsole({
-  viewMode: controlledView,
-  onViewModeChange,
+  viewMode: controlledView, currentRole, 
 }: DoctorConsoleProps = {}) {
   const [internalView] = useState<DoctorViewMode>('active');
   const viewMode = controlledView ?? internalView;
+
+    // Check if current user is viewing as Dentist (with safe JWT fallback)
+  const isDentist = currentRole
+    ? currentRole === 'DENTIST'
+    : (() => {
+        try {
+          const token = localStorage.getItem('valetudo_token');
+          if (!token) return false;
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          return payload.roles?.includes('DENTIST') && !payload.roles?.includes('DOCTOR');
+        } catch {
+          return false;
+        }
+      })();
 
   const [appointments, setAppointments] = useState<AppointmentItem[]>([]);
   const [selectedApp, setSelectedApp] = useState<AppointmentItem | null>(null);
@@ -78,6 +128,35 @@ export default function DoctorConsole({
 
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
 
+  /* ── In-App Document Preview Modal State ── */
+  const [previewModal, setPreviewModal] = useState<{
+    url: string;
+    fileName: string;
+    mimeType: string;
+  } | null>(null);
+
+  /* ── Immunization Modal State ────────────────────────────────── */
+  const [showImmunizationModal, setShowImmunizationModal] = useState(false);
+  const [patientImmunizations, setPatientImmunizations] = useState<string[]>([]);
+  const [newImmunizations, setNewImmunizations] = useState<string[]>([]);
+  const [customImmunizationInput, setCustomImmunizationInput] = useState('');
+  const [loadingImmunizations, setLoadingImmunizations] = useState(false);
+  const [savingImmunizations, setSavingImmunizations] = useState(false);
+  const [immunizationFeedback, setImmunizationFeedback] = useState<{
+    text: string;
+    type: 'success' | 'error';
+  } | null>(null);
+
+  /* ── In-consultation diagnostic attachments ──────────────────── */
+  const [activePatientAttachments, setActivePatientAttachments] = useState<any[]>([]);
+  const [openingAttachmentId, setOpeningAttachmentId] = useState<number | null>(null);
+
+  /* ── Dental charting / Odontogram state ──────────────────────── */
+  const [dentalChartData, setDentalChartData] = useState<Record<number, ToothRecord>>({});
+  const [selectedTooth, setSelectedTooth] = useState<number | null>(null);
+  const [forceShowDentalChart, setForceShowDentalChart] = useState(false);
+
+  /* ── Vitals ──────────────────────────────────────────────────── */
   const [bpSystolic, setBpSystolic] = useState('120');
   const [bpDiastolic, setBpDiastolic] = useState('80');
   const [temperature, setTemperature] = useState('36.6');
@@ -86,6 +165,12 @@ export default function DoctorConsole({
   const [respRate, setRespRate] = useState('18');
   const [height, setHeight] = useState('');
   const [weight, setWeight] = useState('');
+
+  /* ── Vaccination history ─────────────────────────────────────── */
+  const [patientVaccines, setPatientVaccines] = useState<string[]>([]);
+  const [newVaccineInput, setNewVaccineInput] = useState('');
+  const [isSavingVaccines, setIsSavingVaccines] = useState(false);
+  const [vaccineMsg, setVaccineMsg] = useState<string | null>(null);
 
   const [docType, setDocType] = useState<'rx' | 'clearance'>('rx');
   const [clearancePurpose, setClearancePurpose] = useState('On-the-Job Training (OJT) Medical Clearance');
@@ -172,6 +257,9 @@ export default function DoctorConsole({
     setClinicalNotes('');
     setAttachedFile(null);
     setFeedbackMsg(null);
+    setDentalChartData({});
+    setSelectedTooth(null);
+    setActivePatientAttachments([]);
   };
 
   const selectPatient = (app: AppointmentItem) => {
@@ -188,6 +276,28 @@ export default function DoctorConsole({
     setWeight(app.weight ? String(app.weight) : '');
     setAttachedFile(null);
     setFeedbackMsg(null);
+    setSelectedTooth(null);
+
+    // Try restoring past odontogram entries if present in past treatment record
+    const pastChart: Record<number, ToothRecord> = {};
+    if (app.past_treatment && app.past_treatment.includes('[DENTAL ODONTOGRAM CHART]:')) {
+      const match = app.past_treatment.match(/\[DENTAL ODONTOGRAM CHART\]:\s*([^\n]+)/);
+      if (match) {
+        const parts = match[1].split(';');
+        parts.forEach((p) => {
+          const tMatch = p.trim().match(/Tooth #(\d+):\s*(.*)/i);
+          if (tMatch) {
+            const num = parseInt(tMatch[1], 10);
+            const label = tMatch[2].trim().toLowerCase();
+            const foundCond = (Object.keys(CONDITION_COLORS) as ToothCondition[]).find(
+              (c) => CONDITION_COLORS[c].label.toLowerCase() === label
+            ) || 'sound';
+            pastChart[num] = { number: num, condition: foundCond };
+          }
+        });
+      }
+    }
+    setDentalChartData(pastChart);
 
     if (app.notes && app.notes.includes('[TRIAGE VITALS]')) {
       const bpMatch = app.notes.match(/BP:\s*(\d+)\/(\d+)/);
@@ -197,6 +307,142 @@ export default function DoctorConsole({
       const pulseMatch = app.notes.match(/Pulse:\s*(\d+)/);
       if (pulseMatch) setPulseRate(pulseMatch[1]);
     }
+
+    fetchPatientVaccines(app.patient_id);
+    fetchActivePatientAttachments(app.patient_id);
+  };
+
+  /* ── Fetch patient's past diagnostic attachments for in-consultation preview ── */
+  const fetchActivePatientAttachments = async (patientId: number) => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/appointments/patient/${patientId}/history`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const emrs = await res.json();
+        const allAtts: any[] = [];
+        emrs.forEach((e: any) => {
+          if (Array.isArray(e.attachments)) {
+            e.attachments.forEach((att: any) => {
+              allAtts.push({
+                ...att,
+                encounter_date: e.encounter_date,
+                doctor_last_name: e.doctor_last_name,
+                diagnosis: e.diagnosis,
+              });
+            });
+          }
+        });
+        setActivePatientAttachments(allAtts);
+      }
+    } catch (_) {
+      setActivePatientAttachments([]);
+    }
+  };
+
+/* ── Authenticated Attachment Viewer (Embeds inside Electron Modal) ── */
+  const handleOpenAttachment = async (attachmentId: number, fileName: string, mimeType?: string) => {
+    setOpeningAttachmentId(attachmentId);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/documents/attachments/${attachmentId}/download`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to download/decrypt diagnostic file.');
+      const blob = await res.blob();
+      const detectedMime =
+        mimeType ||
+        res.headers.get('content-type') ||
+        (fileName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+      
+      const typedBlob = new Blob([blob], { type: detectedMime });
+      const objectUrl = URL.createObjectURL(typedBlob);
+
+      setPreviewModal({
+        url: objectUrl,
+        fileName,
+        mimeType: detectedMime,
+      });
+    } catch (err: any) {
+      alert(`Could not open ${fileName}: ${err.message}`);
+    } finally {
+      setOpeningAttachmentId(null);
+    }
+  };
+
+  const handleClosePreviewModal = () => {
+    if (previewModal?.url) {
+      URL.revokeObjectURL(previewModal.url);
+    }
+    setPreviewModal(null);
+  };
+
+  const fetchPatientVaccines = async (userId: number) => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/profile/patient/${userId}/immunizations`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPatientVaccines(data.immunizations || []);
+      }
+    } catch (_) {
+      setPatientVaccines([]);
+    }
+  };
+
+  const handleAddVaccine = (vaccineName: string) => {
+    const trimmed = vaccineName.trim();
+    if (!trimmed) return;
+    if (patientVaccines.includes(trimmed)) {
+      setVaccineMsg('⚠️ Vaccine already recorded in patient list.');
+      return;
+    }
+    setPatientVaccines([...patientVaccines, trimmed]);
+    setNewVaccineInput('');
+    setVaccineMsg(null);
+  };
+
+  const handleRemoveVaccine = (vaccineName: string) => {
+    setPatientVaccines(patientVaccines.filter((v) => v !== vaccineName));
+  };
+
+  const handleSaveVaccinationHistory = async () => {
+    if (!selectedApp) return;
+    setIsSavingVaccines(true);
+    setVaccineMsg(null);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/profile/patient/${selectedApp.patient_id}/immunizations`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ immunizations: patientVaccines }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setVaccineMsg('✅ Immunization records saved to health profile!');
+      } else {
+        setVaccineMsg('❌ ' + (data.error || 'Failed to save vaccines.'));
+      }
+    } catch (err: any) {
+      setVaccineMsg('❌ Network error: ' + err.message);
+    } finally {
+      setIsSavingVaccines(false);
+    }
+  };
+
+  const handleToothConditionChange = (condition: ToothCondition) => {
+    if (!selectedTooth) return;
+    setDentalChartData((prev) => ({
+      ...prev,
+      [selectedTooth]: {
+        number: selectedTooth,
+        condition,
+        notes: prev[selectedTooth]?.notes || '',
+      },
+    }));
   };
 
   const handleStartConsultation = async () => {
@@ -232,12 +478,24 @@ export default function DoctorConsole({
     setFeedbackMsg(null);
     const token = localStorage.getItem('valetudo_token');
 
+    // Summarize dental chart entries if teeth were marked
+    const chartedTeeth = Object.values(dentalChartData).filter((t) => t.condition !== 'sound');
+    let finalTreatmentPlan = treatmentPlan;
+    if (chartedTeeth.length > 0) {
+      const dentalSummary = chartedTeeth
+        .map((t) => `Tooth #${t.number}: ${CONDITION_COLORS[t.condition].label}`)
+        .join('; ');
+      finalTreatmentPlan = finalTreatmentPlan
+        ? `${finalTreatmentPlan}\n\n[DENTAL ODONTOGRAM CHART]: ${dentalSummary}`
+        : `[DENTAL ODONTOGRAM CHART]: ${dentalSummary}`;
+    }
+
     const encounterPayload = {
       patient_user_id: selectedApp.patient_id,
       appointment_id: selectedApp.appointment_id,
       chief_complaint: chiefComplaint,
       diagnosis,
-      treatment_plan: treatmentPlan,
+      treatment_plan: finalTreatmentPlan,
       notes: clinicalNotes,
       vitals: {
         systolic_bp: bpSystolic, diastolic_bp: bpDiastolic,
@@ -354,6 +612,110 @@ export default function DoctorConsole({
     finally { setLoadingTimeline(false); }
   };
 
+  /* ── Immunization handlers ───────────────────────────────────── */
+  const openImmunizationModal = async () => {
+    if (!selectedApp) return;
+    setShowImmunizationModal(true);
+    setPatientImmunizations([]);
+    setNewImmunizations([]);
+    setCustomImmunizationInput('');
+    setImmunizationFeedback(null);
+    setLoadingImmunizations(true);
+
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/profile/patient/${selectedApp.patient_id}/immunizations`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPatientImmunizations(Array.isArray(data.immunizations) ? data.immunizations : []);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setImmunizationFeedback({
+          text: '❌ ' + (err.error || 'Failed to load immunization records.'),
+          type: 'error',
+        });
+      }
+    } catch (err: any) {
+      setImmunizationFeedback({ text: '❌ Network error: ' + err.message, type: 'error' });
+    } finally {
+      setLoadingImmunizations(false);
+    }
+  };
+
+  const closeImmunizationModal = () => {
+    setShowImmunizationModal(false);
+    setPatientImmunizations([]);
+    setNewImmunizations([]);
+    setCustomImmunizationInput('');
+    setImmunizationFeedback(null);
+  };
+
+  const handleQuickAddImmunization = (name: string) => {
+    const lower = name.toLowerCase();
+    if (
+      patientImmunizations.some((p) => p.toLowerCase() === lower) ||
+      newImmunizations.some((p) => p.toLowerCase() === lower)
+    ) {
+      return;
+    }
+    setNewImmunizations((prev) => [...prev, name]);
+    setImmunizationFeedback(null);
+  };
+
+  const handleAddCustomImmunization = () => {
+    const trimmed = customImmunizationInput.trim();
+    if (!trimmed) return;
+
+    const lower = trimmed.toLowerCase();
+    if (
+      patientImmunizations.some((p) => p.toLowerCase() === lower) ||
+      newImmunizations.some((p) => p.toLowerCase() === lower)
+    ) {
+      setImmunizationFeedback({
+        text: '⚠️ That immunization is already on record or already queued for this visit.',
+        type: 'error',
+      });
+      return;
+    }
+
+    setNewImmunizations((prev) => [...prev, trimmed]);
+    setCustomImmunizationInput('');
+    setImmunizationFeedback(null);
+  };
+
+  const handleRemoveNewImmunization = (idx: number) => {
+    setNewImmunizations((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleSaveImmunizations = async () => {
+    if (!selectedApp || newImmunizations.length === 0) return;
+    setSavingImmunizations(true);
+    setImmunizationFeedback(null);
+    const token = localStorage.getItem('valetudo_token');
+
+    try {
+      const mergedList = Array.from(new Set([...patientImmunizations, ...newImmunizations]));
+      const res = await fetch(`${API_BASE_URL}/api/profile/patient/${selectedApp.patient_id}/immunizations`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ immunizations: mergedList }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save immunization records.');
+
+      setPatientImmunizations(Array.isArray(data.immunizations) ? data.immunizations : mergedList);
+      setNewImmunizations([]);
+      setImmunizationFeedback({ text: '✅ ' + data.message, type: 'success' });
+      setFeedbackMsg({ text: `💉 ${data.message}`, type: 'success' });
+    } catch (err: any) {
+      setImmunizationFeedback({ text: '❌ ' + err.message, type: 'error' });
+    } finally {
+      setSavingImmunizations(false);
+    }
+  };
+
   const handlePrintClearance = async () => {
     if (!selectedApp) return;
     setIsIssuingClearance(true);
@@ -389,7 +751,7 @@ export default function DoctorConsole({
               .patient-box { margin: 16px 0; padding: 14px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; line-height: 1.6; }
               .body-text { font-size: 14px; line-height: 1.8; margin-top: 18px; }
               .verification-panel { margin-top: 26px; display: flex; align-items: center; gap: 20px; border: 1px solid #99f6e4; background: #f0fdfa; padding: 16px; border-radius: 6px; }
-              .footer { margin-top: 40px; display: space-between; align-items: flex-end; font-size: 12px; }
+              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; font-size: 12px; }
               .sig-line { border-top: 1px solid #000; width: 220px; text-align: center; font-weight: bold; padding-top: 4px; }
             </style>
           </head>
@@ -458,6 +820,14 @@ export default function DoctorConsole({
   };
 
   const isArchivedMode = viewMode === 'history' || selectedApp?.status === 'completed' || selectedApp?.status === 'cancelled';
+
+    const isDentalVisit = isDentist && Boolean(
+    selectedApp?.appointment_type?.toLowerCase().includes('dent') ||
+    selectedApp?.appointment_type?.toLowerCase().includes('tooth') ||
+    selectedApp?.appointment_type?.toLowerCase().includes('oral') ||
+    selectedApp?.appointment_type?.toLowerCase().includes('prophylaxis') ||
+    forceShowDentalChart
+  );
 
   /* ═══════════════════════════════════════════════════════════════ */
   /* RENDER                                                          */
@@ -705,7 +1075,7 @@ export default function DoctorConsole({
                             <b>Diagnosis:</b> {item.diagnosis}
                           </div>
                           {item.treatment_plan && (
-                            <div style={{ fontSize: 12.5, color: T.textSub, marginBottom: 4 }}>
+                            <div style={{ fontSize: 12.5, color: T.textSub, marginBottom: 4, whiteSpace: 'pre-wrap' }}>
                               <b>Plan:</b> {item.treatment_plan}
                             </div>
                           )}
@@ -731,20 +1101,22 @@ export default function DoctorConsole({
                               display: 'flex', gap: 8, flexWrap: 'wrap',
                             }}>
                               {item.attachments.map((att: any) => (
-                                <a
+                                <button
                                   key={att.attachment_id}
-                                  href={`${API_BASE_URL}/api/documents/attachments/${att.attachment_id}/download`}
-                                  target="_blank"
-                                  rel="noreferrer"
+                                  type="button"
+                                  onClick={() => handleOpenAttachment(att.attachment_id, att.file_name)}
+                                  disabled={openingAttachmentId === att.attachment_id}
                                   style={{
                                     fontSize: 11.5, color: T.info,
-                                    fontWeight: 700, textDecoration: 'none',
+                                    fontWeight: 700,
                                     background: T.infoSoft, padding: '4px 10px',
                                     borderRadius: T.radius.xs,
+                                    border: `1px solid ${T.infoBorder}`,
+                                    cursor: 'pointer',
                                   }}
                                 >
-                                  📎 {att.file_name}
-                                </a>
+                                  📎 {att.file_name} {openingAttachmentId === att.attachment_id ? '(Loading…)' : ''}
+                                </button>
                               ))}
                             </div>
                           )}
@@ -774,7 +1146,7 @@ export default function DoctorConsole({
               }`,
               borderRadius: T.radius.lg,
               padding: '18px 22px',
-              marginBottom: 22,
+              marginBottom: 20,
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
@@ -838,6 +1210,32 @@ export default function DoctorConsole({
                   📜 Past EMR history
                 </button>
 
+                <button
+                  type="button"
+                  onClick={openImmunizationModal}
+                  style={{ ...btnGhost, color: T.primary, borderColor: T.primaryTint }}
+                  title="View and append immunization records"
+                >
+                  💉 Immunizations
+                </button>
+
+            {isDentist && (
+                  <button
+                    type="button"
+                    onClick={() => setForceShowDentalChart((prev) => !prev)}
+                    style={{
+                      ...btnGhost,
+                    color: isDentalVisit ? '#0F766E' : T.textSub,
+                    borderColor: isDentalVisit ? '#99F6E4' : T.border,
+                    background: isDentalVisit ? '#F0FDFA' : T.surface,
+                  }}
+                  title="Toggle Dental Odontogram"
+                >
+                  🦷 {isDentalVisit ? 'Odontogram Active' : 'Dental Chart'}
+                </button>
+            )}
+
+
                 {selectedApp.status === 'completed' ? (
                   <span style={{
                     background: T.successSoft, color: T.success,
@@ -875,6 +1273,387 @@ export default function DoctorConsole({
                   </button>
                 )}
               </div>
+            </div>
+          )}
+
+{/* ── IN-CONSULTATION DIAGNOSTIC LABS & ATTACHMENT PREVIEW DRAWER ── */}
+          {selectedApp && activePatientAttachments.length > 0 && (
+            <div style={{
+              background: '#F0F9FF',
+              border: '1px solid #BAE6FD',
+              borderRadius: T.radius.lg,
+              padding: '14px 18px',
+              marginBottom: 20,
+              boxShadow: T.shadow.xs,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <span style={{ fontSize: 13, fontWeight: 800, color: '#0369A1', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  📂 Prior Diagnostic Records & Lab Imaging on File ({activePatientAttachments.length})
+                </span>
+                <span style={{ fontSize: 11, color: '#0284C7', fontWeight: 600 }}>
+                  Click to open/inspect attachment
+                </span>
+              </div>
+
+              {/* 👉 PUT IT RIGHT HERE (replace the existing <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}> block) */}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {activePatientAttachments.map((att: any, idx: number) => (
+                  <button
+                    key={att.attachment_id || idx}
+                    type="button"
+                    onClick={() => handleOpenAttachment(att.attachment_id, att.file_name, att.mime_type)}
+                    disabled={openingAttachmentId === att.attachment_id}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '6px 14px',
+                      background: '#FFFFFF',
+                      border: '1px solid #7DD3FC',
+                      borderRadius: T.radius.pill,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: '#0284C7',
+                      cursor: 'pointer',
+                      boxShadow: T.shadow.xs,
+                      fontFamily: T.font,
+                    }}
+                  >
+                    📄 {att.file_name}
+                    <span style={{ fontSize: 10.5, color: '#64748B', fontWeight: 500 }}>
+                      ({new Date(att.encounter_date).toLocaleDateString()})
+                    </span>
+                    <span style={{ fontSize: 11, color: '#0369A1' }}>
+                      {openingAttachmentId === att.attachment_id ? '⏳' : '👁️'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+            </div>
+          )}
+
+          {/* ── INTERACTIVE ODONTOGRAM DENTAL CHART (Shown for dental visits or manually toggled) ── */}
+          {selectedApp && isDentalVisit && (
+            <div style={{
+              background: T.surface,
+              border: '1.5px solid #0F766E',
+              borderRadius: T.radius.lg,
+              padding: '18px 22px',
+              marginBottom: 20,
+              boxShadow: T.shadow.sm,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: '#0F766E', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    🦷 Adult Dental Chart (Odontogram) · Universal Numbering System
+                  </h4>
+                  <p style={{ margin: '3px 0 0', fontSize: 12, color: T.textSub }}>
+                    Click a tooth (Upper 1–16, Lower 32–17) to record or update findings. Automatically appended to the clinical plan upon discharge.
+                  </p>
+                </div>
+
+                {Object.values(dentalChartData).filter((t) => t.condition !== 'sound').length > 0 && !isArchivedMode && (
+                  <button
+                    type="button"
+                    onClick={() => setDentalChartData({})}
+                    style={{ ...btnGhost, padding: '4px 10px', fontSize: 11, color: T.danger, borderColor: T.dangerBorder }}
+                  >
+                    Reset Chart
+                  </button>
+                )}
+              </div>
+
+              {/* Teeth Layout */}
+              <div style={{ background: T.sage50, padding: 12, borderRadius: T.radius.md, border: `1px solid ${T.borderSoft}` }}>
+                {/* Upper Teeth 1-16 */}
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 800, color: T.textMuted, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    Maxillary Arch (Upper Teeth 1–16)
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(16, 1fr)', gap: 4 }}>
+                    {UPPER_TEETH.map((tNum) => {
+                      const tData = dentalChartData[tNum] || { number: tNum, condition: 'sound' };
+                      const conf = CONDITION_COLORS[tData.condition];
+                      const isSel = selectedTooth === tNum;
+                      return (
+                        <button
+                          key={tNum}
+                          type="button"
+                          onClick={() => setSelectedTooth(tNum)}
+                          title={`Tooth #${tNum} (${conf.label})`}
+                          style={{
+                            padding: '6px 2px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            borderRadius: T.radius.xs,
+                            border: isSel ? `2px solid ${T.primary}` : `1px solid ${conf.border}`,
+                            background: isSel ? '#E2EBE1' : conf.bg,
+                            cursor: isArchivedMode ? 'default' : 'pointer',
+                            fontFamily: T.mono,
+                          }}
+                        >
+                          <span style={{ fontSize: 11, fontWeight: 800, color: conf.text }}>{tNum}</span>
+                          <span style={{ fontSize: 8.5, fontWeight: 800, color: conf.text }}>{tData.condition[0].toUpperCase()}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Lower Teeth 32-17 */}
+                <div>
+                  <div style={{ fontSize: 10.5, fontWeight: 800, color: T.textMuted, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    Mandibular Arch (Lower Teeth 32–17)
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(16, 1fr)', gap: 4 }}>
+                    {LOWER_TEETH.map((tNum) => {
+                      const tData = dentalChartData[tNum] || { number: tNum, condition: 'sound' };
+                      const conf = CONDITION_COLORS[tData.condition];
+                      const isSel = selectedTooth === tNum;
+                      return (
+                        <button
+                          key={tNum}
+                          type="button"
+                          onClick={() => setSelectedTooth(tNum)}
+                          title={`Tooth #${tNum} (${conf.label})`}
+                          style={{
+                            padding: '6px 2px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            borderRadius: T.radius.xs,
+                            border: isSel ? `2px solid ${T.primary}` : `1px solid ${conf.border}`,
+                            background: isSel ? '#E2EBE1' : conf.bg,
+                            cursor: isArchivedMode ? 'default' : 'pointer',
+                            fontFamily: T.mono,
+                          }}
+                        >
+                          <span style={{ fontSize: 11, fontWeight: 800, color: conf.text }}>{tNum}</span>
+                          <span style={{ fontSize: 8.5, fontWeight: 800, color: conf.text }}>{tData.condition[0].toUpperCase()}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Tooth Condition Selector Bar */}
+              {!isArchivedMode && selectedTooth && (
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px dashed ${T.border}` }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: T.primary }}>
+                      Set Finding for Tooth #{selectedTooth}:
+                    </span>
+                    <span style={{ fontSize: 11, color: T.textMuted }}>
+                      Current: {CONDITION_COLORS[dentalChartData[selectedTooth]?.condition || 'sound'].label}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {(Object.keys(CONDITION_COLORS) as ToothCondition[]).map((cond) => {
+                      const current = (dentalChartData[selectedTooth]?.condition || 'sound') === cond;
+                      const conf = CONDITION_COLORS[cond];
+                      return (
+                        <button
+                          key={cond}
+                          type="button"
+                          onClick={() => handleToothConditionChange(cond)}
+                          style={{
+                            padding: '4px 12px',
+                            borderRadius: T.radius.pill,
+                            border: current ? `2px solid ${T.primary}` : `1px solid ${conf.border}`,
+                            background: conf.bg,
+                            color: conf.text,
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {conf.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 💉 PATIENT VACCINATION & IMMUNIZATION HISTORY MANAGER (Single instance) */}
+          {selectedApp && (
+            <div style={{
+              background: T.surface,
+              border: `1px solid ${T.border}`,
+              borderRadius: T.radius.lg,
+              padding: '18px 22px',
+              marginBottom: 20,
+              boxShadow: T.shadow.xs,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: T.primary }}>
+                    💉 Patient Vaccination & Immunization History
+                  </h4>
+                  <p style={{ margin: '3px 0 0', fontSize: 12, color: T.textSub }}>
+                    Verified in-person clinical vaccine records for <b>{selectedApp.first_name} {selectedApp.last_name}</b> (R.A. 10173 Protected)
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSaveVaccinationHistory}
+                  disabled={isSavingVaccines || isArchivedMode}
+                  style={{
+                    ...btnPrimary,
+                    padding: '8px 18px',
+                    fontSize: 12.5,
+                    opacity: (isSavingVaccines || isArchivedMode) ? 0.6 : 1,
+                    cursor: (isSavingVaccines || isArchivedMode) ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {isSavingVaccines ? 'Saving…' : '💾 Save Vaccines to Profile'}
+                </button>
+              </div>
+
+              {/* Vaccine Badges Display */}
+              <div style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 8,
+                padding: '12px 14px',
+                background: T.sage50,
+                borderRadius: T.radius.md,
+                border: `1px solid ${T.borderSoft}`,
+                minHeight: 46,
+                alignItems: 'center',
+              }}>
+                {patientVaccines.length === 0 ? (
+                  <span style={{ fontSize: 12, color: T.textMuted, fontStyle: 'italic' }}>
+                    No immunizations recorded yet. Select from common vaccines or type below to add.
+                  </span>
+                ) : (
+                  patientVaccines.map((v) => (
+                    <span
+                      key={v}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: '4px 12px',
+                        borderRadius: T.radius.pill,
+                        background: '#D7E8D2',
+                        color: '#264D36',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        border: '1px solid #BBF7D0',
+                      }}
+                    >
+                      ✓ {v}
+                      {!isArchivedMode && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveVaccine(v)}
+                          title="Remove vaccine"
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#7A2E26',
+                            cursor: 'pointer',
+                            fontWeight: 900,
+                            padding: 0,
+                            marginLeft: 2,
+                            fontSize: 13,
+                          }}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </span>
+                  ))
+                )}
+              </div>
+
+              {/* Inputter & Quick Suggestion Pills */}
+              {!isArchivedMode && (
+                <div style={{ marginTop: 14 }}>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+                    <input
+                      type="text"
+                      placeholder="Type vaccine name (e.g. Tetanus Toxoid 2nd Dose, Pneumococcal)..."
+                      value={newVaccineInput}
+                      onChange={(e) => setNewVaccineInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddVaccine(newVaccineInput);
+                        }
+                      }}
+                      style={{
+                        ...inputStyle,
+                        flex: '1 1 280px',
+                        padding: '8px 14px',
+                        fontSize: 12.5,
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleAddVaccine(newVaccineInput)}
+                      style={{
+                        ...btnGhost,
+                        padding: '8px 16px',
+                        fontSize: 12.5,
+                        background: T.sage100,
+                        borderColor: T.sage300,
+                        color: T.primary,
+                        fontWeight: 700,
+                      }}
+                    >
+                      + Add to List
+                    </button>
+                  </div>
+
+                  {/* Quick presets */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: T.textMuted }}>Quick Presets:</span>
+                    {COMMON_VACCINES.map((cv) => {
+                      const alreadyHas = patientVaccines.includes(cv);
+                      return (
+                        <button
+                          key={cv}
+                          type="button"
+                          onClick={() => handleAddVaccine(cv)}
+                          disabled={alreadyHas}
+                          style={{
+                            padding: '3px 10px',
+                            borderRadius: T.radius.pill,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            background: alreadyHas ? T.sage100 : T.surface,
+                            color: alreadyHas ? T.textMuted : T.textSub,
+                            border: `1px solid ${T.border}`,
+                            cursor: alreadyHas ? 'default' : 'pointer',
+                            opacity: alreadyHas ? 0.6 : 1,
+                          }}
+                        >
+                          {alreadyHas ? '✓ ' : '+ '} {cv}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {vaccineMsg && (
+                <div style={{
+                  marginTop: 10,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: vaccineMsg.includes('✅') ? T.success : T.danger,
+                }}>
+                  {vaccineMsg}
+                </div>
+              )}
             </div>
           )}
 
@@ -1272,7 +2051,7 @@ export default function DoctorConsole({
                     <div style={{ fontSize: 13, marginBottom: 4 }}><b>Diagnosis:</b> {item.diagnosis}</div>
                     <div style={{ fontSize: 13, marginBottom: 4 }}><b>Complaint:</b> {item.chief_complaint}</div>
                     {item.treatment_plan && (
-                      <div style={{ fontSize: 13, color: T.textSub, marginBottom: 4 }}>
+                      <div style={{ fontSize: 13, color: T.textSub, marginBottom: 4, whiteSpace: 'pre-wrap' }}>
                         <b>Treatment:</b> {item.treatment_plan}
                       </div>
                     )}
@@ -1301,23 +2080,23 @@ export default function DoctorConsole({
                         </div>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           {item.attachments.map((att: any) => (
-                            <a
+                            <button
                               key={att.attachment_id}
-                              href={`${API_BASE_URL}/api/documents/attachments/${att.attachment_id}/download`}
-                              target="_blank"
-                              rel="noreferrer"
+                              type="button"
+                              onClick={() => handleOpenAttachment(att.attachment_id, att.file_name)}
+                              disabled={openingAttachmentId === att.attachment_id}
                               style={{
                                 display: 'inline-flex', alignItems: 'center', gap: 6,
                                 padding: '5px 12px',
                                 background: T.infoSoft, color: T.info,
                                 borderRadius: T.radius.xs,
                                 fontSize: 11.5, fontWeight: 700,
-                                textDecoration: 'none',
                                 border: `1px solid ${T.infoBorder}`,
+                                cursor: 'pointer',
                               }}
                             >
-                              📄 {att.file_name} ({(att.file_size / 1024).toFixed(0)} KB)
-                            </a>
+                              📄 {att.file_name} ({(att.file_size / 1024).toFixed(0)} KB) {openingAttachmentId === att.attachment_id ? '⏳' : ''}
+                            </button>
                           ))}
                         </div>
                       </div>
@@ -1326,6 +2105,487 @@ export default function DoctorConsole({
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* IMMUNIZATIONS MODAL                                         */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {showImmunizationModal && selectedApp && (
+        <div className="modal-backdrop" onClick={closeImmunizationModal}>
+          <div
+            className="modal-card"
+            style={{ maxWidth: 660, padding: 0, overflow: 'hidden' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div
+              style={{
+                padding: '22px 26px 18px',
+                borderBottom: `1px solid ${T.border}`,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: 12,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                <div
+                  style={{
+                    width: 42,
+                    height: 42,
+                    borderRadius: T.radius.md,
+                    background: T.primaryTint,
+                    display: 'grid',
+                    placeItems: 'center',
+                    fontSize: 20,
+                    flexShrink: 0,
+                  }}
+                >
+                  💉
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: T.text }}>
+                    Immunization records
+                  </h3>
+                  <p style={{ margin: '3px 0 0', fontSize: 12.5, color: T.textSub }}>
+                    {selectedApp.first_name} {selectedApp.last_name} ·{' '}
+                    {selectedApp.student_no || 'PSU Member'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeImmunizationModal}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: 20,
+                  cursor: 'pointer',
+                  color: T.textSub,
+                  lineHeight: 1,
+                  padding: 4,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '20px 26px', maxHeight: '66vh', overflowY: 'auto' }}>
+              {/* Currently on record */}
+              <div style={{ marginBottom: 22 }}>
+                <div
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 800,
+                    letterSpacing: 1.4,
+                    color: T.textMuted,
+                    textTransform: 'uppercase',
+                    marginBottom: 10,
+                  }}
+                >
+                  Currently on record ({patientImmunizations.length})
+                </div>
+
+                {loadingImmunizations ? (
+                  <div style={{ fontSize: 13, color: T.textMuted, padding: '12px 0' }}>
+                    Loading records…
+                  </div>
+                ) : patientImmunizations.length === 0 ? (
+                  <div
+                    style={{
+                      padding: '14px 18px',
+                      background: T.sage50,
+                      border: `1px dashed ${T.border}`,
+                      borderRadius: T.radius.md,
+                      fontSize: 12.5,
+                      color: T.textMuted,
+                      fontStyle: 'italic',
+                    }}
+                  >
+                    No immunization records yet. Add the first one below.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {patientImmunizations.map((imm, idx) => (
+                      <span
+                        key={idx}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          padding: '6px 12px',
+                          background: T.successSoft,
+                          color: T.success,
+                          border: `1px solid ${T.successBorder}`,
+                          borderRadius: T.radius.pill,
+                          fontSize: 12,
+                          fontWeight: 700,
+                        }}
+                      >
+                        ✓ {imm}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Quick-add */}
+              <div style={{ marginBottom: 22 }}>
+                <div
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 800,
+                    letterSpacing: 1.4,
+                    color: T.textMuted,
+                    textTransform: 'uppercase',
+                    marginBottom: 10,
+                  }}
+                >
+                  Quick-add common vaccines
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {COMMON_VACCINES.map((v) => {
+                    const lower = v.toLowerCase();
+                    const disabled =
+                      patientImmunizations.some((p) => p.toLowerCase() === lower) ||
+                      newImmunizations.some((p) => p.toLowerCase() === lower);
+                    return (
+                      <button
+                        key={v}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => handleQuickAddImmunization(v)}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: T.radius.pill,
+                          border: `1px solid ${disabled ? T.borderSoft : T.border}`,
+                          background: disabled ? T.sage50 : T.surface,
+                          color: disabled ? T.textFaint : T.text,
+                          fontSize: 11.5,
+                          fontWeight: 600,
+                          cursor: disabled ? 'not-allowed' : 'pointer',
+                          fontFamily: T.font,
+                          transition: 'all 120ms ease',
+                        }}
+                      >
+                        + {v}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Custom input */}
+              <div style={{ marginBottom: 22 }}>
+                <div
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 800,
+                    letterSpacing: 1.4,
+                    color: T.textMuted,
+                    textTransform: 'uppercase',
+                    marginBottom: 10,
+                  }}
+                >
+                  Or type a custom entry
+                </div>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleAddCustomImmunization();
+                  }}
+                  style={{ display: 'flex', gap: 8 }}
+                >
+                  <input
+                    style={{ ...inputStyle, flex: 1 }}
+                    placeholder="e.g. Anti-rabies dose 2 of 3"
+                    value={customImmunizationInput}
+                    onChange={(e) => setCustomImmunizationInput(e.target.value)}
+                    maxLength={120}
+                  />
+                  <button
+                    type="submit"
+                    disabled={!customImmunizationInput.trim()}
+                    style={{
+                      ...btnPrimary,
+                      padding: '10px 20px',
+                      opacity: customImmunizationInput.trim() ? 1 : 0.5,
+                      cursor: customImmunizationInput.trim() ? 'pointer' : 'not-allowed',
+                    }}
+                  >
+                    Add
+                  </button>
+                </form>
+              </div>
+
+              {/* Pending additions */}
+              {newImmunizations.length > 0 && (
+                <div
+                  style={{
+                    padding: 16,
+                    background: T.primaryTint,
+                    borderRadius: T.radius.md,
+                    border: `1px solid ${T.sage300}`,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 10.5,
+                      fontWeight: 800,
+                      letterSpacing: 1.4,
+                      color: T.primary,
+                      textTransform: 'uppercase',
+                      marginBottom: 10,
+                    }}
+                  >
+                    Pending additions ({newImmunizations.length})
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {newImmunizations.map((imm, idx) => (
+                      <span
+                        key={idx}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '6px 8px 6px 12px',
+                          background: T.surface,
+                          color: T.primary,
+                          border: `1px solid ${T.sage300}`,
+                          borderRadius: T.radius.pill,
+                          fontSize: 12,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {imm}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveNewImmunization(idx)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: T.textSub,
+                            fontSize: 13,
+                            lineHeight: 1,
+                            padding: 0,
+                            width: 16,
+                            height: 16,
+                            display: 'grid',
+                            placeItems: 'center',
+                            borderRadius: '50%',
+                            fontFamily: T.font,
+                          }}
+                          title="Remove"
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {immunizationFeedback && (
+                <div
+                  style={{
+                    marginTop: 16,
+                    padding: '12px 16px',
+                    borderRadius: T.radius.md,
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    background:
+                      immunizationFeedback.type === 'success' ? T.successSoft : T.dangerSoft,
+                    color:
+                      immunizationFeedback.type === 'success' ? T.success : T.danger,
+                    border: `1px solid ${
+                      immunizationFeedback.type === 'success'
+                        ? T.successBorder
+                        : T.dangerBorder
+                    }`,
+                  }}
+                >
+                  {immunizationFeedback.text}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div
+              style={{
+                padding: '16px 26px',
+                borderTop: `1px solid ${T.border}`,
+                background: T.sage50,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 12,
+                flexWrap: 'wrap',
+              }}
+            >
+              <p style={{ margin: 0, fontSize: 11.5, color: T.textMuted, fontStyle: 'italic' }}>
+                Records are appended — existing entries are preserved.
+              </p>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={closeImmunizationModal}
+                  style={btnGhost}
+                  disabled={savingImmunizations}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveImmunizations}
+                  disabled={savingImmunizations || newImmunizations.length === 0}
+                  style={{
+                    ...btnPrimary,
+                    opacity:
+                      savingImmunizations || newImmunizations.length === 0 ? 0.5 : 1,
+                    cursor:
+                      savingImmunizations || newImmunizations.length === 0
+                        ? 'not-allowed'
+                        : 'pointer',
+                  }}
+                >
+                  {savingImmunizations
+                    ? 'Saving…'
+                    : `Save ${newImmunizations.length} new record${newImmunizations.length === 1 ? '' : 's'}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* IN-APP DIAGNOSTIC ATTACHMENT PREVIEW MODAL                  */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {previewModal && (
+        <div className="modal-backdrop" style={{ zIndex: 999 }} onClick={handleClosePreviewModal}>
+          <div
+            className="modal-card"
+            style={{
+              maxWidth: 960,
+              width: '92vw',
+              height: '86vh',
+              display: 'flex',
+              flexDirection: 'column',
+              padding: 22,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 14,
+                paddingBottom: 10,
+                borderBottom: `1px solid ${T.border}`,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                <span style={{ fontSize: 22 }}>📄</span>
+                <div style={{ minWidth: 0 }}>
+                  <h3
+                    style={{
+                      margin: 0,
+                      fontSize: 16,
+                      fontWeight: 800,
+                      color: T.text,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {previewModal.fileName}
+                  </h3>
+                  <span style={{ fontSize: 11.5, color: T.textSub }}>
+                    Diagnostic Lab / Clinical Attachment Preview
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const a = document.createElement('a');
+                    a.href = previewModal.url;
+                    a.download = previewModal.fileName;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                  }}
+                  style={{
+                    ...btnGhost,
+                    padding: '6px 14px',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: T.primary,
+                  }}
+                >
+                  💾 Save to PC
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClosePreviewModal}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: 22,
+                    cursor: 'pointer',
+                    color: T.textSub,
+                    lineHeight: 1,
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Embedded Document Viewport (Native PDF / Image Renderer) */}
+            <div
+              style={{
+                flex: 1,
+                background: '#F8FAFC',
+                borderRadius: T.radius.md,
+                overflow: 'hidden',
+                border: `1px solid ${T.border}`,
+                display: 'flex',
+              }}
+            >
+              {previewModal.mimeType.includes('pdf') ||
+              previewModal.fileName.toLowerCase().endsWith('.pdf') ? (
+                <iframe
+                  src={previewModal.url}
+                  title={previewModal.fileName}
+                  style={{ width: '100%', height: '100%', border: 'none' }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    display: 'grid',
+                    placeItems: 'center',
+                    padding: 16,
+                    overflow: 'auto',
+                  }}
+                >
+                  <img
+                    src={previewModal.url}
+                    alt={previewModal.fileName}
+                    style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                  />
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

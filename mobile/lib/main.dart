@@ -29,15 +29,19 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Apply certificate overrides unconditionally
   HttpOverrides.global = DevHttpOverrides();
 
-  try {
-    await Firebase.initializeApp();
-    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-    debugPrint("🔥 [Firebase] Initialized successfully.");
-  } catch (e) {
-    debugPrint("⚠️ [Firebase] Could not initialize: $e");
+  // Only initialize native Firebase on Android / iOS
+  if (!kIsWeb) {
+    try {
+      await Firebase.initializeApp();
+      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+      debugPrint("🔥 [Firebase] Initialized successfully.");
+    } catch (e) {
+      debugPrint("⚠️ [Firebase] Could not initialize: $e");
+    }
+  } else {
+    debugPrint("🌐 [Firebase] Running on Web - skipping native Firebase setup.");
   }
 
   await EmergencyAlertService().initialize();

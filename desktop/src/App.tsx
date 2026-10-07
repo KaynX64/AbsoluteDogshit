@@ -660,6 +660,7 @@ export default function App() {
             <DoctorConsole
               viewMode={doctorViewMode}
               onViewModeChange={setDoctorViewMode}
+              currentRole={activeRoleView}
             />
           )}
           {activeRoleView === 'ADMIN' && (

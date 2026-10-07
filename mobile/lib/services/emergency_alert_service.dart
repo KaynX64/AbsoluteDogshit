@@ -151,8 +151,10 @@ class EmergencyAlertService {
     await connectSocket();
   }
 
+
   // --- FIREBASE CLOUD MESSAGING (FCM) TOKEN REGISTRATION ---
   Future<void> syncFcmTokenWithBackend() async {
+      if (kIsWeb) return; // Skip FCM token registration on Web
     try {
       final messaging = FirebaseMessaging.instance;
       
@@ -163,6 +165,7 @@ class EmergencyAlertService {
       );
 
       String? token = await messaging.getToken();
+
 
       if (token != null && token.isNotEmpty) {
         final jwt = await _storage.read(key: 'jwt_token');
