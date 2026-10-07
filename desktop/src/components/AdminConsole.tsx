@@ -50,7 +50,9 @@ export default function AdminConsole({
   const [isSavingUser, setIsSavingUser] = useState(false);
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
   const [modalFeedback, setModalFeedback] = useState<{ text: string; isError: boolean } | null>(null);
-
+// ── Admin Vaccination History State ──────────────────────────────────────────
+  const [adminUserVaccines, setAdminUserVaccines] = useState<string[]>([]);
+  const [adminNewVaccine, setAdminNewVaccine] = useState('');
   /* Database Studio state */
   const [dbTablesList, setDbTablesList] = useState<any[]>([]);
   const [selectedDbTable, setSelectedDbTable] = useState<string>('USERS');
@@ -242,8 +244,33 @@ export default function AdminConsole({
     });
     setAdminPasswordInput('');
     setModalFeedback(null);
+    fetchUserVaccinesForAdmin(u.id);
+  };
+const fetchUserVaccinesForAdmin = async (userId: number) => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/profile/patient/${userId}/immunizations`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAdminUserVaccines(data.immunizations || []);
+      }
+    } catch (_) {
+      setAdminUserVaccines([]);
+    }
   };
 
+  const handleAdminAddVaccine = (vacName: string) => {
+    const trimmed = vacName.trim();
+    if (!trimmed || adminUserVaccines.includes(trimmed)) return;
+    setAdminUserVaccines([...adminUserVaccines, trimmed]);
+    setAdminNewVaccine('');
+  };
+
+  const handleAdminRemoveVaccine = (vacName: string) => {
+    setAdminUserVaccines(adminUserVaccines.filter((v) => v !== vacName));
+  };
   const handleSaveUserProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
@@ -273,6 +300,12 @@ export default function AdminConsole({
       const data = await res.json();
       if (res.ok) {
         setModalFeedback({ text: '✅ ' + data.message, isError: false });
+        // Save updated immunization history
+     await fetch(`${API_BASE_URL}/api/profile/patient/${editingUser.id}/immunizations`, {
+       method: 'PUT',
+       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+       body: JSON.stringify({ immunizations: adminUserVaccines }),
+     });
         fetchUsers();
         setTimeout(() => setEditingUser(null), 1200);
       } else {
@@ -1796,6 +1829,83 @@ export default function AdminConsole({
                   )}
 
                   {/* Admin password override panel */}
+                  {/* 💉 SECTION: VACCINATION / IMMUNIZATION RECORDS */}
+                  <div style={{
+                    background: '#F0FDFA',
+                    padding: 16,
+                    borderRadius: T.radius.md,
+                    border: '1px solid #99F6E4',
+                    marginBottom: 16,
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <span style={{ fontSize: 13, fontWeight: 800, color: '#0F766E' }}>
+                        💉 Vaccination & Immunization History
+                      </span>
+                      <span style={{ fontSize: 11.5, color: '#475569', fontWeight: 600 }}>
+                        {adminUserVaccines.length} vaccine(s) on file
+                      </span>
+                    </div>
+
+                    {/* Badges List */}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                      {adminUserVaccines.length === 0 ? (
+                        <span style={{ fontSize: 12, color: '#64748B', fontStyle: 'italic' }}>
+                          No immunization records on file. Type a vaccine below to add.
+                        </span>
+                      ) : (
+                        adminUserVaccines.map((v) => (
+                          <span
+                            key={v}
+                            style={{
+                              padding: '4px 12px',
+                              borderRadius: 20,
+                              background: '#CCFBF1',
+                              color: '#0F766E',
+                              fontSize: 11.5,
+                              fontWeight: 700,
+                              border: '1px solid #99F6E4',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                            }}
+                          >
+                            ✓ {v}
+                            <button
+                              type="button"
+                              onClick={() => handleAdminRemoveVaccine(v)}
+                              style={{ background: 'none', border: 'none', color: '#DC2626', cursor: 'pointer', fontWeight: 900, padding: 0, fontSize: 12 }}
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ))
+                      )}
+                    </div>
+
+                    {/* Add Input */}
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input
+                        type="text"
+                        placeholder="Add vaccine (e.g. Hepatitis B, COVID-19 Booster, Anti-Rabies)..."
+                        value={adminNewVaccine}
+                        onChange={(e) => setAdminNewVaccine(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAdminAddVaccine(adminNewVaccine);
+                          }
+                        }}
+                        style={{ ...inputStyle, flex: 1, padding: '7px 12px', fontSize: 12.5 }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleAdminAddVaccine(adminNewVaccine)}
+                        style={{ ...btnGhost, padding: '7px 16px', fontSize: 12.5, fontWeight: 700, color: '#0F766E', borderColor: '#99F6E4' }}
+                      >
+                        + Add Vaccine
+                      </button>
+                    </div>
+                  </div>
                   <div style={{
                     marginTop: 20,
                     padding: '18px 20px',
