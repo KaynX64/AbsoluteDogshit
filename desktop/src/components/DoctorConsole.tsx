@@ -57,6 +57,23 @@ const STATUS_STYLE = (status: string) => {
   }
 };
 
+/* Quick-add catalogue — the twelve most common vaccines on a Philippine
+   university campus. Doctors can still type anything else in the field below. */
+const COMMON_VACCINES = [
+  'COVID-19 Primary Series',
+  'COVID-19 Booster',
+  'Influenza (Flu) 2026',
+  'Hepatitis B',
+  'Tetanus Toxoid',
+  'Measles-Mumps-Rubella (MMR)',
+  'Varicella (Chickenpox)',
+  'HPV',
+  'Pneumococcal',
+  'Rabies (Post-exposure)',
+  'Meningococcal',
+  'Typhoid',
+];
+
 export default function DoctorConsole({
   viewMode: controlledView,
   onViewModeChange,
@@ -68,7 +85,7 @@ export default function DoctorConsole({
   const [selectedApp, setSelectedApp] = useState<AppointmentItem | null>(null);
   const [loadingAppointments, setLoadingAppointments] = useState(false);
 
-  /* ── Form fields (unchanged) ─────────────────────────────────── */
+  /* ── Form fields ─────────────────────────────────────────────── */
   const [chiefComplaint, setChiefComplaint] = useState('');
   const [diagnosis, setDiagnosis] = useState('');
   const [treatmentPlan, setTreatmentPlan] = useState('');
@@ -113,7 +130,7 @@ export default function DoctorConsole({
     return d.toISOString().split('T')[0];
   });
 
-  /* ── History & archive state (unchanged) ─────────────────────── */
+  /* ── History & archive state ─────────────────────────────────── */
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [patientHistory, setPatientHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -124,7 +141,16 @@ export default function DoctorConsole({
   const [directoryTimeline, setDirectoryTimeline] = useState<any[]>([]);
   const [loadingTimeline, setLoadingTimeline] = useState(false);
 
-  /* ── Data fetchers (identical) ───────────────────────────────── */
+  /* ── Immunization modal state ────────────────────────────────── */
+  const [showImmunizationModal, setShowImmunizationModal] = useState(false);
+  const [patientImmunizations, setPatientImmunizations] = useState<string[]>([]);
+  const [newImmunizations, setNewImmunizations] = useState<string[]>([]);
+  const [loadingImmunizations, setLoadingImmunizations] = useState(false);
+  const [savingImmunizations, setSavingImmunizations] = useState(false);
+  const [customImmunizationInput, setCustomImmunizationInput] = useState('');
+  const [immunizationFeedback, setImmunizationFeedback] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  /* ── Data fetchers ───────────────────────────────────────────── */
   const fetchAppointments = async (mode = viewMode, retainSelection = true) => {
     if (mode === 'analytics') return;
     setLoadingAppointments(true);
@@ -423,6 +449,109 @@ export default function DoctorConsole({
       if (res.ok) setDirectoryTimeline(await res.json());
     } catch (err) { console.error('Failed to load patient timeline:', err); }
     finally { setLoadingTimeline(false); }
+  };
+
+  /* ── Immunization handlers ───────────────────────────────────── */
+  const openImmunizationModal = async () => {
+    if (!selectedApp) return;
+    setShowImmunizationModal(true);
+    setPatientImmunizations([]);
+    setNewImmunizations([]);
+    setCustomImmunizationInput('');
+    setImmunizationFeedback(null);
+    setLoadingImmunizations(true);
+
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/profile/${selectedApp.patient_id}/immunizations`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPatientImmunizations(Array.isArray(data.immunizations) ? data.immunizations : []);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setImmunizationFeedback({
+          text: '❌ ' + (err.error || 'Failed to load immunization records.'),
+          type: 'error',
+        });
+      }
+    } catch (err: any) {
+      setImmunizationFeedback({ text: '❌ Network error: ' + err.message, type: 'error' });
+    } finally {
+      setLoadingImmunizations(false);
+    }
+  };
+
+  const closeImmunizationModal = () => {
+    setShowImmunizationModal(false);
+    setPatientImmunizations([]);
+    setNewImmunizations([]);
+    setCustomImmunizationInput('');
+    setImmunizationFeedback(null);
+  };
+
+  const handleQuickAddImmunization = (name: string) => {
+    const lower = name.toLowerCase();
+    if (
+      patientImmunizations.some((p) => p.toLowerCase() === lower) ||
+      newImmunizations.some((p) => p.toLowerCase() === lower)
+    ) {
+      return;
+    }
+    setNewImmunizations((prev) => [...prev, name]);
+    setImmunizationFeedback(null);
+  };
+
+  const handleAddCustomImmunization = () => {
+    const trimmed = customImmunizationInput.trim();
+    if (!trimmed) return;
+
+    const lower = trimmed.toLowerCase();
+    if (
+      patientImmunizations.some((p) => p.toLowerCase() === lower) ||
+      newImmunizations.some((p) => p.toLowerCase() === lower)
+    ) {
+      setImmunizationFeedback({
+        text: '⚠️ That immunization is already on record or already queued for this visit.',
+        type: 'error',
+      });
+      return;
+    }
+
+    setNewImmunizations((prev) => [...prev, trimmed]);
+    setCustomImmunizationInput('');
+    setImmunizationFeedback(null);
+  };
+
+  const handleRemoveNewImmunization = (idx: number) => {
+    setNewImmunizations((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleSaveImmunizations = async () => {
+    if (!selectedApp || newImmunizations.length === 0) return;
+    setSavingImmunizations(true);
+    setImmunizationFeedback(null);
+    const token = localStorage.getItem('valetudo_token');
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/profile/${selectedApp.patient_id}/immunizations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ immunizations: newImmunizations }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save immunization records.');
+
+      setPatientImmunizations(Array.isArray(data.immunizations) ? data.immunizations : []);
+      setNewImmunizations([]);
+      setImmunizationFeedback({ text: '✅ ' + data.message, type: 'success' });
+      setFeedbackMsg({ text: `💉 ${data.message}`, type: 'success' });
+    } catch (err: any) {
+      setImmunizationFeedback({ text: '❌ ' + err.message, type: 'error' });
+    } finally {
+      setSavingImmunizations(false);
+    }
   };
 
   const handlePrintClearance = async () => {
@@ -907,6 +1036,15 @@ export default function DoctorConsole({
                   style={{ ...btnGhost, color: T.info, borderColor: T.infoBorder }}
                 >
                   📜 Past EMR history
+                </button>
+
+                <button
+                  type="button"
+                  onClick={openImmunizationModal}
+                  style={{ ...btnGhost, color: T.primary, borderColor: T.primaryTint }}
+                  title="View and append immunization records"
+                >
+                  💉 Immunizations
                 </button>
 
                 {selectedApp.status === 'completed' ? (
@@ -1572,6 +1710,359 @@ export default function DoctorConsole({
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* IMMUNIZATIONS MODAL                                         */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {showImmunizationModal && selectedApp && (
+        <div className="modal-backdrop" onClick={closeImmunizationModal}>
+          <div
+            className="modal-card"
+            style={{ maxWidth: 660, padding: 0, overflow: 'hidden' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div
+              style={{
+                padding: '22px 26px 18px',
+                borderBottom: `1px solid ${T.border}`,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: 12,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                <div
+                  style={{
+                    width: 42,
+                    height: 42,
+                    borderRadius: T.radius.md,
+                    background: T.primaryTint,
+                    display: 'grid',
+                    placeItems: 'center',
+                    fontSize: 20,
+                    flexShrink: 0,
+                  }}
+                >
+                  💉
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: T.text }}>
+                    Immunization records
+                  </h3>
+                  <p style={{ margin: '3px 0 0', fontSize: 12.5, color: T.textSub }}>
+                    {selectedApp.first_name} {selectedApp.last_name} ·{' '}
+                    {selectedApp.student_no || 'PSU Member'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeImmunizationModal}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: 20,
+                  cursor: 'pointer',
+                  color: T.textSub,
+                  lineHeight: 1,
+                  padding: 4,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '20px 26px', maxHeight: '66vh', overflowY: 'auto' }}>
+              {/* Currently on record */}
+              <div style={{ marginBottom: 22 }}>
+                <div
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 800,
+                    letterSpacing: 1.4,
+                    color: T.textMuted,
+                    textTransform: 'uppercase',
+                    marginBottom: 10,
+                  }}
+                >
+                  Currently on record ({patientImmunizations.length})
+                </div>
+
+                {loadingImmunizations ? (
+                  <div style={{ fontSize: 13, color: T.textMuted, padding: '12px 0' }}>
+                    Loading records…
+                  </div>
+                ) : patientImmunizations.length === 0 ? (
+                  <div
+                    style={{
+                      padding: '14px 18px',
+                      background: T.sage50,
+                      border: `1px dashed ${T.border}`,
+                      borderRadius: T.radius.md,
+                      fontSize: 12.5,
+                      color: T.textMuted,
+                      fontStyle: 'italic',
+                    }}
+                  >
+                    No immunization records yet. Add the first one below.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {patientImmunizations.map((imm, idx) => (
+                      <span
+                        key={idx}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          padding: '6px 12px',
+                          background: T.successSoft,
+                          color: T.success,
+                          border: `1px solid ${T.successBorder}`,
+                          borderRadius: T.radius.pill,
+                          fontSize: 12,
+                          fontWeight: 700,
+                        }}
+                      >
+                        ✓ {imm}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Quick-add */}
+              <div style={{ marginBottom: 22 }}>
+                <div
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 800,
+                    letterSpacing: 1.4,
+                    color: T.textMuted,
+                    textTransform: 'uppercase',
+                    marginBottom: 10,
+                  }}
+                >
+                  Quick-add common vaccines
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {COMMON_VACCINES.map((v) => {
+                    const lower = v.toLowerCase();
+                    const disabled =
+                      patientImmunizations.some((p) => p.toLowerCase() === lower) ||
+                      newImmunizations.some((p) => p.toLowerCase() === lower);
+                    return (
+                      <button
+                        key={v}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => handleQuickAddImmunization(v)}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: T.radius.pill,
+                          border: `1px solid ${disabled ? T.borderSoft : T.border}`,
+                          background: disabled ? T.sage50 : T.surface,
+                          color: disabled ? T.textFaint : T.text,
+                          fontSize: 11.5,
+                          fontWeight: 600,
+                          cursor: disabled ? 'not-allowed' : 'pointer',
+                          fontFamily: T.font,
+                          transition: 'all 120ms ease',
+                        }}
+                      >
+                        + {v}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Custom input */}
+              <div style={{ marginBottom: 22 }}>
+                <div
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 800,
+                    letterSpacing: 1.4,
+                    color: T.textMuted,
+                    textTransform: 'uppercase',
+                    marginBottom: 10,
+                  }}
+                >
+                  Or type a custom entry
+                </div>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleAddCustomImmunization();
+                  }}
+                  style={{ display: 'flex', gap: 8 }}
+                >
+                  <input
+                    style={{ ...inputStyle, flex: 1 }}
+                    placeholder="e.g. Anti-rabies dose 2 of 3"
+                    value={customImmunizationInput}
+                    onChange={(e) => setCustomImmunizationInput(e.target.value)}
+                    maxLength={120}
+                  />
+                  <button
+                    type="submit"
+                    disabled={!customImmunizationInput.trim()}
+                    style={{
+                      ...btnPrimary,
+                      padding: '10px 20px',
+                      opacity: customImmunizationInput.trim() ? 1 : 0.5,
+                      cursor: customImmunizationInput.trim() ? 'pointer' : 'not-allowed',
+                    }}
+                  >
+                    Add
+                  </button>
+                </form>
+              </div>
+
+              {/* Pending additions */}
+              {newImmunizations.length > 0 && (
+                <div
+                  style={{
+                    padding: 16,
+                    background: T.primaryTint,
+                    borderRadius: T.radius.md,
+                    border: `1px solid ${T.sage300}`,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 10.5,
+                      fontWeight: 800,
+                      letterSpacing: 1.4,
+                      color: T.primary,
+                      textTransform: 'uppercase',
+                      marginBottom: 10,
+                    }}
+                  >
+                    Pending additions ({newImmunizations.length})
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {newImmunizations.map((imm, idx) => (
+                      <span
+                        key={idx}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '6px 8px 6px 12px',
+                          background: T.surface,
+                          color: T.primary,
+                          border: `1px solid ${T.sage300}`,
+                          borderRadius: T.radius.pill,
+                          fontSize: 12,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {imm}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveNewImmunization(idx)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: T.textSub,
+                            fontSize: 13,
+                            lineHeight: 1,
+                            padding: 0,
+                            width: 16,
+                            height: 16,
+                            display: 'grid',
+                            placeItems: 'center',
+                            borderRadius: '50%',
+                            fontFamily: T.font,
+                          }}
+                          title="Remove"
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {immunizationFeedback && (
+                <div
+                  style={{
+                    marginTop: 16,
+                    padding: '12px 16px',
+                    borderRadius: T.radius.md,
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    background:
+                      immunizationFeedback.type === 'success' ? T.successSoft : T.dangerSoft,
+                    color:
+                      immunizationFeedback.type === 'success' ? T.success : T.danger,
+                    border: `1px solid ${
+                      immunizationFeedback.type === 'success'
+                        ? T.successBorder
+                        : T.dangerBorder
+                    }`,
+                  }}
+                >
+                  {immunizationFeedback.text}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div
+              style={{
+                padding: '16px 26px',
+                borderTop: `1px solid ${T.border}`,
+                background: T.sage50,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 12,
+                flexWrap: 'wrap',
+              }}
+            >
+              <p style={{ margin: 0, fontSize: 11.5, color: T.textMuted, fontStyle: 'italic' }}>
+                Records are appended — existing entries are preserved.
+              </p>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={closeImmunizationModal}
+                  style={btnGhost}
+                  disabled={savingImmunizations}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveImmunizations}
+                  disabled={savingImmunizations || newImmunizations.length === 0}
+                  style={{
+                    ...btnPrimary,
+                    opacity:
+                      savingImmunizations || newImmunizations.length === 0 ? 0.5 : 1,
+                    cursor:
+                      savingImmunizations || newImmunizations.length === 0
+                        ? 'not-allowed'
+                        : 'pointer',
+                  }}
+                >
+                  {savingImmunizations
+                    ? 'Saving…'
+                    : `Save ${newImmunizations.length} new record${newImmunizations.length === 1 ? '' : 's'}`}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

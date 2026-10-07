@@ -4,10 +4,72 @@ import jwt from 'jsonwebtoken';
 import { pool } from './db.js';
 import { logAudit } from './utils/auditLogger.js';
 import { JWT_SECRET } from './utils/secrets.js';
+import { redis, isRedisActive } from './utils/redisClient.js';
+import { LOGIN_LIMIT } from './config/limits.js';
 
 // S-09: Pre-computed dummy hash to prevent user-enumeration timing attacks
 const DUMMY_HASH = bcrypt.hashSync('timing-equalizer', 10);
 
+// ─────────────────────────────────────────────────────────────────────────
+// RATE LIMITING (brute-force protection on the login endpoint)
+// Values come from server/src/config/limits.js
+// ─────────────────────────────────────────────────────────────────────────
+function loginRateLimitKey(ip) {
+  return `ratelimit:login:${ip}`;
+}
+
+export async function loginRateLimit(req, res, next) {
+  // If the cache layer is unavailable, skip the guard entirely
+  if (!isRedisActive()) return next();
+
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  const key = loginRateLimitKey(ip);
+
+  try {
+    const count = await redis.incr(key);
+
+    // First hit in this window — start the TTL clock
+    if (count === 1) {
+      await redis.expire(key, LOGIN_LIMIT.windowSeconds);
+    }
+
+    if (count > LOGIN_LIMIT.maxAttempts) {
+      const ttl = await redis.ttl(key);
+      const minutesLeft = Math.max(
+        1,
+        Math.ceil((ttl > 0 ? ttl : LOGIN_LIMIT.windowSeconds) / 60)
+      );
+
+      res.setHeader('Retry-After', String(ttl > 0 ? ttl : LOGIN_LIMIT.windowSeconds));
+      return res.status(429).json({
+        error: `Too many login attempts. Please wait ${minutesLeft} minute(s) before trying again.`,
+      });
+    }
+
+    res.setHeader(
+      'X-RateLimit-Remaining',
+      String(Math.max(0, LOGIN_LIMIT.maxAttempts - count))
+    );
+    next();
+  } catch (err) {
+    // If Redis throws mid-request, don't block a legitimate login
+    console.error('[Rate Limit Error]:', err.message);
+    next();
+  }
+}
+
+// Clears the IP's attempt counter after a successful login so that
+// someone who mistyped a few passwords and finally got in starts fresh.
+async function clearLoginAttempts(ip) {
+  if (!isRedisActive()) return;
+  try {
+    await redis.del(loginRateLimitKey(ip));
+  } catch (_) {}
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// LOGIN
+// ─────────────────────────────────────────────────────────────────────────
 export async function loginUser(req, res) {
   const { email, password } = req.body;
 
@@ -16,13 +78,11 @@ export async function loginUser(req, res) {
   }
 
   try {
-    // 1. Fetch user by email (only active, non-deleted accounts)
     const [users] = await pool.query(
       'SELECT * FROM USERS WHERE email = ? AND is_active = TRUE AND deleted_at IS NULL',
       [email]
     );
 
-    // S-09: If user not found, perform dummy bcrypt compare so timing is identical
     if (users.length === 0) {
       await bcrypt.compare(password, DUMMY_HASH);
       return res.status(401).json({ error: 'Invalid credentials.' });
@@ -30,14 +90,12 @@ export async function loginUser(req, res) {
 
     const user = users[0];
 
-    // 2. Validate Password strictly against bcrypt hash (Backdoor removed for S-09)
     const isMatch = await bcrypt.compare(password, user.password_hash);
 
     if (!isMatch) {
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
 
-    // 3. Fetch user's assigned roles from M:N tables
     const [roles] = await pool.query(
       `SELECT r.code, r.name 
        FROM ROLES r 
@@ -48,7 +106,6 @@ export async function loginUser(req, res) {
 
     const roleCodes = roles.map((r) => r.code);
 
-    // 4. Sign JWT Token
     const token = jwt.sign(
       {
         user_id: user.user_id,
@@ -59,7 +116,6 @@ export async function loginUser(req, res) {
       { expiresIn: '24h' }
     );
 
-    // 5. R.A. 10173: Log authentication event to append-only audit trail
     const connection = await pool.getConnection();
     try {
       await logAudit(connection, {
@@ -76,6 +132,9 @@ export async function loginUser(req, res) {
     } finally {
       connection.release();
     }
+
+    // Successful login — reset the rate-limit counter for this IP
+    await clearLoginAttempts(req.ip || req.socket?.remoteAddress || 'unknown');
 
     return res.json({
       message: 'Login successful',
@@ -94,10 +153,12 @@ export async function loginUser(req, res) {
   }
 }
 
-// Middleware to verify JWT token
+// ─────────────────────────────────────────────────────────────────────────
+// TOKEN MIDDLEWARE
+// ─────────────────────────────────────────────────────────────────────────
 export function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Format: Bearer <token>
+  const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
     return res.status(401).json({ error: 'Access token required.' });
@@ -110,7 +171,9 @@ export function authenticateToken(req, res, next) {
   });
 }
 
-// Handler for user password changes
+// ─────────────────────────────────────────────────────────────────────────
+// CHANGE PASSWORD
+// ─────────────────────────────────────────────────────────────────────────
 export async function changePassword(req, res) {
   const userId = req.user.user_id;
   const { currentPassword, newPassword } = req.body;
@@ -135,7 +198,6 @@ export async function changePassword(req, res) {
 
     const user = users[0];
 
-    // Verify current password
     const isMatch =
       (await bcrypt.compare(currentPassword, user.password_hash)) ||
       (user.password_hash === SEED_DEFAULT_HASH && currentPassword === 'Password123!');
@@ -144,11 +206,9 @@ export async function changePassword(req, res) {
       return res.status(400).json({ error: 'Incorrect current password.' });
     }
 
-    // Generate new bcrypt hash
     const newHash = await bcrypt.hash(newPassword, 10);
     await pool.query('UPDATE USERS SET password_hash = ? WHERE user_id = ?', [newHash, userId]);
 
-    // R.A. 10173 Audit logging
     const connection = await pool.getConnection();
     try {
       await logAudit(connection, {

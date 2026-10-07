@@ -1,6 +1,7 @@
 // desktop/src/components/AdminConsole.tsx
 import React, { useState, useEffect } from 'react';
 import AnalyticsDashboard from './AnalyticsDashboard';
+import CreateUserModal from './CreateUserModal';
 import { T, rolePill, inputStyle, btnPrimary, btnGhost } from '../theme';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
 
@@ -47,6 +48,7 @@ export default function AdminConsole({
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [editingUser, setEditingUser] = useState<any | null>(null);
+  const [showCreateUserModal, setShowCreateUserModal] = useState(false);
   const [isSavingUser, setIsSavingUser] = useState(false);
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
   const [modalFeedback, setModalFeedback] = useState<{ text: string; isError: boolean } | null>(null);
@@ -556,6 +558,31 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
               <span style={{ fontSize: 12.5, color: T.textSub }}>
                 {activeUsersCount} active · {suspendedUsersCount} suspended
               </span>
+              <button
+                type="button"
+                onClick={() => setShowCreateUserModal(true)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '8px 16px',
+                  borderRadius: T.radius.pill,
+                  background: T.primary,
+                  color: '#FFFFFF',
+                  border: 'none',
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  fontFamily: T.font,
+                  boxShadow: '0 4px 12px rgba(31,74,52,0.18)',
+                  transition: 'background 120ms ease',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = T.primaryDark)}
+                onMouseLeave={(e) => (e.currentTarget.style.background = T.primary)}
+              >
+                <span style={{ fontSize: 14, lineHeight: 1 }}>＋</span>
+                Add account
+              </button>
             </div>
           </div>
 
@@ -714,8 +741,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           </p>
         </div>
       )}
-
-      {/* ═══════════════════════════════════════════════════════════ */}
+            {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: AUDIT                                                */}
       {/* ═══════════════════════════════════════════════════════════ */}
       {activeTab === 'audit' && (
@@ -1535,6 +1561,15 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           </p>
         </div>
       )}
+
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* MODAL: CREATE USER ACCOUNT                                 */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      <CreateUserModal
+        isOpen={showCreateUserModal}
+        onClose={() => setShowCreateUserModal(false)}
+        onCreated={fetchUsers}
+      />
 
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* MODAL: DB ROW INSERT / EDIT                                */}

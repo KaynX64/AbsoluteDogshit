@@ -12,6 +12,8 @@ import '../config/api_config.dart';
 import '../widgets/session_timeout_listener.dart';
 import '../widgets/valetudo_logo.dart';
 import '../services/emergency_alert_service.dart';
+import '../services/offline_sos_service.dart';
+import '../services/connectivity_service.dart';
 import 'login_screen.dart';
 import 'edit_profile_screen.dart';
 import 'consultation_scheduler_screen.dart';
@@ -64,6 +66,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     _fetchActiveQueueTicket();
     _initQueueSocket();
 
+    // Listen for connectivity changes — replays queued SOS when back online
+    ConnectivityService().addListener(_onConnectivityChanged);
+
     _queuePollingTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) => _fetchActiveQueueTicket(silent: true),
@@ -72,11 +77,68 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
 
   @override
   void dispose() {
+    ConnectivityService().removeListener(_onConnectivityChanged);
     _queuePollingTimer?.cancel();
     _holdTimer?.cancel();
     _holdProgressNotifier.dispose();
     _socket?.disconnect();
     super.dispose();
+  }
+
+  // ===========================================================================
+  // CONNECTIVITY LISTENER + OFFLINE SOS REPLAY
+  // ===========================================================================
+
+  void _onConnectivityChanged() {
+    if (ConnectivityService().isOnline) {
+      _replayQueuedSosEvents();
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _replayQueuedSosEvents() async {
+    final pending = await OfflineSosService().pendingSosEvents();
+    if (pending.isEmpty) return;
+
+    final token = await _storage.read(key: 'jwt_token');
+    if (token == null) return;
+
+    final List<Map<String, dynamic>> stillFailing = [];
+
+    for (final event in pending) {
+      try {
+        final res = await ApiConfig.client.post(
+          Uri.parse('${ApiConfig.baseUrl}/api/emergency/sos'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+          body: jsonEncode({
+            'latitude': event['latitude'],
+            'longitude': event['longitude'],
+            'notes': event['notes'],
+          }),
+        );
+
+        // 5xx = server error, retry later. 4xx = bad request, drop it.
+        if (res.statusCode >= 500) {
+          stillFailing.add(event);
+        }
+      } catch (_) {
+        stillFailing.add(event);
+      }
+    }
+
+    await OfflineSosService().savePendingQueue(stillFailing);
+
+    if (stillFailing.isEmpty && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ Queued SOS alert delivered to campus responders.'),
+          backgroundColor: Color(0xFF15803D),
+        ),
+      );
+    }
   }
 
   // ===========================================================================
@@ -353,7 +415,23 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         headers: {'Authorization': 'Bearer $token'},
       );
       if (res.statusCode == 200) {
-        setState(() => _profileData = jsonDecode(res.body));
+        final decoded = jsonDecode(res.body);
+        setState(() => _profileData = decoded);
+
+        // Cache emergency info locally for offline SOS fallback
+        try {
+          final hp = decoded['healthProfile'] ?? {};
+          if (hp['emergency_contact_name'] != null &&
+              hp['emergency_contact_phone'] != null) {
+            await OfflineSosService().cacheEmergencyInfo(
+              contactName: hp['emergency_contact_name'],
+              contactPhone: hp['emergency_contact_phone'],
+              bloodType: hp['blood_type'],
+              allergies: hp['allergies'],
+              chronicConditions: hp['chronic_conditions'],
+            );
+          }
+        } catch (_) {}
       }
     } catch (_) {}
     if (mounted) setState(() => _loadingProfile = false);
@@ -444,6 +522,29 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
       Position position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
       );
+
+      // ── Offline branch ────────────────────────────────────────
+      // If we have no network, queue the event locally and prompt
+      // the user to make a direct native call instead.
+      if (!ConnectivityService().isOnline) {
+        await OfflineSosService().queueOfflineSos(
+          latitude: position.latitude,
+          longitude: position.longitude,
+          notes: 'Offline SOS triggered via mobile panic button',
+        );
+
+        if (mounted) {
+          setState(() {
+            _sosStatusMessage =
+                'OFFLINE: SOS queued. Use the call buttons above to contact help now.';
+          });
+        }
+
+        // Best-effort: open the native dialer to 911
+        await OfflineSosService().dialNumber('911');
+        if (mounted) setState(() => _isDispatchingSOS = false);
+        return;
+      }
 
       setState(() => _sosStatusMessage = 'Broadcasting alert to clinic responders...');
 
@@ -632,8 +733,44 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
             ),
           ),
         ),
-        body: tabs[_currentIndex],
+        body: Column(
+          children: [
+            if (!ConnectivityService().isOnline) _buildOfflineBanner(),
+            Expanded(child: tabs[_currentIndex]),
+          ],
+        ),
         bottomNavigationBar: _buildCustomBottomNav(),
+      ),
+    );
+  }
+
+  // Offline banner shown at the very top of the screen when the OS reports
+  // no network connectivity. SOS still works through the native dialer.
+  Widget _buildOfflineBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: const BoxDecoration(
+        color: Color(0xFFFDE8E8),
+        border: Border(
+          bottom: BorderSide(color: Color(0xFFF8B4B4), width: 1),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.wifi_off_rounded, size: 16, color: Color(0xFF7A2E26)),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text(
+              'Offline · Last synced data shown. SOS still works via call.',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF7A2E26),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -797,7 +934,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   // ===========================================================================
-  // 6. TAB 0: OVERVIEW (QR CODE ISOLATED WITH REPAINTBOUNDARY)
+  // 6. TAB 0: OVERVIEW
   // ===========================================================================
 
   Widget _buildOverviewTab(String firstName) {
@@ -1337,7 +1474,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   // ===========================================================================
-  // 7. TAB 2: EMERGENCY SOS (FIGMA CONCENTRIC CIRCLE DESIGN)
+  // 7. TAB 2: EMERGENCY SOS (WITH OFFLINE FALLBACK)
   // ===========================================================================
 
   Widget _buildSOSTab() {
@@ -1354,6 +1491,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     const activeHalo = Color(0xFFF4C8C1);
     const inactiveCircle = Color(0xFFBFA298);
     const inactiveHalo = Color(0xFFE8D8CF);
+
+    final isOffline = !ConnectivityService().isOnline;
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -1382,6 +1521,68 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
               ),
             ),
             const SizedBox(height: 18),
+
+            // ── OFFLINE NOTICE + DIRECT CALL BUTTONS ────────────────
+            if (isOffline) ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFDE8E8),
+                  border: Border.all(color: const Color(0xFFF8B4B4)),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.wifi_off_rounded, color: Color(0xFF7A2E26), size: 20),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'You are currently offline',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF7A2E26),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      "In-app SOS can't reach the campus server without internet. But these buttons work with no data connection:",
+                      style: TextStyle(fontSize: 12.5, color: Color(0xFF7A2E26), height: 1.4),
+                    ),
+                    const SizedBox(height: 14),
+                    _buildOfflineCallButton('📞  Call 911', '911'),
+                    const SizedBox(height: 8),
+                    FutureBuilder<Map<String, dynamic>?>(
+                      future: OfflineSosService().readCachedEmergencyInfo(),
+                      builder: (ctx, snap) {
+                        final info = snap.data;
+                        final name = info?['contact_name'] ?? 'Emergency contact';
+                        final phone = info?['contact_phone'];
+                        if (phone == null) return const SizedBox.shrink();
+                        return Column(
+                          children: [
+                            _buildOfflineCallButton('📞  Call $name', phone),
+                            const SizedBox(height: 8),
+                            _buildOfflineSmsButton(
+                              name,
+                              phone,
+                              'EMERGENCY: I need help. This is an automated alert from Valetudo HealthLink.',
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
 
             // Main Peach SOS Card
             Container(
@@ -1668,6 +1869,47 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     );
   }
 
+  // ── Offline SOS helper buttons ────────────────────────────────
+
+  Widget _buildOfflineCallButton(String label, String number) {
+    return SizedBox(
+      width: double.infinity,
+      height: 48,
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF7A2E26),
+          foregroundColor: Colors.white,
+          shape: const StadiumBorder(),
+          elevation: 0,
+        ),
+        onPressed: () => OfflineSosService().dialNumber(number),
+        child: Text(
+          label,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOfflineSmsButton(String recipientLabel, String phone, String body) {
+    return SizedBox(
+      width: double.infinity,
+      height: 44,
+      child: OutlinedButton(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFF7A2E26),
+          side: const BorderSide(color: Color(0xFF7A2E26)),
+          shape: const StadiumBorder(),
+        ),
+        onPressed: () => OfflineSosService().composeEmergencySms(phone, body: body),
+        child: Text(
+          '💬  Text $recipientLabel',
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+        ),
+      ),
+    );
+  }
+
   // ===========================================================================
   // 8. TAB 4: PROFILE
   // ===========================================================================
@@ -1880,7 +2122,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                   ],
                 ),
                 const SizedBox(height: 14),
-                // ▼ NEW: freshness line showing when a nurse/doctor last verified these
                 Row(
                   children: [
                     const Icon(Icons.update, size: 13, color: textSub),

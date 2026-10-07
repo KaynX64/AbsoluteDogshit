@@ -79,28 +79,40 @@ function createWindow() {
     win.focus();
   });
 
-  // ── DevTools Shortcut Guard ──────────────────────────────────────────────
-  // In development:  allow F12 / Ctrl+Shift+I to toggle DevTools (helpful).
-  // In production:   swallow every known DevTools shortcut.
+   // ── Keyboard shortcuts (F11 fullscreen + DevTools guard) ────────────────
   win.webContents.on('before-input-event', (event, input) => {
     const key = (input.key || '').toLowerCase();
 
+    // ── F11 → toggle fullscreen ────────────────────────────────
+    // Standard desktop behaviour: F11 enters fullscreen, F11 exits it.
+    // Also accept Ctrl+Cmd+F on macOS (the native fullscreen shortcut).
+    const isF11 = input.key === 'F11';
+    const isMacFullscreen =
+      process.platform === 'darwin' && input.control && input.meta && key === 'f';
+
+    if (isF11 || isMacFullscreen) {
+      win.setFullScreen(!win.isFullScreen());
+      event.preventDefault();
+      return;
+    }
+
+    // ── DevTools Shortcut Guard ────────────────────────────────
+    // In development: allow F12 / Ctrl+Shift+I to toggle DevTools.
+    // In production:  swallow every known DevTools shortcut.
     const isDevToolsShortcut =
-      input.key === 'F12' ||                            // Windows/Linux
-      (input.control && input.shift && key === 'i') ||  // Ctrl+Shift+I
-      (input.control && input.shift && key === 'j') ||  // Ctrl+Shift+J (console)
-      (input.control && input.shift && key === 'c') ||  // Ctrl+Shift+C (inspect)
-      (input.meta && input.alt && key === 'i') ||       // Cmd+Opt+I (macOS)
-      (input.meta && input.alt && key === 'j') ||       // Cmd+Opt+J (macOS)
-      (input.meta && input.alt && key === 'c');         // Cmd+Opt+C (macOS)
+      input.key === 'F12' ||
+      (input.control && input.shift && key === 'i') ||
+      (input.control && input.shift && key === 'j') ||
+      (input.control && input.shift && key === 'c') ||
+      (input.meta && input.alt && key === 'i') ||
+      (input.meta && input.alt && key === 'j') ||
+      (input.meta && input.alt && key === 'c');
 
     if (!isDevToolsShortcut) return;
 
     if (isDev) {
-      // Toggle DevTools normally during development
       win.webContents.toggleDevTools();
     }
-    // Always prevent the shortcut from bubbling further.
     event.preventDefault();
   });
 

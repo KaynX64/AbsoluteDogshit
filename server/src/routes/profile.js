@@ -5,6 +5,8 @@ import { authenticateToken } from '../auth.js';
 import { logAudit } from '../utils/auditLogger.js';
 import { encrypt, decrypt } from '../utils/cryptoVault.js';
 import { requirePrivacyConsent } from '../middleware/consent.js';
+import { requireRoles } from '../middleware/rbac.js';
+import { logPhiAccess } from '../utils/phiLogger.js';
 
 const router = express.Router();
 
