@@ -273,6 +273,152 @@ router.post('/users/:id/reset-password', async (req, res) => {
   }
 });
 
+// 3.3 POST /api/admin/users - Create a brand new user account
+router.post('/users', async (req, res) => {
+  const {
+    first_name,
+    last_name,
+    email,
+    phone,
+    password,
+    role_code,
+    is_active = true,
+    student_no,
+    course,
+    year_level,
+    license_no,
+    specialty,
+    department,
+    position,
+  } = req.body;
+
+  // ── Validation ────────────────────────────────────────────────
+  if (!first_name || !last_name || !email || !password || !role_code) {
+    return res.status(400).json({
+      error: 'first_name, last_name, email, password, and role_code are required.',
+    });
+  }
+
+  if (String(password).length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters long.' });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    // Email uniqueness check
+    const [existingEmail] = await connection.query(
+      'SELECT user_id FROM USERS WHERE email = ? AND deleted_at IS NULL',
+      [email.trim()]
+    );
+    if (existingEmail.length > 0) {
+      throw new Error('Email address is already in use by another account.');
+    }
+
+    // Role must exist in the RBAC table
+    const [roleRows] = await connection.query('SELECT role_id FROM ROLES WHERE code = ?', [role_code]);
+    if (roleRows.length === 0) {
+      throw new Error(`Invalid role code: ${role_code}`);
+    }
+    const roleId = roleRows[0].role_id;
+
+    // Hash the password with bcrypt
+    const passwordHash = await bcrypt.hash(String(password), 10);
+
+    // Insert core USERS identity row
+    const [insertResult] = await connection.query(
+      `INSERT INTO USERS (email, password_hash, first_name, last_name, phone, is_active)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        email.trim(),
+        passwordHash,
+        first_name.trim(),
+        last_name.trim(),
+        phone ? String(phone).trim() : null,
+        is_active ? 1 : 0,
+      ]
+    );
+    const newUserId = insertResult.insertId;
+
+    // Assign the RBAC role
+    await connection.query(
+      'INSERT INTO USER_ROLES (user_id, role_id) VALUES (?, ?)',
+      [newUserId, roleId]
+    );
+
+    // Role-specific sub-profile row
+    if (role_code === 'STUDENT') {
+      if (!student_no) {
+        throw new Error('Student number is required for STUDENT accounts.');
+      }
+      await connection.query(
+        `INSERT INTO STUDENT_PROFILES (user_id, student_no, course, year_level)
+         VALUES (?, ?, ?, ?)`,
+        [
+          newUserId,
+          String(student_no).trim(),
+          course ? String(course).trim() : 'General',
+          Number(year_level) || 1,
+        ]
+      );
+    } else if (['DOCTOR', 'DENTIST', 'NURSE', 'EMERGENCY_RESPONDER', 'ADMIN'].includes(role_code)) {
+      await connection.query(
+        `INSERT INTO STAFF_PROFILES (user_id, license_no, specialty, department)
+         VALUES (?, ?, ?, ?)`,
+        [
+          newUserId,
+          license_no ? String(license_no).trim() : null,
+          specialty ? String(specialty).trim() : null,
+          department ? String(department).trim() : 'University Infirmary',
+        ]
+      );
+    } else if (role_code === 'FACULTY') {
+      await connection.query(
+        `INSERT INTO FACULTY_PROFILES (user_id, department, position)
+         VALUES (?, ?, ?)`,
+        [
+          newUserId,
+          department ? String(department).trim() : 'Academic Affairs',
+          position ? String(position).trim() : 'Faculty Member',
+        ]
+      );
+    }
+
+    // R.A. 10173 cryptographic audit trail
+    // NOTE: never log the plaintext password
+    await logAudit(connection, {
+      userId: req.user.user_id,
+      action: 'CREATE',
+      table: 'USERS',
+      recordId: newUserId,
+      oldValue: null,
+      newValue: {
+        operation: 'ADMIN_CREATE_USER_ACCOUNT',
+        email: email.trim(),
+        first_name: first_name.trim(),
+        last_name: last_name.trim(),
+        role_code,
+        is_active: Boolean(is_active),
+      },
+      ipAddress: req.ip,
+    });
+
+    await connection.commit();
+
+    res.status(201).json({
+      message: `Account for ${first_name} ${last_name} created successfully.`,
+      userId: newUserId,
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[Admin Create User Error]:', error);
+    res.status(400).json({ error: error.message || 'Failed to create user account.' });
+  } finally {
+    connection.release();
+  }
+});
+
 // 4. GET /api/admin/audit-logs - Append-only Hash Chain
 router.get('/audit-logs', async (req, res) => {
   try {
@@ -529,6 +675,5 @@ router.delete('/db/tables/:table/rows', async (req, res) => {
     connection.release();
   }
 });
-
 
 export default router;

@@ -26,22 +26,12 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _rememberMe = true;
   String _errorMessage = '';
 
-  @override
-  void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    super.dispose();
-  }
+  // Brand palette
+  static const Color primaryGreen = Color(0xFF284E3A);
+  static const Color textSub = Color(0xFF5A635B);
+  static const Color borderColor = Color(0xFFD6DFD5);
 
   Future<void> _handleLogin() async {
-    final email = _emailController.text.trim();
-    final password = _passwordController.text.trim();
-
-    if (email.isEmpty || password.isEmpty) {
-      setState(() => _errorMessage = 'Please enter both email and password.');
-      return;
-    }
-
     setState(() {
       _isLoading = true;
       _errorMessage = '';
@@ -52,17 +42,22 @@ class _LoginScreenState extends State<LoginScreen> {
         Uri.parse('${ApiConfig.baseUrl}/api/auth/login'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'email': email,
-          'password': password,
+          'email': _emailController.text.trim(),
+          'password': _passwordController.text.trim(),
         }),
       );
 
       final data = jsonDecode(res.body);
 
       if (res.statusCode == 200) {
+        // Save BOTH token and user profile into secure storage
         await _storage.write(key: 'jwt_token', value: data['token']);
         await _storage.write(key: 'user_data', value: jsonEncode(data['user']));
-        await EmergencyAlertService().syncFcmTokenWithBackend();
+
+        // Sync device token for FCM background alerts
+        try {
+          await EmergencyAlertService().syncFcmTokenWithBackend();
+        } catch (_) {}
 
         if (!mounted) return;
 
@@ -83,9 +78,8 @@ class _LoginScreenState extends State<LoginScreen> {
         setState(() => _errorMessage = data['error'] ?? 'Login failed');
       }
     } catch (e) {
-      debugPrint('[Login Network Exception]: $e');
       if (mounted) {
-        setState(() => _errorMessage = 'Cannot reach campus server: $e');
+        setState(() => _errorMessage = 'Unable to connect. Please try again.');
       }
     } finally {
       if (mounted) {
@@ -96,10 +90,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const primaryGreen = Color(0xFF284E3A);
-    const textSub = Color(0xFF5A635B);
-    const borderColor = Color(0xFFD6DFD5);
-
     return Scaffold(
       backgroundColor: const Color(0xFFF7F9F6),
       body: SafeArea(
@@ -285,6 +275,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ],
               ),
 
+              // Error Banner & User Guidance Tip
               if (_errorMessage.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 Container(
@@ -298,6 +289,14 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Text(
                     _errorMessage,
                     style: const TextStyle(color: Color(0xFF9B1C1C), fontSize: 12.5),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 4.0),
+                  child: Text(
+                    'Tip: Ensure you are using your official @psu.edu.ph email address. If you need an account created, visit the PSU Lingayen Infirmary.',
+                    style: TextStyle(color: Color(0xFF5A635B), fontSize: 11.5),
                   ),
                 ),
               ],

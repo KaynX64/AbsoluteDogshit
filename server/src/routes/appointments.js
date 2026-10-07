@@ -9,13 +9,38 @@ import { encrypt, decrypt } from '../utils/cryptoVault.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
 import { getCache, setCache, invalidateCache } from '../utils/redisClient.js';
 import { sendAppointmentEmail } from '../utils/mailer.js';
+import {
+  APPOINTMENT_RULES,
+  CLINIC_HOURS,
+  getHourBlock,
+  addHourBlock,
+  isLunchBreak,
+  isPastSlot,
+} from '../config/appointmentRules.js';
 
 export default function appointmentRoutes(io) {
   const router = express.Router();
 
+// Shared guard: does this patient already have a live queue ticket today?
+// Used by both /:id/checkin and /walk-in to prevent duplicate tickets.
+async function findActiveQueueEntry(connection, patientUserId) {
+  const [rows] = await connection.query(
+    `SELECT q.queue_id, q.queue_number, q.status, q.appointment_id,
+            CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS ticket_no,
+            DATE_FORMAT(q.checked_in_at, '%h:%i %p') AS arrival_time
+     FROM QUEUE q
+     WHERE q.patient_user_id = ?
+       AND q.queue_date = CURDATE()
+       AND q.status IN ('waiting', 'in-consultation')
+     ORDER BY q.queue_id DESC
+     LIMIT 1`,
+    [patientUserId]
+  );
+  return rows.length > 0 ? rows[0] : null;
+}
   // Symmetric consultation buffer: a booking at HH:MM blocks
   // HH:MM-30 and HH:MM+30 as well.
-  const CONSULTATION_BUFFER_MINUTES = 30;
+  const CONSULTATION_BUFFER_MINUTES = 15;
 
   function subtractMinutes(hhmm, minutes) {
     const [h, m] = hhmm.split(':').map(Number);
@@ -60,9 +85,8 @@ export default function appointmentRoutes(io) {
   });
 
   // ===========================================================================
-  // 2. TIME SLOT AVAILABILITY (symmetric 30-minute buffer)
+  // 2. TIME SLOT AVAILABILITY (per-role, per-type capacity model)
   // ===========================================================================
-
   router.get('/slots', authenticateToken, async (req, res) => {
     const { doctorId, date } = req.query;
 
@@ -71,37 +95,141 @@ export default function appointmentRoutes(io) {
     }
 
     try {
-      const defaultSlots = [
-        '08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
-        '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30',
-      ];
+      // ── 1. Identify the doctor's role (DOCTOR vs DENTIST) ─────────────
+      const [roleRows] = await pool.query(
+        `SELECT r.code
+         FROM USERS u
+         JOIN USER_ROLES ur ON u.user_id = ur.user_id
+         JOIN ROLES r ON ur.role_id = r.role_id
+         WHERE u.user_id = ? AND r.code IN ('DOCTOR', 'DENTIST')
+         LIMIT 1`,
+        [doctorId]
+      );
+      const doctorRole = roleRows[0]?.code || 'DOCTOR';
+      const rules = APPOINTMENT_RULES[doctorRole];
 
-    const [booked] = await pool.query(
-      `SELECT DATE_FORMAT(date_time, '%H:%i') AS time_slot
-       FROM APPOINTMENTS
-       WHERE doctor_user_id = ?
-         AND DATE(date_time) = ?
-         AND status IN ('scheduled', 'checked_in', 'serving')
-         AND deleted_at IS NULL`,
-      [doctorId, date]
-    );
+      // ── 2. Fetch today's live bookings for this doctor/date ───────────
+      const [bookings] = await pool.query(
+        `SELECT DATE_FORMAT(date_time, '%H:%i') AS time_slot, appointment_type
+         FROM APPOINTMENTS
+         WHERE doctor_user_id = ?
+           AND DATE(date_time) = ?
+           AND status IN ('scheduled', 'checked_in', 'serving')
+           AND deleted_at IS NULL`,
+        [doctorId, date]
+      );
 
-      const bookedSet = new Set(booked.map((b) => b.time_slot));
+      // Group: hourBlock -> { typeName -> count }
+      const bookingsByHour = {};
+      for (const b of bookings) {
+        const hour = getHourBlock(b.time_slot);
+        if (!bookingsByHour[hour]) bookingsByHour[hour] = {};
+        bookingsByHour[hour][b.appointment_type] =
+          (bookingsByHour[hour][b.appointment_type] || 0) + 1;
+      }
+
+      // ── 3. Determine which hour blocks are "blocked" ──────────────────
+      // A block is blocked if it's full for its role rules, OR cascaded
+      // from a previous hour that was full.
+      const blockedHours = new Set();
+
+      for (const [hourBlock, typeCounts] of Object.entries(bookingsByHour)) {
+        let isFull = false;
+
+        if (rules.mode === 'exclusive-hour') {
+          const totalInHour = Object.values(typeCounts).reduce((a, b) => a + b, 0);
+          isFull = totalInHour >= rules.hourlyCapacity;
+        } else if (rules.mode === 'shared-hour') {
+          for (const typeRule of rules.appointmentTypes) {
+            const count = typeCounts[typeRule.name] || 0;
+            if (count >= typeRule.hourlyCapacity) {
+              isFull = true;
+              break;
+            }
+          }
+        }
+
+        if (isFull && rules.cascadeNextHour) {
+          const nextHour = addHourBlock(hourBlock, 1);
+          if (nextHour) blockedHours.add(nextHour);
+        }
+      }
+
+      // ── 4. Generate the day's 15-min grid and evaluate each slot ──────
+      const defaultSlots = [];
+      const [openH, openM] = CLINIC_HOURS.openTime.split(':').map(Number);
+      const [closeH, closeM] = CLINIC_HOURS.closeTime.split(':').map(Number);
+      const startMins = openH * 60 + openM;
+      const endMins = closeH * 60 + closeM;
+
+      for (let m = startMins; m < endMins; m += CLINIC_HOURS.slotMinutes) {
+        const hh = String(Math.floor(m / 60)).padStart(2, '0');
+        const mm = String(m % 60).padStart(2, '0');
+        defaultSlots.push(`${hh}:${mm}`);
+      }
 
       const slots = defaultSlots.map((time) => {
-        const prevSlot = subtractMinutes(time, CONSULTATION_BUFFER_MINUTES);
-        const nextSlot = addMinutes(time, CONSULTATION_BUFFER_MINUTES);
+        const hourBlock = getHourBlock(time);
+        const isLunch = isLunchBreak(time);
+        const isPast = isPastSlot(time, date);
+        const isCascadeBlocked = blockedHours.has(hourBlock);
 
-        const isBlockedByPrevious = prevSlot !== null && bookedSet.has(prevSlot);
-        const isBlockedByNext = nextSlot !== null && bookedSet.has(nextSlot);
+        // Build per-type availability
+        const availabilityByType = {};
+
+        if (rules.mode === 'exclusive-hour') {
+          const totalBooked = Object.values(bookingsByHour[hourBlock] || {})
+            .reduce((a, b) => a + b, 0);
+          const anyAvailable =
+            !isLunch && !isPast && !isCascadeBlocked &&
+            totalBooked < rules.hourlyCapacity;
+
+          for (const typeName of rules.appointmentTypes) {
+            availabilityByType[typeName] = {
+              booked: totalBooked,
+              capacity: rules.hourlyCapacity,
+              available: anyAvailable,
+            };
+          }
+        } else {
+          // shared-hour: per-type capacity
+          for (const typeRule of rules.appointmentTypes) {
+            const booked = (bookingsByHour[hourBlock] || {})[typeRule.name] || 0;
+            availabilityByType[typeRule.name] = {
+              booked,
+              capacity: typeRule.hourlyCapacity,
+              available:
+                !isLunch && !isPast && !isCascadeBlocked &&
+                booked < typeRule.hourlyCapacity,
+            };
+          }
+        }
+
+        const isAvailable = Object.values(availabilityByType).some((v) => v.available);
 
         return {
           time,
-          isAvailable: !bookedSet.has(time) && !isBlockedByPrevious && !isBlockedByNext,
+          hourBlock,
+          isPast,
+          isLunchBreak: isLunch,
+          isCascadeBlocked,
+          availabilityByType,
+          isAvailable, // true if at least one type can still be booked
         };
       });
 
-      res.json({ slots });
+      res.json({
+        doctorRole,
+        doctorId: Number(doctorId),
+        date,
+        rules: {
+          mode: rules.mode,
+          hourlyCapacity: rules.hourlyCapacity,
+          cascadeNextHour: rules.cascadeNextHour || false,
+          appointmentTypes: rules.appointmentTypes,
+        },
+        slots,
+      });
     } catch (error) {
       console.error('[Appointments] Error fetching slots:', error);
       res.status(500).json({ error: 'Failed to retrieve available slots.' });
@@ -149,41 +277,125 @@ export default function appointmentRoutes(io) {
       return res.status(400).json({ error: 'doctor_user_id, date_time, and appointment_type are required.' });
     }
 
+    // Parse the incoming datetime into date and time parts
+    const dt = new Date(date_time);
+    if (isNaN(dt.getTime())) {
+      return res.status(400).json({ error: 'Invalid date_time format.' });
+    }
+    const dateStr = dt.toISOString().split('T')[0];
+    const timeStr = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
+
+    // ── Pre-flight checks (cheap, no DB lock) ──────────────────────────
+    if (isLunchBreak(timeStr)) {
+      return res.status(409).json({
+        error: 'The clinic is closed for lunch (12:00–1:00 PM). Please choose another time.',
+        code: 'LUNCH_BREAK',
+      });
+    }
+
+    if (isPastSlot(timeStr, dateStr)) {
+      return res.status(409).json({
+        error: 'That time has already passed. Please choose a future slot.',
+        code: 'SLOT_IN_PAST',
+      });
+    }
+
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
 
-      // Symmetric buffer collision check:
-      //   reject if the requested time, 30 min before, or 30 min after
-      //   already has a live appointment with the same doctor.
-      // FOR UPDATE locks the range to prevent concurrent races.
-      const [conflict] = await connection.query(
-        `SELECT appointment_id FROM APPOINTMENTS
-         WHERE doctor_user_id = ?
-           AND (
-             date_time = ?
-             OR date_time = DATE_SUB(?, INTERVAL ? MINUTE)
-             OR date_time = DATE_ADD(?, INTERVAL ? MINUTE)
-           )
-           AND status IN ('scheduled', 'checked_in', 'serving')
-           AND deleted_at IS NULL
-         FOR UPDATE`,
-        [
-          doctor_user_id,
-          date_time,
-          date_time,
-          CONSULTATION_BUFFER_MINUTES,
-          date_time,
-          CONSULTATION_BUFFER_MINUTES,
-        ]
+      // ── 1. Look up the doctor's role and rules ────────────────────────
+      const [roleRows] = await connection.query(
+        `SELECT r.code
+         FROM USERS u
+         JOIN USER_ROLES ur ON u.user_id = ur.user_id
+         JOIN ROLES r ON ur.role_id = r.role_id
+         WHERE u.user_id = ? AND r.code IN ('DOCTOR', 'DENTIST')
+         LIMIT 1`,
+        [doctor_user_id]
       );
 
-      if (conflict.length > 0) {
+      if (roleRows.length === 0) {
+        throw new Error('Selected practitioner is not a valid doctor or dentist.');
+      }
+
+      const doctorRole = roleRows[0].code;
+      const rules = APPOINTMENT_RULES[doctorRole];
+
+      // Validate that the requested type is offered by this role
+      const typeNames = rules.mode === 'shared-hour'
+        ? rules.appointmentTypes.map((t) => t.name)
+        : rules.appointmentTypes;
+
+      if (!typeNames.includes(appointment_type)) {
         throw new Error(
-          'This time slot conflicts with another consultation (30-minute buffer). Please choose a different time.'
+          `${doctorRole} practitioners do not offer "${appointment_type}".`
         );
       }
 
+      // ── 2. Lock all of today's bookings for this doctor ───────────────
+      const [bookings] = await connection.query(
+        `SELECT DATE_FORMAT(date_time, '%H:%i') AS time_slot, appointment_type
+         FROM APPOINTMENTS
+         WHERE doctor_user_id = ?
+           AND DATE(date_time) = ?
+           AND status IN ('scheduled', 'checked_in', 'serving')
+           AND deleted_at IS NULL
+         FOR UPDATE`,
+        [doctor_user_id, dateStr]
+      );
+
+      const hourBlock = getHourBlock(timeStr);
+
+      const bookingsByHour = {};
+      for (const b of bookings) {
+        const h = getHourBlock(b.time_slot);
+        if (!bookingsByHour[h]) bookingsByHour[h] = {};
+        bookingsByHour[h][b.appointment_type] =
+          (bookingsByHour[h][b.appointment_type] || 0) + 1;
+      }
+
+      // ── 3. Cascade check — is this hour blocked by the previous hour? ─
+      if (rules.cascadeNextHour) {
+        const [prevHourNum] = hourBlock.split(':').map(Number);
+        if (prevHourNum > 0) {
+          const prevHourBlock = `${String(prevHourNum - 1).padStart(2, '0')}:00`;
+          const prevTypeCounts = bookingsByHour[prevHourBlock] || {};
+
+          for (const typeRule of rules.appointmentTypes) {
+            const count = prevTypeCounts[typeRule.name] || 0;
+            if (count >= typeRule.hourlyCapacity) {
+              throw new Error(
+                `The ${prevHourBlock} block is full for ${typeRule.name}. ` +
+                `This hour is reserved as a recovery buffer — please choose a later slot.`
+              );
+            }
+          }
+        }
+      }
+
+      // ── 4. Capacity check for the requested hour ─────────────────────
+      const thisHourCounts = bookingsByHour[hourBlock] || {};
+
+      if (rules.mode === 'exclusive-hour') {
+        const totalInHour = Object.values(thisHourCounts).reduce((a, b) => a + b, 0);
+        if (totalInHour >= rules.hourlyCapacity) {
+          throw new Error(
+            `This hour is fully booked. Only ${rules.hourlyCapacity} patient per hour can be seen by the ${doctorRole.toLowerCase()}.`
+          );
+        }
+      } else {
+        const typeRule = rules.appointmentTypes.find((t) => t.name === appointment_type);
+        const existingCount = thisHourCounts[appointment_type] || 0;
+        if (existingCount >= typeRule.hourlyCapacity) {
+          throw new Error(
+            `"${appointment_type}" is fully booked for this hour ` +
+            `(${existingCount}/${typeRule.hourlyCapacity}). Please choose a different time.`
+          );
+        }
+      }
+
+      // ── 5. Insert the appointment ────────────────────────────────────
       const [insertResult] = await connection.query(
         `INSERT INTO APPOINTMENTS (patient_user_id, doctor_user_id, date_time, appointment_type, status, notes)
          VALUES (?, ?, ?, ?, 'scheduled', ?)`,
@@ -204,6 +416,7 @@ export default function appointmentRoutes(io) {
 
       await connection.commit();
 
+      // ── 6. Confirmation email + socket broadcast ──────────────────────
       const [details] = await pool.query(
         `SELECT u.email AS patient_email, u.first_name AS patient_first_name, u.last_name AS patient_last_name,
                 doc.first_name AS doc_first_name, doc.last_name AS doc_last_name,
@@ -214,7 +427,9 @@ export default function appointmentRoutes(io) {
         [patientUserId, doctor_user_id]
       );
 
-      const patientName = details.length > 0 ? `${details[0].patient_first_name} ${details[0].patient_last_name}` : 'Student';
+      const patientName = details.length > 0
+        ? `${details[0].patient_first_name} ${details[0].patient_last_name}`
+        : 'Student';
 
       if (details.length > 0) {
         sendAppointmentEmail({
@@ -272,11 +487,31 @@ export default function appointmentRoutes(io) {
       }
 
       const app = appRows[0];
-      if (app.patient_user_id !== userId && !isStaff) {
-        return res.status(403).json({ error: 'Unauthorized to cancel this appointment.' });
+
+      // ── Guard 1: appointment was already processed ─────────────
+      if (['checked_in', 'serving', 'completed'].includes(app.status)) {
+        await connection.rollback();
+        return res.status(409).json({
+          error: `This appointment is already marked as ${app.status.replace('_', ' ')}.`,
+          code: 'APPOINTMENT_ALREADY_PROCESSED',
+          existingStatus: app.status,
+        });
       }
 
-      await connection.query(
+      // ── Guard 2: patient already has a live queue ticket today ─
+      const activeEntry = await findActiveQueueEntry(connection, app.patient_user_id);
+      if (activeEntry) {
+        await connection.rollback();
+        return res.status(409).json({
+          error: `Patient is already in today's queue as ${activeEntry.ticket_no} (${activeEntry.status.replace('-', ' ')}).`,
+          code: 'ALREADY_IN_QUEUE',
+          existingTicket: activeEntry.ticket_no,
+          existingStatus: activeEntry.status,
+          arrivalTime: activeEntry.arrival_time,
+        });
+      }
+
+      const [numRows] = await connection.query(
         "UPDATE APPOINTMENTS SET status = 'cancelled', cancelled_reason = ? WHERE appointment_id = ?",
         [cancelled_reason || 'Cancelled by user', appointmentId]
       );
@@ -396,6 +631,55 @@ export default function appointmentRoutes(io) {
     }
   });
 
+  // ===========================================================================
+  // 4.1 GET /api/appointments/expected-today
+  // Today's scheduled appointments that haven't been checked in yet.
+  // Powers the nurse console's "Expected arrivals" tab.
+  // ===========================================================================
+  router.get('/expected-today', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'DENTIST', 'ADMIN'), async (req, res) => {
+    try {
+      const [rows] = await pool.query(
+        `SELECT a.appointment_id,
+                a.patient_user_id AS patient_id,
+                a.doctor_user_id,
+                a.date_time,
+                DATE_FORMAT(a.date_time, '%h:%i %p') AS time_slot,
+                a.appointment_type,
+                a.status,
+                a.notes,
+                u.first_name, u.last_name, u.phone,
+                COALESCE(sp.student_no, st.license_no, fp.position, 'PSU Member') AS student_no,
+                COALESCE(sp.course, st.department, fp.department, 'PSU Lingayen') AS course,
+                hp.blood_type, hp.allergies, hp.chronic_conditions,
+                doc.first_name AS doctor_first_name,
+                doc.last_name AS doctor_last_name,
+                COALESCE(stp.specialty, 'Campus Physician') AS doctor_specialty
+         FROM APPOINTMENTS a
+         JOIN USERS u ON a.patient_user_id = u.user_id
+         JOIN USERS doc ON a.doctor_user_id = doc.user_id
+         LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+         LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
+         LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
+         LEFT JOIN STAFF_PROFILES stp ON doc.user_id = stp.user_id
+         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+         WHERE a.status = 'scheduled'
+           AND DATE(a.date_time) = CURDATE()
+           AND a.deleted_at IS NULL
+         ORDER BY a.date_time ASC`
+      );
+
+      const decrypted = rows.map((app) => ({
+        ...app,
+        allergies: decrypt(app.allergies) || 'None reported',
+        chronic_conditions: decrypt(app.chronic_conditions) || 'None reported',
+      }));
+
+      res.json(decrypted);
+    } catch (error) {
+      console.error('[Appointments] Expected-today error:', error);
+      res.status(500).json({ error: 'Failed to fetch expected patients.' });
+    }
+  });
   // ===========================================================================
   // 5. LIVE CLINIC TRIAGE QUEUE
   // ===========================================================================
@@ -714,6 +998,185 @@ export default function appointmentRoutes(io) {
       connection.release();
     }
   });
+
+
+  // ===========================================================================
+  // 6.1 POST /api/appointments/walk-in
+  // Register a walk-in patient (no scheduled appointment) directly into the
+  // live queue. Uses QUEUE.appointment_id = NULL, which the schema permits.
+  // ===========================================================================
+  router.post('/walk-in', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+    const { patient_user_id, visit_type, notes, vitals } = req.body;
+
+    if (!patient_user_id) {
+      return res.status(400).json({ error: 'patient_user_id is required.' });
+    }
+
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      // 1. Verify patient exists and is active
+      const [patientRows] = await connection.query(
+        `SELECT u.user_id, u.first_name, u.last_name
+         FROM USERS u
+         WHERE u.user_id = ? AND u.is_active = TRUE AND u.deleted_at IS NULL`,
+        [patient_user_id]
+      );
+
+      if (patientRows.length === 0) {
+        throw new Error('Patient not found or inactive.');
+      }
+
+      // 2. Block duplicate tickets for the same day — return the existing
+      //    ticket so the client can surface it instead of a generic error.
+      const activeEntry = await findActiveQueueEntry(connection, patient_user_id);
+      if (activeEntry) {
+        await connection.rollback();
+        return res.status(409).json({
+          error: `Patient is already in today's queue as ${activeEntry.ticket_no} (${activeEntry.status.replace('-', ' ')}).`,
+          code: 'ALREADY_IN_QUEUE',
+          existingTicket: activeEntry.ticket_no,
+          existingStatus: activeEntry.status,
+          arrivalTime: activeEntry.arrival_time,
+        });
+      }
+
+      // 3. Allocate the next queue number for today
+      const [numRows] = await connection.query(
+        'SELECT COALESCE(MAX(queue_number), 0) + 1 AS next_num FROM QUEUE WHERE queue_date = CURDATE()'
+      );
+      const nextNum = numRows[0].next_num;
+
+      // 4. Insert the walk-in queue entry (appointment_id is NULL)
+      const [queueResult] = await connection.query(
+        `INSERT INTO QUEUE
+         (patient_user_id, appointment_id, queue_date, counter_id, queue_number, status, checked_in_at)
+         VALUES (?, NULL, CURDATE(), 1, ?, 'waiting', CURRENT_TIMESTAMP)`,
+        [patient_user_id, nextNum]
+      );
+
+      // 5. Persist latest height/weight to the master health profile if provided
+      if (vitals && (vitals.height || vitals.weight)) {
+        const [hpRows] = await connection.query(
+          'SELECT profile_id FROM HEALTH_PROFILES WHERE user_id = ?',
+          [patient_user_id]
+        );
+
+        if (hpRows.length > 0) {
+          await connection.query(
+            `UPDATE HEALTH_PROFILES
+             SET height = COALESCE(?, height),
+                 weight = COALESCE(?, weight),
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE user_id = ?`,
+            [
+              vitals.height ? Number(vitals.height) : null,
+              vitals.weight ? Number(vitals.weight) : null,
+              patient_user_id,
+            ]
+          );
+        } else {
+          await connection.query(
+            'INSERT INTO HEALTH_PROFILES (user_id, height, weight) VALUES (?, ?, ?)',
+            [
+              patient_user_id,
+              vitals.height ? Number(vitals.height) : null,
+              vitals.weight ? Number(vitals.weight) : null,
+            ]
+          );
+        }
+      }
+
+      // 6. R.A. 10173 audit trail
+      await logAudit(connection, {
+        userId: req.user.user_id,
+        action: 'CREATE',
+        table: 'QUEUE',
+        recordId: queueResult.insertId,
+        oldValue: null,
+        newValue: {
+          operation: 'WALK_IN_PATIENT_REGISTERED',
+          patient_user_id,
+          queue_number: nextNum,
+          visit_type: visit_type || 'Walk-in Consultation',
+          notes: notes || null,
+          vitals_recorded: Boolean(vitals),
+        },
+        ipAddress: req.ip,
+      });
+
+      await connection.commit();
+
+       await invalidateCache('queue:*');
+
+      if (io) {
+        io.emit('queue:updated');
+      }
+
+      const queueTicket = `Q-${String(nextNum).padStart(2, '0')}`;
+      const arrivalTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      res.status(201).json({
+        message: 'Walk-in patient registered and admitted to today\'s queue.',
+        queueTicket,
+        queueNumber: nextNum,
+        arrivalTime,
+      });
+    } catch (error) {
+      await connection.rollback();
+      console.error('[Walk-in Error]:', error);
+      res.status(400).json({ error: error.message || 'Failed to register walk-in patient.' });
+    } finally {
+      connection.release();
+    }
+  });
+
+
+  // ===========================================================================
+  // 6.2 GET /api/appointments/patient/:patientId/active-ticket
+  // Lightweight pre-check used by the nurse console UI before it shows
+  // a check-in confirmation, so the nurse never gets a stale "confirm" dialog.
+  // ===========================================================================
+  router.get(
+    '/patient/:patientId/active-ticket',
+    authenticateToken,
+    requireRoles('NURSE', 'DOCTOR', 'DENTIST', 'ADMIN'),
+    async (req, res) => {
+      const patientId = Number(req.params.patientId);
+      if (!patientId || Number.isNaN(patientId)) {
+        return res.status(400).json({ error: 'A valid patient id is required.' });
+      }
+
+      try {
+        const [rows] = await pool.query(
+          `SELECT q.queue_id, q.queue_number, q.status, q.appointment_id,
+                  CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS ticket_no,
+                  DATE_FORMAT(q.checked_in_at, '%h:%i %p') AS arrival_time,
+                  COALESCE(a.appointment_type, 'Walk-in Consultation') AS visit_type,
+                  COALESCE(CONCAT('Dr. ', doc.first_name, ' ', doc.last_name), 'Unassigned') AS doctor_name
+           FROM QUEUE q
+           LEFT JOIN APPOINTMENTS a ON q.appointment_id = a.appointment_id
+           LEFT JOIN USERS doc ON a.doctor_user_id = doc.user_id
+           WHERE q.patient_user_id = ?
+             AND q.queue_date = CURDATE()
+             AND q.status IN ('waiting', 'in-consultation')
+           ORDER BY q.queue_id DESC
+           LIMIT 1`,
+          [patientId]
+        );
+
+        if (rows.length === 0) {
+          return res.json({ hasActiveTicket: false });
+        }
+
+        res.json({ hasActiveTicket: true, ticket: rows[0] });
+      } catch (error) {
+        console.error('[Active Ticket Error]:', error);
+        res.status(500).json({ error: 'Failed to check active queue ticket.' });
+      }
+    }
+  );
 
   router.patch('/:id/status', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
     const appointmentId = Number(req.params.id);
