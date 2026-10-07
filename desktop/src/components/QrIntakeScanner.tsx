@@ -604,6 +604,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
       )}
 
       {/* Action buttons row */}
+{scanMode === 'camera' && (
       <div
         style={{
           display: 'flex',
@@ -720,6 +721,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
           />
         </label>
       </div>
+)}
 
       {/* Status line */}
       {scanStatus && (
