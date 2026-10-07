@@ -2,8 +2,12 @@
 
     <!-- Network & Communication -->
     <uses-permission android:name="android.permission.INTERNET" />
+<<<<<<< HEAD
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     
+=======
+
+>>>>>>> 59be797f1838e590a35980733f714f0da7e89d2f
     <!-- Geolocation for SOS Emergency Dispatch -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />

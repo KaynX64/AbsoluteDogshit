@@ -29,7 +29,7 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Apply certificate overrides unconditionally (works in both debug and release builds)
+  // Apply certificate overrides unconditionally
   HttpOverrides.global = DevHttpOverrides();
 
   try {
