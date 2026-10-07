@@ -1,10 +1,13 @@
+// mobile/lib/screens/login_screen.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../config/api_config.dart';
+import '../widgets/valetudo_logo.dart';
 import 'patient_portal_screen.dart';
-import 'responder_screen.dart'; // <-- IMPORTED HERE
+import 'responder_screen.dart';
+import '../services/emergency_alert_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -14,11 +17,19 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _emailController = TextEditingController(text: 'student@psu.edu.ph');
-  final _passwordController = TextEditingController(text: 'Password123!');
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
   final _storage = const FlutterSecureStorage();
+
   bool _isLoading = false;
+  bool _obscurePassword = true;
+  bool _rememberMe = true;
   String _errorMessage = '';
+
+  // Brand palette
+  static const Color primaryGreen = Color(0xFF284E3A);
+  static const Color textSub = Color(0xFF5A635B);
+  static const Color borderColor = Color(0xFFD6DFD5);
 
   Future<void> _handleLogin() async {
     setState(() {
@@ -42,6 +53,11 @@ class _LoginScreenState extends State<LoginScreen> {
         // Save BOTH token and user profile into secure storage
         await _storage.write(key: 'jwt_token', value: data['token']);
         await _storage.write(key: 'user_data', value: jsonEncode(data['user']));
+
+        // Sync device token for FCM background alerts
+        try {
+          await EmergencyAlertService().syncFcmTokenWithBackend();
+        } catch (_) {}
 
         if (!mounted) return;
 
@@ -73,39 +89,15 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-<<<<<<< Updated upstream
-      appBar: AppBar(title: const Text('Valetudo HealthLink')),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.local_hospital_rounded, size: 72, color: Colors.teal),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _emailController,
-              decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder()),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _passwordController,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder()),
-            ),
-            const SizedBox(height: 12),
-            if (_errorMessage.isNotEmpty) Text(_errorMessage, style: const TextStyle(color: Colors.red)),
-            const SizedBox(height: 12),
-            _isLoading
-                ? const CircularProgressIndicator()
-                : ElevatedButton(
-                    style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(50)),
-                    onPressed: _handleLogin,
-                    child: const Text('Sign In'),
-                  )
-          ],
-=======
       backgroundColor: const Color(0xFFF7F9F6),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -290,7 +282,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ],
               ),
 
-              // Error Banner & User Guidance Tip
+              // Error Banner
               if (_errorMessage.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 Container(
@@ -368,7 +360,6 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 12),
             ],
           ),
->>>>>>> Stashed changes
         ),
       ),
     );
