@@ -1,6 +1,9 @@
 // server/src/routes/documents.js
 import express from 'express';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { requireRoles } from '../middleware/rbac.js';
@@ -10,8 +13,11 @@ import { requirePrivacyConsent } from '../middleware/consent.js';
 import multer from 'multer';
 import { uploadToS3, getFromS3 } from '../utils/s3Vault.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
-import { JWT_SECRET } from '../utils/secrets.js'; // <-- use ../
+import { JWT_SECRET } from '../utils/secrets.js';
 
+// Define __dirname for ES Modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const router = express.Router();
 
@@ -259,13 +265,27 @@ router.get('/clearances/my', authenticateToken, requirePrivacyConsent, async (re
   }
 });
 
+// Helper to reliably locate verify.html across environments
+function getVerifyHtmlPath() {
+  const candidates = [
+    path.join(__dirname, '../../public/verify.html'),
+    path.join(__dirname, '../public/verify.html'),
+    path.join(process.cwd(), 'server/public/verify.html'),
+    path.join(process.cwd(), 'public/verify.html'),
+  ];
+  return candidates.find((p) => fs.existsSync(p)) || null;
+}
+
 // =============================================================================
 // 3. UNIVERSAL QR VERIFICATION
 // =============================================================================
 
 router.get('/verify/:qrToken', async (req, res) => {
   const { qrToken } = req.params;
+  const acceptsHtml = req.accepts('html') && !req.xhr && !req.headers['accept']?.includes('application/json');
+
   try {
+    // 1. Check if token is a Medical Clearance
     const [clearances] = await pool.query(
       `SELECT mc.clearance_id, mc.purpose, mc.status, mc.issued_at, mc.expires_at,
               mc.signature_metadata,
@@ -285,9 +305,17 @@ router.get('/verify/:qrToken', async (req, res) => {
     if (clearances.length > 0) {
       const c = clearances[0];
       const isExpired = new Date(c.expires_at) < new Date();
+      const isValid = !isExpired && c.status === 'approved';
+
+      // If opened via mobile browser ("Open Web Verify"), serve the HTML page
+      if (acceptsHtml) {
+        const verifyHtml = getVerifyHtmlPath();
+        if (verifyHtml) return res.sendFile(verifyHtml);
+      }
+
       return res.json({
-        valid: !isExpired && c.status === 'approved',
-        verified: !isExpired && c.status === 'approved',
+        valid: isValid,
+        verified: isValid,
         type: 'MEDICAL_CLEARANCE',
         purpose: c.purpose,
         status: isExpired ? 'expired' : c.status,
@@ -302,10 +330,11 @@ router.get('/verify/:qrToken', async (req, res) => {
       });
     }
 
+    // 2. Check if token is a Prescription
     const [prescriptions] = await pool.query(
       `SELECT p.prescription_id, p.status, p.issued_at, p.notes,
               u.first_name AS patient_first_name, u.last_name AS patient_last_name,
-              sp.student_no,
+              sp.student_no, sp.course,
               doc.first_name AS doc_first_name, doc.last_name AS doc_last_name,
               staff.license_no AS doc_license
        FROM PRESCRIPTIONS p
@@ -319,17 +348,47 @@ router.get('/verify/:qrToken', async (req, res) => {
 
     if (prescriptions.length > 0) {
       const p = prescriptions[0];
+      const isValid = p.status === 'active' || p.status === 'dispensed';
+
+      const [items] = await pool.query(
+        `SELECT pi.dosage, pi.frequency, pi.route, pi.duration_days, pi.quantity_dispensed, pi.instructions,
+                m.name AS medicine_name, m.generic_name
+         FROM PRESCRIPTION_ITEMS pi
+         JOIN MEDICINES m ON pi.medicine_id = m.medicine_id
+         WHERE pi.prescription_id = ?`,
+        [p.prescription_id]
+      );
+
+      const decryptedItems = items.map((it) => ({
+        ...it,
+        instructions: decrypt(it.instructions),
+      }));
+
+      // If opened via mobile browser ("Open Web Verify"), serve the HTML page
+      if (acceptsHtml) {
+        const verifyHtml = getVerifyHtmlPath();
+        if (verifyHtml) return res.sendFile(verifyHtml);
+      }
+
       return res.json({
-        valid: p.status === 'active',
-        verified: p.status === 'active',
+        valid: isValid,
+        verified: isValid,
         type: 'PRESCRIPTION',
         status: p.status,
         patient: `${p.patient_first_name} ${p.patient_last_name}`,
         studentNo: p.student_no || 'N/A',
-        issuedBy: `Dr. ${p.doc_first_name} ${p.doc_last_name}`,
+        course: p.course || 'PSU Lingayen',
+        issuedBy: `Dr. ${p.doc_first_name} ${p.doc_last_name} (${p.doc_license || 'PRC Verified'})`,
         issuedAt: p.issued_at,
         notes: decrypt(p.notes),
+        items: decryptedItems,
       });
+    }
+
+    // 3. Fallback: Not found
+    if (acceptsHtml) {
+      const verifyHtml = getVerifyHtmlPath();
+      if (verifyHtml) return res.status(404).sendFile(verifyHtml);
     }
 
     return res.status(404).json({ valid: false, verified: false, error: 'Document token not found or invalid.' });
@@ -338,6 +397,7 @@ router.get('/verify/:qrToken', async (req, res) => {
     res.status(500).json({ error: 'Verification failed.' });
   }
 });
+
 
 // Alias route with retention check (AND mc.deleted_at IS NULL)
 router.get('/clearances/verify/:token', async (req, res) => {

@@ -1,5 +1,7 @@
 // desktop/src/components/AnalyticsDashboard.tsx
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { T, btnGhost, btnPrimary } from '../theme';
+import { API_BASE_URL } from '../config/api';
 
 interface TimePoint {
   date: string;
@@ -17,10 +19,19 @@ interface DeptItem {
   consultations_count: number;
 }
 
+interface RoleItem {
+  role_code: string;
+  role_name: string;
+  count: number;
+}
+
 interface AnalyticsData {
   totalConsultations: number;
+  totalStudents: number;
   emergencyMetrics: { active: number; avgResponseSeconds: number };
+  roleDistribution: RoleItem[];
   timeSeries: TimePoint[];
+  emergencyTimeSeries: TimePoint[];
   topDiagnoses: DiagnosisItem[];
   deptBreakdown: DeptItem[];
   fluStats: { cases_past_7_days: number; cases_prev_7_days: number };
@@ -43,75 +54,191 @@ interface AnalyticsData {
   }[];
 }
 
-// =========================================================
-// 1. FULL-WIDTH SVG LINE CHART (Consultation Trajectory)
-// =========================================================
-function SvgLineChart({ data }: { data: TimePoint[] }) {
+/* ================================================================= */
+/* Material You · smooth cubic-bezier path builder                    */
+/* ================================================================= */
+function buildSmoothPath(points: { x: number; y: number }[]): string {
+  if (points.length === 0) return '';
+  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+
+  let d = `M ${points[0].x} ${points[0].y}`;
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[i];
+    const p1 = points[i + 1];
+    const dx = (p1.x - p0.x) * 0.4;
+    const cx1 = p0.x + dx;
+    const cx2 = p1.x - dx;
+    d += ` C ${cx1} ${p0.y}, ${cx2} ${p1.y}, ${p1.x} ${p1.y}`;
+  }
+  return d;
+}
+
+/* ================================================================= */
+/* SVG LINE CHART — Material You                                      */
+/* ================================================================= */
+function SvgLineChart({
+  data,
+  themeColor = '#2E5C43',
+  themeColorLight = '#7BAA87',
+  gradId = 'lineGrad',
+  emptyMessage = 'No data recorded yet.',
+}: {
+  data: TimePoint[];
+  themeColor?: string;
+  themeColorLight?: string;
+  gradId?: string;
+  emptyMessage?: string;
+}) {
   if (!data || data.length === 0) {
     return (
-      <div style={{ height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
-        No timeline data recorded yet.
+      <div
+        style={{
+          height: 220,
+          display: 'grid',
+          placeItems: 'center',
+          color: 'var(--text-muted)',
+          fontSize: 13,
+          background: '#F5F8F3',
+          borderRadius: 20,
+        }}
+      >
+        {emptyMessage}
       </div>
     );
   }
 
   const width = 900;
-  const height = 220;
-  const paddingX = 50;
-  const paddingTop = 36;
-  const paddingBottom = 32;
+  const height = 240;
+  const padX = 56;
+  const padTop = 40;
+  const padBottom = 44;
 
   const maxCount = Math.max(...data.map((d) => d.count), 1);
-  const maxVal = Math.ceil(maxCount * 1.35); // 35% headroom so highest point never touches top edge
-  const chartW = width - paddingX * 2;
-  const chartH = height - paddingTop - paddingBottom;
+  const maxVal = Math.max(Math.ceil(maxCount * 1.5), 2);
+  const chartW = width - padX * 2;
+  const chartH = height - padTop - padBottom;
 
-  const points = data.map((d, idx) => {
-    const x = paddingX + (idx / (data.length - 1)) * chartW;
-    const y = paddingTop + (1 - d.count / maxVal) * chartH;
-    return { x, y, ...d };
-  });
+  const points = data.map((d, idx) => ({
+    x: padX + (idx / Math.max(data.length - 1, 1)) * chartW,
+    y: padTop + (1 - d.count / maxVal) * chartH,
+    ...d,
+  }));
 
-  const pathD = points.reduce((acc, p, idx) => `${acc} ${idx === 0 ? 'M' : 'L'} ${p.x} ${p.y}`, '');
-  const areaD = `${pathD} L ${points[points.length - 1].x} ${height - paddingBottom} L ${points[0].x} ${height - paddingBottom} Z`;
+  const smoothPath = buildSmoothPath(points);
+  const areaPath = `${smoothPath} L ${points[points.length - 1].x} ${height - padBottom} L ${points[0].x} ${height - padBottom} Z`;
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto', maxHeight: 240, overflow: 'visible' }}>
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      style={{ width: '100%', height: 'auto', maxHeight: 260, overflow: 'visible' }}
+    >
       <defs>
-        <linearGradient id="lineGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#0f766e" stopOpacity="0.30" />
-          <stop offset="100%" stopColor="#0f766e" stopOpacity="0.0" />
+        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={themeColor} stopOpacity="0.24" />
+          <stop offset="100%" stopColor={themeColor} stopOpacity="0" />
+        </linearGradient>
+        <linearGradient id={`${gradId}Stroke`} x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor={themeColorLight} />
+          <stop offset="100%" stopColor={themeColor} />
         </linearGradient>
       </defs>
 
-      {/* Subtle Horizontal Guidelines */}
+      {/* Soft horizontal guides */}
       {[0, 0.5, 1].map((ratio, i) => {
-        const y = paddingTop + (1 - ratio) * chartH;
+        const y = padTop + (1 - ratio) * chartH;
         const val = Math.round(ratio * maxVal);
         return (
           <g key={i}>
-            <line x1={paddingX} y1={y} x2={width - paddingX} y2={y} stroke="#e2e8f0" strokeDasharray="4 4" />
-            <text x={paddingX - 12} y={y + 4} textAnchor="end" fontSize="11" fill="#94a3b8">
+            <line
+              x1={padX}
+              y1={y}
+              x2={width - padX}
+              y2={y}
+              stroke="#E8EDE6"
+              strokeWidth="1"
+              strokeDasharray="2 6"
+              strokeLinecap="round"
+            />
+            <text
+              x={padX - 14}
+              y={y + 4}
+              textAnchor="end"
+              fontSize="11"
+              fontWeight="600"
+              fill="#9AA79B"
+            >
               {val}
             </text>
           </g>
         );
       })}
 
-      {/* Shaded Area & Trajectory Line */}
-      <path d={areaD} fill="url(#lineGrad)" />
-      <path d={pathD} fill="none" stroke="#0f766e" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+      {/* Gradient area fill */}
+      <path d={areaPath} fill={`url(#${gradId})`} />
 
-      {/* Nodes and Labels */}
+      {/* Smooth gradient stroke */}
+      <path
+        className="my-line-path"
+        d={smoothPath}
+        fill="none"
+        stroke={`url(#${gradId}Stroke)`}
+        strokeWidth="3.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+
+      {/* Data points */}
       {points.map((p, i) => (
         <g key={i}>
-          <circle cx={p.x} cy={p.y} r="5" fill="#ffffff" stroke="#0f766e" strokeWidth="2.5" />
           {p.count > 0 && (
-            <text x={p.x} y={p.y - 9} textAnchor="middle" fontSize="11" fontWeight="bold" fill="#0f766e">
+            <>
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r="9"
+                fill={themeColor}
+                fillOpacity="0.14"
+              />
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r="5.5"
+                fill="#FFFFFF"
+                stroke={themeColor}
+                strokeWidth="2.5"
+              />
+            </>
+          )}
+          {p.count === 0 && (
+            <circle
+              cx={p.x}
+              cy={p.y}
+              r="3.5"
+              fill="#FFFFFF"
+              stroke="#C9D9C7"
+              strokeWidth="2"
+            />
+          )}
+          {p.count > 0 && (
+            <text
+              x={p.x}
+              y={p.y - 14}
+              textAnchor="middle"
+              fontSize="11.5"
+              fontWeight="700"
+              fill={themeColor}
+            >
               {p.count}
             </text>
           )}
-          <text x={p.x} y={height - 8} textAnchor="middle" fontSize="10" fill="#64748b">
+          <text
+            x={p.x}
+            y={height - 14}
+            textAnchor="middle"
+            fontSize="10.5"
+            fontWeight="600"
+            fill="#9AA79B"
+          >
             {i % 2 === 0 ? p.label : ''}
           </text>
         </g>
@@ -120,78 +247,133 @@ function SvgLineChart({ data }: { data: TimePoint[] }) {
   );
 }
 
-// =========================================================
-// 2. FULL-WIDTH VERTICAL BAR CHART (Top Diagnoses)
-// =========================================================
+/* ================================================================= */
+/* VERTICAL BAR CHART — Material You                                  */
+/* ================================================================= */
 function SvgVerticalBarChart({ data }: { data: DiagnosisItem[] }) {
   if (!data || data.length === 0) {
     return (
-      <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
+      <div
+        style={{
+          height: 220,
+          display: 'grid',
+          placeItems: 'center',
+          color: 'var(--text-muted)',
+          fontSize: 13,
+          background: '#F5F8F3',
+          borderRadius: 20,
+        }}
+      >
         No diagnoses recorded yet.
       </div>
     );
   }
 
   const width = 900;
-  const height = 250;
-  // Left padding is wide (90px) so rotated text for bar #1 is never clipped by the edge
-  const padLeft = 95;
-  const padRight = 45;
-  const padTop = 35;
-  const padBottom = 75; // Plenty of headroom for rotated labels
+  const height = 300;
+  const padLeft = 56;
+  const padRight = 40;
+  const padTop = 50;
+  const padBottom = 90;
 
   const maxCount = Math.max(...data.map((d) => d.count), 1);
-  const maxVal = Math.ceil(maxCount * 1.3);
+  const maxVal = Math.max(Math.ceil(maxCount * 1.4), 2);
   const chartW = width - padLeft - padRight;
   const chartH = height - padTop - padBottom;
   const colSlot = chartW / data.length;
-  const barWidth = Math.min(colSlot * 0.45, 60);
+  const barWidth = Math.min(colSlot * 0.42, 72);
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto', minHeight: 220, overflow: 'visible' }}>
-      {/* Grid Lines */}
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      style={{ width: '100%', height: 'auto', minHeight: 240, overflow: 'visible' }}
+    >
+      <defs>
+        <linearGradient id="barVertGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#4A7A5E" />
+          <stop offset="100%" stopColor="#1F4A34" />
+        </linearGradient>
+      </defs>
+
+      {/* Guides */}
       {[0, 0.5, 1].map((ratio, i) => {
         const y = padTop + chartH * (1 - ratio);
         const val = Math.round(ratio * maxVal);
         return (
           <g key={i}>
-            <line x1={padLeft} y1={y} x2={width - padRight} y2={y} stroke="#e2e8f0" strokeDasharray="3 3" />
-            <text x={padLeft - 10} y={y + 4} textAnchor="end" fontSize="11" fill="#94a3b8">
+            <line
+              x1={padLeft}
+              y1={y}
+              x2={width - padRight}
+              y2={y}
+              stroke="#E8EDE6"
+              strokeWidth="1"
+              strokeDasharray="2 6"
+              strokeLinecap="round"
+            />
+            <text
+              x={padLeft - 14}
+              y={y + 4}
+              textAnchor="end"
+              fontSize="11"
+              fontWeight="600"
+              fill="#9AA79B"
+            >
               {val}
             </text>
           </g>
         );
       })}
 
-      {/* Base axis */}
-      <line x1={padLeft} y1={height - padBottom} x2={width - padRight} y2={height - padBottom} stroke="#cbd5e1" strokeWidth="1.5" />
-
       {data.map((item, idx) => {
         const x = padLeft + idx * colSlot + (colSlot - barWidth) / 2;
-        const bHeight = Math.max((item.count / maxVal) * chartH, 14);
+        const bHeight = Math.max((item.count / maxVal) * chartH, 20);
         const y = height - padBottom - bHeight;
 
         return (
           <g key={idx}>
-            {/* Blue Rounded Bar */}
-            <rect x={x} y={y} width={barWidth} height={bHeight} rx="6" fill="#0284c7" />
-
-            {/* Value on Top */}
-            <text x={x + barWidth / 2} y={y - 8} textAnchor="middle" fontSize="12" fontWeight="bold" fill="#0369a1">
-              {item.count}
-            </text>
-
-            {/* Rotated Diagnosis Label - Now has plenty of left margin */}
+            <rect
+              className="my-bar-rect"
+              x={x}
+              y={y}
+              width={barWidth}
+              height={bHeight}
+              rx="16"
+              fill="url(#barVertGrad)"
+              style={{ animationDelay: `${idx * 80}ms` }}
+            />
+            <g transform={`translate(${x + barWidth / 2}, ${y - 14})`}>
+              <rect
+                x="-16"
+                y="-14"
+                width="32"
+                height="22"
+                rx="11"
+                fill="#D7E8D2"
+              />
+              <text
+                x="0"
+                y="3"
+                textAnchor="middle"
+                fontSize="12"
+                fontWeight="800"
+                fill="#264D36"
+              >
+                {item.count}
+              </text>
+            </g>
             <text
               x={x + barWidth / 2}
-              y={height - padBottom + 16}
-              transform={`rotate(-20, ${x + barWidth / 2}, ${height - padBottom + 16})`}
+              y={height - padBottom + 22}
+              transform={`rotate(-22, ${x + barWidth / 2}, ${height - padBottom + 22})`}
               textAnchor="end"
               fontSize="11.5"
               fontWeight="600"
-              fill="#334155"
+              fill="#5A635B"
             >
-              {item.diagnosis.length > 25 ? `${item.diagnosis.substring(0, 23)}…` : item.diagnosis}
+              {item.diagnosis.length > 26
+                ? `${item.diagnosis.substring(0, 24)}…`
+                : item.diagnosis}
             </text>
           </g>
         );
@@ -200,53 +382,112 @@ function SvgVerticalBarChart({ data }: { data: DiagnosisItem[] }) {
   );
 }
 
-// =========================================================
-// 3. FULL-WIDTH HORIZONTAL BAR CHART (Visits by Department)
-// =========================================================
+/* ================================================================= */
+/* HORIZONTAL BAR CHART — Material You                                */
+/* ================================================================= */
 function SvgHorizontalBarChart({ data }: { data: DeptItem[] }) {
   if (!data || data.length === 0) {
     return (
-      <div style={{ height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
+      <div
+        style={{
+          height: 130,
+          display: 'grid',
+          placeItems: 'center',
+          color: 'var(--text-muted)',
+          fontSize: 13,
+          background: '#F5F8F3',
+          borderRadius: 20,
+        }}
+      >
         No department consultation data recorded yet.
       </div>
     );
   }
 
-  // Adaptive Height: Scales cleanly with number of rows so 1 item looks neat, not empty
-  const rowHeight = 44;
+  const rowHeight = 56;
   const padY = 20;
-  const height = Math.max(data.length * rowHeight + padY * 2, 110);
+  const height = Math.max(data.length * rowHeight + padY * 2, 130);
   const width = 900;
-  const padLeft = 240; // Room for full "BS Information Technology" with zero clipping
-  const padRight = 60;
+  const padLeft = 240;
+  const padRight = 80;
   const maxCount = Math.max(...data.map((d) => d.consultations_count), 1);
-  const maxVal = Math.ceil(maxCount * 1.2);
+  const maxVal = Math.max(Math.ceil(maxCount * 1.15), 2);
   const chartW = width - padLeft - padRight;
-  const barThickness = 22;
+  const barThickness = 26;
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto', minHeight: 110 }}>
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      style={{ width: '100%', height: 'auto', minHeight: 130 }}
+    >
+      <defs>
+        <linearGradient id="barHorizGrad" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="#2E5C43" />
+          <stop offset="100%" stopColor="#4A7A5E" />
+        </linearGradient>
+      </defs>
+
       {data.map((d, idx) => {
-        const y =
-          padY +
-          idx * ((height - padY * 2) / data.length) +
-          ((height - padY * 2) / data.length - barThickness) / 2;
-        const bWidth = Math.max((d.consultations_count / maxVal) * chartW, 20);
+        const rowSlot = (height - padY * 2) / data.length;
+        const y = padY + idx * rowSlot + (rowSlot - barThickness) / 2;
+        const bWidth = Math.max((d.consultations_count / maxVal) * chartW, 28);
 
         return (
           <g key={idx}>
-            {/* Full Department / Course Name */}
-            <text x={padLeft - 14} y={y + 15} textAnchor="end" fontSize="12" fontWeight="600" fill="#334155">
+            <text
+              x={padLeft - 18}
+              y={y + 18}
+              textAnchor="end"
+              fontSize="12.5"
+              fontWeight="600"
+              fill="#334155"
+            >
               {d.department}
             </text>
-            {/* Background Track */}
-            <rect x={padLeft} y={y} width={chartW} height={barThickness} rx="5" fill="#f1f5f9" />
-            {/* Progress Bar Fill */}
-            <rect x={padLeft} y={y} width={bWidth} height={barThickness} rx="5" fill="#0f766e" />
-            {/* Count Tag */}
-            <text x={padLeft + bWidth + 10} y={y + 16} fontSize="12" fontWeight="bold" fill="#0f766e">
-              {d.consultations_count} visits
-            </text>
+
+            {/* Pill track */}
+            <rect
+              x={padLeft}
+              y={y}
+              width={chartW}
+              height={barThickness}
+              rx={barThickness / 2}
+              fill="#EEF3EC"
+            />
+
+            {/* Pill fill */}
+            <rect
+              className="my-hbar-rect"
+              x={padLeft}
+              y={y}
+              width={bWidth}
+              height={barThickness}
+              rx={barThickness / 2}
+              fill="url(#barHorizGrad)"
+              style={{ animationDelay: `${idx * 100}ms` }}
+            />
+
+            {/* Value pill at end */}
+            <g transform={`translate(${padLeft + bWidth + 14}, ${y})`}>
+              <rect
+                x="0"
+                y="0"
+                width="66"
+                height={barThickness}
+                rx={barThickness / 2}
+                fill="#D7E8D2"
+              />
+              <text
+                x="33"
+                y="17.5"
+                textAnchor="middle"
+                fontSize="12"
+                fontWeight="800"
+                fill="#264D36"
+              >
+                {d.consultations_count} {d.consultations_count === 1 ? 'visit' : 'visits'}
+              </text>
+            </g>
           </g>
         );
       })}
@@ -254,9 +495,9 @@ function SvgHorizontalBarChart({ data }: { data: DeptItem[] }) {
   );
 }
 
-// =========================================================
-// 4. MAIN ANALYTICS DASHBOARD
-// =========================================================
+/* ================================================================= */
+/* MAIN DASHBOARD                                                     */
+/* ================================================================= */
 export default function AnalyticsDashboard() {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -265,13 +506,10 @@ export default function AnalyticsDashboard() {
     setLoading(true);
     const token = localStorage.getItem('valetudo_token') || localStorage.getItem('token');
     try {
-      const res = await fetch('https://localhost:5000/api/analytics/summary', {
+      const res = await fetch(`${API_BASE_URL}/api/analytics/summary`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.ok) {
-        const json = await res.json();
-        setData(json);
-      }
+      if (res.ok) setData(await res.json());
     } catch (err) {
       console.error('Failed to load analytics:', err);
     } finally {
@@ -279,14 +517,12 @@ export default function AnalyticsDashboard() {
     }
   };
 
-  useEffect(() => {
-    fetchAnalytics();
-  }, []);
+  useEffect(() => { fetchAnalytics(); }, []);
 
   const handleDownloadExcelCSV = async () => {
     const token = localStorage.getItem('valetudo_token') || localStorage.getItem('token');
     try {
-      const res = await fetch('https://localhost:5000/api/analytics/export/csv', {
+      const res = await fetch(`${API_BASE_URL}/api/analytics/export/csv`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Export failed');
@@ -303,219 +539,659 @@ export default function AnalyticsDashboard() {
     }
   };
 
-  const handlePrintPDFReport = () => {
-    window.print();
-  };
+  const handlePrintPDFReport = () => window.print();
 
   if (loading) {
-    return <div style={{ padding: 30, color: '#0f766e', fontWeight: 'bold' }}>Loading campus epidemiological analytics...</div>;
+    return (
+      <div
+        style={{
+          padding: 80,
+          textAlign: 'center',
+          color: '#2E5C43',
+          fontWeight: 700,
+          fontSize: 14,
+        }}
+      >
+        Loading campus epidemiological analytics…
+      </div>
+    );
   }
 
   if (!data) {
-    return <div style={{ padding: 30, color: '#dc2626' }}>Failed to load analytics data. Ensure server is running.</div>;
+    return (
+      <div
+        style={{
+          padding: 80,
+          textAlign: 'center',
+          color: '#7A2E26',
+          fontSize: 14,
+        }}
+      >
+        Failed to load analytics data. Ensure the server is running.
+      </div>
+    );
   }
 
-  const isFluSpike = (data.fluStats?.cases_past_7_days || 0) > (data.fluStats?.cases_prev_7_days || 0);
+  const isFluSpike =
+    (data.fluStats?.cases_past_7_days || 0) > (data.fluStats?.cases_prev_7_days || 0);
+
+  const getRoleTone = (code: string) => {
+    switch (code) {
+      case 'STUDENT':             return { bg: '#D6E3F0', fg: '#1F4462', icon: '🎓' };
+      case 'FACULTY':             return { bg: '#F0E6D2', fg: '#6E5526', icon: '🏫' };
+      case 'DOCTOR':              return { bg: '#D7E8D2', fg: '#264D36', icon: '🩺' };
+      case 'DENTIST':             return { bg: '#D3E8E5', fg: '#1F5A55', icon: '🦷' };
+      case 'NURSE':               return { bg: '#DFEBE0', fg: '#2A5A38', icon: '👩‍⚕️' };
+      case 'EMERGENCY_RESPONDER': return { bg: '#F4DBD6', fg: '#7A2E26', icon: '🚨' };
+      case 'ADMIN':               return { bg: '#E4DEF2', fg: '#4A3A80', icon: '⚙️' };
+      default:                    return { bg: '#EEF3EC', fg: '#5A635B', icon: '👤' };
+    }
+  };
+
+  const totalRegistered =
+    data.roleDistribution?.reduce((acc, r) => acc + Number(r.count), 0) || 0;
 
   return (
     <div
       id="analytics-report-area"
-      style={{
-        width: '100%',
-        boxSizing: 'border-box',
-        background: '#ffffff',
-        padding: 'clamp(14px, 2vw, 24px)',
-        borderRadius: 10,
-        border: '1px solid #cbd5e1',
-        marginTop: 16,
-      }}
+      style={{ width: '100%', marginTop: 8 }}
     >
-      {/* Printable Report Styles */}
+      {/* Print stylesheet */}
       <style>{`
         @media print {
-          body * {
-            visibility: hidden;
-          }
-          #analytics-report-area, #analytics-report-area * {
-            visibility: visible;
-          }
+          body * { visibility: hidden; }
+          #analytics-report-area, #analytics-report-area * { visibility: visible; }
           #analytics-report-area {
             position: absolute;
-            left: 0;
-            top: 0;
+            left: 0; top: 0;
             width: 100% !important;
             padding: 0 !important;
             border: none !important;
           }
-          .no-print {
-            display: none !important;
-          }
-          .print-header {
-            display: block !important;
-          }
+          .no-print { display: none !important; }
+          .print-header { display: block !important; }
         }
       `}</style>
 
-      {/* Official PSU Print Header (Only visible on PDF Export) */}
-      <div className="print-header" style={{ display: 'none', borderBottom: '2px solid #0f766e', paddingBottom: 10, marginBottom: 20, textAlign: 'center' }}>
-        <h2 style={{ margin: 0, color: '#0f766e', fontSize: 18 }}>PANGASINAN STATE UNIVERSITY - LINGAYEN CAMPUS</h2>
-        <p style={{ margin: '2px 0 0', fontSize: 12, color: '#475569' }}>Campus Health Services & Infirmary Epidemiological Report • R.A. 10173 Compliant</p>
-        <p style={{ margin: '2px 0 0', fontSize: 11, color: '#64748b' }}>Generated On: {new Date().toLocaleString()}</p>
-      </div>
-
-      {/* Screen Toolbar */}
-      <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h3 style={{ margin: 0, color: '#0f766e', fontSize: 20 }}>📊 Health Analytics & Epidemic Reporting</h3>
-          <small style={{ color: '#64748b' }}>Campus illness monitoring, 14-day consultation trajectories & departmental surveillance</small>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            onClick={fetchAnalytics}
-            style={{ padding: '8px 14px', background: '#f8fafc', color: '#334155', border: '1px solid #cbd5e1', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}
-          >
-            🔄 Refresh
-          </button>
-          <button
-            onClick={handleDownloadExcelCSV}
-            style={{ padding: '8px 16px', background: '#0284c7', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}
-          >
-            📊 Export for Excel (.CSV)
-          </button>
-          <button
-            onClick={handlePrintPDFReport}
-            style={{ padding: '8px 16px', background: '#0f766e', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}
-          >
-            🖨️ Export to PDF
-          </button>
-        </div>
-      </div>
-
-      {/* Epidemic Surveillance Banner */}
+      {/* Print-only header */}
       <div
+        className="print-header"
         style={{
-          padding: '12px 16px',
-          marginBottom: 20,
-          borderRadius: 8,
-          background: isFluSpike && (data.fluStats?.cases_past_7_days || 0) > 0 ? '#fef2f2' : '#f0fdf4',
-          border: `1px solid ${isFluSpike && (data.fluStats?.cases_past_7_days || 0) > 0 ? '#fecaca' : '#bbf7d0'}`,
+          display: 'none',
+          borderBottom: '2px solid #2E5C43',
+          paddingBottom: 12,
+          marginBottom: 22,
+          textAlign: 'center',
+        }}
+      >
+        <h2 style={{ margin: 0, color: '#2E5C43', fontSize: 18, fontWeight: 800 }}>
+          PANGASINAN STATE UNIVERSITY — LINGAYEN CAMPUS
+        </h2>
+        <p style={{ margin: '4px 0 0', fontSize: 12, color: '#5A635B' }}>
+          Campus Health Services & Infirmary Epidemiological Report · R.A. 10173 Compliant
+        </p>
+        <p style={{ margin: '2px 0 0', fontSize: 11, color: '#9AA79B' }}>
+          Generated: {new Date().toLocaleString()}
+        </p>
+      </div>
+
+      {/* Toolbar */}
+      <div
+        className="no-print"
+        style={{
           display: 'flex',
-          alignItems: 'center',
           justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 24,
+          flexWrap: 'wrap',
+          gap: 12,
         }}
       >
         <div>
-          <strong style={{ color: isFluSpike && (data.fluStats?.cases_past_7_days || 0) > 0 ? '#b91c1c' : '#15803d' }}>
-            {isFluSpike && (data.fluStats?.cases_past_7_days || 0) > 0 ? '⚠️ Seasonal Illness / Flu Spike Alert' : '✅ Seasonal Illness Trends Stable'}
-          </strong>
-          <p style={{ margin: '4px 0 0 0', fontSize: 12, color: '#475569' }}>
-            Acute respiratory & flu-like visits logged past 7 days: <strong>{data.fluStats?.cases_past_7_days || 0}</strong> (Previous 7 days: {data.fluStats?.cases_prev_7_days || 0}).
+          <h1
+            style={{
+              fontSize: 28,
+              fontWeight: 800,
+              letterSpacing: -0.6,
+              color: 'var(--text)',
+              margin: 0,
+            }}
+          >
+            Epidemiological analytics
+          </h1>
+          <p style={{ fontSize: 13.5, color: 'var(--text-sub)', margin: '6px 0 0' }}>
+            Campus illness trajectories, seasonal spike monitoring & health reports
           </p>
         </div>
-        <span style={{ fontSize: 11, padding: '4px 8px', borderRadius: 4, background: '#fff', fontWeight: 600, color: '#475569', border: '1px solid #e2e8f0' }}>
-          Epidemic Surveillance
+
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button type="button" onClick={fetchAnalytics} style={btnGhost}>
+            🔄 Refresh
+          </button>
+          <button
+            type="button"
+            onClick={handleDownloadExcelCSV}
+            style={{
+              ...btnGhost,
+              background: '#D6E3F0',
+              color: '#1F4462',
+              border: 'none',
+            }}
+          >
+            📊 Export CSV
+          </button>
+          <button type="button" onClick={handlePrintPDFReport} style={btnPrimary}>
+            🖨️ Export PDF
+          </button>
+        </div>
+      </div>
+
+      {/* KPI cards */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          gap: 16,
+          marginBottom: 22,
+        }}
+      >
+        {[
+          {
+            label: 'Enrolled students',
+            value: data.totalStudents,
+            icon: '🎓',
+            bg: '#D7E8D2',
+            fg: '#264D36',
+            sub: 'Verified student profiles',
+          },
+          {
+            label: 'Total consultations',
+            value: data.totalConsultations,
+            icon: '🩺',
+            bg: '#D7E8D2',
+            fg: '#264D36',
+            sub: 'All-time encounters logged',
+          },
+          {
+            label: 'Active emergencies',
+            value: data.emergencyMetrics?.active || 0,
+            icon: '🚨',
+            bg: '#F4DBD6',
+            fg: '#7A2E26',
+            sub: 'Pending / in-dispatch triage',
+          },
+          {
+            label: 'Avg. response time',
+            value: `${Math.round(data.emergencyMetrics?.avgResponseSeconds || 0)}s`,
+            icon: '⚡',
+            bg: '#E4DEF2',
+            fg: '#4A3A80',
+            sub: 'Trigger to resolution average',
+          },
+        ].map((card) => (
+          <div
+            key={card.label}
+            style={{
+              padding: '20px 22px',
+              background: card.bg,
+              borderRadius: 24,
+              position: 'relative',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                marginBottom: 14,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 20,
+                  width: 36,
+                  height: 36,
+                  borderRadius: 12,
+                  background: 'rgba(255,255,255,0.55)',
+                  display: 'grid',
+                  placeItems: 'center',
+                }}
+              >
+                {card.icon}
+              </span>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 800,
+                  letterSpacing: 0.6,
+                  color: card.fg,
+                  textTransform: 'uppercase',
+                }}
+              >
+                {card.label}
+              </span>
+            </div>
+            <div
+              style={{
+                fontSize: 32,
+                fontWeight: 800,
+                color: card.fg,
+                letterSpacing: -1,
+                lineHeight: 1,
+              }}
+            >
+              {card.value}
+            </div>
+            <div
+              style={{
+                fontSize: 11.5,
+                color: card.fg,
+                opacity: 0.75,
+                marginTop: 8,
+                fontWeight: 600,
+              }}
+            >
+              {card.sub}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Flu surveillance banner */}
+      <div
+        style={{
+          padding: '20px 24px',
+          marginBottom: 22,
+          borderRadius: 24,
+          background: isFluSpike && (data.fluStats?.cases_past_7_days || 0) > 0
+            ? '#F4DBD6'
+            : '#D7E8D2',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 14,
+          flexWrap: 'wrap',
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontSize: 15,
+              fontWeight: 800,
+              color: isFluSpike && (data.fluStats?.cases_past_7_days || 0) > 0
+                ? '#7A2E26'
+                : '#264D36',
+            }}
+          >
+            {isFluSpike && (data.fluStats?.cases_past_7_days || 0) > 0
+              ? '⚠️ Seasonal illness / flu spike alert'
+              : '✅ Seasonal illness trends stable'}
+          </div>
+          <p
+            style={{
+              margin: '6px 0 0',
+              fontSize: 13,
+              color: isFluSpike && (data.fluStats?.cases_past_7_days || 0) > 0
+                ? '#7A2E26'
+                : '#264D36',
+              opacity: 0.85,
+              fontWeight: 500,
+            }}
+          >
+            Acute respiratory & flu-like visits logged past 7 days:{' '}
+            <b>{data.fluStats?.cases_past_7_days || 0}</b>{' '}
+            (Previous 7 days: {data.fluStats?.cases_prev_7_days || 0}).
+          </p>
+        </div>
+        <span
+          className="my-pill"
+          style={{
+            background: 'rgba(255,255,255,0.6)',
+            color: isFluSpike && (data.fluStats?.cases_past_7_days || 0) > 0
+              ? '#7A2E26'
+              : '#264D36',
+            fontSize: 10.5,
+            letterSpacing: 0.6,
+          }}
+        >
+          EPIDEMIC SURVEILLANCE
         </span>
       </div>
 
-      {/* ========================================================= */}
-      {/* 1. FULL-WIDTH CARD: 14-DAY TIMELINE (LINE GRAPH)          */}
-      {/* ========================================================= */}
-      <div style={{ padding: 18, border: '1px solid #e2e8f0', borderRadius: 8, background: '#ffffff', marginBottom: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+      {/* ── 1. Roles & headcount ──────────────────────── */}
+      <div className="my-card" style={{ marginBottom: 22 }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 20,
+            flexWrap: 'wrap',
+            gap: 12,
+          }}
+        >
           <div>
-            <h4 style={{ margin: 0, color: '#0f766e', fontSize: 15 }}>📈 14-Day Consultation Volume Trajectory (Line Graph)</h4>
-            <small style={{ color: '#64748b' }}>Daily patient consultations across all campus infirmaries</small>
+            <h4 className="my-card-title">Campus population & headcount by role</h4>
+            <p className="my-card-sub">
+              Distribution of authorized users across all 7 platform RBAC roles
+            </p>
           </div>
-          <span style={{ fontSize: 12, fontWeight: 'bold', color: '#0f766e', background: '#f0fdfa', padding: '4px 8px', borderRadius: 4 }}>
-            Total Consultations: {data.totalConsultations}
+          <span
+            className="my-pill"
+            style={{
+              background: '#EEF3EC',
+              color: '#5A635B',
+              fontSize: 11.5,
+            }}
+          >
+            Total registered: {totalRegistered}
           </span>
         </div>
-        <SvgLineChart data={data.timeSeries || []} />
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+            gap: 12,
+          }}
+        >
+          {data.roleDistribution?.map((role) => {
+            const tone = getRoleTone(role.role_code);
+            return (
+              <div
+                key={role.role_code}
+                style={{
+                  padding: '18px 14px',
+                  borderRadius: 20,
+                  background: tone.bg,
+                  textAlign: 'center',
+                }}
+              >
+                <div style={{ fontSize: 22 }}>{tone.icon}</div>
+                <div
+                  style={{
+                    fontSize: 22,
+                    fontWeight: 800,
+                    color: tone.fg,
+                    marginTop: 6,
+                    letterSpacing: -0.4,
+                  }}
+                >
+                  {role.count}
+                </div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: tone.fg,
+                    opacity: 0.85,
+                    marginTop: 3,
+                  }}
+                >
+                  {role.role_name}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
-      {/* ========================================================= */}
-      {/* 2. FULL-WIDTH CARD: TOP DIAGNOSES (VERTICAL BAR GRAPH)    */}
-      {/* ========================================================= */}
-      <div style={{ padding: 18, border: '1px solid #e2e8f0', borderRadius: 8, background: '#ffffff', marginBottom: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+      {/* ── 2. Consultation timeline ─────────────────── */}
+      <div className="my-card" style={{ marginBottom: 22 }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 18,
+            flexWrap: 'wrap',
+            gap: 12,
+          }}
+        >
           <div>
-            <h4 style={{ margin: 0, color: '#0284c7', fontSize: 15 }}>📊 Top Clinical Diagnoses (Vertical Bar Graph)</h4>
-            <small style={{ color: '#64748b' }}>Primary medical diagnoses logged across student and employee encounters</small>
+            <h4 className="my-card-title">14-day consultation volume</h4>
+            <p className="my-card-sub">
+              Daily patient consultations across all campus infirmaries
+            </p>
           </div>
+          <span className="my-pill my-tonal-green">Total: {data.totalConsultations}</span>
+        </div>
+        <SvgLineChart
+          data={data.timeSeries || []}
+          themeColor="#2E5C43"
+          themeColorLight="#7BAA87"
+          gradId="consultationGrad"
+        />
+      </div>
+
+      {/* ── 3. Emergency SOS timeline ─────────────────── */}
+      <div className="my-card" style={{ marginBottom: 22 }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 18,
+            flexWrap: 'wrap',
+            gap: 12,
+          }}
+        >
+          <div>
+            <h4 className="my-card-title">14-day campus emergency incidents</h4>
+            <p className="my-card-sub">
+              Daily SOS panic triggers transmitted from mobile clients
+            </p>
+          </div>
+          <span className="my-pill my-tonal-rose">Incidents tracked</span>
+        </div>
+        <SvgLineChart
+          data={data.emergencyTimeSeries || []}
+          themeColor="#B25C4D"
+          themeColorLight="#E0A89A"
+          gradId="emergencyGrad"
+          emptyMessage="No campus emergency incidents reported in the past 14 days."
+        />
+      </div>
+
+      {/* ── 4. Top diagnoses ───────────────────────────── */}
+      <div className="my-card" style={{ marginBottom: 22 }}>
+        <div style={{ marginBottom: 14 }}>
+          <h4 className="my-card-title">Top clinical diagnoses</h4>
+          <p className="my-card-sub">
+            Primary medical diagnoses logged across student and employee encounters
+          </p>
         </div>
         <SvgVerticalBarChart data={data.topDiagnoses || []} />
       </div>
 
-      {/* ========================================================= */}
-      {/* 3. FULL-WIDTH CARD: DEPT VISITS (HORIZONTAL BAR GRAPH)    */}
-      {/* ========================================================= */}
-      <div style={{ padding: 18, border: '1px solid #e2e8f0', borderRadius: 8, background: '#ffffff', marginBottom: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-          <div>
-            <h4 style={{ margin: 0, color: '#0f766e', fontSize: 15 }}>🏫 Visits by Academic Program & Department (Horizontal Bar Graph)</h4>
-            <small style={{ color: '#64748b' }}>Consultation volume aggregated per academic degree program or employee unit</small>
-          </div>
+      {/* ── 5. Department breakdown ───────────────────── */}
+      <div className="my-card" style={{ marginBottom: 22 }}>
+        <div style={{ marginBottom: 14 }}>
+          <h4 className="my-card-title">Visits by academic program & department</h4>
+          <p className="my-card-sub">
+            Consultation volume aggregated per academic degree program or employee unit
+          </p>
         </div>
         <SvgHorizontalBarChart data={data.deptBreakdown || []} />
       </div>
 
-      {/* ========================================================= */}
-      {/* 4. 2-COLUMN GRID: WATCHLIST & CRITICAL INVENTORY          */}
-      {/* ========================================================= */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 20 }}>
-        {/* High Risk Watchlist */}
-        <div style={{ padding: 18, border: '1px solid #e2e8f0', borderRadius: 8, background: '#f8fafc' }}>
-          <h4 style={{ margin: '0 0 12px 0', color: '#1e293b', fontSize: 14 }}>🛡️ High-Risk Student Surveillance Watchlist</h4>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <div style={{ background: '#fff', padding: 10, borderRadius: 6, border: '1px solid #e2e8f0' }}>
-              <div style={{ fontSize: 11, color: '#64748b' }}>Asthma / Respiratory</div>
-              <div style={{ fontSize: 20, fontWeight: 'bold', color: '#0369a1' }}>{data.highRiskGroups?.asthma_count || 0}</div>
-            </div>
-            <div style={{ background: '#fff', padding: 10, borderRadius: 6, border: '1px solid #e2e8f0' }}>
-              <div style={{ fontSize: 11, color: '#64748b' }}>Hypertension / Cardiac</div>
-              <div style={{ fontSize: 20, fontWeight: 'bold', color: '#b91c1c' }}>{data.highRiskGroups?.hypertension_count || 0}</div>
-            </div>
-            <div style={{ background: '#fff', padding: 10, borderRadius: 6, border: '1px solid #e2e8f0' }}>
-              <div style={{ fontSize: 11, color: '#64748b' }}>Severe Allergies</div>
-              <div style={{ fontSize: 20, fontWeight: 'bold', color: '#d97706' }}>{data.highRiskGroups?.severe_allergies_count || 0}</div>
-            </div>
-            <div style={{ background: '#fff', padding: 10, borderRadius: 6, border: '1px solid #e2e8f0' }}>
-              <div style={{ fontSize: 11, color: '#64748b' }}>Diabetes / Endocrine</div>
-              <div style={{ fontSize: 20, fontWeight: 'bold', color: '#7c3aed' }}>{data.highRiskGroups?.diabetes_count || 0}</div>
-            </div>
+      {/* ── 6. Watchlist & critical inventory ────────── */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+          gap: 20,
+        }}
+      >
+        {/* High-risk watchlist */}
+        <div className="my-card">
+          <h4
+            className="my-card-title"
+            style={{ marginBottom: 18 }}
+          >
+            High-risk student surveillance watchlist
+          </h4>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: 12,
+            }}
+          >
+            {[
+              {
+                label: 'Asthma / respiratory',
+                value: data.highRiskGroups?.asthma_count || 0,
+                bg: '#D6E3F0',
+                fg: '#1F4462',
+              },
+              {
+                label: 'Hypertension / cardiac',
+                value: data.highRiskGroups?.hypertension_count || 0,
+                bg: '#F4DBD6',
+                fg: '#7A2E26',
+              },
+              {
+                label: 'Severe allergies',
+                value: data.highRiskGroups?.severe_allergies_count || 0,
+                bg: '#F0E6D2',
+                fg: '#6E5526',
+              },
+              {
+                label: 'Diabetes / endocrine',
+                value: data.highRiskGroups?.diabetes_count || 0,
+                bg: '#E4DEF2',
+                fg: '#4A3A80',
+              },
+            ].map((item) => (
+              <div
+                key={item.label}
+                style={{
+                  padding: '16px 18px',
+                  borderRadius: 20,
+                  background: item.bg,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    color: item.fg,
+                    opacity: 0.85,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {item.label}
+                </div>
+                <div
+                  style={{
+                    fontSize: 28,
+                    fontWeight: 800,
+                    color: item.fg,
+                    marginTop: 6,
+                    letterSpacing: -0.6,
+                    lineHeight: 1,
+                  }}
+                >
+                  {item.value}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 
-        {/* Low Stock & Expiry Sweeps */}
-        <div style={{ padding: 18, border: '1px solid #e2e8f0', borderRadius: 8, background: '#f8fafc' }}>
-          <h4 style={{ margin: '0 0 8px 0', color: '#1e293b', fontSize: 14 }}>💊 Critical Pharmacy Inventory & Buffer Stock</h4>
+        {/* Low stock & expiry sweeps */}
+        <div className="my-card">
+          <h4
+            className="my-card-title"
+            style={{ marginBottom: 16 }}
+          >
+            Critical pharmacy inventory
+          </h4>
+
           {!data.lowStockMeds || data.lowStockMeds.length === 0 ? (
-            <p style={{ fontSize: 12, color: '#16a34a' }}>All clinic supplies have adequate stock buffers.</p>
+            <div
+              style={{
+                padding: '32px 20px',
+                textAlign: 'center',
+                color: '#264D36',
+                fontSize: 13,
+                fontWeight: 700,
+                background: '#D7E8D2',
+                borderRadius: 20,
+              }}
+            >
+              ✅ All clinic supplies have adequate stock buffers.
+            </div>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid #cbd5e1', textAlign: 'left', color: '#64748b' }}>
-                  <th style={{ paddingBottom: 6 }}>Medicine</th>
-                  <th style={{ paddingBottom: 6 }}>Batch</th>
-                  <th style={{ paddingBottom: 6 }}>Stock</th>
-                  <th style={{ paddingBottom: 6 }}>Expires</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.lowStockMeds.slice(0, 4).map((med, idx) => (
-                  <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '6px 0', fontWeight: 600 }}>{med.name}</td>
-                    <td style={{ color: '#64748b' }}>{med.batch_no || 'Standard'}</td>
-                    <td style={{ color: med.quantity_on_hand < 15 ? '#dc2626' : '#0f766e', fontWeight: 600 }}>
-                      {med.quantity_on_hand} left
-                    </td>
-                    <td style={{ color: med.days_until_expiry < 90 ? '#b91c1c' : '#64748b', fontSize: 11 }}>
+            <div
+              style={{
+                borderRadius: 20,
+                overflow: 'hidden',
+                background: '#F5F8F3',
+              }}
+            >
+              {data.lowStockMeds.slice(0, 4).map((med, idx, arr) => {
+                const criticalStock = med.quantity_on_hand < 15;
+                const criticalExpiry = med.days_until_expiry < 90;
+                return (
+                  <div
+                    key={idx}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1.4fr 0.9fr 0.7fr 0.9fr',
+                      gap: 12,
+                      padding: '14px 18px',
+                      alignItems: 'center',
+                      borderBottom: idx < arr.length - 1
+                        ? '1px solid rgba(15,30,23,0.06)'
+                        : 'none',
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: 'var(--text)',
+                      }}
+                    >
+                      {med.name}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: 'var(--mono)',
+                        fontSize: 10.5,
+                        color: 'var(--text-muted)',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {med.batch_no || 'Standard'}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 800,
+                        color: criticalStock ? '#7A2E26' : '#264D36',
+                        textAlign: 'right',
+                      }}
+                    >
+                      {med.quantity_on_hand}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: criticalExpiry ? '#7A2E26' : 'var(--text-sub)',
+                        fontWeight: 600,
+                        textAlign: 'right',
+                      }}
+                    >
                       {med.expiry_date}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       </div>

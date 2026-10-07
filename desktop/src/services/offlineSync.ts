@@ -1,4 +1,5 @@
 // desktop/src/services/offlineSync.ts
+import { API_BASE_URL } from '../config/api';
 
 export interface OfflineMutation {
   client_mutation_id: string;
@@ -43,7 +44,7 @@ export async function replayOfflineQueue(): Promise<{ synced: number; remaining:
   if (!token) return { synced: 0, remaining: queue.length };
 
   try {
-    const res = await fetch('https://localhost:5000/api/sync/replay', {
+    const res = await fetch(`${API_BASE_URL}/api/sync/replay`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

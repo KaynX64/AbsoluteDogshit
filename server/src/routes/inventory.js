@@ -11,7 +11,7 @@ const router = express.Router();
 // 1. READ / QUERY CATALOGUE & LOGS
 // =============================================================================
 
-// GET /api/inventory/batches - Fetch all active inventory batches (FEFO sorted)
+// GET /api/inventory/batches - Fetch only batches with available stock (> 0)
 router.get('/batches', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
   try {
     const [rows] = await pool.query(
@@ -21,6 +21,7 @@ router.get('/batches', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
        FROM MEDICINE_BATCHES b 
        JOIN MEDICINES m ON b.medicine_id = m.medicine_id 
        WHERE b.deleted_at IS NULL 
+         AND b.quantity_on_hand > 0   -- 👈 DAGDAG ITO: Itago kapag ubos na
        ORDER BY b.expiry_date ASC`
     );
     res.json(rows);
@@ -46,7 +47,7 @@ router.get('/medicines', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'N
   }
 });
 
-// GET /api/inventory/expiring-soon - Sweeps for lots expiring within 90 days or below reorder level
+// GET /api/inventory/expiring-soon - Sweeps ONLY for remaining stock (> 0) expiring within 90 days
 router.get('/expiring-soon', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
   try {
     const [rows] = await pool.query(
@@ -55,14 +56,14 @@ router.get('/expiring-soon', authenticateToken, requireRoles('NURSE', 'DOCTOR', 
               DATEDIFF(b.expiry_date, CURDATE()) as days_until_expiry,
               CASE 
                 WHEN DATEDIFF(b.expiry_date, CURDATE()) < 0 THEN 'EXPIRED'
-                WHEN DATEDIFF(b.expiry_date, CURDATE()) <= 30 THEN 'CRITICAL'
-                WHEN DATEDIFF(b.expiry_date, CURDATE()) <= 90 THEN 'EXPIRING_SOON'
-                ELSE 'OK'
+                WHEN DATEDIFF(b.expiry_date, CURDATE()) <= 30 THEN 'CRITICAL (<30d)'
+                ELSE 'EXPIRING SOON'
               END AS alert_level
        FROM MEDICINE_BATCHES b
        JOIN MEDICINES m ON b.medicine_id = m.medicine_id
        WHERE b.deleted_at IS NULL 
-         AND (DATEDIFF(b.expiry_date, CURDATE()) <= 90 OR b.quantity_on_hand <= m.reorder_level)
+         AND b.quantity_on_hand > 0                        -- 👈 DAPAT MAY STOCK PA
+         AND DATEDIFF(b.expiry_date, CURDATE()) <= 90     -- 👈 EXPIRING LANG TALAGA
        ORDER BY b.expiry_date ASC`
     );
     res.json(rows);
@@ -269,6 +270,69 @@ router.post('/medicines', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'AD
     await connection.rollback();
     console.error('Add medicine error:', error);
     res.status(500).json({ error: 'Failed to create medicine definition.' });
+  } finally {
+    connection.release();
+  }
+});
+
+// DELETE /api/inventory/medicines/:id - Delete / retire a formulary entry
+router.delete('/medicines/:id', authenticateToken, requireRoles('NURSE', 'ADMIN'), async (req, res) => {
+  const medicineId = Number(req.params.id);
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const [medRows] = await connection.query(
+      'SELECT name, generic_name, strength FROM MEDICINES WHERE medicine_id = ? AND deleted_at IS NULL',
+      [medicineId]
+    );
+
+    if (medRows.length === 0) {
+      throw new Error('Medicine definition not found or already deleted.');
+    }
+
+    // Safety check: block deletion if any batches still have active stock
+    const [activeBatches] = await connection.query(
+      'SELECT COALESCE(SUM(quantity_on_hand), 0) as total_stock FROM MEDICINE_BATCHES WHERE medicine_id = ? AND deleted_at IS NULL AND quantity_on_hand > 0',
+      [medicineId]
+    );
+
+    const stockRemaining = activeBatches[0]?.total_stock || 0;
+    if (stockRemaining > 0) {
+      throw new Error(
+        `Cannot delete "${medRows[0].name}". There are still ${stockRemaining} units in active stock. Dispose or dispense the stock before deleting this formulary entry.`
+      );
+    }
+
+    // Soft-delete the medicine master
+    await connection.query(
+      'UPDATE MEDICINES SET is_active = FALSE, deleted_at = CURRENT_TIMESTAMP WHERE medicine_id = ?',
+      [medicineId]
+    );
+
+    // Soft-delete any 0-quantity lots linked to it
+    await connection.query(
+      'UPDATE MEDICINE_BATCHES SET deleted_at = CURRENT_TIMESTAMP WHERE medicine_id = ?',
+      [medicineId]
+    );
+
+    await logAudit(connection, {
+      userId: req.user.user_id,
+      action: 'DELETE',
+      table: 'MEDICINES',
+      recordId: medicineId,
+      oldValue: medRows[0],
+      newValue: { operation: 'FORMULARY_DELETED', is_active: false },
+      ipAddress: req.ip,
+    });
+
+    await connection.commit();
+    res.json({ message: `Medicine "${medRows[0].name}" (${medRows[0].strength}) deleted from formulary.` });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Delete medicine error:', error);
+    res.status(400).json({ error: error.message || 'Failed to delete medicine definition.' });
   } finally {
     connection.release();
   }

@@ -1,18 +1,7 @@
 // desktop/src/components/PrescriptionGenerator.tsx
-
-import React, { useState, useEffect } from 'react';
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  boxSizing: 'border-box',
-  padding: '6px 8px',
-  marginTop: 4,
-  border: '1px solid #cbd5e1',
-  borderRadius: 4,
-  fontSize: 13,
-  color: '#0f172a',
-  backgroundColor: '#ffffff',
-};
+import React, { useState, useEffect, useRef } from 'react';
+import { T, btnPrimary, inputStyle } from '../theme';
+import { API_BASE_URL } from '../config/api';
 
 interface MedicineMaster {
   medicine_id: number;
@@ -34,6 +23,153 @@ interface PrescriptionGeneratorProps {
   initialNotes?: string;
   isArchived?: boolean;
   onPrescriptionIssued?: () => void;
+}
+
+/* ── Custom themed dropdown (replaces native <select>) ─────────── */
+function FormularySelect({
+  medicines,
+  value,
+  onChange,
+  disabled,
+}: {
+  medicines: MedicineMaster[];
+  value: number;
+  onChange: (id: number) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  const selected = medicines.find((m) => m.medicine_id === value);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  return (
+    <div ref={wrapperRef} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => !disabled && setOpen((v) => !v)}
+        style={{
+          ...inputStyle,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          textAlign: 'left',
+          opacity: disabled ? 0.6 : 1,
+        }}
+      >
+        <span
+          style={{
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            color: selected ? T.text : T.textMuted,
+          }}
+        >
+          {selected
+            ? `${selected.name} (${selected.generic_name}) · ${selected.strength} [${selected.form}]`
+            : 'Select medicine…'}
+        </span>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={T.textSub}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{
+            width: 14,
+            height: 14,
+            flexShrink: 0,
+            marginLeft: 8,
+            transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 140ms ease',
+          }}
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+
+      {open && !disabled && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            left: 0,
+            right: 0,
+            zIndex: 50,
+            maxHeight: 260,
+            overflowY: 'auto',
+            background: T.surface,
+            border: `1px solid ${T.border}`,
+            borderRadius: T.radius.md,
+            boxShadow: T.shadow.lg,
+            padding: 4,
+          }}
+        >
+          {medicines.length === 0 ? (
+            <div
+              style={{
+                padding: '10px 12px',
+                fontSize: 12.5,
+                color: T.textMuted,
+                fontStyle: 'italic',
+              }}
+            >
+              Loading formulary…
+            </div>
+          ) : (
+            medicines.map((m) => {
+              const isSelected = m.medicine_id === value;
+              return (
+                <button
+                  key={m.medicine_id}
+                  type="button"
+                  onClick={() => {
+                    onChange(m.medicine_id);
+                    setOpen(false);
+                  }}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '10px 12px',
+                    borderRadius: T.radius.sm,
+                    border: 'none',
+                    background: isSelected ? T.primaryTint : 'transparent',
+                    color: isSelected ? T.primary : T.text,
+                    fontSize: 13,
+                    fontWeight: isSelected ? 700 : 500,
+                    cursor: 'pointer',
+                    fontFamily: T.font,
+                    transition: 'background 100ms ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isSelected) e.currentTarget.style.background = T.sage100;
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isSelected) e.currentTarget.style.background = 'transparent';
+                  }}
+                >
+                  {m.name} ({m.generic_name}) · {m.strength} [{m.form}]
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function PrescriptionGenerator({
@@ -59,7 +195,6 @@ export default function PrescriptionGenerator({
   const [isSaving, setIsSaving] = useState(false);
   const [issuedStatus, setIssuedStatus] = useState<string | null>(null);
 
-  // Sync state dynamically whenever patient or initial notes prop changes
   useEffect(() => {
     if (initialNotes !== undefined && initialNotes !== null && initialNotes !== '') {
       setDoctorNotes(initialNotes);
@@ -70,12 +205,11 @@ export default function PrescriptionGenerator({
     }
   }, [initialNotes, isArchived]);
 
-  // 1. Fetch live medicine catalogue
   useEffect(() => {
     const fetchCatalog = async () => {
       const token = localStorage.getItem('valetudo_token');
       try {
-        const res = await fetch('https://localhost:5000/api/inventory/medicines', {
+        const res = await fetch(`${API_BASE_URL}/api/inventory/medicines`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.ok) {
@@ -103,46 +237,36 @@ export default function PrescriptionGenerator({
     }
   };
 
-  // 2. Persist to MySQL and Spool to Printer
   const handleSaveAndPrintPrescription = async () => {
     if (!patientUserId) {
       alert('Error: No patient selected. Please choose a patient from the queue first.');
       return;
     }
-
     setIsSaving(true);
     setIssuedStatus(null);
     const token = localStorage.getItem('valetudo_token');
 
     try {
-      // Step A: POST to backend
-      const res = await fetch('https://localhost:5000/api/documents/prescriptions', {
+      const res = await fetch(`${API_BASE_URL}/api/documents/prescriptions`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           patient_user_id: patientUserId,
           notes: doctorNotes,
-          items: [
-            {
-              medicine_id: selectedMedicineId,
-              dosage: rxDosage,
-              frequency: rxFrequency,
-              route: 'Oral',
-              duration_days: Number(rxDurationDays) || 3,
-              quantity_dispensed: Number(rxQuantity) || 10,
-              instructions: rxInstructions,
-            },
-          ],
+          items: [{
+            medicine_id: selectedMedicineId,
+            dosage: rxDosage,
+            frequency: rxFrequency,
+            route: 'Oral',
+            duration_days: Number(rxDurationDays) || 3,
+            quantity_dispensed: Number(rxQuantity) || 10,
+            instructions: rxInstructions,
+          }],
         }),
       });
 
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to issue prescription.');
-      }
+      if (!res.ok) throw new Error(data.error || 'Failed to issue prescription.');
 
       const realQrToken = data.qrToken;
       const prescriptionId = data.prescriptionId;
@@ -150,7 +274,6 @@ export default function PrescriptionGenerator({
       setIssuedStatus(`✅ Prescription #${prescriptionId} recorded and signed! Verification Token: ${realQrToken}`);
       if (onPrescriptionIssued) onPrescriptionIssued();
 
-      // Step B: Build official print HTML containing verifiable QR Code image
       const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(realQrToken)}`;
 
       const htmlContent = `
@@ -178,24 +301,19 @@ export default function PrescriptionGenerator({
               <h1>PANGASINAN STATE UNIVERSITY INFIRMARY</h1>
               <p>Lingayen Campus Medical Services • Republic Act No. 10173 Verified E-Prescription</p>
             </div>
-
             <div class="patient-box">
               <b>Patient:</b> ${verifiedPatient.first_name} ${verifiedPatient.last_name} &nbsp;|&nbsp;
               <b>Student No:</b> ${verifiedPatient.student_no || 'N/A'}<br/>
               <b>Course:</b> ${verifiedPatient.course || 'N/A'} &nbsp;|&nbsp;
               <b>Allergies:</b> <span style="color:red; font-weight:bold;">${verifiedPatient.allergies || 'None recorded'}</span>
             </div>
-
             <div class="rx-symbol">℞</div>
-
             <div class="med-item">
               <div class="med-name">${rxMedName} - ${rxDosage}</div>
               <div class="med-instructions">Sig: ${rxInstructions} • ${rxFrequency}</div>
               <div style="margin-top: 4px; font-size: 12px;">Duration: <b>${rxDurationDays} days</b> &nbsp;|&nbsp; Quantity Dispensed: <b>${rxQuantity} pcs</b></div>
             </div>
-
             ${doctorNotes ? `<p style="font-size: 13px; color: #475569;"><b>Physician Notes:</b> ${doctorNotes}</p>` : ''}
-
             <div class="verification-panel">
               <img src="${qrImageUrl}" width="110" height="110" alt="Rx QR Verification" />
               <div>
@@ -206,7 +324,6 @@ export default function PrescriptionGenerator({
                 <code style="font-size: 10px; background: #eee; padding: 2px 6px; border-radius: 4px;">${realQrToken}</code>
               </div>
             </div>
-
             <div class="footer">
               <div>
                 <p>Issued: ${new Date().toLocaleString()}</p>
@@ -239,121 +356,124 @@ export default function PrescriptionGenerator({
     }
   };
 
+  /* ── Field wrapper ────────────────────────────────────────── */
+  const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div>
+      <label style={{
+        display: 'block', fontSize: 11.5, fontWeight: 700,
+        color: T.textSub, marginBottom: 6,
+      }}>
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+
   return (
-    <section style={{ padding: 16, border: '1px solid #cbd5e1', borderRadius: 8, background: '#ffffff' }}>
-      <h3 style={{ marginTop: 0, color: '#0f766e', fontSize: 16 }}>℞ Official Digital Prescription</h3>
-
-      {/* Select Formulary Drug */}
-      <div style={{ marginBottom: 10 }}>
-        <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Select Medicine (Formulary):</label>
-        <select
-          style={{ width: '100%', padding: 6, marginTop: 4, borderRadius: 4, border: '1px solid #cbd5e1', fontSize: 13 }}
-          disabled={isArchived}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Formulary picker (custom themed dropdown) */}
+      <Field label="Medicine (formulary)">
+        <FormularySelect
+          medicines={medicines}
           value={selectedMedicineId}
-          onChange={(e) => handleSelectMedicine(Number(e.target.value))}
-        >
-          {medicines.map((m) => (
-            <option key={m.medicine_id} value={m.medicine_id}>
-              {m.name} ({m.generic_name}) - {m.strength} [{m.form}]
-            </option>
-          ))}
-        </select>
-      </div>
+          onChange={handleSelectMedicine}
+          disabled={isArchived}
+        />
+      </Field>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-        <div>
-          <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Dosage:</label>
+      {/* Dosage & quantity */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Dosage">
           <input
-            style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
+            style={inputStyle}
             disabled={isArchived}
             value={rxDosage}
             onChange={(e) => setRxDosage(e.target.value)}
           />
-        </div>
-        <div>
-          <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Quantity (pcs/bottles):</label>
+        </Field>
+        <Field label="Quantity (pcs/bottles)">
           <input
             type="number"
             min="1"
-            style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
+            style={inputStyle}
             disabled={isArchived}
             value={rxQuantity}
             onChange={(e) => setRxQuantity(e.target.value)}
           />
-        </div>
+        </Field>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-        <div>
-          <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Frequency:</label>
+      {/* Frequency & duration */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Frequency">
           <input
-            style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
+            style={inputStyle}
             disabled={isArchived}
             value={rxFrequency}
             onChange={(e) => setRxFrequency(e.target.value)}
           />
-        </div>
-        <div>
-          <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Duration (Days):</label>
+        </Field>
+        <Field label="Duration (days)">
           <input
             type="number"
             min="1"
-            style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
+            style={inputStyle}
             disabled={isArchived}
             value={rxDurationDays}
             onChange={(e) => setRxDurationDays(e.target.value)}
           />
-        </div>
+        </Field>
       </div>
 
-      <div style={{ marginBottom: 10 }}>
-        <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Instructions (Sig):</label>
+      {/* Instructions */}
+      <Field label="Instructions (sig)">
         <textarea
           rows={2}
-          style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
+          style={{ ...inputStyle, resize: 'vertical', fontFamily: T.font }}
           disabled={isArchived}
           value={rxInstructions}
           onChange={(e) => setRxInstructions(e.target.value)}
         />
-      </div>
+      </Field>
 
-      <div style={{ marginBottom: 14 }}>
-        <label style={{ fontSize: 12, fontWeight: 'bold', color: '#334155' }}>Physician Dietary / Clinical Notes:</label>
+      {/* Physician dietary / clinical notes */}
+      <Field label="Physician dietary / clinical notes">
         <input
-          style={{ width: '100%', boxSizing: 'border-box', padding: 6, marginTop: 4, border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
+          style={inputStyle}
           disabled={isArchived}
           value={doctorNotes}
           onChange={(e) => setDoctorNotes(e.target.value)}
         />
-      </div>
+      </Field>
 
+      {/* Submit */}
       <button
+        type="button"
         onClick={handleSaveAndPrintPrescription}
         disabled={isSaving || isArchived}
         style={{
+          ...btnPrimary,
           width: '100%',
-          padding: 10,
-          background: (isSaving || isArchived) ? '#94a3b8' : '#0f766e',
-          color: '#fff',
-          border: 'none',
-          borderRadius: 6,
+          padding: 13,
+          opacity: (isSaving || isArchived) ? 0.5 : 1,
           cursor: (isSaving || isArchived) ? 'not-allowed' : 'pointer',
-          fontWeight: 'bold',
-          fontSize: 13,
         }}
       >
         {isArchived
-          ? '🔒 Prescription Issued & Archived'
+          ? '🔒 Prescription issued & archived'
           : isSaving
-          ? 'Signing & Printing...'
-          : '🖨️ Issue, Sign & Print Prescription'}
+          ? 'Signing & printing…'
+          : '🖨️ Issue, sign & print prescription'}
       </button>
 
       {issuedStatus && (
-        <p style={{ fontSize: 11, color: '#16a34a', fontWeight: 'bold', marginTop: 8, wordBreak: 'break-all' }}>
+        <p style={{
+          fontSize: 11.5, color: T.success, fontWeight: 700,
+          margin: 0, wordBreak: 'break-all', textAlign: 'center',
+        }}>
           {issuedStatus}
         </p>
       )}
-    </section>
+    </div>
   );
 }

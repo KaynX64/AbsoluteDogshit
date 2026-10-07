@@ -24,7 +24,7 @@ router.get('/token', authenticateToken, requirePrivacyConsent, (req, res) => {
     const hmac = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
 
     const qrToken = `${payload}.${hmac}`;
-    res.json({ qrToken, expiresInSeconds: 300 });
+    res.json({ qrToken, expiresInSeconds: 900 });
   } catch (error) {
     console.error('[HealthPass] QR generation error:', error);
     res.status(500).json({ error: 'Failed to generate QR token.' });
@@ -89,7 +89,8 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
     const [patient] = await connection.query(
       `SELECT u.user_id, u.first_name, u.last_name, u.email,
               sp.student_no, sp.course, sp.year_level,
-              hp.blood_type, hp.allergies, hp.chronic_conditions
+              hp.blood_type, hp.allergies, hp.chronic_conditions,
+              hp.height, hp.weight, hp.updated_at AS health_profile_updated_at
        FROM USERS u
        LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
        LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id

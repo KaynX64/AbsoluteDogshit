@@ -11,6 +11,12 @@ const hasCerts = fs.existsSync(certPath) && fs.existsSync(keyPath);
 
 export default defineConfig({
   plugins: [react()],
+
+  // ── CRITICAL for Electron production builds ─────────────────────────────
+  // Emit relative asset URLs (./assets/...) so they resolve correctly
+  // when the app is loaded via file:// protocol inside the packaged .exe.
+  base: './',
+
   server: {
     host: '127.0.0.1',
     port: 5173,
