@@ -18,13 +18,15 @@
     "multer": "^2.4.0",
     "mysql2": "^3.24.4",
     "nodemailer": "^10.0.10",
+    "pdfkit": "^0.20.2",
+    "qrcode": "^1.5.4",
     "redis": "^6.2.1",
     "socket.io": "^4.8.3"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"
   },
-    "overrides": {
+  "overrides": {
     "glob": "^13.0.0",
     "uuid": "^11.1.0"
   },
@@ -32,5 +34,4 @@
     "@firebase/util@1.15.3": true,
     "protobufjs@7.6.6": true
   }
-
 }

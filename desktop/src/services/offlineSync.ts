@@ -21,7 +21,9 @@ export function getOfflineQueue(): OfflineMutation[] {
   }
 }
 
-export function queueOfflineMutation(mutation: Omit<OfflineMutation, 'client_mutation_id' | 'created_at'>): string {
+export function queueOfflineMutation(
+  mutation: Omit<OfflineMutation, 'client_mutation_id' | 'created_at'>
+): string {
   const id = crypto.randomUUID();
   const queue = getOfflineQueue();
   const item: OfflineMutation = {

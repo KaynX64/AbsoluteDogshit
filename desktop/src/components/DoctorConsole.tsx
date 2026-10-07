@@ -1,4 +1,3 @@
-// desktop/src/components/DoctorConsole.tsx
 import React, { useState, useEffect } from 'react';
 import PrescriptionGenerator from './PrescriptionGenerator';
 import { io } from 'socket.io-client';
@@ -35,6 +34,7 @@ interface AppointmentItem {
   past_chief_complaint?: string;
   past_diagnosis?: string;
   past_treatment?: string;
+  past_dental_chart?: Record<number, ToothRecord> | null;
   past_clinical_notes?: string;
   past_dietary_notes?: string;
 }
@@ -43,6 +43,7 @@ interface DoctorConsoleProps {
   /** Optional controlled view mode — sidebar drives it. Falls back to internal state. */
   viewMode?: DoctorViewMode;
   onViewModeChange?: (m: DoctorViewMode) => void;
+  currentRole?: string;   /* 👈 ADD THIS */
 }
 
 const STATUS_STYLE = (status: string) => {
@@ -74,12 +75,46 @@ const COMMON_VACCINES = [
   'Typhoid',
 ];
 
+/* ── ODONTOGRAM DENTAL CHART TYPES & CONFIGURATION ────────────────────────── */
+export type ToothCondition = 'sound' | 'caries' | 'filled' | 'missing' | 'extraction_needed' | 'prophylaxis';
+
+export interface ToothRecord {
+  number: number;
+  condition: ToothCondition;
+  notes?: string;
+}
+
+const CONDITION_COLORS: Record<ToothCondition, { bg: string; text: string; label: string; border: string }> = {
+  sound:             { bg: '#EEF3EC', text: '#2E5C43', border: '#C9D9C7', label: 'Sound' },
+  caries:            { bg: '#FDE8E8', text: '#7A2E26', border: '#F8B4B4', label: 'Caries (Decay)' },
+  filled:            { bg: '#E0F2FE', text: '#0369A1', border: '#BAE6FD', label: 'Restored / Filled' },
+  missing:           { bg: '#F3F4F6', text: '#6B7280', border: '#D1D5DB', label: 'Missing / Extracted' },
+  extraction_needed: { bg: '#FEF3C7', text: '#92400E', border: '#FDE68A', label: 'Needs Extraction' },
+  prophylaxis:       { bg: '#F0FDFA', text: '#0F766E', border: '#99F6E4', label: 'Calculus / Prophylaxis' },
+};
+
+const UPPER_TEETH = Array.from({ length: 16 }, (_, i) => i + 1); // 1-16
+const LOWER_TEETH = Array.from({ length: 16 }, (_, i) => 32 - i); // 32-17
+
 export default function DoctorConsole({
-  viewMode: controlledView,
-  onViewModeChange,
+  viewMode: controlledView, currentRole, 
 }: DoctorConsoleProps = {}) {
   const [internalView] = useState<DoctorViewMode>('active');
   const viewMode = controlledView ?? internalView;
+
+    // Check if current user is viewing as Dentist (with safe JWT fallback)
+  const isDentist = currentRole
+    ? currentRole === 'DENTIST'
+    : (() => {
+        try {
+          const token = localStorage.getItem('valetudo_token');
+          if (!token) return false;
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          return payload.roles?.includes('DENTIST') && !payload.roles?.includes('DOCTOR');
+        } catch {
+          return false;
+        }
+      })();
 
   const [appointments, setAppointments] = useState<AppointmentItem[]>([]);
   const [selectedApp, setSelectedApp] = useState<AppointmentItem | null>(null);
@@ -91,10 +126,44 @@ export default function DoctorConsole({
   const [treatmentPlan, setTreatmentPlan] = useState('');
   const [clinicalNotes, setClinicalNotes] = useState('');
   const [isSubmittingEMR, setIsSubmittingEMR] = useState(false);
-  const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [feedbackMsg, setFeedbackMsg] = useState<{
+    text: string;
+    type: 'success' | 'error';
+    pdfKind?: 'prescriptions' | 'clearances';
+    pdfId?: number;
+  } | null>(null);
 
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
 
+  /* ── In-App Document Preview Modal State ── */
+  const [previewModal, setPreviewModal] = useState<{
+    url: string;
+    fileName: string;
+    mimeType: string;
+  } | null>(null);
+
+  /* ── Immunization Modal State ────────────────────────────────── */
+  const [showImmunizationModal, setShowImmunizationModal] = useState(false);
+  const [patientImmunizations, setPatientImmunizations] = useState<string[]>([]);
+  const [newImmunizations, setNewImmunizations] = useState<string[]>([]);
+  const [customImmunizationInput, setCustomImmunizationInput] = useState('');
+  const [loadingImmunizations, setLoadingImmunizations] = useState(false);
+  const [savingImmunizations, setSavingImmunizations] = useState(false);
+  const [immunizationFeedback, setImmunizationFeedback] = useState<{
+    text: string;
+    type: 'success' | 'error';
+  } | null>(null);
+
+  /* ── In-consultation diagnostic attachments ──────────────────── */
+  const [activePatientAttachments, setActivePatientAttachments] = useState<any[]>([]);
+  const [openingAttachmentId, setOpeningAttachmentId] = useState<number | null>(null);
+
+  /* ── Dental charting / Odontogram state ──────────────────────── */
+  const [dentalChartData, setDentalChartData] = useState<Record<number, ToothRecord>>({});
+  const [selectedTooth, setSelectedTooth] = useState<number | null>(null);
+  const [forceShowDentalChart, setForceShowDentalChart] = useState(false);
+
+  /* ── Vitals ──────────────────────────────────────────────────── */
   const [bpSystolic, setBpSystolic] = useState('120');
   const [bpDiastolic, setBpDiastolic] = useState('80');
   const [temperature, setTemperature] = useState('36.6');
@@ -214,6 +283,9 @@ export default function DoctorConsole({
     setClinicalNotes('');
     setAttachedFile(null);
     setFeedbackMsg(null);
+    setDentalChartData({});
+    setSelectedTooth(null);
+    setActivePatientAttachments([]);
   };
 
   const selectPatient = (app: AppointmentItem) => {
@@ -230,6 +302,10 @@ export default function DoctorConsole({
     setWeight(app.weight ? String(app.weight) : '');
     setAttachedFile(null);
     setFeedbackMsg(null);
+    setSelectedTooth(null);
+
+    // Restore the dentist-only odontogram (the server only sends this to DENTIST users)
+    setDentalChartData(isDentist && app.past_dental_chart ? app.past_dental_chart : {});
 
     if (app.notes && app.notes.includes('[TRIAGE VITALS]')) {
       const bpMatch = app.notes.match(/BP:\s*(\d+)\/(\d+)/);
@@ -239,8 +315,77 @@ export default function DoctorConsole({
       const pulseMatch = app.notes.match(/Pulse:\s*(\d+)/);
       if (pulseMatch) setPulseRate(pulseMatch[1]);
     }
+
     fetchPatientVaccines(app.patient_id);
+    fetchActivePatientAttachments(app.patient_id);
   };
+
+  /* ── Fetch patient's past diagnostic attachments for in-consultation preview ── */
+  const fetchActivePatientAttachments = async (patientId: number) => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/appointments/patient/${patientId}/history`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const emrs = await res.json();
+        const allAtts: any[] = [];
+        emrs.forEach((e: any) => {
+          if (Array.isArray(e.attachments)) {
+            e.attachments.forEach((att: any) => {
+              allAtts.push({
+                ...att,
+                encounter_date: e.encounter_date,
+                doctor_last_name: e.doctor_last_name,
+                diagnosis: e.diagnosis,
+              });
+            });
+          }
+        });
+        setActivePatientAttachments(allAtts);
+      }
+    } catch (_) {
+      setActivePatientAttachments([]);
+    }
+  };
+
+/* ── Authenticated Attachment Viewer (Embeds inside Electron Modal) ── */
+  const handleOpenAttachment = async (attachmentId: number, fileName: string, mimeType?: string) => {
+    setOpeningAttachmentId(attachmentId);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/documents/attachments/${attachmentId}/download`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to download/decrypt diagnostic file.');
+      const blob = await res.blob();
+      const detectedMime =
+        mimeType ||
+        res.headers.get('content-type') ||
+        (fileName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+      
+      const typedBlob = new Blob([blob], { type: detectedMime });
+      const objectUrl = URL.createObjectURL(typedBlob);
+
+      setPreviewModal({
+        url: objectUrl,
+        fileName,
+        mimeType: detectedMime,
+      });
+    } catch (err: any) {
+      alert(`Could not open ${fileName}: ${err.message}`);
+    } finally {
+      setOpeningAttachmentId(null);
+    }
+  };
+
+  const handleClosePreviewModal = () => {
+    if (previewModal?.url) {
+      URL.revokeObjectURL(previewModal.url);
+    }
+    setPreviewModal(null);
+  };
+
   const fetchPatientVaccines = async (userId: number) => {
     const token = localStorage.getItem('valetudo_token');
     try {
@@ -296,6 +441,18 @@ export default function DoctorConsole({
     }
   };
 
+  const handleToothConditionChange = (condition: ToothCondition) => {
+    if (!selectedTooth) return;
+    setDentalChartData((prev) => ({
+      ...prev,
+      [selectedTooth]: {
+        number: selectedTooth,
+        condition,
+        notes: prev[selectedTooth]?.notes || '',
+      },
+    }));
+  };
+
   const handleStartConsultation = async () => {
     if (!selectedApp) return;
     const token = localStorage.getItem('valetudo_token');
@@ -329,13 +486,17 @@ export default function DoctorConsole({
     setFeedbackMsg(null);
     const token = localStorage.getItem('valetudo_token');
 
-    const encounterPayload = {
-      patient_user_id: selectedApp.patient_id,
-      appointment_id: selectedApp.appointment_id,
-      chief_complaint: chiefComplaint,
-      diagnosis,
-      treatment_plan: treatmentPlan,
-      notes: clinicalNotes,
+    // Summarize dental chart entries if teeth were marked
+      const chartedTeeth = Object.values(dentalChartData).filter((t) => t.condition !== 'sound');
+
+      const encounterPayload = {
+        patient_user_id: selectedApp.patient_id,
+        appointment_id: selectedApp.appointment_id,
+        chief_complaint: chiefComplaint,
+        diagnosis,
+        treatment_plan: treatmentPlan,
+        notes: clinicalNotes,
+        dental_chart: isDentist && chartedTeeth.length > 0 ? dentalChartData : undefined,
       vitals: {
         systolic_bp: bpSystolic, diastolic_bp: bpDiastolic,
         temperature, pulse: pulseRate, spo2, resp_rate: respRate,
@@ -463,7 +624,7 @@ export default function DoctorConsole({
 
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`${API_BASE_URL}/api/profile/${selectedApp.patient_id}/immunizations`, {
+      const res = await fetch(`${API_BASE_URL}/api/profile/patient/${selectedApp.patient_id}/immunizations`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -535,15 +696,16 @@ export default function DoctorConsole({
     const token = localStorage.getItem('valetudo_token');
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/profile/${selectedApp.patient_id}/immunizations`, {
-        method: 'POST',
+      const mergedList = Array.from(new Set([...patientImmunizations, ...newImmunizations]));
+      const res = await fetch(`${API_BASE_URL}/api/profile/patient/${selectedApp.patient_id}/immunizations`, {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ immunizations: newImmunizations }),
+        body: JSON.stringify({ immunizations: mergedList }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to save immunization records.');
 
-      setPatientImmunizations(Array.isArray(data.immunizations) ? data.immunizations : []);
+      setPatientImmunizations(Array.isArray(data.immunizations) ? data.immunizations : mergedList);
       setNewImmunizations([]);
       setImmunizationFeedback({ text: '✅ ' + data.message, type: 'success' });
       setFeedbackMsg({ text: `💉 ${data.message}`, type: 'success' });
@@ -554,6 +716,50 @@ export default function DoctorConsole({
     }
   };
 
+   // ── Fetch the official signed PDF from MinIO and save it ──────────
+  const handleDownloadPdf = async (
+    kind: 'prescriptions' | 'clearances',
+    id: number
+  ) => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/documents/${kind}/${id}/pdf`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setFeedbackMsg({
+          text: '❌ PDF download failed: ' + (err.error || `HTTP ${res.status}`),
+          type: 'error',
+        });
+        return;
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+
+      // Use an <a download> click — Electron routes this through its
+      // native download pipeline (save dialog + file picker) instead of
+      // the popup handler that blocks blob: URLs.
+      const a = document.createElement('a');
+      a.href = url;
+      a.download =
+        kind === 'prescriptions'
+          ? `prescription-${id}.pdf`
+          : `clearance-${id}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err: any) {
+      setFeedbackMsg({
+        text: '❌ Network error fetching PDF: ' + err.message,
+        type: 'error',
+      });
+    }
+  };
   const handlePrintClearance = async () => {
     if (!selectedApp) return;
     setIsIssuingClearance(true);
@@ -589,7 +795,7 @@ export default function DoctorConsole({
               .patient-box { margin: 16px 0; padding: 14px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; line-height: 1.6; }
               .body-text { font-size: 14px; line-height: 1.8; margin-top: 18px; }
               .verification-panel { margin-top: 26px; display: flex; align-items: center; gap: 20px; border: 1px solid #99f6e4; background: #f0fdfa; padding: 16px; border-radius: 6px; }
-              .footer { margin-top: 40px; display: space-between; align-items: flex-end; font-size: 12px; }
+              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; font-size: 12px; }
               .sig-line { border-top: 1px solid #000; width: 220px; text-align: center; font-weight: bold; padding-top: 4px; }
             </style>
           </head>
@@ -649,7 +855,12 @@ export default function DoctorConsole({
         }
       }
 
-      setFeedbackMsg({ text: `✅ Clearance #${clearanceId} (Expires: ${clearanceExpiryDate}) issued!`, type: 'success' });
+      setFeedbackMsg({
+        text: `✅ Clearance #${clearanceId} (Expires: ${clearanceExpiryDate}) issued!`,
+        type: 'success',
+        pdfKind: 'clearances',
+        pdfId: clearanceId,
+      });
     } catch (err: any) {
       setFeedbackMsg({ text: 'Error issuing clearance: ' + err.message, type: 'error' });
     } finally {
@@ -658,6 +869,14 @@ export default function DoctorConsole({
   };
 
   const isArchivedMode = viewMode === 'history' || selectedApp?.status === 'completed' || selectedApp?.status === 'cancelled';
+
+    const isDentalVisit = isDentist && Boolean(
+    selectedApp?.appointment_type?.toLowerCase().includes('dent') ||
+    selectedApp?.appointment_type?.toLowerCase().includes('tooth') ||
+    selectedApp?.appointment_type?.toLowerCase().includes('oral') ||
+    selectedApp?.appointment_type?.toLowerCase().includes('prophylaxis') ||
+    forceShowDentalChart
+  );
 
   /* ═══════════════════════════════════════════════════════════════ */
   /* RENDER                                                          */
@@ -905,7 +1124,7 @@ export default function DoctorConsole({
                             <b>Diagnosis:</b> {item.diagnosis}
                           </div>
                           {item.treatment_plan && (
-                            <div style={{ fontSize: 12.5, color: T.textSub, marginBottom: 4 }}>
+                            <div style={{ fontSize: 12.5, color: T.textSub, marginBottom: 4, whiteSpace: 'pre-wrap' }}>
                               <b>Plan:</b> {item.treatment_plan}
                             </div>
                           )}
@@ -931,20 +1150,22 @@ export default function DoctorConsole({
                               display: 'flex', gap: 8, flexWrap: 'wrap',
                             }}>
                               {item.attachments.map((att: any) => (
-                                <a
+                                <button
                                   key={att.attachment_id}
-                                  href={`${API_BASE_URL}/api/documents/attachments/${att.attachment_id}/download`}
-                                  target="_blank"
-                                  rel="noreferrer"
+                                  type="button"
+                                  onClick={() => handleOpenAttachment(att.attachment_id, att.file_name)}
+                                  disabled={openingAttachmentId === att.attachment_id}
                                   style={{
                                     fontSize: 11.5, color: T.info,
-                                    fontWeight: 700, textDecoration: 'none',
+                                    fontWeight: 700,
                                     background: T.infoSoft, padding: '4px 10px',
                                     borderRadius: T.radius.xs,
+                                    border: `1px solid ${T.infoBorder}`,
+                                    cursor: 'pointer',
                                   }}
                                 >
-                                  📎 {att.file_name}
-                                </a>
+                                  📎 {att.file_name} {openingAttachmentId === att.attachment_id ? '(Loading…)' : ''}
+                                </button>
                               ))}
                             </div>
                           )}
@@ -974,7 +1195,7 @@ export default function DoctorConsole({
               }`,
               borderRadius: T.radius.lg,
               padding: '18px 22px',
-              marginBottom: 22,
+              marginBottom: 20,
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
@@ -1047,6 +1268,23 @@ export default function DoctorConsole({
                   💉 Immunizations
                 </button>
 
+            {isDentist && (
+                  <button
+                    type="button"
+                    onClick={() => setForceShowDentalChart((prev) => !prev)}
+                    style={{
+                      ...btnGhost,
+                    color: isDentalVisit ? '#0F766E' : T.textSub,
+                    borderColor: isDentalVisit ? '#99F6E4' : T.border,
+                    background: isDentalVisit ? '#F0FDFA' : T.surface,
+                  }}
+                  title="Toggle Dental Odontogram"
+                >
+                  🦷 {isDentalVisit ? 'Odontogram Active' : 'Dental Chart'}
+                </button>
+            )}
+
+
                 {selectedApp.status === 'completed' ? (
                   <span style={{
                     background: T.successSoft, color: T.success,
@@ -1087,6 +1325,230 @@ export default function DoctorConsole({
             </div>
           )}
 {/* 💉 PATIENT VACCINATION & IMMUNIZATION HISTORY MANAGER */}
+          {selectedApp && (
+            <div style={{
+              background: T.surface,
+              border: `1px solid ${T.border}`,
+              borderRadius: T.radius.lg,
+              padding: '18px 22px',
+              marginBottom: 20,
+              boxShadow: T.shadow.xs,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: T.primary }}>
+                    💉 Patient Vaccination & Immunization History
+                  </h4>
+                  <p style={{ margin: '3px 0 0', fontSize: 12, color: T.textSub }}>
+                    Verified in-person clinical vaccine records for <b>{selectedApp.first_name} {selectedApp.last_name}</b> (R.A. 10173 Protected)
+                  </p>
+                </div>
+
+{/* ── IN-CONSULTATION DIAGNOSTIC LABS & ATTACHMENT PREVIEW DRAWER ── */}
+          {selectedApp && activePatientAttachments.length > 0 && (
+            <div style={{
+              background: '#F0F9FF',
+              border: '1px solid #BAE6FD',
+              borderRadius: T.radius.lg,
+              padding: '14px 18px',
+              marginBottom: 20,
+              boxShadow: T.shadow.xs,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <span style={{ fontSize: 13, fontWeight: 800, color: '#0369A1', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  📂 Prior Diagnostic Records & Lab Imaging on File ({activePatientAttachments.length})
+                </span>
+                <span style={{ fontSize: 11, color: '#0284C7', fontWeight: 600 }}>
+                  Click to open/inspect attachment
+                </span>
+              </div>
+
+              {/* 👉 PUT IT RIGHT HERE (replace the existing <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}> block) */}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {activePatientAttachments.map((att: any, idx: number) => (
+                  <button
+                    key={att.attachment_id || idx}
+                    type="button"
+                    onClick={() => handleOpenAttachment(att.attachment_id, att.file_name, att.mime_type)}
+                    disabled={openingAttachmentId === att.attachment_id}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '6px 14px',
+                      background: '#FFFFFF',
+                      border: '1px solid #7DD3FC',
+                      borderRadius: T.radius.pill,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: '#0284C7',
+                      cursor: 'pointer',
+                      boxShadow: T.shadow.xs,
+                      fontFamily: T.font,
+                    }}
+                  >
+                    📄 {att.file_name}
+                    <span style={{ fontSize: 10.5, color: '#64748B', fontWeight: 500 }}>
+                      ({new Date(att.encounter_date).toLocaleDateString()})
+                    </span>
+                    <span style={{ fontSize: 11, color: '#0369A1' }}>
+                      {openingAttachmentId === att.attachment_id ? '⏳' : '👁️'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+            </div>
+          )}
+
+          {/* ── INTERACTIVE ODONTOGRAM DENTAL CHART (Shown for dental visits or manually toggled) ── */}
+          {selectedApp && isDentalVisit && (
+            <div style={{
+              background: T.surface,
+              border: '1.5px solid #0F766E',
+              borderRadius: T.radius.lg,
+              padding: '18px 22px',
+              marginBottom: 20,
+              boxShadow: T.shadow.sm,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: '#0F766E', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    🦷 Adult Dental Chart (Odontogram) · Universal Numbering System
+                  </h4>
+                  <p style={{ margin: '3px 0 0', fontSize: 12, color: T.textSub }}>
+                    Click a tooth (Upper 1–16, Lower 32–17) to record or update findings. Automatically appended to the clinical plan upon discharge.
+                  </p>
+                </div>
+
+                {Object.values(dentalChartData).filter((t) => t.condition !== 'sound').length > 0 && !isArchivedMode && (
+                  <button
+                    type="button"
+                    onClick={() => setDentalChartData({})}
+                    style={{ ...btnGhost, padding: '4px 10px', fontSize: 11, color: T.danger, borderColor: T.dangerBorder }}
+                  >
+                    Reset Chart
+                  </button>
+                )}
+              </div>
+
+              {/* Teeth Layout */}
+              <div style={{ background: T.sage50, padding: 12, borderRadius: T.radius.md, border: `1px solid ${T.borderSoft}` }}>
+                {/* Upper Teeth 1-16 */}
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 800, color: T.textMuted, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    Maxillary Arch (Upper Teeth 1–16)
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(16, 1fr)', gap: 4 }}>
+                    {UPPER_TEETH.map((tNum) => {
+                      const tData = dentalChartData[tNum] || { number: tNum, condition: 'sound' };
+                      const conf = CONDITION_COLORS[tData.condition];
+                      const isSel = selectedTooth === tNum;
+                      return (
+                        <button
+                          key={tNum}
+                          type="button"
+                          onClick={() => setSelectedTooth(tNum)}
+                          title={`Tooth #${tNum} (${conf.label})`}
+                          style={{
+                            padding: '6px 2px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            borderRadius: T.radius.xs,
+                            border: isSel ? `2px solid ${T.primary}` : `1px solid ${conf.border}`,
+                            background: isSel ? '#E2EBE1' : conf.bg,
+                            cursor: isArchivedMode ? 'default' : 'pointer',
+                            fontFamily: T.mono,
+                          }}
+                        >
+                          <span style={{ fontSize: 11, fontWeight: 800, color: conf.text }}>{tNum}</span>
+                          <span style={{ fontSize: 8.5, fontWeight: 800, color: conf.text }}>{tData.condition[0].toUpperCase()}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Lower Teeth 32-17 */}
+                <div>
+                  <div style={{ fontSize: 10.5, fontWeight: 800, color: T.textMuted, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    Mandibular Arch (Lower Teeth 32–17)
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(16, 1fr)', gap: 4 }}>
+                    {LOWER_TEETH.map((tNum) => {
+                      const tData = dentalChartData[tNum] || { number: tNum, condition: 'sound' };
+                      const conf = CONDITION_COLORS[tData.condition];
+                      const isSel = selectedTooth === tNum;
+                      return (
+                        <button
+                          key={tNum}
+                          type="button"
+                          onClick={() => setSelectedTooth(tNum)}
+                          title={`Tooth #${tNum} (${conf.label})`}
+                          style={{
+                            padding: '6px 2px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            borderRadius: T.radius.xs,
+                            border: isSel ? `2px solid ${T.primary}` : `1px solid ${conf.border}`,
+                            background: isSel ? '#E2EBE1' : conf.bg,
+                            cursor: isArchivedMode ? 'default' : 'pointer',
+                            fontFamily: T.mono,
+                          }}
+                        >
+                          <span style={{ fontSize: 11, fontWeight: 800, color: conf.text }}>{tNum}</span>
+                          <span style={{ fontSize: 8.5, fontWeight: 800, color: conf.text }}>{tData.condition[0].toUpperCase()}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Tooth Condition Selector Bar */}
+              {!isArchivedMode && selectedTooth && (
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px dashed ${T.border}` }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: T.primary }}>
+                      Set Finding for Tooth #{selectedTooth}:
+                    </span>
+                    <span style={{ fontSize: 11, color: T.textMuted }}>
+                      Current: {CONDITION_COLORS[dentalChartData[selectedTooth]?.condition || 'sound'].label}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {(Object.keys(CONDITION_COLORS) as ToothCondition[]).map((cond) => {
+                      const current = (dentalChartData[selectedTooth]?.condition || 'sound') === cond;
+                      const conf = CONDITION_COLORS[cond];
+                      return (
+                        <button
+                          key={cond}
+                          type="button"
+                          onClick={() => handleToothConditionChange(cond)}
+                          style={{
+                            padding: '4px 12px',
+                            borderRadius: T.radius.pill,
+                            border: current ? `2px solid ${T.primary}` : `1px solid ${conf.border}`,
+                            background: conf.bg,
+                            color: conf.text,
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {conf.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 💉 PATIENT VACCINATION & IMMUNIZATION HISTORY MANAGER (Single instance) */}
           {selectedApp && (
             <div style={{
               background: T.surface,
@@ -1222,7 +1684,7 @@ export default function DoctorConsole({
                   {/* Quick presets */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 11, fontWeight: 700, color: T.textMuted }}>Quick Presets:</span>
-                    {commonVaccines.map((cv) => {
+                    {COMMON_VACCINES.map((cv) => {
                       const alreadyHas = patientVaccines.includes(cv);
                       return (
                         <button
@@ -1262,6 +1724,7 @@ export default function DoctorConsole({
               )}
             </div>
           )}
+
           {/* Two-column workspace */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.15fr', gap: 20 }}>
             {/* LEFT: Document issuance */}
@@ -1306,24 +1769,80 @@ export default function DoctorConsole({
                   })}
                 </div>
               </div>
+              {/* ── Shared issuance feedback banner (Feature 8 isolation fix) ── */}
+              {feedbackMsg && (
+                <div
+                  style={{
+                    marginBottom: 16,
+                    padding: '12px 16px',
+                    borderRadius: T.radius.md,
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    background: feedbackMsg.type === 'success' ? T.successSoft : T.dangerSoft,
+                    color: feedbackMsg.type === 'success' ? T.success : T.danger,
+                    border: `1px solid ${feedbackMsg.type === 'success' ? T.successBorder : T.dangerBorder}`,
+                    wordBreak: 'break-all',
+                    lineHeight: 1.5,
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 12,
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <span style={{ flex: '1 1 260px' }}>{feedbackMsg.text}</span>
 
+                  {feedbackMsg.type === 'success' &&
+                    feedbackMsg.pdfKind &&
+                    feedbackMsg.pdfId && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleDownloadPdf(feedbackMsg.pdfKind!, feedbackMsg.pdfId!)
+                        }
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: T.radius.pill,
+                          background: T.primary,
+                          color: '#fff',
+                          border: 'none',
+                          fontSize: 11.5,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          fontFamily: T.font,
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        ⬇️ Download PDF
+                      </button>
+                    )}
+                </div>
+              )}
               {docType === 'rx' ? (
-                <PrescriptionGenerator
-                  key={selectedApp?.appointment_id}
-                  patientUserId={selectedApp?.patient_id || 5}
-                  verifiedPatient={{
-                    first_name: selectedApp?.first_name || 'Daniella',
-                    last_name: selectedApp?.last_name || 'Movida',
-                    student_no: selectedApp?.student_no || '22-LN-0123',
-                    course: selectedApp?.course || 'BS Information Technology',
-                    allergies: selectedApp?.allergies || 'None',
-                  }}
-                  initialNotes={selectedApp?.past_dietary_notes}
-                  isArchived={isArchivedMode}
-                  onPrescriptionIssued={() => {
-                    setFeedbackMsg({ text: '✅ Prescription successfully issued to patient.', type: 'success' });
-                  }}
-                />
+              <PrescriptionGenerator
+                key={selectedApp?.appointment_id}
+                patientUserId={selectedApp?.patient_id || 5}
+                verifiedPatient={{
+                  first_name: selectedApp?.first_name || 'Daniella',
+                  last_name: selectedApp?.last_name || 'Movida',
+                  student_no: selectedApp?.student_no || '22-LN-0123',
+                  course: selectedApp?.course || 'BS Information Technology',
+                  allergies: selectedApp?.allergies || 'None',
+                }}
+                initialNotes={selectedApp?.past_dietary_notes}
+                isArchived={isArchivedMode}
+                onPrescriptionIssued={(info) => {
+                  setFeedbackMsg({
+                    text: `✅ Prescription #${info.prescriptionId} recorded and signed.`,
+                    type: 'success',
+                    pdfKind: 'prescriptions',
+                    pdfId: info.prescriptionId,
+                  });
+                }}
+                onPrescriptionError={(message) => {
+                  setFeedbackMsg({ text: message, type: 'error' });
+                }}
+              />
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                   <div>
@@ -1601,16 +2120,6 @@ export default function DoctorConsole({
                     ? '⏳ Patient not triaged by nurse'
                     : '✅ Finish consultation & discharge'}
                 </button>
-
-                {feedbackMsg && (
-                  <p style={{
-                    textAlign: 'center', marginTop: 12,
-                    fontSize: 13, fontWeight: 700,
-                    color: feedbackMsg.type === 'success' ? T.success : T.danger,
-                  }}>
-                    {feedbackMsg.text}
-                  </p>
-                )}
               </form>
             </section>
           </div>
@@ -1656,7 +2165,7 @@ export default function DoctorConsole({
                     <div style={{ fontSize: 13, marginBottom: 4 }}><b>Diagnosis:</b> {item.diagnosis}</div>
                     <div style={{ fontSize: 13, marginBottom: 4 }}><b>Complaint:</b> {item.chief_complaint}</div>
                     {item.treatment_plan && (
-                      <div style={{ fontSize: 13, color: T.textSub, marginBottom: 4 }}>
+                      <div style={{ fontSize: 13, color: T.textSub, marginBottom: 4, whiteSpace: 'pre-wrap' }}>
                         <b>Treatment:</b> {item.treatment_plan}
                       </div>
                     )}
@@ -1685,23 +2194,23 @@ export default function DoctorConsole({
                         </div>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           {item.attachments.map((att: any) => (
-                            <a
+                            <button
                               key={att.attachment_id}
-                              href={`${API_BASE_URL}/api/documents/attachments/${att.attachment_id}/download`}
-                              target="_blank"
-                              rel="noreferrer"
+                              type="button"
+                              onClick={() => handleOpenAttachment(att.attachment_id, att.file_name)}
+                              disabled={openingAttachmentId === att.attachment_id}
                               style={{
                                 display: 'inline-flex', alignItems: 'center', gap: 6,
                                 padding: '5px 12px',
                                 background: T.infoSoft, color: T.info,
                                 borderRadius: T.radius.xs,
                                 fontSize: 11.5, fontWeight: 700,
-                                textDecoration: 'none',
                                 border: `1px solid ${T.infoBorder}`,
+                                cursor: 'pointer',
                               }}
                             >
-                              📄 {att.file_name} ({(att.file_size / 1024).toFixed(0)} KB)
-                            </a>
+                              📄 {att.file_name} ({(att.file_size / 1024).toFixed(0)} KB) {openingAttachmentId === att.attachment_id ? '⏳' : ''}
+                            </button>
                           ))}
                         </div>
                       </div>
@@ -2062,6 +2571,134 @@ export default function DoctorConsole({
                     : `Save ${newImmunizations.length} new record${newImmunizations.length === 1 ? '' : 's'}`}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* IN-APP DIAGNOSTIC ATTACHMENT PREVIEW MODAL                  */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {previewModal && (
+        <div className="modal-backdrop" style={{ zIndex: 999 }} onClick={handleClosePreviewModal}>
+          <div
+            className="modal-card"
+            style={{
+              maxWidth: 960,
+              width: '92vw',
+              height: '86vh',
+              display: 'flex',
+              flexDirection: 'column',
+              padding: 22,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 14,
+                paddingBottom: 10,
+                borderBottom: `1px solid ${T.border}`,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                <span style={{ fontSize: 22 }}>📄</span>
+                <div style={{ minWidth: 0 }}>
+                  <h3
+                    style={{
+                      margin: 0,
+                      fontSize: 16,
+                      fontWeight: 800,
+                      color: T.text,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {previewModal.fileName}
+                  </h3>
+                  <span style={{ fontSize: 11.5, color: T.textSub }}>
+                    Diagnostic Lab / Clinical Attachment Preview
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const a = document.createElement('a');
+                    a.href = previewModal.url;
+                    a.download = previewModal.fileName;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                  }}
+                  style={{
+                    ...btnGhost,
+                    padding: '6px 14px',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: T.primary,
+                  }}
+                >
+                  💾 Save to PC
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClosePreviewModal}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: 22,
+                    cursor: 'pointer',
+                    color: T.textSub,
+                    lineHeight: 1,
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Embedded Document Viewport (Native PDF / Image Renderer) */}
+            <div
+              style={{
+                flex: 1,
+                background: '#F8FAFC',
+                borderRadius: T.radius.md,
+                overflow: 'hidden',
+                border: `1px solid ${T.border}`,
+                display: 'flex',
+              }}
+            >
+              {previewModal.mimeType.includes('pdf') ||
+              previewModal.fileName.toLowerCase().endsWith('.pdf') ? (
+                <iframe
+                  src={previewModal.url}
+                  title={previewModal.fileName}
+                  style={{ width: '100%', height: '100%', border: 'none' }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    display: 'grid',
+                    placeItems: 'center',
+                    padding: 16,
+                    overflow: 'auto',
+                  }}
+                >
+                  <img
+                    src={previewModal.url}
+                    alt={previewModal.fileName}
+                    style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                  />
+                </div>
+              )}
             </div>
           </div>
         </div>

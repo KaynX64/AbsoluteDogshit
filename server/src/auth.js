@@ -198,7 +198,8 @@ export async function loginUser(req, res) {
 // ─────────────────────────────────────────────────────────────────────────
 export function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  // Support both HTTP Authorization header and URL query parameter (?token=...)
+  const token = (authHeader && authHeader.split(' ')[1]) || req.query.token;
 
   if (!token) {
     return res.status(401).json({ error: 'Access token required.' });
