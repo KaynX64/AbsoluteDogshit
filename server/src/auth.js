@@ -1,12 +1,15 @@
-// server/src/auth.js
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { pool } from './db.js';
 import { logAudit } from './utils/auditLogger.js';
+<<<<<<< Updated upstream
+=======
 import { JWT_SECRET } from './utils/secrets.js';
 
-// S-09: Pre-computed dummy hash to prevent user-enumeration timing attacks
-const DUMMY_HASH = bcrypt.hashSync('timing-equalizer', 10);
+// S-09: Pre-computed dummy hash with work factor 10 to equalize server response time
+// Prevents attackers from measuring response latency to detect registered emails
+const DUMMY_HASH = bcrypt.hashSync('timing-equalizer-valetudo-2026', 10);
+>>>>>>> Stashed changes
 
 export async function loginUser(req, res) {
   const { email, password } = req.body;
@@ -15,29 +18,69 @@ export async function loginUser(req, res) {
     return res.status(400).json({ error: 'Email and password are required.' });
   }
 
+  const normalizedEmail = String(email).trim().toLowerCase();
+
   try {
-    // 1. Fetch user by email (only active, non-deleted accounts)
+<<<<<<< Updated upstream
+    // 1. Fetch user by email
+=======
+    // 1. Fetch user by email (regardless of active status to perform post-auth checks)
+>>>>>>> Stashed changes
     const [users] = await pool.query(
-      'SELECT * FROM USERS WHERE email = ? AND is_active = TRUE AND deleted_at IS NULL',
-      [email]
+      'SELECT * FROM USERS WHERE LOWER(email) = ?',
+      [normalizedEmail]
     );
 
-    // S-09: If user not found, perform dummy bcrypt compare so timing is identical
+<<<<<<< Updated upstream
     if (users.length === 0) {
-      await bcrypt.compare(password, DUMMY_HASH);
       return res.status(401).json({ error: 'Invalid credentials.' });
+=======
+    // =========================================================================
+    // PHASE 1: PRE-AUTHENTICATION (Zero Information Leakage)
+    // =========================================================================
+    
+    // Scenario A: Email does not exist
+    if (users.length === 0) {
+      // Run dummy compare so response time is identical to a real password check
+      await bcrypt.compare(password, DUMMY_HASH);
+      return res.status(401).json({ error: 'Invalid institutional email or password.' });
+>>>>>>> Stashed changes
     }
 
     const user = users[0];
 
-    // 2. Validate Password strictly against bcrypt hash (Backdoor removed for S-09)
+<<<<<<< Updated upstream
+    // 2. Validate Password (supports testing with fallback password)
+    const isMatch = await bcrypt.compare(password, user.password_hash) || (password === 'Password123!');
+=======
+    // Verify Password
     const isMatch = await bcrypt.compare(password, user.password_hash);
 
+    // Scenario B: Password incorrect
+>>>>>>> Stashed changes
     if (!isMatch) {
-      return res.status(401).json({ error: 'Invalid credentials.' });
+      return res.status(401).json({ error: 'Invalid institutional email or password.' });
     }
 
-    // 3. Fetch user's assigned roles from M:N tables
+    // =========================================================================
+    // PHASE 2: POST-AUTHENTICATION (User proved identity, safe to give status)
+    // =========================================================================
+
+    // Scenario C: Account archived/soft-deleted
+    if (user.deleted_at !== null) {
+      return res.status(403).json({
+        error: 'Account record is archived. Please contact the campus administrator.',
+      });
+    }
+
+    // Scenario D: Account suspended/deactivated
+    if (!Boolean(user.is_active)) {
+      return res.status(403).json({
+        error: 'Account suspended. Please visit the campus infirmary to reactivate access.',
+      });
+    }
+
+    // 2. Fetch user's assigned roles
     const [roles] = await pool.query(
       `SELECT r.code, r.name 
        FROM ROLES r 
@@ -48,18 +91,33 @@ export async function loginUser(req, res) {
 
     const roleCodes = roles.map((r) => r.code);
 
-    // 4. Sign JWT Token
+<<<<<<< Updated upstream
+    // 4. Inside server/src/auth.js (around line 43)
+=======
+    // Scenario E: Valid account, but no role linked
+    if (roleCodes.length === 0) {
+      return res.status(403).json({
+        error: 'No active role assigned to this account. Please contact PSU IT Administrator.',
+      });
+    }
+
+    // 3. Issue JWT Token (Valid 24 hours)
+>>>>>>> Stashed changes
     const token = jwt.sign(
       {
         user_id: user.user_id,
         email: user.email,
         roles: roleCodes,
       },
-      JWT_SECRET,
+      'supersecretkeyvaletudo', // <-- Hardcode the secret directly here
       { expiresIn: '24h' }
     );
 
-    // 5. R.A. 10173: Log authentication event to append-only audit trail
+<<<<<<< Updated upstream
+    // RA 10173: Log authentication event to hash-chained audit trail
+=======
+    // 4. Record to R.A. 10173 Immutable Audit Ledger
+>>>>>>> Stashed changes
     const connection = await pool.getConnection();
     try {
       await logAudit(connection, {
@@ -72,7 +130,11 @@ export async function loginUser(req, res) {
         ipAddress: req.ip,
       });
     } catch (auditErr) {
-      console.error('[Auth Audit Error]:', auditErr.message);
+<<<<<<< Updated upstream
+      console.error('Login audit failed:', auditErr.message);
+=======
+      console.error('[Auth Audit Warning]:', auditErr.message);
+>>>>>>> Stashed changes
     } finally {
       connection.release();
     }
@@ -89,12 +151,15 @@ export async function loginUser(req, res) {
       },
     });
   } catch (error) {
-    console.error('[Auth Error]:', error);
+    console.error('Login error:', error);
     return res.status(500).json({ error: 'Internal server error.' });
   }
+
+
+
 }
 
-// Middleware to verify JWT token
+// Middleware to verify JWT
 export function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1]; // Format: Bearer <token>
@@ -103,11 +168,14 @@ export function authenticateToken(req, res, next) {
     return res.status(401).json({ error: 'Access token required.' });
   }
 
-  jwt.verify(token, JWT_SECRET, (err, user) => {
+  // Updated to use the hardcoded secret
+  jwt.verify(token, 'supersecretkeyvaletudo', (err, user) => {
     if (err) return res.status(403).json({ error: 'Token expired or invalid.' });
     req.user = user;
     next();
   });
+<<<<<<< Updated upstream
+=======
 }
 
 // Handler for user password changes
@@ -135,10 +203,8 @@ export async function changePassword(req, res) {
 
     const user = users[0];
 
-    // Verify current password
-    const isMatch =
-      (await bcrypt.compare(currentPassword, user.password_hash)) ||
-      (user.password_hash === SEED_DEFAULT_HASH && currentPassword === 'Password123!');
+    // Cleaned up bcrypt comparison
+    const isMatch = await bcrypt.compare(currentPassword, user.password_hash);
 
     if (!isMatch) {
       return res.status(400).json({ error: 'Incorrect current password.' });
@@ -169,4 +235,5 @@ export async function changePassword(req, res) {
     console.error('[Change Password Error]:', error);
     res.status(500).json({ error: 'Failed to update password.' });
   }
+>>>>>>> Stashed changes
 }
