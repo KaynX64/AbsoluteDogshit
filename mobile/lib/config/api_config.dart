@@ -7,8 +7,12 @@ class ApiConfig {
     if (kIsWeb) return 'http://localhost:5000';
     try {
       if (Platform.isAndroid) {
+<<<<<<< Updated upstream
         // When using `adb reverse tcp:5000 tcp:5000`, 127.0.0.1 routes straight to your PC
         return 'http://192.168.18.116:5000';
+=======
+        return 'https://10.36.143.59:5000';
+>>>>>>> Stashed changes
       }
     } catch (_) {}
     return 'http://localhost:5000';

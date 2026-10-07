@@ -1,9 +1,9 @@
 -- =============================================================================
--- VALETUDO HEALTHLINK DATABASE SCHEMA & SEED DATA
--- Course: CC106 | PSU Lingayen Campus | Team 2
--- Target Database: MySQL 8.0 or higher
+-- SEED 6 ADDITIONAL STUDENTS (User IDs 7 to 12)
+-- Default Password for all: Password123!
 -- =============================================================================
 
+<<<<<<< Updated upstream
 CREATE DATABASE IF NOT EXISTS `valetudo_healthlink`
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
@@ -445,3 +445,57 @@ INSERT INTO `PRESCRIPTION_ITEMS` (`item_id`, `prescription_id`, `medicine_id`, `
 -- Sample Medical Clearance Certificate with verifiable expiry and digital seal
 INSERT INTO `MEDICAL_CLEARANCES` (`clearance_id`, `user_id`, `purpose`, `status`, `issued_by`, `expires_at`, `qr_token`, `signature_metadata`) VALUES
 (1, 5, 'On-the-Job Training (OJT) Medical Clearance', 'approved', 2, DATE_ADD(CURRENT_DATE, INTERVAL 6 MONTH), 'VALETUDO-CLR-2026-0001-E4D2B1', JSON_OBJECT('signer_id', 2, 'signer_name', 'Dr. Juan Mata', 'prc_license', 'PRC-MD-098765', 'algorithm', 'SHA-256', 'document_hash', '8f4e2c1a0b3d5e7f9a8b6c4d2e0f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f'));
+=======
+-- Ensure @default_pw is defined
+SET @default_pw = '$2b$10$Y5.xe6H/ZbWi0K/RYcQE2uGPh9hdAn/vKWCit/EMDrpqigeOQ45n.';
+
+-- 1. Insert into USERS
+INSERT INTO `USERS` (`user_id`, `email`, `password_hash`, `first_name`, `last_name`, `phone`, `is_active`) VALUES
+(7,  'maria.santos@psu.edu.ph',     @default_pw, 'Maria Carmela', 'Santos',     '09214441001', TRUE),
+(8,  'christian.reyes@psu.edu.ph',  @default_pw, 'Christian',     'Reyes',      '09214441002', TRUE),
+(9,  'bea.delacruz@psu.edu.ph',     @default_pw, 'Bea Bianca',    'Dela Cruz',  '09214441003', TRUE),
+(10, 'joshua.aquino@psu.edu.ph',    @default_pw, 'Joshua',        'Aquino',     '09214441004', TRUE),
+(11, 'althea.garcia@psu.edu.ph',    @default_pw, 'Althea Mae',    'Garcia',     '09214441005', TRUE),
+(12, 'kevin.villanueva@psu.edu.ph', @default_pw, 'Kevin',         'Villanueva', '09214441006', TRUE)
+ON DUPLICATE KEY UPDATE `email` = VALUES(`email`);
+
+-- 2. Assign STUDENT Role (role_id = 1)
+INSERT INTO `USER_ROLES` (`user_id`, `role_id`) VALUES
+(7, 1),
+(8, 1),
+(9, 1),
+(10, 1),
+(11, 1),
+(12, 1)
+ON DUPLICATE KEY UPDATE `role_id` = VALUES(`role_id`);
+
+-- 3. Academic Student Profiles
+INSERT INTO `STUDENT_PROFILES` (`user_id`, `student_no`, `course`, `year_level`) VALUES
+(7,  '22-LN-0201', 'BS Information Technology', 3),
+(8,  '22-LN-0202', 'BS Computer Science',        3),
+(9,  '23-LN-0310', 'BS Nursing',                 2),
+(10, '21-LN-0115', 'BS Business Administration', 4),
+(11, '23-LN-0342', 'BS Hospitality Management',  2),
+(12, '22-LN-0255', 'BS Education',               3)
+ON DUPLICATE KEY UPDATE `student_no` = VALUES(`student_no`);
+
+-- 4. Baseline Health Profiles (Emergency contacts, blood types & allergies)
+INSERT INTO `HEALTH_PROFILES` (`user_id`, `blood_type`, `allergies`, `chronic_conditions`, `emergency_contact_name`, `emergency_contact_phone`, `height`, `weight`, `immunization_history`) VALUES
+(7,  'O+', 'None',       'None',        'Carmela Santos',   '09171110001', 160.00, 52.00, '["COVID-19 Booster"]'),
+(8,  'A+', 'Penicillin', 'Mild Asthma', 'Eduardo Reyes',    '09171110002', 172.00, 65.00, '["COVID-19 Booster", "Hepatitis B"]'),
+(9,  'B+', 'None',       'None',        'Corazon Dela Cruz','09171110003', 158.00, 49.00, '["COVID-19 Booster"]'),
+(10, 'AB+','Aspirin',    'None',        'Roberto Aquino',   '09171110004', 175.00, 70.00, '["COVID-19 Booster"]'),
+(11, 'O-', 'None',       'None',        'Luz Garcia',       '09171110005', 162.00, 54.00, '["COVID-19 Booster"]'),
+(12, 'B-', 'None',       'None',        'Danilo Villanueva','09171110006', 168.00, 61.00, '["COVID-19 Booster"]')
+ON DUPLICATE KEY UPDATE `blood_type` = VALUES(`blood_type`);
+
+-- 5. Mandatory R.A. 10173 Privacy Consent (prevents 403 Forbidden lockouts)
+INSERT INTO `CONSENT_RECORDS` (`user_id`, `consent_type`, `is_granted`, `ip_address`) VALUES
+(7,  'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
+(8,  'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
+(9,  'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
+(10, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
+(11, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
+(12, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1')
+ON DUPLICATE KEY UPDATE `is_granted` = TRUE;
+>>>>>>> Stashed changes

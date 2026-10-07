@@ -19,4 +19,4 @@ node_modules/
 dist/
 build/
 desktop/dist/
-mobile/build/
+mobile/build/server/serviceAccountKey.json
