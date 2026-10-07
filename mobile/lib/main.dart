@@ -6,6 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'screens/splash_screen.dart';
 import 'services/emergency_alert_service.dart';
+import 'services/connectivity_service.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -45,6 +46,8 @@ void main() async {
   }
 
   await EmergencyAlertService().initialize();
+  await ConnectivityService().initialize();
+
   runApp(const ValetudoMobileApp());
 }
 

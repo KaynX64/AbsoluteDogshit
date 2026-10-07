@@ -11,7 +11,11 @@ import { logAudit } from '../utils/auditLogger.js';
 import { encrypt, decrypt } from '../utils/cryptoVault.js';
 import { requirePrivacyConsent } from '../middleware/consent.js';
 import multer from 'multer';
-import { uploadToS3, getFromS3 } from '../utils/s3Vault.js';
+import { uploadToS3, getFromS3, getBufferFromS3 } from '../utils/s3Vault.js';
+import {
+  generateAndStorePrescriptionPDF,
+  generateAndStoreClearancePDF,
+} from '../utils/documentService.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
 import { JWT_SECRET } from '../utils/secrets.js';
 
@@ -57,6 +61,7 @@ router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST
       targetEmrId = emrResult.insertId;
     }
 
+    // ── Build HMAC-signed QR token ─────────────────────────────────────────
     const rxUuid = crypto.randomUUID();
     const hmac = crypto
       .createHmac('sha256', JWT_SECRET)
@@ -64,13 +69,33 @@ router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST
       .digest('hex');
     const qrToken = `RX.${rxUuid}.${hmac.substring(0, 16)}`;
 
+    // ── Build cryptographic signature metadata (R.A. 10173) ────────────────
+    const signatureMetadata = {
+      signer_user_id: doctorUserId,
+      signer_role: req.user.roles[0],
+      signed_at: new Date().toISOString(),
+      algorithm: 'SHA-256',
+      document_sha256: crypto
+        .createHash('sha256')
+        .update(`${patient_user_id}:${rxUuid}:${targetEmrId}:${items.length}`)
+        .digest('hex'),
+      items_count: items.length,
+    };
+
     const encryptedNotes = encrypt(notes || '');
 
     const [headerResult] = await connection.query(
       `INSERT INTO PRESCRIPTIONS 
-       (emr_id, patient_user_id, doctor_user_id, status, notes, qr_token)
-       VALUES (?, ?, ?, 'active', ?, ?)`,
-      [targetEmrId, patient_user_id, doctorUserId, encryptedNotes, qrToken]
+       (emr_id, patient_user_id, doctor_user_id, status, notes, qr_token, signature_metadata)
+       VALUES (?, ?, ?, 'active', ?, ?, ?)`,
+      [
+        targetEmrId,
+        patient_user_id,
+        doctorUserId,
+        encryptedNotes,
+        qrToken,
+        JSON.stringify(signatureMetadata),
+      ]
     );
 
     const prescriptionId = headerResult.insertId;
@@ -93,23 +118,50 @@ router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST
       );
     }
 
+    // ── Audit #1: Resource creation ────────────────────────────────────────
     await logAudit(connection, {
       userId: doctorUserId,
       action: 'CREATE',
       table: 'PRESCRIPTIONS',
       recordId: prescriptionId,
       oldValue: null,
-      newValue: { patient_user_id, emr_id: targetEmrId, qr_token: qrToken, items_count: items.length },
+      newValue: {
+        patient_user_id,
+        emr_id: targetEmrId,
+        qr_token: qrToken,
+        items_count: items.length,
+      },
+      ipAddress: req.ip,
+    });
+
+    // ── Audit #2 (Gap 10): Cryptographic signature event ───────────────────
+    await logAudit(connection, {
+      userId: doctorUserId,
+      action: 'SIGN',
+      table: 'PRESCRIPTIONS',
+      recordId: prescriptionId,
+      oldValue: null,
+      newValue: {
+        document_sha256: signatureMetadata.document_sha256,
+        signer_role: signatureMetadata.signer_role,
+        qr_token: qrToken,
+        algorithm: signatureMetadata.algorithm,
+      },
       ipAddress: req.ip,
     });
 
     await connection.commit();
+
+    // ✅ Generate + upload the signed PDF (best-effort, post-commit)
+    const pdfKey = await generateAndStorePrescriptionPDF(prescriptionId);
 
     res.status(201).json({
       message: 'Prescription issued and stored securely under AES-256 encryption.',
       prescriptionId,
       emrId: targetEmrId,
       qrToken,
+      signatureMetadata,
+      pdfAvailable: Boolean(pdfKey),
     });
   } catch (error) {
     await connection.rollback();
@@ -127,6 +179,7 @@ router.get('/prescriptions/my', authenticateToken, requirePrivacyConsent, async 
 
     const [rows] = await pool.query(
       `SELECT p.prescription_id, p.emr_id, p.issued_at, p.status, p.notes, p.qr_token,
+              p.signature_metadata, p.pdf_s3_key,
               doc.first_name AS doctor_first_name, doc.last_name AS doctor_last_name,
               COALESCE(sp.license_no, 'PRC-VERIFIED') AS doctor_license,
               COALESCE(sp.specialty, 'Infirmary Physician') AS doctor_specialty,
@@ -162,6 +215,7 @@ router.get('/prescriptions/my', authenticateToken, requirePrivacyConsent, async 
       return {
         ...rx,
         notes: decrypt(rx.notes),
+        pdfAvailable: Boolean(rx.pdf_s3_key),
         items,
       };
     });
@@ -172,6 +226,100 @@ router.get('/prescriptions/my', authenticateToken, requirePrivacyConsent, async 
     res.status(500).json({ error: 'Failed to retrieve prescriptions.' });
   }
 });
+
+// ── Gap 8: PATCH /api/documents/prescriptions/:id/cancel ────────────────────
+// Only the issuing practitioner or an ADMIN may cancel an active prescription.
+router.patch(
+  '/prescriptions/:id/cancel',
+  authenticateToken,
+  requireRoles('DOCTOR', 'DENTIST', 'ADMIN'),
+  async (req, res) => {
+    const prescriptionId = Number(req.params.id);
+    const { reason } = req.body;
+
+    if (!prescriptionId || Number.isNaN(prescriptionId)) {
+      return res.status(400).json({ error: 'A valid prescription id is required.' });
+    }
+
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      const [rows] = await connection.query(
+        'SELECT * FROM PRESCRIPTIONS WHERE prescription_id = ? AND deleted_at IS NULL FOR UPDATE',
+        [prescriptionId]
+      );
+
+      if (rows.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'Prescription not found.' });
+      }
+
+      const rx = rows[0];
+
+      if (rx.status !== 'active') {
+        await connection.rollback();
+        return res.status(409).json({
+          error: `Cannot cancel a prescription with status "${rx.status}".`,
+          code: 'INVALID_STATE',
+          currentStatus: rx.status,
+        });
+      }
+
+      const isIssuer = Number(rx.doctor_user_id) === Number(req.user.user_id);
+      const isAdmin = (req.user.roles || []).includes('ADMIN');
+      if (!isIssuer && !isAdmin) {
+        await connection.rollback();
+        return res.status(403).json({
+          error: 'Only the issuing practitioner or an administrator may cancel this prescription.',
+        });
+      }
+
+      const cancellationNote = `\n[CANCELLED ${new Date().toISOString()}] ${reason || 'Cancelled by practitioner'}`;
+      const [updateResult] = await connection.query(
+        `UPDATE PRESCRIPTIONS
+         SET status = 'cancelled',
+             notes = CONCAT(COALESCE(notes, ''), ?)
+         WHERE prescription_id = ?`,
+        [cancellationNote, prescriptionId]
+      );
+
+      if (updateResult.affectedRows === 0) {
+        throw new Error('Failed to update prescription status.');
+      }
+
+      // Gap 10: dedicated REVOKE audit entry
+      await logAudit(connection, {
+        userId: req.user.user_id,
+        action: 'REVOKE',
+        table: 'PRESCRIPTIONS',
+        recordId: prescriptionId,
+        oldValue: { status: 'active' },
+        newValue: {
+          status: 'cancelled',
+          reason: reason || 'Cancelled by practitioner',
+          cancelled_by_role: req.user.roles[0],
+          cancelled_at: new Date().toISOString(),
+        },
+        ipAddress: req.ip,
+      });
+
+      await connection.commit();
+
+      res.json({
+        message: 'Prescription cancelled successfully.',
+        prescriptionId,
+        status: 'cancelled',
+      });
+    } catch (error) {
+      await connection.rollback();
+      console.error('[Prescription Cancel Error]:', error);
+      res.status(400).json({ error: error.message || 'Failed to cancel prescription.' });
+    } finally {
+      connection.release();
+    }
+  }
+);
 
 // =============================================================================
 // 2. MEDICAL CLEARANCES
@@ -198,6 +346,7 @@ router.post('/clearances', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 
       signer_user_id: issuerId,
       signer_role: req.user.roles[0],
       signed_at: new Date().toISOString(),
+      algorithm: 'SHA-256',
       document_sha256: crypto.createHash('sha256').update(`${user_id}:${purpose}:${token}`).digest('hex'),
       clinical_remarks: remarks || 'Physically fit to undergo university practicum requirements.',
     };
@@ -213,6 +362,7 @@ router.post('/clearances', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 
 
     const clearanceId = insertResult.insertId;
 
+    // ── Audit #1: Resource creation ────────────────────────────────────────
     await logAudit(connection, {
       userId: issuerId,
       action: 'CREATE',
@@ -223,12 +373,32 @@ router.post('/clearances', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 
       ipAddress: req.ip,
     });
 
+    // ── Audit #2 (Gap 10): Cryptographic signature event ───────────────────
+    await logAudit(connection, {
+      userId: issuerId,
+      action: 'SIGN',
+      table: 'MEDICAL_CLEARANCES',
+      recordId: clearanceId,
+      oldValue: null,
+      newValue: {
+        document_sha256: signatureMetadata.document_sha256,
+        signer_role: signatureMetadata.signer_role,
+        qr_token: token,
+        algorithm: signatureMetadata.algorithm,
+      },
+      ipAddress: req.ip,
+    });
+
     await connection.commit();
+
+    // ✅ Generate + upload the signed PDF (best-effort, post-commit)
+    const pdfKey = await generateAndStoreClearancePDF(clearanceId);
 
     res.status(201).json({
       message: 'Medical clearance issued successfully.',
       clearanceId,
       qrToken: token,
+      pdfAvailable: Boolean(pdfKey),
     });
   } catch (error) {
     await connection.rollback();
@@ -245,8 +415,8 @@ router.get('/clearances/my', authenticateToken, requirePrivacyConsent, async (re
     const userId = req.user.user_id;
 
     const [clearances] = await pool.query(
-      `SELECT mc.clearance_id, mc.purpose, mc.status, mc.issued_at, mc.expires_at, 
-              mc.qr_token, mc.signature_metadata,
+      `SELECT mc.clearance_id, mc.purpose, mc.status, mc.issued_at, mc.expires_at,
+              mc.qr_token, mc.signature_metadata, mc.pdf_s3_key,
               doc.first_name AS doctor_first_name, doc.last_name AS doctor_last_name,
               COALESCE(sp.license_no, 'PRC-VERIFIED') AS doctor_license,
               COALESCE(sp.specialty, 'Infirmary Physician') AS doctor_specialty
@@ -258,12 +428,120 @@ router.get('/clearances/my', authenticateToken, requirePrivacyConsent, async (re
       [userId]
     );
 
-    res.json(clearances);
+    const enriched = clearances.map((row) => ({
+      ...row,
+      pdfAvailable: Boolean(row.pdf_s3_key),
+    }));
+
+    res.json(enriched);
   } catch (error) {
     console.error('[Documents] Error fetching clearances:', error);
     res.status(500).json({ error: 'Failed to retrieve medical clearances.' });
   }
 });
+
+// ── Gap 7: PATCH /api/documents/clearances/:id/revoke ───────────────────────
+// Any authorized clinical staff can revoke an approved clearance.
+// Revocation stamps the signature_metadata with the actor, reason, and timestamp.
+router.patch(
+  '/clearances/:id/revoke',
+  authenticateToken,
+  requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'),
+  async (req, res) => {
+    const clearanceId = Number(req.params.id);
+    const { reason } = req.body;
+
+    if (!clearanceId || Number.isNaN(clearanceId)) {
+      return res.status(400).json({ error: 'A valid clearance id is required.' });
+    }
+
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      const [rows] = await connection.query(
+        'SELECT * FROM MEDICAL_CLEARANCES WHERE clearance_id = ? AND deleted_at IS NULL FOR UPDATE',
+        [clearanceId]
+      );
+
+      if (rows.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'Clearance not found.' });
+      }
+
+      const clearance = rows[0];
+
+      if (clearance.status === 'revoked') {
+        await connection.rollback();
+        return res.status(409).json({
+          error: 'Clearance is already revoked.',
+          code: 'ALREADY_REVOKED',
+        });
+      }
+
+      if (clearance.status === 'expired') {
+        await connection.rollback();
+        return res.status(409).json({
+          error: 'Cannot revoke an already-expired clearance.',
+          code: 'ALREADY_EXPIRED',
+        });
+      }
+
+      const revokedAt = new Date().toISOString();
+      const revocationPatch = {
+        revoked_at: revokedAt,
+        revoked_by: req.user.user_id,
+        revoked_by_role: req.user.roles[0],
+        revocation_reason: reason || 'Revoked by clinical staff',
+      };
+
+      const existingMetadata =
+        typeof clearance.signature_metadata === 'string'
+          ? JSON.parse(clearance.signature_metadata)
+          : clearance.signature_metadata || {};
+
+      const mergedMetadata = { ...existingMetadata, ...revocationPatch };
+
+      await connection.query(
+        `UPDATE MEDICAL_CLEARANCES
+         SET status = 'revoked',
+             signature_metadata = ?
+         WHERE clearance_id = ?`,
+        [JSON.stringify(mergedMetadata), clearanceId]
+      );
+
+      await logAudit(connection, {
+        userId: req.user.user_id,
+        action: 'REVOKE',
+        table: 'MEDICAL_CLEARANCES',
+        recordId: clearanceId,
+        oldValue: { status: clearance.status },
+        newValue: {
+          status: 'revoked',
+          reason: reason || 'Revoked by clinical staff',
+          revoked_by_role: req.user.roles[0],
+          revoked_at: revokedAt,
+        },
+        ipAddress: req.ip,
+      });
+
+      await connection.commit();
+
+      res.json({
+        message: 'Medical clearance revoked successfully.',
+        clearanceId,
+        status: 'revoked',
+        revokedAt,
+      });
+    } catch (error) {
+      await connection.rollback();
+      console.error('[Clearance Revoke Error]:', error);
+      res.status(400).json({ error: error.message || 'Failed to revoke clearance.' });
+    } finally {
+      connection.release();
+    }
+  }
+);
 
 // Helper to reliably locate verify.html across environments
 function getVerifyHtmlPath() {
@@ -305,9 +583,14 @@ router.get('/verify/:qrToken', async (req, res) => {
     if (clearances.length > 0) {
       const c = clearances[0];
       const isExpired = new Date(c.expires_at) < new Date();
-      const isValid = !isExpired && c.status === 'approved';
+      const isRevoked = c.status === 'revoked';
+      const isValid = !isExpired && !isRevoked && c.status === 'approved';
 
-      // If opened via mobile browser ("Open Web Verify"), serve the HTML page
+      const metadata =
+        typeof c.signature_metadata === 'string'
+          ? JSON.parse(c.signature_metadata)
+          : c.signature_metadata || {};
+
       if (acceptsHtml) {
         const verifyHtml = getVerifyHtmlPath();
         if (verifyHtml) return res.sendFile(verifyHtml);
@@ -318,21 +601,23 @@ router.get('/verify/:qrToken', async (req, res) => {
         verified: isValid,
         type: 'MEDICAL_CLEARANCE',
         purpose: c.purpose,
-        status: isExpired ? 'expired' : c.status,
+        status: isRevoked ? 'revoked' : isExpired ? 'expired' : c.status,
+        revokeReason: isRevoked ? metadata.revocation_reason || null : null,
+        revokedAt: isRevoked ? metadata.revoked_at || null : null,
         patient: `${c.patient_first_name} ${c.patient_last_name}`,
         studentNo: c.student_no || 'N/A',
         course: c.course || 'N/A',
         issuedBy: `Dr. ${c.doc_first_name} ${c.doc_last_name} (${c.doc_license || 'PRC Verified'})`,
         issuedAt: c.issued_at,
         expiresAt: c.expires_at,
-        metadata: c.signature_metadata,
+        metadata,
         clearance: c,
       });
     }
 
     // 2. Check if token is a Prescription
     const [prescriptions] = await pool.query(
-      `SELECT p.prescription_id, p.status, p.issued_at, p.notes,
+      `SELECT p.prescription_id, p.status, p.issued_at, p.notes, p.signature_metadata,
               u.first_name AS patient_first_name, u.last_name AS patient_last_name,
               sp.student_no, sp.course,
               doc.first_name AS doc_first_name, doc.last_name AS doc_last_name,
@@ -348,7 +633,8 @@ router.get('/verify/:qrToken', async (req, res) => {
 
     if (prescriptions.length > 0) {
       const p = prescriptions[0];
-      const isValid = p.status === 'active' || p.status === 'dispensed';
+      const isCancelled = p.status === 'cancelled';
+      const isValid = !isCancelled && (p.status === 'active' || p.status === 'dispensed');
 
       const [items] = await pool.query(
         `SELECT pi.dosage, pi.frequency, pi.route, pi.duration_days, pi.quantity_dispensed, pi.instructions,
@@ -364,7 +650,6 @@ router.get('/verify/:qrToken', async (req, res) => {
         instructions: decrypt(it.instructions),
       }));
 
-      // If opened via mobile browser ("Open Web Verify"), serve the HTML page
       if (acceptsHtml) {
         const verifyHtml = getVerifyHtmlPath();
         if (verifyHtml) return res.sendFile(verifyHtml);
@@ -382,6 +667,7 @@ router.get('/verify/:qrToken', async (req, res) => {
         issuedAt: p.issued_at,
         notes: decrypt(p.notes),
         items: decryptedItems,
+        metadata: p.signature_metadata,
       });
     }
 
@@ -456,8 +742,9 @@ router.get('/clearances/verify/:token', async (req, res) => {
 
     const c = clearances[0];
     const isExpired = new Date(c.expires_at) < new Date();
+    const isRevoked = c.status === 'revoked';
     res.json({
-      verified: !isExpired && c.status === 'approved',
+      verified: !isExpired && !isRevoked && c.status === 'approved',
       clearance: c,
     });
   } catch (error) {
@@ -469,7 +756,6 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024 },
 });
-
 
 // =============================================================================
 // 4. EMR DIAGNOSTIC & LAB ATTACHMENTS (MINIO S3)
@@ -494,7 +780,6 @@ router.post(
     try {
       await connection.beginTransaction();
 
-      // Verify EMR record exists
       const [emrRows] = await connection.query(
         'SELECT patient_user_id FROM EMR_RECORDS WHERE emr_id = ? AND deleted_at IS NULL',
         [emrId]
@@ -507,21 +792,18 @@ router.post(
       const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
       const s3Key = `emr-${emrId}/${Date.now()}-${sanitizedName}`;
 
-      // 1. Upload file buffer to MinIO S3
       await uploadToS3({
         buffer: file.buffer,
         key: s3Key,
         mimeType: file.mimetype,
       });
 
-      // 2. Persist record in database
       const [insertResult] = await connection.query(
         `INSERT INTO EMR_ATTACHMENTS (emr_id, file_name, s3_key, file_size, mime_type, uploaded_by)
          VALUES (?, ?, ?, ?, ?, ?)`,
         [emrId, file.originalname, s3Key, file.size, file.mimetype, userId]
       );
 
-      // 3. Log to R.A. 10173 Cryptographic Audit Trail
       await logAudit(connection, {
         userId,
         action: 'CREATE',
@@ -581,10 +863,8 @@ router.get('/attachments/:attachmentId/download', authenticateToken, async (req,
       return res.status(403).json({ error: 'Unauthorized to access this clinical file.' });
     }
 
-    // Stream from MinIO S3
     const s3Object = await getFromS3(att.s3_key);
 
-    // Log PHI read access
     logPhiAccess({
       viewerUserId: req.user.user_id,
       patientUserId: att.patient_user_id,
@@ -600,6 +880,128 @@ router.get('/attachments/:attachmentId/download', authenticateToken, async (req,
   } catch (error) {
     console.error('[Attachment Download Error]:', error);
     res.status(500).json({ error: 'Failed to retrieve document from storage.' });
+  }
+});
+
+// =============================================================================
+// 5. SIGNED PDF DOWNLOADS (Feature 8)
+// =============================================================================
+
+// GET /api/documents/prescriptions/:id/pdf
+router.get('/prescriptions/:id/pdf', authenticateToken, async (req, res) => {
+  const prescriptionId = Number(req.params.id);
+  if (!prescriptionId) return res.status(400).json({ error: 'Invalid prescription id.' });
+
+  try {
+    const [rows] = await pool.query(
+      `SELECT prescription_id, patient_user_id, doctor_user_id, pdf_s3_key, qr_token
+       FROM PRESCRIPTIONS
+       WHERE prescription_id = ? AND deleted_at IS NULL`,
+      [prescriptionId]
+    );
+
+    if (rows.length === 0) return res.status(404).json({ error: 'Prescription not found.' });
+    const rx = rows[0];
+
+    const roles = req.user.roles || [];
+    const isOwner = Number(req.user.user_id) === Number(rx.patient_user_id);
+    const isStaff = roles.some((r) => ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'].includes(r));
+
+    if (!isOwner && !isStaff) {
+      return res.status(403).json({ error: 'Not authorized to access this document.' });
+    }
+
+    let key = rx.pdf_s3_key;
+    if (!key) {
+      key = await generateAndStorePrescriptionPDF(prescriptionId);
+      if (!key) {
+        return res.status(503).json({
+          error: 'Document is being generated. Please try again shortly.',
+          retryAfterSeconds: 5,
+        });
+      }
+    }
+
+    const buffer = await getBufferFromS3(key);
+
+    logPhiAccess({
+      viewerUserId: req.user.user_id,
+      patientUserId: rx.patient_user_id,
+      table: 'PRESCRIPTIONS',
+      recordId: prescriptionId,
+      purpose: 'Prescription PDF download',
+      ipAddress: req.ip,
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="prescription-${prescriptionId}.pdf"`
+    );
+    res.setHeader('Content-Length', String(buffer.length));
+    res.send(buffer);
+  } catch (err) {
+    console.error('[Prescription PDF Download Error]:', err);
+    res.status(500).json({ error: 'Failed to retrieve prescription PDF.' });
+  }
+});
+
+// GET /api/documents/clearances/:id/pdf
+router.get('/clearances/:id/pdf', authenticateToken, async (req, res) => {
+  const clearanceId = Number(req.params.id);
+  if (!clearanceId) return res.status(400).json({ error: 'Invalid clearance id.' });
+
+  try {
+    const [rows] = await pool.query(
+      `SELECT clearance_id, user_id, pdf_s3_key, status
+       FROM MEDICAL_CLEARANCES
+       WHERE clearance_id = ? AND deleted_at IS NULL`,
+      [clearanceId]
+    );
+
+    if (rows.length === 0) return res.status(404).json({ error: 'Clearance not found.' });
+    const clr = rows[0];
+
+    const roles = req.user.roles || [];
+    const isOwner = Number(req.user.user_id) === Number(clr.user_id);
+    const isStaff = roles.some((r) => ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'].includes(r));
+
+    if (!isOwner && !isStaff) {
+      return res.status(403).json({ error: 'Not authorized to access this document.' });
+    }
+
+    let key = clr.pdf_s3_key;
+    if (!key) {
+      key = await generateAndStoreClearancePDF(clearanceId);
+      if (!key) {
+        return res.status(503).json({
+          error: 'Document is being generated. Please try again shortly.',
+          retryAfterSeconds: 5,
+        });
+      }
+    }
+
+    const buffer = await getBufferFromS3(key);
+
+    logPhiAccess({
+      viewerUserId: req.user.user_id,
+      patientUserId: clr.user_id,
+      table: 'MEDICAL_CLEARANCES',
+      recordId: clearanceId,
+      purpose: 'Clearance PDF download',
+      ipAddress: req.ip,
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="clearance-${clearanceId}.pdf"`
+    );
+    res.setHeader('Content-Length', String(buffer.length));
+    res.send(buffer);
+  } catch (err) {
+    console.error('[Clearance PDF Download Error]:', err);
+    res.status(500).json({ error: 'Failed to retrieve clearance PDF.' });
   }
 });
 

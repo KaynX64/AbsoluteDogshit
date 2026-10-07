@@ -58,7 +58,8 @@ const STATUS_STYLE = (status: string) => {
   }
 };
 
-/* Quick-add catalogue — common university vaccines */
+/* Quick-add catalogue — the twelve most common vaccines on a Philippine
+   university campus. Doctors can still type anything else in the field below. */
 const COMMON_VACCINES = [
   'COVID-19 Primary Series',
   'COVID-19 Booster',
@@ -119,13 +120,18 @@ export default function DoctorConsole({
   const [selectedApp, setSelectedApp] = useState<AppointmentItem | null>(null);
   const [loadingAppointments, setLoadingAppointments] = useState(false);
 
-  /* ── Form fields (unchanged) ─────────────────────────────────── */
+  /* ── Form fields ─────────────────────────────────────────────── */
   const [chiefComplaint, setChiefComplaint] = useState('');
   const [diagnosis, setDiagnosis] = useState('');
   const [treatmentPlan, setTreatmentPlan] = useState('');
   const [clinicalNotes, setClinicalNotes] = useState('');
   const [isSubmittingEMR, setIsSubmittingEMR] = useState(false);
-  const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [feedbackMsg, setFeedbackMsg] = useState<{
+    text: string;
+    type: 'success' | 'error';
+    pdfKind?: 'prescriptions' | 'clearances';
+    pdfId?: number;
+  } | null>(null);
 
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
 
@@ -166,13 +172,23 @@ export default function DoctorConsole({
   const [respRate, setRespRate] = useState('18');
   const [height, setHeight] = useState('');
   const [weight, setWeight] = useState('');
-
-  /* ── Vaccination history ─────────────────────────────────────── */
+// ── Vaccination History State ──────────────────────────────────────────────
   const [patientVaccines, setPatientVaccines] = useState<string[]>([]);
   const [newVaccineInput, setNewVaccineInput] = useState('');
   const [isSavingVaccines, setIsSavingVaccines] = useState(false);
   const [vaccineMsg, setVaccineMsg] = useState<string | null>(null);
 
+  const commonVaccines = [
+    'COVID-19 Primary & Booster',
+    'Hepatitis B',
+    'Tetanus Toxoid',
+    'Influenza 2026',
+    'Anti-Rabies',
+    'MMR (Measles, Mumps, Rubella)',
+    'Chickenpox (Varicella)',
+    'HPV (Human Papillomavirus)',
+    'Pneumococcal',
+  ];
   const [docType, setDocType] = useState<'rx' | 'clearance'>('rx');
   const [clearancePurpose, setClearancePurpose] = useState('On-the-Job Training (OJT) Medical Clearance');
   const [clearanceRemarks, setClearanceRemarks] = useState('Physically fit to undergo university practicum requirements.');
@@ -183,7 +199,7 @@ export default function DoctorConsole({
     return d.toISOString().split('T')[0];
   });
 
-  /* ── History & archive state (unchanged) ─────────────────────── */
+  /* ── History & archive state ─────────────────────────────────── */
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [patientHistory, setPatientHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -194,7 +210,16 @@ export default function DoctorConsole({
   const [directoryTimeline, setDirectoryTimeline] = useState<any[]>([]);
   const [loadingTimeline, setLoadingTimeline] = useState(false);
 
-  /* ── Data fetchers (identical) ───────────────────────────────── */
+  /* ── Immunization modal state ────────────────────────────────── */
+  const [showImmunizationModal, setShowImmunizationModal] = useState(false);
+  const [patientImmunizations, setPatientImmunizations] = useState<string[]>([]);
+  const [newImmunizations, setNewImmunizations] = useState<string[]>([]);
+  const [loadingImmunizations, setLoadingImmunizations] = useState(false);
+  const [savingImmunizations, setSavingImmunizations] = useState(false);
+  const [customImmunizationInput, setCustomImmunizationInput] = useState('');
+  const [immunizationFeedback, setImmunizationFeedback] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  /* ── Data fetchers ───────────────────────────────────────────── */
   const fetchAppointments = async (mode = viewMode, retainSelection = true) => {
     if (mode === 'analytics') return;
     setLoadingAppointments(true);
@@ -691,6 +716,50 @@ export default function DoctorConsole({
     }
   };
 
+   // ── Fetch the official signed PDF from MinIO and save it ──────────
+  const handleDownloadPdf = async (
+    kind: 'prescriptions' | 'clearances',
+    id: number
+  ) => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/documents/${kind}/${id}/pdf`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setFeedbackMsg({
+          text: '❌ PDF download failed: ' + (err.error || `HTTP ${res.status}`),
+          type: 'error',
+        });
+        return;
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+
+      // Use an <a download> click — Electron routes this through its
+      // native download pipeline (save dialog + file picker) instead of
+      // the popup handler that blocks blob: URLs.
+      const a = document.createElement('a');
+      a.href = url;
+      a.download =
+        kind === 'prescriptions'
+          ? `prescription-${id}.pdf`
+          : `clearance-${id}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err: any) {
+      setFeedbackMsg({
+        text: '❌ Network error fetching PDF: ' + err.message,
+        type: 'error',
+      });
+    }
+  };
   const handlePrintClearance = async () => {
     if (!selectedApp) return;
     setIsIssuingClearance(true);
@@ -786,7 +855,12 @@ export default function DoctorConsole({
         }
       }
 
-      setFeedbackMsg({ text: `✅ Clearance #${clearanceId} (Expires: ${clearanceExpiryDate}) issued!`, type: 'success' });
+      setFeedbackMsg({
+        text: `✅ Clearance #${clearanceId} (Expires: ${clearanceExpiryDate}) issued!`,
+        type: 'success',
+        pdfKind: 'clearances',
+        pdfId: clearanceId,
+      });
     } catch (err: any) {
       setFeedbackMsg({ text: 'Error issuing clearance: ' + err.message, type: 'error' });
     } finally {
@@ -1250,6 +1324,25 @@ export default function DoctorConsole({
               </div>
             </div>
           )}
+{/* 💉 PATIENT VACCINATION & IMMUNIZATION HISTORY MANAGER */}
+          {selectedApp && (
+            <div style={{
+              background: T.surface,
+              border: `1px solid ${T.border}`,
+              borderRadius: T.radius.lg,
+              padding: '18px 22px',
+              marginBottom: 20,
+              boxShadow: T.shadow.xs,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: T.primary }}>
+                    💉 Patient Vaccination & Immunization History
+                  </h4>
+                  <p style={{ margin: '3px 0 0', fontSize: 12, color: T.textSub }}>
+                    Verified in-person clinical vaccine records for <b>{selectedApp.first_name} {selectedApp.last_name}</b> (R.A. 10173 Protected)
+                  </p>
+                </div>
 
 {/* ── IN-CONSULTATION DIAGNOSTIC LABS & ATTACHMENT PREVIEW DRAWER ── */}
           {selectedApp && activePatientAttachments.length > 0 && (
@@ -1676,24 +1769,80 @@ export default function DoctorConsole({
                   })}
                 </div>
               </div>
+              {/* ── Shared issuance feedback banner (Feature 8 isolation fix) ── */}
+              {feedbackMsg && (
+                <div
+                  style={{
+                    marginBottom: 16,
+                    padding: '12px 16px',
+                    borderRadius: T.radius.md,
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    background: feedbackMsg.type === 'success' ? T.successSoft : T.dangerSoft,
+                    color: feedbackMsg.type === 'success' ? T.success : T.danger,
+                    border: `1px solid ${feedbackMsg.type === 'success' ? T.successBorder : T.dangerBorder}`,
+                    wordBreak: 'break-all',
+                    lineHeight: 1.5,
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 12,
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <span style={{ flex: '1 1 260px' }}>{feedbackMsg.text}</span>
 
+                  {feedbackMsg.type === 'success' &&
+                    feedbackMsg.pdfKind &&
+                    feedbackMsg.pdfId && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleDownloadPdf(feedbackMsg.pdfKind!, feedbackMsg.pdfId!)
+                        }
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: T.radius.pill,
+                          background: T.primary,
+                          color: '#fff',
+                          border: 'none',
+                          fontSize: 11.5,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          fontFamily: T.font,
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        ⬇️ Download PDF
+                      </button>
+                    )}
+                </div>
+              )}
               {docType === 'rx' ? (
-                <PrescriptionGenerator
-                  key={selectedApp?.appointment_id}
-                  patientUserId={selectedApp?.patient_id || 5}
-                  verifiedPatient={{
-                    first_name: selectedApp?.first_name || 'Daniella',
-                    last_name: selectedApp?.last_name || 'Movida',
-                    student_no: selectedApp?.student_no || '22-LN-0123',
-                    course: selectedApp?.course || 'BS Information Technology',
-                    allergies: selectedApp?.allergies || 'None',
-                  }}
-                  initialNotes={selectedApp?.past_dietary_notes}
-                  isArchived={isArchivedMode}
-                  onPrescriptionIssued={() => {
-                    setFeedbackMsg({ text: '✅ Prescription successfully issued to patient.', type: 'success' });
-                  }}
-                />
+              <PrescriptionGenerator
+                key={selectedApp?.appointment_id}
+                patientUserId={selectedApp?.patient_id || 5}
+                verifiedPatient={{
+                  first_name: selectedApp?.first_name || 'Daniella',
+                  last_name: selectedApp?.last_name || 'Movida',
+                  student_no: selectedApp?.student_no || '22-LN-0123',
+                  course: selectedApp?.course || 'BS Information Technology',
+                  allergies: selectedApp?.allergies || 'None',
+                }}
+                initialNotes={selectedApp?.past_dietary_notes}
+                isArchived={isArchivedMode}
+                onPrescriptionIssued={(info) => {
+                  setFeedbackMsg({
+                    text: `✅ Prescription #${info.prescriptionId} recorded and signed.`,
+                    type: 'success',
+                    pdfKind: 'prescriptions',
+                    pdfId: info.prescriptionId,
+                  });
+                }}
+                onPrescriptionError={(message) => {
+                  setFeedbackMsg({ text: message, type: 'error' });
+                }}
+              />
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                   <div>
@@ -1971,16 +2120,6 @@ export default function DoctorConsole({
                     ? '⏳ Patient not triaged by nurse'
                     : '✅ Finish consultation & discharge'}
                 </button>
-
-                {feedbackMsg && (
-                  <p style={{
-                    textAlign: 'center', marginTop: 12,
-                    fontSize: 13, fontWeight: 700,
-                    color: feedbackMsg.type === 'success' ? T.success : T.danger,
-                  }}>
-                    {feedbackMsg.text}
-                  </p>
-                )}
               </form>
             </section>
           </div>

@@ -148,24 +148,35 @@ const navByRole: Record<string, { key: string; label: string; icon: React.ReactN
     { key: 'db',        label: 'Database',   icon: <I.Database /> },
   ],
   NURSE: [
-    { 
-      key: 'triage', 
-      label: 'Triage', 
+    {
+      key: 'triage',
+      label: 'Triage',
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
         </svg>
-      ) 
+      )
     },
-    { 
-      key: 'inventory', 
-      label: 'Inventory', 
+    {
+      key: 'expected',
+      label: 'Expected',
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2" />
+          <path d="M16 2v4M8 2v4M3 10h18" />
+          <path d="M9 15l2 2 4-4" />
+        </svg>
+      )
+    },
+    {
+      key: 'inventory',
+      label: 'Inventory',
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M10.5 20.5a7 7 0 0 1-9.9-9.9l6.4-6.4a7 7 0 0 1 9.9 9.9z" />
           <path d="M8.5 8.5l7 7" />
         </svg>
-      ) 
+      )
     },
   ],
   DOCTOR: [
@@ -252,7 +263,6 @@ interface TopBarProps {
   onChangeRoleView: (v: string) => void;
 }
 
-// Inside TopBar in desktop/src/App.tsx
 function TopBar({
   user, role, isOnline, offlineQueueCount, isReplaying, onManualReplay,
   roleView, roles, onChangeRoleView,
@@ -273,8 +283,6 @@ function TopBar({
         <div className="tb-eyebrow">Valetudo HealthLink Console</div>
         <h1 className="tb-greeting">{greeting}, {user.first_name}</h1>
       </div>
-
-      {/* ...rest of the tb-right block stays exactly as it was... */}
 
       <div className="tb-right">
         {roles.length > 1 && (
@@ -474,7 +482,7 @@ export default function App() {
   const [doctorViewMode, setDoctorViewMode] = useState<
     'active' | 'scheduled' | 'history' | 'archive' | 'analytics'
   >('active');
-  const [nurseViewMode, setNurseViewMode] = useState<'triage' | 'inventory'>('triage');
+  const [nurseViewMode, setNurseViewMode] = useState<'triage' | 'expected' | 'inventory'>('triage');
 
   /* ── Connectivity & offline queue ────────────────────────────── */
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
@@ -631,7 +639,7 @@ export default function App() {
             : (activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST')
             ? (key) => setDoctorViewMode(key as typeof doctorViewMode)
             : activeRoleView === 'NURSE'
-            ? (key) => setNurseViewMode(key as typeof nurseViewMode)
+            ? (key) => setNurseViewMode(key as 'triage' | 'expected' | 'inventory')
             : undefined
         }
       />

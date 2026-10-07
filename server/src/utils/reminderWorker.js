@@ -1,6 +1,7 @@
 // server/src/utils/reminderWorker.js
 import { pool } from '../db.js';
 import { sendAppointmentEmail } from './mailer.js';
+import { logAudit } from './auditLogger.js';
 
 export function startReminderScheduler(io) {
   // Check every 15 minutes
@@ -50,11 +51,7 @@ export function startReminderScheduler(io) {
   }, 15 * 60 * 1000); // 15 mins
 
   // ── Auto-no-show worker: runs every 60 seconds ────────────────────
-  // Marks any appointment still in 'scheduled' state as 'no_show'
-  // if 20+ minutes have passed since the scheduled time.
-  // Only looks at the last 24 hours to avoid mass-marking old records
-  // after a long server downtime.
-    setInterval(async () => {
+  setInterval(async () => {
     try {
       const [expired] = await pool.query(
         `SELECT appointment_id FROM APPOINTMENTS
@@ -88,4 +85,100 @@ export function startReminderScheduler(io) {
       console.error('[Auto-No-Show Worker Error]:', err.message);
     }
   }, 60 * 1000); // every 60 seconds
+
+  // ── Gap 9: Prescription Auto-Expiry Worker ─────────────────────────
+  // Runs every 30 minutes. A prescription is considered "expired" when the
+  // latest clinical window across its line items has closed:
+  //   MAX(issued_at + INTERVAL duration_days DAY) < NOW()
+  //
+  // This is a clinical validity window, NOT the 5-year R.A. 10173 retention
+  // sweep (which is handled separately by /api/privacy/retention/sweep).
+  setInterval(async () => {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      const [expired] = await connection.query(
+        `SELECT p.prescription_id
+         FROM PRESCRIPTIONS p
+         JOIN PRESCRIPTION_ITEMS pi ON pi.prescription_id = p.prescription_id
+         WHERE p.status = 'active'
+           AND p.deleted_at IS NULL
+         GROUP BY p.prescription_id
+         HAVING MAX(DATE_ADD(p.issued_at, INTERVAL pi.duration_days DAY)) < NOW()`
+      );
+
+      if (expired.length === 0) {
+        await connection.commit();
+        return;
+      }
+
+      const ids = expired.map((r) => r.prescription_id);
+
+      await connection.query(
+        `UPDATE PRESCRIPTIONS SET status = 'expired' WHERE prescription_id IN (?)`,
+        [ids]
+      );
+
+      // R.A. 10173 audit trail for the automated state change
+      await logAudit(connection, {
+        userId: null, // system-initiated
+        action: 'UPDATE',
+        table: 'PRESCRIPTIONS',
+        recordId: 0,
+        oldValue: null,
+        newValue: {
+          operation: 'AUTO_EXPIRE_PRESCRIPTIONS',
+          count: ids.length,
+          prescription_ids: ids,
+        },
+        ipAddress: 'system',
+      });
+
+      await connection.commit();
+
+      console.log(`[Prescription Expiry Worker] Marked ${ids.length} prescription(s) as expired.`);
+
+      if (io) {
+        io.emit('prescription:status_changed', {
+          status: 'expired',
+          count: ids.length,
+          prescription_ids: ids,
+        });
+      }
+    } catch (err) {
+      await connection.rollback();
+      console.error('[Prescription Expiry Worker Error]:', err.message);
+    } finally {
+      connection.release();
+    }
+  }, 30 * 60 * 1000); // every 30 minutes
+
+    // ── Nightly PDF backfill (Feature 8) ─────────────────────────────
+  setInterval(async () => {
+    try {
+      const { generateAndStorePrescriptionPDF, generateAndStoreClearancePDF } =
+        await import('./documentService.js');
+
+      const [missingRx] = await pool.query(
+        `SELECT prescription_id FROM PRESCRIPTIONS
+         WHERE pdf_s3_key IS NULL AND deleted_at IS NULL
+         ORDER BY prescription_id DESC LIMIT 20`
+      );
+      for (const rx of missingRx) {
+        await generateAndStorePrescriptionPDF(rx.prescription_id);
+      }
+
+      const [missingClr] = await pool.query(
+        `SELECT clearance_id FROM MEDICAL_CLEARANCES
+         WHERE pdf_s3_key IS NULL AND deleted_at IS NULL
+         ORDER BY clearance_id DESC LIMIT 20`
+      );
+      for (const clr of missingClr) {
+        await generateAndStoreClearancePDF(clr.clearance_id);
+      }
+    } catch (err) {
+      console.error('[PDF Backfill Worker Error]:', err.message);
+    }
+  }, 6 * 60 * 60 * 1000); // every 6 hours
 }

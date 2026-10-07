@@ -7,6 +7,17 @@ interface QrIntakeScannerProps {
   onPatientVerified: (patient: any, token: string) => void;
 }
 
+interface ActiveTicket {
+  queue_id: number;
+  queue_number: number;
+  status: string;
+  appointment_id: number | null;
+  ticket_no: string;
+  arrival_time: string;
+  visit_type: string;
+  doctor_name: string;
+}
+
 export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerProps) {
   const [scanMode, setScanMode] = useState<'camera' | 'search' | 'manual'>('camera');
   const [searchQuery, setSearchQuery] = useState('22-LN-0123');
@@ -15,6 +26,14 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
 
   const [pendingAppointment, setPendingAppointment] = useState<any>(null);
   const [checkInSuccess, setCheckInSuccess] = useState<string | null>(null);
+
+  /* ── Active ticket (duplicate prevention) ────────────────── */
+  const [activeTicket, setActiveTicket] = useState<ActiveTicket | null>(null);
+  const [loadingActiveTicket, setLoadingActiveTicket] = useState(false);
+
+  /* ── Walk-in state ───────────────────────────────────────── */
+  const [walkInSuccess, setWalkInSuccess] = useState<string | null>(null);
+  const [isRegisteringWalkIn, setIsRegisteringWalkIn] = useState(false);
 
   const [bp, setBp] = useState('120/80');
   const [temp, setTemp] = useState('36.6');
@@ -56,13 +75,37 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
     successBorder:'#BBF7D0',
   };
 
-  /* ── Logic — identical to prior version ───────────────────── */
+  /* ── Active-ticket pre-check ─────────────────────────────── */
+  const checkActiveTicket = async (userId: number) => {
+    setLoadingActiveTicket(true);
+    const jwt = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/appointments/patient/${userId}/active-ticket`, {
+        headers: { Authorization: `Bearer ${jwt}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setActiveTicket(data.hasActiveTicket ? data.ticket : null);
+      } else {
+        setActiveTicket(null);
+      }
+    } catch (_) {
+      setActiveTicket(null);
+    } finally {
+      setLoadingActiveTicket(false);
+    }
+  };
+
+  /* ── Verify QR token ─────────────────────────────────────── */
   const verifyToken = async (tokenToVerify: string) => {
     if (!tokenToVerify || tokenToVerify.trim().length === 0) return;
     setScanStatus('🔍 Verifying cryptographic QR pass signature...');
     setVerifiedPatient(null);
     setPendingAppointment(null);
     setCheckInSuccess(null);
+    setWalkInSuccess(null);
+    setActiveTicket(null);
+
     const jwt = localStorage.getItem('valetudo_token');
     try {
       const res = await fetch(`${API_BASE_URL}/api/health-pass/verify`, {
@@ -79,7 +122,11 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
         setWeight(data.patient?.weight ? String(data.patient.weight) : '');
         setLastVerifiedAt(data.patient?.health_profile_updated_at || '');
         stopCamera();
-        checkPatientAppointments(data.patient.user_id);
+        // Fetch active ticket + pending appointment in parallel
+        await Promise.all([
+          checkActiveTicket(data.patient.user_id),
+          checkPatientAppointments(data.patient.user_id),
+        ]);
       } else {
         setScanStatus('❌ Verification failed: ' + (data.error || 'Invalid or expired QR pass'));
       }
@@ -93,6 +140,9 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
     if (!searchQuery.trim()) return;
     setScanStatus('🔍 Searching student records...');
     setCheckInSuccess(null);
+    setWalkInSuccess(null);
+    setActiveTicket(null);
+
     const jwt = localStorage.getItem('valetudo_token');
     try {
       const res = await fetch(`${API_BASE_URL}/api/appointments/lookup?query=${encodeURIComponent(searchQuery.trim())}`, {
@@ -118,6 +168,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
         setHeight(app.height ? String(app.height) : '');
         setWeight(app.weight ? String(app.weight) : '');
         setLastVerifiedAt(app.health_profile_updated_at || '');
+        await checkActiveTicket(app.user_id);
       } else {
         setScanStatus('❌ No scheduled appointments found matching that query.');
       }
@@ -159,15 +210,64 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
           weight: weight || null,
         }),
       });
+
       const data = await res.json();
-      if (res.ok) {
-        setCheckInSuccess(`✅ Arrival confirmed! Ticket ${data.queueTicket} assigned at ${data.arrivalTime}.`);
-        setPendingAppointment({ ...pendingAppointment, status: 'checked_in' });
-      } else {
-        alert(data.error || 'Failed to check in patient.');
+
+      // Race-condition path: server rejected because patient is already in queue
+      if (res.status === 409) {
+        setScanStatus('⚠️ ' + data.error);
+        if (verifiedPatient) await checkActiveTicket(verifiedPatient.user_id);
+        return;
       }
+
+      if (!res.ok) throw new Error(data.error || 'Failed to check in patient.');
+
+      setCheckInSuccess(`✅ Arrival confirmed! Ticket ${data.queueTicket} assigned at ${data.arrivalTime}.`);
+      setPendingAppointment({ ...pendingAppointment, status: 'checked_in' });
+      if (verifiedPatient) await checkActiveTicket(verifiedPatient.user_id);
     } catch (err: any) {
-      alert('Error during check-in: ' + err.message);
+      setScanStatus('❌ ' + err.message);
+    }
+  };
+
+  /* ── Register as walk-in ─────────────────────────────────── */
+  const handleRegisterWalkIn = async () => {
+    if (!verifiedPatient) return;
+    setIsRegisteringWalkIn(true);
+    setWalkInSuccess(null);
+    const jwt = localStorage.getItem('valetudo_token');
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/appointments/walk-in`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({
+          patient_user_id: verifiedPatient.user_id,
+          visit_type: 'Walk-in Consultation',
+          notes: `Walk-in triage vitals · BP ${bp}, Temp ${temp}°C, Pulse ${pulse} bpm`,
+          vitals: {
+            height: height || null,
+            weight: weight || null,
+          },
+        }),
+      });
+      const data = await res.json();
+
+      // Race-condition path: server rejected because patient is already in queue
+      if (res.status === 409) {
+        setScanStatus('⚠️ ' + data.error);
+        await checkActiveTicket(verifiedPatient.user_id);
+        return;
+      }
+
+      if (!res.ok) throw new Error(data.error || 'Failed to register walk-in patient.');
+
+      setWalkInSuccess(`✅ Walk-in registered! Ticket ${data.queueTicket} at ${data.arrivalTime}.`);
+      await checkActiveTicket(verifiedPatient.user_id);
+    } catch (err: any) {
+      setScanStatus('❌ ' + err.message);
+    } finally {
+      setIsRegisteringWalkIn(false);
     }
   };
 
@@ -264,6 +364,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
   /* ── Derived status ──────────────────────────────────────── */
   const statusIsOk = scanStatus.includes('✅');
   const statusIsErr = scanStatus.includes('❌');
+  const statusIsWarn = scanStatus.includes('⚠️');
 
   /* ── Render ──────────────────────────────────────────────── */
   return (
@@ -503,6 +604,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
       )}
 
       {/* Action buttons row */}
+{scanMode === 'camera' && (
       <div
         style={{
           display: 'flex',
@@ -619,6 +721,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
           />
         </label>
       </div>
+)}
 
       {/* Status line */}
       {scanStatus && (
@@ -629,10 +732,28 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
             borderRadius: 12,
             fontSize: 12.5,
             fontWeight: 700,
-            background: statusIsOk ? C.successSoft : statusIsErr ? C.dangerSoft : C.sage100,
-            color: statusIsOk ? C.success : statusIsErr ? C.danger : C.textSub,
+            background: statusIsOk
+              ? C.successSoft
+              : statusIsErr
+              ? C.dangerSoft
+              : statusIsWarn
+              ? C.warningSoft
+              : C.sage100,
+            color: statusIsOk
+              ? C.success
+              : statusIsErr
+              ? C.danger
+              : statusIsWarn
+              ? C.warning
+              : C.textSub,
             border: `1px solid ${
-              statusIsOk ? C.successBorder : statusIsErr ? C.dangerBorder : 'transparent'
+              statusIsOk
+                ? C.successBorder
+                : statusIsErr
+                ? C.dangerBorder
+                : statusIsWarn
+                ? C.warningBorder
+                : 'transparent'
             }`,
           }}
         >
@@ -744,7 +865,148 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
             ))}
           </div>
 
-          {pendingAppointment ? (
+          {/* ── Pre-check: active ticket already exists ────────── */}
+          {loadingActiveTicket ? (
+            <div
+              style={{
+                padding: '14px 16px',
+                background: C.surface,
+                border: `1px solid ${C.border}`,
+                borderRadius: 14,
+                fontSize: 12.5,
+                color: C.textSub,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+              }}
+            >
+              <div
+                style={{
+                  width: 16,
+                  height: 16,
+                  border: `2px solid ${C.primaryTint}`,
+                  borderTopColor: C.primary,
+                  borderRadius: '50%',
+                  animation: 'spin 0.8s linear infinite',
+                  flexShrink: 0,
+                }}
+              />
+              Checking patient's queue status…
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            </div>
+          ) : activeTicket ? (
+            /* ── STATE: Already in queue ─────────────────────── */
+            <div
+              style={{
+                padding: 16,
+                background: C.warningSoft,
+                border: `1px solid ${C.warningBorder}`,
+                borderRadius: 14,
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: 12,
+                }}
+              >
+                <b style={{ fontSize: 13, color: C.warning, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 16 }}>⚠️</span>
+                  Patient already in today's queue
+                </b>
+                <span
+                  style={{
+                    fontSize: 10.5,
+                    padding: '3px 10px',
+                    borderRadius: 999,
+                    background: C.warning,
+                    color: '#FFFFFF',
+                    fontWeight: 800,
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.3,
+                  }}
+                >
+                  {activeTicket.status.replace('-', ' ')}
+                </span>
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: 12,
+                  marginBottom: 12,
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 800,
+                      letterSpacing: 1,
+                      color: C.warning,
+                      textTransform: 'uppercase',
+                      marginBottom: 2,
+                    }}
+                  >
+                    Queue ticket
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
+                      fontSize: 22,
+                      fontWeight: 800,
+                      color: C.warning,
+                    }}
+                  >
+                    {activeTicket.ticket_no}
+                  </div>
+                </div>
+                <div>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 800,
+                      letterSpacing: 1,
+                      color: C.warning,
+                      textTransform: 'uppercase',
+                      marginBottom: 2,
+                    }}
+                  >
+                    Arrived
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>
+                    {activeTicket.arrival_time}
+                  </div>
+                </div>
+                <div style={{ gridColumn: 'span 2' }}>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 800,
+                      letterSpacing: 1,
+                      color: C.warning,
+                      textTransform: 'uppercase',
+                      marginBottom: 2,
+                    }}
+                  >
+                    Visit & attending
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>
+                    {activeTicket.visit_type} · {activeTicket.doctor_name}
+                  </div>
+                </div>
+              </div>
+
+              <p style={{ margin: 0, fontSize: 12, color: C.textSub, lineHeight: 1.5 }}>
+                No new ticket was created. The patient is already being tracked in the live
+                triage queue — no further action needed here.
+              </p>
+            </div>
+          ) : pendingAppointment ? (
+            /* ── STATE: Pending scheduled appointment ────────── */
             <div
               style={{
                 padding: 16,
@@ -890,17 +1152,148 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
               )}
             </div>
           ) : (
+            /* ── STATE: Walk-in (no active ticket, no booking) ─ */
             <div
               style={{
-                padding: '12px 16px',
-                background: C.warningSoft,
-                color: C.warning,
+                padding: 16,
+                background: C.surface,
+                border: `1px solid ${C.primaryTint}`,
                 borderRadius: 14,
-                fontSize: 12.5,
-                border: `1px solid ${C.warningBorder}`,
               }}
             >
-              No scheduled appointment found. Student can be treated as a regular walk-in.
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: 12,
+                }}
+              >
+                <b style={{ fontSize: 13, color: C.primary }}>No scheduled appointment today</b>
+                <span
+                  style={{
+                    fontSize: 10.5,
+                    padding: '3px 10px',
+                    borderRadius: 999,
+                    background: C.primaryTint,
+                    color: C.primary,
+                    fontWeight: 800,
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.3,
+                  }}
+                >
+                  Walk-in
+                </span>
+              </div>
+
+              <p style={{ margin: '0 0 14px', fontSize: 12.5, color: C.textSub, lineHeight: 1.5 }}>
+                The student has no booking on file. Capture triage vitals and register them as a
+                walk-in — they'll be added to today's live queue.
+              </p>
+
+              {walkInSuccess ? (
+                <div
+                  style={{
+                    textAlign: 'center',
+                    color: C.success,
+                    fontWeight: 700,
+                    fontSize: 13,
+                    padding: '14px 16px',
+                    background: C.successSoft,
+                    borderRadius: 14,
+                    border: `1px solid ${C.successBorder}`,
+                  }}
+                >
+                  {walkInSuccess}
+                </div>
+              ) : (
+                <>
+                  <div
+                    style={{
+                      fontSize: 10.5,
+                      fontWeight: 800,
+                      letterSpacing: 1.2,
+                      color: C.textMuted,
+                      textTransform: 'uppercase',
+                      marginBottom: 8,
+                    }}
+                  >
+                    Triage vitals
+                  </div>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(5, 1fr)',
+                      gap: 8,
+                      marginBottom: 14,
+                    }}
+                  >
+                    {[
+                      { label: 'Blood pressure', value: bp, set: setBp, placeholder: '120/80' },
+                      { label: 'Temp (°C)', value: temp, set: setTemp, placeholder: '36.6' },
+                      { label: 'Pulse (bpm)', value: pulse, set: setPulse, placeholder: '78' },
+                      { label: 'Height (cm)', value: height, set: setHeight, placeholder: '162.5' },
+                      { label: 'Weight (kg)', value: weight, set: setWeight, placeholder: '54.0' },
+                    ].map((f) => (
+                      <div key={f.label}>
+                        <label
+                          style={{
+                            fontSize: 10.5,
+                            color: C.textSub,
+                            fontWeight: 600,
+                            display: 'block',
+                            marginBottom: 4,
+                          }}
+                        >
+                          {f.label}
+                        </label>
+                        <input
+                          type="text"
+                          placeholder={f.placeholder}
+                          style={{
+                            width: '100%',
+                            boxSizing: 'border-box',
+                            padding: '8px 10px',
+                            fontSize: 12,
+                            color: C.text,
+                            background: C.surface,
+                            border: `1px solid ${C.border}`,
+                            borderRadius: 8,
+                            outline: 'none',
+                            fontFamily: 'inherit',
+                          }}
+                          value={f.value}
+                          onChange={(e) => f.set(e.target.value)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleRegisterWalkIn}
+                    disabled={isRegisteringWalkIn}
+                    style={{
+                      width: '100%',
+                      padding: 12,
+                      borderRadius: 999,
+                      background: isRegisteringWalkIn ? C.sage400 : C.primary,
+                      color: '#FFFFFF',
+                      border: 'none',
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: isRegisteringWalkIn ? 'not-allowed' : 'pointer',
+                      fontFamily: 'inherit',
+                      boxShadow: '0 4px 12px rgba(31,74,52,0.16)',
+                      transition: 'background 120ms ease',
+                    }}
+                  >
+                    {isRegisteringWalkIn
+                      ? 'Registering walk-in…'
+                      : '✓ Register as walk-in patient'}
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>

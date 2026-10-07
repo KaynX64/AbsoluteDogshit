@@ -22,7 +22,8 @@ interface PrescriptionGeneratorProps {
   };
   initialNotes?: string;
   isArchived?: boolean;
-  onPrescriptionIssued?: () => void;
+  onPrescriptionIssued?: (info: { prescriptionId: number; qrToken: string; emrId: number }) => void;
+  onPrescriptionError?: (message: string) => void;
 }
 
 /* ── Custom themed dropdown (replaces native <select>) ─────────── */
@@ -178,6 +179,7 @@ export default function PrescriptionGenerator({
   initialNotes,
   isArchived = false,
   onPrescriptionIssued,
+  onPrescriptionError,
 }: PrescriptionGeneratorProps) {
   const [medicines, setMedicines] = useState<MedicineMaster[]>([]);
   const [selectedMedicineId, setSelectedMedicineId] = useState<number>(1);
@@ -193,7 +195,6 @@ export default function PrescriptionGenerator({
   );
 
   const [isSaving, setIsSaving] = useState(false);
-  const [issuedStatus, setIssuedStatus] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialNotes !== undefined && initialNotes !== null && initialNotes !== '') {
@@ -239,11 +240,12 @@ export default function PrescriptionGenerator({
 
   const handleSaveAndPrintPrescription = async () => {
     if (!patientUserId) {
-      alert('Error: No patient selected. Please choose a patient from the queue first.');
+      if (onPrescriptionError) {
+        onPrescriptionError('❌ No patient selected. Please choose a patient from the queue first.');
+      }
       return;
     }
     setIsSaving(true);
-    setIssuedStatus(null);
     const token = localStorage.getItem('valetudo_token');
 
     try {
@@ -270,9 +272,12 @@ export default function PrescriptionGenerator({
 
       const realQrToken = data.qrToken;
       const prescriptionId = data.prescriptionId;
+      const emrId = data.emrId;
 
-      setIssuedStatus(`✅ Prescription #${prescriptionId} recorded and signed! Verification Token: ${realQrToken}`);
-      if (onPrescriptionIssued) onPrescriptionIssued();
+      // Route success to the parent — it owns the shared feedback banner
+      if (onPrescriptionIssued) {
+        onPrescriptionIssued({ prescriptionId, qrToken: realQrToken, emrId });
+      }
 
       const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(realQrToken)}`;
 
@@ -350,7 +355,12 @@ export default function PrescriptionGenerator({
         }
       }
     } catch (err: any) {
-      alert('Error issuing prescription: ' + err.message);
+      // Route error to the parent — no more blocking alert()
+      if (onPrescriptionError) {
+        onPrescriptionError('❌ Error issuing prescription: ' + err.message);
+      } else {
+        console.error('[Prescription Generator]', err);
+      }
     } finally {
       setIsSaving(false);
     }
@@ -465,15 +475,7 @@ export default function PrescriptionGenerator({
           ? 'Signing & printing…'
           : '🖨️ Issue, sign & print prescription'}
       </button>
-
-      {issuedStatus && (
-        <p style={{
-          fontSize: 11.5, color: T.success, fontWeight: 700,
-          margin: 0, wordBreak: 'break-all', textAlign: 'center',
-        }}>
-          {issuedStatus}
-        </p>
-      )}
+      {/* No local feedback line — parent renders it in the issuance panel header */}
     </div>
   );
 }

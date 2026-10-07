@@ -60,7 +60,6 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
 
   final List<String> _medicalPurposes = [
     'General consultation',
-    'Physical examination',
     'Prescription refill',
     'Medical clearance',
   ];
@@ -69,7 +68,6 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     'Dental Check-up',
     'Tooth Extraction',
     'Oral Prophylaxis',
-    'Dental Filling',
     'Toothache Emergency',
   ];
 
@@ -207,6 +205,178 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
       return time24;
     }
   }
+
+  // ── AM/PM split helpers ─────────────────────────────────────────
+
+  bool _isMorning(String time24) {
+    final hour = int.tryParse(time24.split(':').first) ?? 0;
+    return hour < 12;
+  }
+
+  /// Compact range like "8:00 – 11:45 AM" — period suffix shown only once.
+  String _formatSlotRange(List<dynamic> group) {
+    if (group.isEmpty) return '';
+    final first = _formatSlotDisplay(group.first['time']);
+    final last = _formatSlotDisplay(group.last['time']);
+
+    final firstPeriod = first.split(' ').last; // "AM" or "PM"
+    final lastPeriod = last.split(' ').last;
+
+    if (firstPeriod == lastPeriod) {
+      // Both on the same side of noon — drop the leading suffix.
+      final firstTime = first.substring(0, first.length - firstPeriod.length - 1);
+      return '$firstTime – $last';
+    }
+    return '$first – $last';
+  }
+
+  /// Soft section header: sage icon chip · label · hairline · range.
+  Widget _buildSlotGroupHeader({
+    required IconData icon,
+    required String label,
+    required String range,
+  }) {
+    return Row(
+      children: [
+        Container(
+          width: 26,
+          height: 26,
+          decoration: BoxDecoration(
+            color: softSage,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          alignment: Alignment.center,
+          child: Icon(icon, size: 14, color: primaryGreen),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 13.5,
+            fontWeight: FontWeight.w800,
+            color: textMain,
+            letterSpacing: -0.2,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Container(height: 1, color: borderColor),
+        ),
+        const SizedBox(width: 12),
+        Text(
+          range,
+          style: const TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w600,
+            color: textSub,
+            letterSpacing: 0.1,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Whisper-light divider between AM and PM — a small sage dot between rules.
+  Widget _buildSectionBreak() {
+    return Row(
+      children: [
+        Expanded(
+          child: Container(
+            height: 1,
+            color: borderColor.withValues(alpha: 0.55),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Container(
+            width: 5,
+            height: 5,
+            decoration: const BoxDecoration(
+              color: _dividerSoft,
+              shape: BoxShape.circle,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Container(
+            height: 1,
+            color: borderColor.withValues(alpha: 0.55),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// The slot pills themselves — grouped AM or PM block.
+  Widget _buildSlotWrap(List<dynamic> group) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const crossAxisCount = 3;
+        const gap = 10.0;
+        final slotWidth =
+            (constraints.maxWidth - (crossAxisCount - 1) * gap) / crossAxisCount;
+        final slotHeight = slotWidth / 2.25;
+
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: group.map((slot) {
+            final rawTime = slot['time'];
+            final displayTime = _formatSlotDisplay(rawTime);
+            final isAvail = slot['isAvailable'] == true;
+            final isSelected = _selectedSlotTime == rawTime;
+            final isDisabled = !isAvail;
+
+            return SizedBox(
+              width: slotWidth,
+              height: slotHeight,
+              child: GestureDetector(
+                onTap: isDisabled
+                    ? null
+                    : () => setState(() => _selectedSlotTime = rawTime),
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? primaryGreen
+                        : isDisabled
+                            ? disabledSlotBg
+                            : Colors.white,
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(
+                      color: isSelected
+                          ? primaryGreen
+                          : isDisabled
+                              ? Colors.transparent
+                              : borderColor,
+                      width: 1.2,
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    displayTime,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: isSelected || !isDisabled
+                          ? FontWeight.w700
+                          : FontWeight.w600,
+                      color: isSelected
+                          ? Colors.white
+                          : isDisabled
+                              ? disabledSlotText
+                              : textMain,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
+
+  // ── End AM/PM split helpers ─────────────────────────────────────
 
   void _updatePurposesForSelectedDoctor(int doctorId) {
     final doc = _doctors.firstWhere((d) => d['user_id'] == doctorId, orElse: () => null);
@@ -962,6 +1132,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     );
   }
 
+  // ── Slot grid: AM/PM split with graceful section headers ────────
+  //
   // Uses a Wrap instead of a nested GridView so the slot area never enters
   // the gesture arena and never fights the outer ListView for scroll.
   Widget _buildSlotGrid() {
@@ -982,74 +1154,42 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: borderColor),
         ),
-        child: const Text('No slots available on this date.', style: TextStyle(color: textSub, fontSize: 13)),
+        child: const Text('No slots available on this date.',
+            style: TextStyle(color: textSub, fontSize: 13)),
       );
     }
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        const crossAxisCount = 3;
-        const gap = 10.0;
-        final slotWidth =
-            (constraints.maxWidth - (crossAxisCount - 1) * gap) / crossAxisCount;
-        final slotHeight = slotWidth / 2.25;
+    // Partition into morning / afternoon while preserving server order.
+    final amSlots = _slots.where((s) => _isMorning(s['time'] as String)).toList();
+    final pmSlots = _slots.where((s) => !_isMorning(s['time'] as String)).toList();
 
-        return Wrap(
-          spacing: gap,
-          runSpacing: gap,
-          children: _slots.map((slot) {
-            final rawTime = slot['time'];
-            final displayTime = _formatSlotDisplay(rawTime);
-            final isAvail = slot['isAvailable'] == true;
-            final isSelected = _selectedSlotTime == rawTime;
-            final isDisabled = !isAvail;
-
-            return SizedBox(
-              width: slotWidth,
-              height: slotHeight,
-              child: GestureDetector(
-                onTap: isDisabled
-                    ? null
-                    : () => setState(() => _selectedSlotTime = rawTime),
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? primaryGreen
-                        : isDisabled
-                            ? disabledSlotBg
-                            : Colors.white,
-                    borderRadius: BorderRadius.circular(22),
-                    border: Border.all(
-                      color: isSelected
-                          ? primaryGreen
-                          : isDisabled
-                              ? Colors.transparent
-                              : borderColor,
-                      width: 1.2,
-                    ),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    displayTime,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: isSelected || !isDisabled
-                          ? FontWeight.w700
-                          : FontWeight.w600,
-                      color: isSelected
-                          ? Colors.white
-                          : isDisabled
-                              ? disabledSlotText
-                              : textMain,
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }).toList(),
-        );
-      },
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (amSlots.isNotEmpty) ...[
+          _buildSlotGroupHeader(
+            icon: Icons.wb_sunny_outlined,
+            label: 'Morning',
+            range: _formatSlotRange(amSlots),
+          ),
+          const SizedBox(height: 12),
+          _buildSlotWrap(amSlots),
+        ],
+        if (amSlots.isNotEmpty && pmSlots.isNotEmpty) ...[
+          const SizedBox(height: 22),
+          _buildSectionBreak(),
+          const SizedBox(height: 22),
+        ],
+        if (pmSlots.isNotEmpty) ...[
+          _buildSlotGroupHeader(
+            icon: Icons.wb_twilight,
+            label: 'Afternoon',
+            range: _formatSlotRange(pmSlots),
+          ),
+          const SizedBox(height: 12),
+          _buildSlotWrap(pmSlots),
+        ],
+      ],
     );
   }
 

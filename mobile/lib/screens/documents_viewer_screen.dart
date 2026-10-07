@@ -1,9 +1,13 @@
 // mobile/lib/screens/documents_viewer_screen.dart
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:open_filex/open_filex.dart';
 import '../config/api_config.dart';
 
 class DocumentsViewerScreen extends StatefulWidget {
@@ -27,6 +31,8 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
 
   List<dynamic> _diagnosticAttachments = [];
   bool _loadingDiagnostics = false;
+  // Tracks which document id is currently downloading (null = nothing in flight)
+  int? _downloadingId;
 
   static const primaryGreen = Color(0xFF284E3A);
   static const softSage = Color(0xFFE5EDE4);
@@ -101,44 +107,125 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────
+  // PDF DOWNLOAD — fetches with Bearer auth, saves to device, opens it
+  // ─────────────────────────────────────────────────────────────────
+  Future<void> _downloadAndOpenPdf({
+    required int documentId,
+    required String kind, // 'prescriptions' | 'clearances'
+  }) async {
+    if (_downloadingId != null) return;
+
+    setState(() => _downloadingId = documentId);
+
+    try {
+      final token = await _storage.read(key: 'jwt_token');
+      final url = Uri.parse('${ApiConfig.baseUrl}/api/documents/$kind/$documentId/pdf');
+
+      final res = await http.get(url, headers: {'Authorization': 'Bearer $token'});
+
+      if (res.statusCode != 200) {
+        // Try to read server error message
+        String msg = 'Server returned ${res.statusCode}';
+        try {
+          final decoded = jsonDecode(res.body);
+          if (decoded is Map && decoded['error'] != null) msg = decoded['error'];
+        } catch (_) {}
+        throw Exception(msg);
+      }
+
+      // Save to app documents dir (iOS-friendly, Android-friendly)
+      final dir = await getApplicationDocumentsDirectory();
+      final fileName = kind == 'prescriptions'
+          ? 'prescription-$documentId.pdf'
+          : 'clearance-$documentId.pdf';
+      final file = File('${dir.path}/$fileName');
+      await file.writeAsBytes(res.bodyBytes, flush: true);
+
+      if (!mounted) return;
+
+      // Hand off to the OS PDF viewer
+      final result = await OpenFilex.open(file.path);
+      if (result.type != ResultType.done && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Saved to ${file.path}\nCould not open automatically.'),
+            backgroundColor: primaryGreen,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ PDF downloaded and opened.'),
+            backgroundColor: primaryGreen,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Download failed: $e'),
+            backgroundColor: const Color(0xFF7A2E26),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _downloadingId = null);
+    }
+  }
+
   // --- MODAL 1: FULL OFFICIAL DIGITAL PRESCRIPTION (℞) ---
   void _showPrescriptionDocumentModal(Map<String, dynamic> rx) {
     final qrToken = rx['qr_token'] ?? '';
     final verificationUrl = '${ApiConfig.baseUrl}/api/documents/verify/$qrToken';
     final items = rx['items'] as List<dynamic>? ?? [];
+    final prescriptionId = rx['prescription_id'] as int?;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.9,
-        maxChildSize: 0.95,
-        minChildSize: 0.5,
-        builder: (_, scrollController) => Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
-          child: ListView(
-            controller: scrollController,
-            children: [
-              Center(
-                child: Container(
-                  width: 44,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(10),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => DraggableScrollableSheet(
+          initialChildSize: 0.9,
+          maxChildSize: 0.95,
+          minChildSize: 0.5,
+          builder: (_, scrollController) => Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+            child: ListView(
+              controller: scrollController,
+              children: [
+                Center(
+                  child: Container(
+                    width: 44,
+                    height: 5,
+                    decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
-              ),
-              const SizedBox(height: 18),
+                const SizedBox(height: 18),
 
-              // University Letterhead
-              const Center(
-                child: Column(
+                // University Letterhead
+                const Center(
+                  child: Column(
+                    children: [
+                      Text('PANGASINAN STATE UNIVERSITY', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 2.0, color: Color(0xFF4D6053))),
+                      SizedBox(height: 2),
+                      Text('CAMPUS INFIRMARY MEDICAL SERVICES', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: primaryGreen)),
+                      Text('Lingayen Campus · Republic Act No. 10173 Verified E-Prescription', style: TextStyle(fontSize: 10.5, color: textSub)),
+                    ],
+                  ),
+                ),
+                const Divider(color: primaryGreen, height: 28, thickness: 1.5),
+
+                // Rx Emblem
+                const Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
                       'PANGASINAN STATE UNIVERSITY',
@@ -164,8 +251,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                     ),
                   ],
                 ),
-              ),
-              const Divider(color: primaryGreen, height: 28, thickness: 1.5),
+                const SizedBox(height: 10),
 
               // Rx Emblem
               const Row(
@@ -273,110 +359,106 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                 ),
               ],
 
-              const SizedBox(height: 20),
+                const SizedBox(height: 20),
 
-              // Embedded Verification QR Seal & Signature
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE2EBE1),
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
+                // Embedded Verification QR Seal & Signature
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(color: const Color(0xFFE2EBE1), borderRadius: BorderRadius.circular(18)),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+                        child: QrImageView(data: verificationUrl, version: QrVersions.auto, size: 90),
                       ),
-                      child: QrImageView(
-                        data: verificationUrl,
-                        version: QrVersions.auto,
-                        size: 90,
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('R.A. 10173 DIGITAL SEAL', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, letterSpacing: 1.2, color: primaryGreen)),
+                            const SizedBox(height: 4),
+                            Text("Dr. ${rx['doctor_first_name']} ${rx['doctor_last_name']}", style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: textMain)),
+                            Text("PRC License: ${rx['doctor_license']}", style: const TextStyle(fontSize: 11, color: textSub)),
+                            Text("Issued: ${_formatDate(rx['issued_at'])}", style: const TextStyle(fontSize: 11, color: textSub)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // ── Primary action: Download signed PDF ──────────
+                if (prescriptionId != null)
+                  SizedBox(
+                    width: double.infinity,
+                    height: 46,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primaryGreen,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: const StadiumBorder(),
+                      ),
+                      onPressed: _downloadingId == prescriptionId
+                          ? null
+                          : () => _downloadAndOpenPdf(
+                                documentId: prescriptionId,
+                                kind: 'prescriptions',
+                              ),
+                      icon: _downloadingId == prescriptionId
+                          ? const SizedBox(
+                              width: 16, height: 16,
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                            )
+                          : const Icon(Icons.download_rounded, size: 18),
+                      label: Text(
+                        _downloadingId == prescriptionId
+                            ? 'Downloading…'
+                            : 'Download Signed PDF',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
                       ),
                     ),
-                    const SizedBox(width: 14),
+                  ),
+                const SizedBox(height: 10),
+
+                // Secondary actions row
+                Row(
+                  children: [
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'R.A. 10173 DIGITAL SEAL',
-                            style: TextStyle(
-                              fontSize: 9.5,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 1.2,
-                              color: primaryGreen,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            "Dr. ${rx['doctor_first_name']} ${rx['doctor_last_name']}",
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
-                              color: textMain,
-                            ),
-                          ),
-                          Text(
-                            "PRC License: ${rx['doctor_license']}",
-                            style: const TextStyle(fontSize: 11, color: textSub),
-                          ),
-                          Text(
-                            "Issued: ${_formatDate(rx['issued_at'])}",
-                            style: const TextStyle(fontSize: 11, color: textSub),
-                          ),
-                        ],
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: primaryGreen,
+                          side: const BorderSide(color: primaryGreen),
+                          shape: const StadiumBorder(),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        onPressed: () => launchUrl(Uri.parse(verificationUrl), mode: LaunchMode.externalApplication),
+                        icon: const Icon(Icons.open_in_browser, size: 16),
+                        label: const Text('Open Web Verify', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: softSage,
+                          foregroundColor: primaryGreen,
+                          elevation: 0,
+                          shape: const StadiumBorder(),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('Done', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                       ),
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 20),
-
-              // Actions
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: primaryGreen,
-                        side: const BorderSide(color: primaryGreen),
-                        shape: const StadiumBorder(),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                      onPressed: () => launchUrl(
-                        Uri.parse(verificationUrl),
-                        mode: LaunchMode.externalApplication,
-                      ),
-                      icon: const Icon(Icons.open_in_browser, size: 16),
-                      label: const Text(
-                        'Open Web Verify',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: primaryGreen,
-                        foregroundColor: Colors.white,
-                        shape: const StadiumBorder(),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text(
-                        'Done',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-            ],
+                const SizedBox(height: 12),
+              ],
+            ),
           ),
         ),
       ),
@@ -387,238 +469,181 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
   void _showClearanceCertificateModal(Map<String, dynamic> c) {
     final qrToken = c['qr_token'] ?? '';
     final verificationUrl = '${ApiConfig.baseUrl}/api/documents/verify/$qrToken';
+    final clearanceId = c['clearance_id'] as int?;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.9,
-        maxChildSize: 0.95,
-        minChildSize: 0.5,
-        builder: (_, scrollController) => Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
-          child: ListView(
-            controller: scrollController,
-            children: [
-              Center(
-                child: Container(
-                  width: 44,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(10),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => DraggableScrollableSheet(
+          initialChildSize: 0.9,
+          maxChildSize: 0.95,
+          minChildSize: 0.5,
+          builder: (_, scrollController) => Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+            child: ListView(
+              controller: scrollController,
+              children: [
+                Center(
+                  child: Container(
+                    width: 44,
+                    height: 5,
+                    decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
-              ),
-              const SizedBox(height: 18),
+                const SizedBox(height: 18),
 
-              // University Letterhead
-              const Center(
-                child: Column(
-                  children: [
-                    Text(
-                      'PANGASINAN STATE UNIVERSITY',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 2.0,
-                        color: Color(0xFF4D6053),
-                      ),
-                    ),
-                    SizedBox(height: 2),
-                    Text(
-                      'CAMPUS INFIRMARY MEDICAL SERVICES',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
-                        color: primaryGreen,
-                      ),
-                    ),
-                    Text(
-                      'Lingayen Campus · Republic Act No. 10173 Official Medical Certificate',
-                      style: TextStyle(fontSize: 10.5, color: textSub),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(color: primaryGreen, height: 28, thickness: 1.5),
-
-              const Center(
-                child: Text(
-                  'OFFICIAL MEDICAL CLEARANCE',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.2,
-                    color: textMain,
+                // University Letterhead
+                const Center(
+                  child: Column(
+                    children: [
+                      Text('PANGASINAN STATE UNIVERSITY', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 2.0, color: Color(0xFF4D6053))),
+                      SizedBox(height: 2),
+                      Text('CAMPUS INFIRMARY MEDICAL SERVICES', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: primaryGreen)),
+                      Text('Lingayen Campus · Republic Act No. 10173 Official Medical Certificate', style: TextStyle(fontSize: 10.5, color: textSub)),
+                    ],
                   ),
                 ),
-              ),
-              const SizedBox(height: 18),
+                const Divider(color: primaryGreen, height: 28, thickness: 1.5),
 
-              // Certificate Body
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF7F9F6),
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: borderColor),
+                const Center(
+                  child: Text('OFFICIAL MEDICAL CLEARANCE', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, letterSpacing: 1.2, color: textMain)),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'TO WHOM IT MAY CONCERN:',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: textMain,
+                const SizedBox(height: 18),
+
+                // Certificate Body
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(color: const Color(0xFFF7F9F6), borderRadius: BorderRadius.circular(18), border: Border.all(color: borderColor)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('TO WHOM IT MAY CONCERN:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: textMain)),
+                      const SizedBox(height: 8),
+                      Text(
+                        "This certifies that ${c['patient_first_name'] ?? 'the student'} ${c['patient_last_name'] ?? ''} (${c['student_no'] ?? 'PSU Student'}), enrolled in ${c['course'] ?? 'PSU Lingayen'}, has undergone physical medical evaluation at the University Infirmary and is determined to be:",
+                        style: const TextStyle(fontSize: 13, color: textMain, height: 1.5),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      "This certifies that ${c['patient_first_name'] ?? 'the student'} ${c['patient_last_name'] ?? ''} (${c['student_no'] ?? 'PSU Student'}), enrolled in ${c['course'] ?? 'PSU Lingayen'}, has undergone physical medical evaluation at the University Infirmary and is determined to be:",
-                      style: const TextStyle(fontSize: 13, color: textMain, height: 1.5),
-                    ),
-                    const SizedBox(height: 12),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFE2EBE1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        "PURPOSE: ${c['purpose'] ?? 'General Medical Clearance'}\nSTATUS: PHYSICALLY FIT",
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 13,
-                          color: primaryGreen,
-                          height: 1.4,
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: const Color(0xFFE2EBE1), borderRadius: BorderRadius.circular(12)),
+                        child: Text(
+                          "PURPOSE: ${c['purpose'] ?? 'General Medical Clearance'}\nSTATUS: PHYSICALLY FIT",
+                          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: primaryGreen, height: 1.4),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      "Valid until: ${_formatDate(c['expires_at'])}",
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12.5,
-                        color: textMain,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // Verification Seal Box
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE2EBE1),
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: QrImageView(
-                        data: verificationUrl,
-                        version: QrVersions.auto,
-                        size: 90,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'R.A. 10173 DIGITAL SEAL',
-                            style: TextStyle(
-                              fontSize: 9.5,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 1.2,
-                              color: primaryGreen,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            "Dr. ${c['doctor_first_name']} ${c['doctor_last_name']}",
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
-                              color: textMain,
-                            ),
-                          ),
-                          Text(
-                            "PRC License: ${c['doctor_license']}",
-                            style: const TextStyle(fontSize: 11, color: textSub),
-                          ),
-                          Text(
-                            "Issued: ${_formatDate(c['issued_at'])}",
-                            style: const TextStyle(fontSize: 11, color: textSub),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // Actions
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: primaryGreen,
-                        side: const BorderSide(color: primaryGreen),
-                        shape: const StadiumBorder(),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                      onPressed: () => launchUrl(
-                        Uri.parse(verificationUrl),
-                        mode: LaunchMode.externalApplication,
-                      ),
-                      icon: const Icon(Icons.open_in_browser, size: 16),
-                      label: const Text(
-                        'Open Web Verify',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                      ),
-                    ),
+                      const SizedBox(height: 10),
+                      Text("Valid until: ${_formatDate(c['expires_at'])}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: textMain)),
+                    ],
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: ElevatedButton(
+                ),
+                const SizedBox(height: 20),
+
+                // Verification Seal Box
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(color: const Color(0xFFE2EBE1), borderRadius: BorderRadius.circular(18)),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+                        child: QrImageView(data: verificationUrl, version: QrVersions.auto, size: 90),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('R.A. 10173 DIGITAL SEAL', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, letterSpacing: 1.2, color: primaryGreen)),
+                            const SizedBox(height: 4),
+                            Text("Dr. ${c['doctor_first_name']} ${c['doctor_last_name']}", style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: textMain)),
+                            Text("PRC License: ${c['doctor_license']}", style: const TextStyle(fontSize: 11, color: textSub)),
+                            Text("Issued: ${_formatDate(c['issued_at'])}", style: const TextStyle(fontSize: 11, color: textSub)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // ── Primary action: Download signed PDF ──────────
+                if (clearanceId != null)
+                  SizedBox(
+                    width: double.infinity,
+                    height: 46,
+                    child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: primaryGreen,
                         foregroundColor: Colors.white,
+                        elevation: 0,
                         shape: const StadiumBorder(),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text(
-                        'Done',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                      onPressed: _downloadingId == clearanceId
+                          ? null
+                          : () => _downloadAndOpenPdf(
+                                documentId: clearanceId,
+                                kind: 'clearances',
+                              ),
+                      icon: _downloadingId == clearanceId
+                          ? const SizedBox(
+                              width: 16, height: 16,
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                            )
+                          : const Icon(Icons.download_rounded, size: 18),
+                      label: Text(
+                        _downloadingId == clearanceId
+                            ? 'Downloading…'
+                            : 'Download Signed PDF',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
                       ),
                     ),
                   ),
-                ],
-              ),
-              const SizedBox(height: 12),
-            ],
+                const SizedBox(height: 10),
+
+                // Secondary actions
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: primaryGreen,
+                          side: const BorderSide(color: primaryGreen),
+                          shape: const StadiumBorder(),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        onPressed: () => launchUrl(Uri.parse(verificationUrl), mode: LaunchMode.externalApplication),
+                        icon: const Icon(Icons.open_in_browser, size: 16),
+                        label: const Text('Open Web Verify', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: softSage,
+                          foregroundColor: primaryGreen,
+                          elevation: 0,
+                          shape: const StadiumBorder(),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('Done', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+              ],
+            ),
           ),
         ),
       ),

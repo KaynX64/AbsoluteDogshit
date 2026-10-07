@@ -9,7 +9,8 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
-import { loginUser, authenticateToken, changePassword } from './auth.js';
+import { loginUser, authenticateToken, changePassword, loginRateLimit } from './auth.js';
+import { logActiveLimits } from './config/limits.js';
 
 
 // Route imports
@@ -121,7 +122,7 @@ io.on('connection', (socket) => {
 // =============================================================================
 // API ROUTES
 // =============================================================================
-app.post('/api/auth/login', loginUser);
+app.post('/api/auth/login', loginRateLimit, loginUser);
 app.put('/api/auth/change-password', authenticateToken, changePassword);
 
 app.use('/api/privacy', privacyRouter);
@@ -148,5 +149,6 @@ server.listen(PORT, async () => {
   console.log(`✅ Valetudo HealthLink API & WebSockets running on ${isHttps ? 'HTTPS/WSS' : 'HTTP/WS'} port ${PORT}`);
   await initRedis().catch(() => {});
   await ensureBucketExists().catch(() => {});
+  logActiveLimits();
   startReminderScheduler(io);
 });
