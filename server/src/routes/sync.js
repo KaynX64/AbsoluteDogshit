@@ -2,14 +2,89 @@
 import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
+import { requireRoles } from '../middleware/rbac.js';
 import { logAudit } from '../utils/auditLogger.js';
-import { encrypt } from '../utils/cryptoVault.js';
+import { encrypt, decrypt } from '../utils/cryptoVault.js';
+import { logPhiAccess } from '../utils/phiLogger.js';
 
 const router = express.Router();
 
 /**
+ * GET /api/sync/bootstrap
+ * Pre-populates the Electron clinic workstation's embedded SQLite database
+ * with today's scheduled roster, active patient baselines, and recent EMR records
+ * so clinic staff can read past medical histories during an internet outage.
+ */
+router.get('/bootstrap', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'DENTIST', 'ADMIN'), async (req, res) => {
+  try {
+    // 1. Fetch active students & faculty
+    const [patients] = await pool.query(
+      `SELECT u.user_id, u.first_name, u.last_name, u.email, u.phone,
+              COALESCE(sp.student_no, st.license_no, fp.position, 'PSU Member') AS student_no,
+              COALESCE(sp.course, st.department, fp.department, 'PSU Lingayen') AS course,
+              sp.year_level,
+              hp.blood_type, hp.allergies, hp.chronic_conditions
+       FROM USERS u
+       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+       LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
+       LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
+       LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+       WHERE u.is_active = TRUE AND u.deleted_at IS NULL
+       LIMIT 250`
+    );
+
+    const decryptedPatients = patients.map((p) => ({
+      ...p,
+      allergies: decrypt(p.allergies) || 'None reported',
+      chronic_conditions: decrypt(p.chronic_conditions) || 'None reported',
+    }));
+
+    // 2. Fetch recent encounters (past 90 days) for local offline reading
+    const [emrs] = await pool.query(
+      `SELECT e.emr_id, e.patient_user_id, e.doctor_user_id, e.encounter_date,
+              e.chief_complaint, e.diagnosis, e.treatment_plan, e.notes, e.version,
+              CONCAT('Dr. ', d.first_name, ' ', d.last_name) AS doctor_name
+       FROM EMR_RECORDS e
+       JOIN USERS d ON e.doctor_user_id = d.user_id
+       WHERE e.encounter_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+         AND e.deleted_at IS NULL
+       ORDER BY e.encounter_date DESC
+       LIMIT 300`
+    );
+
+    const decryptedEmrs = emrs.map((e) => ({
+      ...e,
+      chief_complaint: decrypt(e.chief_complaint) || '',
+      diagnosis: decrypt(e.diagnosis) || '',
+      treatment_plan: decrypt(e.treatment_plan) || '',
+      notes: decrypt(e.notes) || '',
+    }));
+
+    // Statutory read log under R.A. 10173
+    logPhiAccess({
+      viewerUserId: req.user.user_id,
+      patientUserId: 0,
+      table: 'EMR_RECORDS',
+      recordId: 0,
+      purpose: 'Clinic Workstation Offline Cache Bootstrap',
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      patients: decryptedPatients,
+      emrRecords: decryptedEmrs,
+      bootstrappedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[Sync Bootstrap Error]:', err);
+    res.status(500).json({ error: 'Failed to retrieve bootstrap cache.' });
+  }
+});
+
+/**
  * POST /api/sync/replay
- * Replays a batch of offline mutations generated during network disruptions.
+ * Replays a batch of offline mutations generated on the clinic Electron desktop.
+ * Enforces idempotency via client_mutation_id and flags concurrent edit conflicts.
  */
 router.post('/replay', authenticateToken, async (req, res) => {
   const { mutations, device_id } = req.body;
@@ -40,9 +115,9 @@ router.post('/replay', authenticateToken, async (req, res) => {
 
       await connection.beginTransaction();
 
-      // 1. IDEMPOTENCY CHECK: Has this mutation already been replayed?
+      // 1. IDEMPOTENCY CHECK
       const [existing] = await connection.query(
-        'SELECT sync_id, sync_status FROM LOCAL_SYNC_LOGS WHERE client_mutation_id = ? FOR UPDATE',
+        'SELECT sync_id, sync_status, record_id FROM LOCAL_SYNC_LOGS WHERE client_mutation_id = ? FOR UPDATE',
         [client_mutation_id]
       );
 
@@ -52,6 +127,7 @@ router.post('/replay', authenticateToken, async (req, res) => {
           client_mutation_id,
           status: 'already_synced',
           sync_id: existing[0].sync_id,
+          serverRecordId: existing[0].record_id,
         });
         continue;
       }
@@ -61,10 +137,54 @@ router.post('/replay', authenticateToken, async (req, res) => {
 
         // 2. DISPATCH MUTATION BASED ON TABLE
         if (table_name === 'EMR_RECORDS' && action === 'CREATE') {
-          const { patient_user_id, chief_complaint, diagnosis, treatment_plan, notes, appointment_id, vitals } = payload;
+          const {
+            patient_user_id,
+            chief_complaint,
+            diagnosis,
+            treatment_plan,
+            notes,
+            appointment_id,
+            vitals,
+          } = payload;
+
+          // Check if appointment was already processed while this PC was offline
+          if (appointment_id) {
+            const [appRows] = await connection.query(
+              'SELECT status FROM APPOINTMENTS WHERE appointment_id = ? FOR UPDATE',
+              [appointment_id]
+            );
+            if (appRows.length > 0 && appRows[0].status === 'completed') {
+              // Record conflict: appointment already finished by another doctor
+              await connection.query(
+                `INSERT INTO LOCAL_SYNC_LOGS 
+                 (client_mutation_id, user_id, device_id, table_name, record_uuid, action, payload, local_version, sync_status, error_message)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'conflict', 'Appointment was already completed concurrently')`,
+                [
+                  client_mutation_id,
+                  userId,
+                  device_id || 'CLINIC-DESKTOP',
+                  table_name,
+                  record_uuid,
+                  action,
+                  JSON.stringify(payload),
+                  local_version,
+                ]
+              );
+              await connection.commit();
+              results.push({
+                client_mutation_id,
+                status: 'conflict',
+                error: 'Appointment was already completed concurrently on the server.',
+              });
+              continue;
+            }
+          }
+
+          // Insert new EMR with AES-256 encryption
           const [emrResult] = await connection.query(
-            `INSERT INTO EMR_RECORDS (patient_user_id, doctor_user_id, appointment_id, chief_complaint, diagnosis, treatment_plan, notes)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO EMR_RECORDS 
+              (patient_user_id, doctor_user_id, appointment_id, chief_complaint, diagnosis, treatment_plan, notes, version)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               patient_user_id,
               userId,
@@ -73,23 +193,24 @@ router.post('/replay', authenticateToken, async (req, res) => {
               encrypt(diagnosis),
               encrypt(treatment_plan || ''),
               encrypt(notes || ''),
+              local_version,
             ]
           );
           serverRecordId = emrResult.insertId;
 
-          // If linked to an appointment, complete it
+          // Link appointment and queue to done
           if (appointment_id) {
             await connection.query("UPDATE APPOINTMENTS SET status = 'completed' WHERE appointment_id = ?", [appointment_id]);
             await connection.query("UPDATE QUEUE SET status = 'done', served_at = CURRENT_TIMESTAMP WHERE appointment_id = ?", [appointment_id]);
           }
 
-          // Persist replayed vitals to VITAL_SIGNS
+          // Persist replayed vitals
           if (vitals && typeof vitals === 'object') {
             for (const [metric, val] of Object.entries(vitals)) {
-              if (val && !isNaN(Number(val))) {
+              if (val !== undefined && val !== null && val !== '' && !isNaN(Number(val))) {
                 const unit = metric.includes('bp') ? 'mmHg' : metric === 'temperature' ? '°C' : metric === 'pulse' ? 'bpm' : metric === 'spo2' ? '%' : 'cpm';
                 await connection.query(
-                  "INSERT INTO VITAL_SIGNS (emr_id, metric, value, unit, recorded_by) VALUES (?, ?, ?, ?, ?)",
+                  'INSERT INTO VITAL_SIGNS (emr_id, metric, value, unit, recorded_by) VALUES (?, ?, ?, ?, ?)',
                   [serverRecordId, metric, Number(val), unit, userId]
                 );
               }
@@ -97,7 +218,7 @@ router.post('/replay', authenticateToken, async (req, res) => {
           }
         }
 
-        // 3. RECORD INTO LOCAL_SYNC_LOGS TABLE
+        // 3. PERSIST SYNC LOG WITH DETERMINISTIC STATE
         const [syncResult] = await connection.query(
           `INSERT INTO LOCAL_SYNC_LOGS 
            (client_mutation_id, user_id, device_id, table_name, record_id, record_uuid, action, payload, local_version, sync_status, synced_at)
@@ -105,7 +226,7 @@ router.post('/replay', authenticateToken, async (req, res) => {
           [
             client_mutation_id,
             userId,
-            device_id || 'CLINIC-ELECTRON-TERMINAL-01',
+            device_id || 'CLINIC-DESKTOP',
             table_name,
             serverRecordId,
             record_uuid || client_mutation_id,
@@ -115,14 +236,20 @@ router.post('/replay', authenticateToken, async (req, res) => {
           ]
         );
 
-        // 4. APPEND TO R.A. 10173 AUDIT LOGS
+        // 4. APPEND TO IMMUTABLE HASH-CHAINED AUDIT LOG
         await logAudit(connection, {
           userId,
           action: 'CREATE',
           table: 'LOCAL_SYNC_LOGS',
           recordId: syncResult.insertId,
           oldValue: null,
-          newValue: { client_mutation_id, table_name, action, serverRecordId, replay: true },
+          newValue: {
+            client_mutation_id,
+            table_name,
+            action,
+            serverRecordId,
+            replay: true,
+          },
           ipAddress: req.ip,
         });
 
@@ -131,7 +258,6 @@ router.post('/replay', authenticateToken, async (req, res) => {
       } catch (mutationErr) {
         await connection.rollback();
 
-        // Log conflict/error in LOCAL_SYNC_LOGS
         await connection.query(
           `INSERT INTO LOCAL_SYNC_LOGS 
            (client_mutation_id, user_id, device_id, table_name, record_uuid, action, payload, local_version, sync_status, error_message)
@@ -139,7 +265,7 @@ router.post('/replay', authenticateToken, async (req, res) => {
           [
             client_mutation_id,
             userId,
-            device_id || 'CLINIC-ELECTRON-TERMINAL-01',
+            device_id || 'CLINIC-DESKTOP',
             table_name,
             record_uuid || client_mutation_id,
             action,
@@ -167,7 +293,7 @@ router.post('/replay', authenticateToken, async (req, res) => {
   }
 });
 
-// GET /api/sync/status - Telemetry of synced vs pending/error sync records
+// GET /api/sync/status - Sync status telemetry
 router.get('/status', authenticateToken, async (req, res) => {
   try {
     const [rows] = await pool.query(
