@@ -15,8 +15,19 @@ interface MedicineMaster {
 
 type InvTab = 'catalog' | 'stockin' | 'adjust' | 'alerts' | 'logs' | 'addmed';
 
+interface ConfirmDialogState {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  isDestructive?: boolean;
+  onConfirm: () => void;
+}
+
 export default function InventoryManager() {
   const [activeTab, setActiveTab] = useState<InvTab>('catalog');
+
+  /* ── In-App Modal Dialog (Prevents Electron Focus Freeze) ─ */
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
 
   /* ── Catalog & Deduction ─────────────────────────────────── */
   const [batchId, setBatchId] = useState('');
@@ -65,8 +76,9 @@ export default function InventoryManager() {
   const [newMedStrength, setNewMedStrength] = useState('500mg');
   const [newMedUnit, setNewMedUnit] = useState('pcs');
   const [newMedReorder, setNewMedReorder] = useState('30');
+  const [medSearchFilter, setMedSearchFilter] = useState('');
 
-  /* ── Fetchers (identical) ────────────────────────────────── */
+  /* ── Fetchers ────────────────────────────────────────────── */
   const fetchBatches = async () => {
     const token = localStorage.getItem('valetudo_token');
     try {
@@ -136,7 +148,7 @@ export default function InventoryManager() {
     return matchesType && matchesSearch;
   });
 
-  /* ── Handlers (identical) ────────────────────────────────── */
+  /* ── Handlers ────────────────────────────────────────────── */
   const handleBarcodeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!barcodeQuery.trim()) return;
@@ -214,9 +226,8 @@ export default function InventoryManager() {
     }
   };
 
-  const handleAdjustStock = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!adjustBatchId) { alert('Please select a batch to adjust.'); return; }
+  /* ── Adjust Stock with In-App Modal Confirmation ────────── */
+  const executeAdjustStock = async () => {
     setStatusMessage('Processing inventory adjustment...');
     const token = localStorage.getItem('valetudo_token');
     try {
@@ -245,8 +256,27 @@ export default function InventoryManager() {
     }
   };
 
-  const handleCreateMedicine = async (e: React.FormEvent) => {
+  const handleAdjustStock = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!adjustBatchId) {
+      setStatusMessage('⚠️ Please select a batch to adjust.');
+      return;
+    }
+
+    const targetBatch = batches.find((b) => b.batch_id === Number(adjustBatchId));
+    const targetName = targetBatch ? `${targetBatch.name} (${targetBatch.batch_no})` : `Batch #${adjustBatchId}`;
+
+    setConfirmDialog({
+      title: '⚠️ Confirm Removal',
+      message: `Are you sure you want to mark ${adjustQty} unit(s) as '${adjustType.toUpperCase()}' for:\n\n${targetName}\n\nReason: "${adjustReason}"\n\nThis will permanently deduct the quantity from available stock.`,
+      confirmLabel: 'Confirm Removal',
+      isDestructive: true,
+      onConfirm: executeAdjustStock,
+    });
+  };
+
+  /* ── Create Medicine with Duplicate Check & In-App Modal ── */
+  const executeCreateMedicine = async () => {
     setStatusMessage('Registering new formulary medicine...');
     const token = localStorage.getItem('valetudo_token');
     try {
@@ -276,6 +306,64 @@ export default function InventoryManager() {
     }
   };
 
+  const handleCreateMedicine = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const existingMatch = medicines.find(
+      (m) =>
+        m.name.trim().toLowerCase() === newMedName.trim().toLowerCase() &&
+        m.strength.trim().toLowerCase() === newMedStrength.trim().toLowerCase()
+    );
+
+    if (existingMatch) {
+      setConfirmDialog({
+        title: '⚠️ Duplicate Formulary Warning',
+        message: `"${newMedName} (${newMedStrength})" already exists in the formulary catalog!\n\nAre you sure you want to create another separate entry for this medicine?`,
+        confirmLabel: 'Add Duplicate',
+        isDestructive: false,
+        onConfirm: executeCreateMedicine,
+      });
+    } else {
+      setConfirmDialog({
+        title: '➕ Confirm Formulary Entry',
+        message: `Add new medicine to formulary?\n\n• Name: ${newMedName.trim()}\n• Generic: ${newMedGeneric.trim()}\n• Form & Strength: ${newMedForm} · ${newMedStrength.trim()}\n• Buffer threshold: ${newMedReorder} ${newMedUnit}`,
+        confirmLabel: 'Add to Formulary',
+        isDestructive: false,
+        onConfirm: executeCreateMedicine,
+      });
+    }
+  };
+
+  /* ── Delete Medicine with In-App Modal ──────────────────── */
+  const handleDeleteMedicine = (medicineId: number, medName: string) => {
+    setConfirmDialog({
+      title: '🗑️ Delete Formulary Entry',
+      message: `Are you sure you want to delete "${medName}" from the formulary catalog?\n\nThis will remove it from the Stock-in dropdown.`,
+      confirmLabel: 'Delete',
+      isDestructive: true,
+      onConfirm: async () => {
+        setStatusMessage(`Removing "${medName}"...`);
+        const token = localStorage.getItem('valetudo_token');
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/inventory/medicines/${medicineId}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const data = await res.json();
+          if (res.ok) {
+            setStatusMessage(`✅ ${data.message}`);
+            fetchMedicines();
+            fetchBatches();
+          } else {
+            setStatusMessage(`❌ ${data.error || 'Failed to delete medicine'}`);
+          }
+        } catch (err: any) {
+          setStatusMessage(`❌ Network error: ${err.message}`);
+        }
+      },
+    });
+  };
+
   const getExpiryStatus = (expiryDate: string) => {
     const daysUntil = (new Date(expiryDate).getTime() - new Date().getTime()) / (1000 * 3600 * 24);
     if (daysUntil < 0) return { label: 'Expired', bg: T.dangerSoft, color: T.danger };
@@ -290,7 +378,7 @@ export default function InventoryManager() {
     { id: 'adjust',  label: 'Adjust & dispose' },
     { id: 'alerts',  label: 'Alerts & reorder' },
     { id: 'logs',    label: 'Consumption logs' },
-    { id: 'addmed',  label: 'New formulary' },
+    { id: 'addmed',  label: 'Formulary master' },
   ];
 
   const fieldLabel: React.CSSProperties = {
@@ -654,11 +742,13 @@ export default function InventoryManager() {
                 required
               >
                 <option value="">Choose batch lot…</option>
-                {batches.map((b) => (
-                  <option key={b.batch_id} value={b.batch_id}>
-                    #{b.batch_id} · {b.name} ({b.batch_no}) · Stock: {b.quantity_on_hand} · Exp: {new Date(b.expiry_date).toISOString().split('T')[0]}
-                  </option>
-                ))}
+                {batches
+                  .filter((b) => b.quantity_on_hand > 0)
+                  .map((b) => (
+                    <option key={b.batch_id} value={b.batch_id}>
+                      #{b.batch_id} · {b.name} ({b.batch_no}) · Stock: {b.quantity_on_hand} · Exp: {new Date(b.expiry_date).toISOString().split('T')[0]}
+                    </option>
+                  ))}
               </select>
             </div>
 
@@ -760,7 +850,7 @@ export default function InventoryManager() {
               margin: '0 0 12px', fontSize: 14, fontWeight: 800, color: T.danger,
               display: 'flex', alignItems: 'center', gap: 8,
             }}>
-              ⏳ Near-expiry & critical lots (&lt; 90 days)
+              ⏳ Expiring stocks on shelf (&lt; 90 days)
             </h4>
             <div style={{
               border: `1px solid ${T.border}`,
@@ -772,25 +862,28 @@ export default function InventoryManager() {
                   padding: 24, textAlign: 'center',
                   color: T.success, fontSize: 12.5, fontWeight: 700,
                 }}>
-                  No batches expiring within 90 days.
+                  ✅ No active batches expiring within 90 days.
                 </div>
               ) : (
                 <table className="tbl" style={{ fontSize: 12 }}>
                   <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
                     <tr>
-                      <th>Lot</th>
                       <th>Medicine</th>
-                      <th style={{ textAlign: 'right' }}>Remaining</th>
-                      <th>Expiry</th>
-                      <th>Status</th>
+                      <th style={{ textAlign: 'right' }}>Stock on hand</th>
+                      <th>Expiry date</th>
+                      <th>Alert</th>
                     </tr>
                   </thead>
                   <tbody>
                     {expiringLots.map((e) => (
                       <tr key={e.batch_id}>
-                        <td style={{ fontFamily: T.mono, fontSize: 11, color: T.textSub }}>{e.batch_no}</td>
-                        <td style={{ fontWeight: 700 }}>{e.name}</td>
-                        <td style={{ textAlign: 'right' }}>{e.quantity_on_hand}</td>
+                        <td>
+                          <div style={{ fontWeight: 700 }}>{e.name}</div>
+                          <div style={{ fontSize: 10.5, color: T.textMuted }}>{e.generic_name}</div>
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 800, color: T.danger }}>
+                          {e.quantity_on_hand}
+                        </td>
                         <td style={{ fontSize: 11, color: T.textSub }}>{e.expiry_date}</td>
                         <td>
                           <span style={{
@@ -955,87 +1048,212 @@ export default function InventoryManager() {
         </div>
       )}
 
-      {/* ── NEW FORMULARY ───────────────────────────────── */}
+      {/* ── FORMULARY MASTER & CATALOG MANAGER ───────────── */}
       {activeTab === 'addmed' && (
-        <div style={{ maxWidth: 620 }}>
-          <h4 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 800, color: T.primary }}>
-            ➕ Add new drug definition
-          </h4>
-          <p style={{ margin: '0 0 20px', fontSize: 12.5, color: T.textSub }}>
-            New definitions become available in Stock-in immediately.
-          </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.6fr', gap: 24, alignItems: 'start' }}>
+          {/* Form */}
+          <div style={{ background: T.sage50, padding: 20, borderRadius: T.radius.md, border: `1px solid ${T.borderSoft}` }}>
+            <h4 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 800, color: T.primary }}>
+              ➕ Register new drug
+            </h4>
+            <p style={{ margin: '0 0 16px', fontSize: 12, color: T.textSub }}>
+              Adds a new formulation definition to the master catalog.
+            </p>
 
-          <form onSubmit={handleCreateMedicine} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div>
-              <label style={fieldLabel}>Brand / trade name</label>
+            <form onSubmit={handleCreateMedicine} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                <label style={fieldLabel}>Brand / trade name</label>
+                <input
+                  style={inputStyle}
+                  placeholder="e.g. Alaxan FR"
+                  value={newMedName}
+                  onChange={(e) => setNewMedName(e.target.value)}
+                  required
+                />
+              </div>
+              <div>
+                <label style={fieldLabel}>Generic active ingredient</label>
+                <input
+                  style={inputStyle}
+                  placeholder="e.g. Ibuprofen + Paracetamol"
+                  value={newMedGeneric}
+                  onChange={(e) => setNewMedGeneric(e.target.value)}
+                  required
+                />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div>
+                  <label style={fieldLabel}>Dosage form</label>
+                  <select style={inputStyle} value={newMedForm} onChange={(e) => setNewMedForm(e.target.value)}>
+                    <option value="Tablet">Tablet</option>
+                    <option value="Capsule">Capsule</option>
+                    <option value="Syrup">Syrup</option>
+                    <option value="Suspension">Suspension</option>
+                    <option value="Inhaler">Inhaler</option>
+                    <option value="Ointment">Ointment</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={fieldLabel}>Strength</label>
+                  <input
+                    style={inputStyle}
+                    placeholder="e.g. 500mg"
+                    value={newMedStrength}
+                    onChange={(e) => setNewMedStrength(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div>
+                  <label style={fieldLabel}>Unit</label>
+                  <input
+                    style={inputStyle}
+                    placeholder="pcs, bottle"
+                    value={newMedUnit}
+                    onChange={(e) => setNewMedUnit(e.target.value)}
+                    required
+                  />
+                </div>
+                <div>
+                  <label style={fieldLabel}>Buffer threshold</label>
+                  <input
+                    style={inputStyle}
+                    type="number"
+                    min="1"
+                    value={newMedReorder}
+                    onChange={(e) => setNewMedReorder(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+              <button type="submit" style={{ ...btnPrimary, padding: 12, marginTop: 4 }}>
+                ➕ Add to master formulary
+              </button>
+            </form>
+          </div>
+
+          {/* Catalog list with delete options */}
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div>
+                <h4 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: T.text }}>
+                  📋 Registered formulary drugs ({medicines.length})
+                </h4>
+                <p style={{ margin: '2px 0 0', fontSize: 11.5, color: T.textSub }}>
+                  Delete duplicate or retired definitions below.
+                </p>
+              </div>
               <input
-                style={inputStyle}
-                placeholder="e.g. Alaxan FR"
-                value={newMedName}
-                onChange={(e) => setNewMedName(e.target.value)}
-                required
+                type="text"
+                placeholder="Filter medicines…"
+                value={medSearchFilter}
+                onChange={(e) => setMedSearchFilter(e.target.value)}
+                style={{ ...inputStyle, width: 170, padding: '6px 12px', fontSize: 12 }}
               />
             </div>
-            <div>
-              <label style={fieldLabel}>Generic active ingredient</label>
-              <input
-                style={inputStyle}
-                placeholder="e.g. Ibuprofen + Paracetamol"
-                value={newMedGeneric}
-                onChange={(e) => setNewMedGeneric(e.target.value)}
-                required
-              />
+
+            <div style={{
+              border: `1px solid ${T.border}`,
+              borderRadius: T.radius.md,
+              overflow: 'hidden',
+              maxHeight: 460,
+              overflowY: 'auto',
+            }}>
+              <table className="tbl" style={{ fontSize: 12 }}>
+                <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
+                  <tr>
+                    <th>Brand & generic name</th>
+                    <th>Form & strength</th>
+                    <th style={{ width: 80, textAlign: 'center' }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {medicines
+                    .filter(
+                      (m) =>
+                        !medSearchFilter ||
+                        m.name.toLowerCase().includes(medSearchFilter.toLowerCase()) ||
+                        m.generic_name.toLowerCase().includes(medSearchFilter.toLowerCase())
+                    )
+                    .map((m) => (
+                      <tr key={m.medicine_id}>
+                        <td>
+                          <div style={{ fontWeight: 700, color: T.text }}>{m.name}</div>
+                          <div style={{ fontSize: 10.5, color: T.textMuted }}>{m.generic_name}</div>
+                        </td>
+                        <td style={{ color: T.textSub }}>
+                          {m.strength} · {m.form}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteMedicine(m.medicine_id, m.name)}
+                            style={{
+                              padding: '4px 10px',
+                              borderRadius: T.radius.sm,
+                              border: `1px solid ${T.dangerBorder}`,
+                              background: T.dangerSoft,
+                              color: T.danger,
+                              fontSize: 11,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              fontFamily: T.font,
+                            }}
+                            title="Delete this formulary definition"
+                          >
+                            🗑️ Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-              <div>
-                <label style={fieldLabel}>Dosage form</label>
-                <select style={inputStyle} value={newMedForm} onChange={(e) => setNewMedForm(e.target.value)}>
-                  <option value="Tablet">Tablet</option>
-                  <option value="Capsule">Capsule</option>
-                  <option value="Syrup">Syrup</option>
-                  <option value="Suspension">Suspension</option>
-                  <option value="Inhaler">Inhaler</option>
-                  <option value="Ointment">Ointment</option>
-                </select>
-              </div>
-              <div>
-                <label style={fieldLabel}>Strength</label>
-                <input
-                  style={inputStyle}
-                  placeholder="e.g. 200mg/325mg"
-                  value={newMedStrength}
-                  onChange={(e) => setNewMedStrength(e.target.value)}
-                  required
-                />
-              </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── IN-APP CONFIRMATION MODAL ────────────────────── */}
+      {confirmDialog && (
+        <div className="modal-backdrop" onClick={() => setConfirmDialog(null)}>
+          <div className="modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{
+              margin: '0 0 12px', fontSize: 17, fontWeight: 800,
+              color: confirmDialog.isDestructive ? T.danger : T.primary,
+            }}>
+              {confirmDialog.title}
+            </h3>
+            <p style={{
+              fontSize: 13, color: T.textSub, margin: '0 0 22px',
+              lineHeight: 1.55, whiteSpace: 'pre-line',
+            }}>
+              {confirmDialog.message}
+            </p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => setConfirmDialog(null)}
+                style={btnGhost}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const action = confirmDialog.onConfirm;
+                  setConfirmDialog(null);
+                  action();
+                }}
+                style={{
+                  ...btnPrimary,
+                  background: confirmDialog.isDestructive ? T.danger : T.primary,
+                }}
+              >
+                {confirmDialog.confirmLabel || 'Confirm'}
+              </button>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-              <div>
-                <label style={fieldLabel}>Unit of measure</label>
-                <input
-                  style={inputStyle}
-                  placeholder="pcs, bottle, box"
-                  value={newMedUnit}
-                  onChange={(e) => setNewMedUnit(e.target.value)}
-                  required
-                />
-              </div>
-              <div>
-                <label style={fieldLabel}>Critical reorder threshold</label>
-                <input
-                  style={inputStyle}
-                  type="number"
-                  min="1"
-                  value={newMedReorder}
-                  onChange={(e) => setNewMedReorder(e.target.value)}
-                  required
-                />
-              </div>
-            </div>
-            <button type="submit" style={{ ...btnPrimary, padding: 13, marginTop: 6 }}>
-              ➕ Save to formulary master
-            </button>
-          </form>
+          </div>
         </div>
       )}
     </section>

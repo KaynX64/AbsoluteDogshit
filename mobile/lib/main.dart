@@ -13,12 +13,13 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   debugPrint("📩 [FCM Background Message]: ${message.notification?.title}");
 }
 
+/// Allows self-signed SSL/TLS certificates even in release mode APK builds.
 class DevHttpOverrides extends HttpOverrides {
   @override
   HttpClient createHttpClient(SecurityContext? context) {
     return super.createHttpClient(context)
       ..badCertificateCallback = (X509Certificate cert, String host, int port) {
-        return kDebugMode;
+        return true; // Always allow self-signed local certificates
       };
   }
 }
@@ -28,9 +29,8 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  if (kDebugMode) {
-    HttpOverrides.global = DevHttpOverrides();
-  }
+  // Apply certificate overrides unconditionally
+  HttpOverrides.global = DevHttpOverrides();
 
   try {
     await Firebase.initializeApp();
