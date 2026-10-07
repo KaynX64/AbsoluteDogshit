@@ -23,21 +23,85 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   bool _obscureAll = true;
   bool _isSaving = false;
 
+  // Real-time strength state
+  int _strengthScore = 0; // 0 = empty/very weak, 1 = weak, 2 = fair, 3 = strong, 4 = very strong
+  String _strengthLabel = '';
+
   static const primaryGreen = Color(0xFF284E3A);
   static const textMain = Color(0xFF191C1A);
   static const textSub = Color(0xFF5A635B);
   static const borderColor = Color(0xFFD6DFD5);
 
   @override
+  void initState() {
+    super.initState();
+    _newPasswordController.addListener(_evaluateStrength);
+  }
+
+  @override
   void dispose() {
+    _newPasswordController.removeListener(_evaluateStrength);
     _currentPasswordController.dispose();
     _newPasswordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
   }
 
+  void _evaluateStrength() {
+    final pwd = _newPasswordController.text;
+    if (pwd.isEmpty) {
+      setState(() {
+        _strengthScore = 0;
+        _strengthLabel = '';
+      });
+      return;
+    }
+
+    int score = 0;
+    if (pwd.length >= 8) score++;
+    if (pwd.length >= 12) score++;
+
+    final hasUpper = RegExp(r'[A-Z]').hasMatch(pwd);
+    final hasLower = RegExp(r'[a-z]').hasMatch(pwd);
+    final hasDigit = RegExp(r'[0-9]').hasMatch(pwd);
+    final hasSpecial = RegExp(r'[^A-Za-z0-9]').hasMatch(pwd); // All symbols & spaces
+
+    int variety = (hasUpper ? 1 : 0) + (hasLower ? 1 : 0) + (hasDigit ? 1 : 0) + (hasSpecial ? 1 : 0);
+    if (variety >= 3) score++;
+    if (pwd.length >= 14 && variety == 4) score++;
+
+    score = score.clamp(0, 4);
+
+    const labels = ['Very Weak', 'Weak', 'Fair', 'Strong', 'Very Strong'];
+
+    setState(() {
+      _strengthScore = score;
+      _strengthLabel = labels[score];
+    });
+  }
+
+  Color _getStrengthColor() {
+    switch (_strengthScore) {
+      case 1:
+        return const Color(0xFFDC2626); // Red
+      case 2:
+        return const Color(0xFFD97706); // Amber
+      case 3:
+        return const Color(0xFF2563EB); // Blue
+      case 4:
+        return const Color(0xFF15803D); // Green
+      default:
+        return const Color(0xFF94A396);
+    }
+  }
+
   Future<void> _updatePassword() async {
     if (!_formKey.currentState!.validate()) return;
+
+    if (_strengthScore < 2) {
+      _showError('Please choose a stronger password before submitting.');
+      return;
+    }
 
     setState(() => _isSaving = true);
     final token = await _storage.read(key: 'jwt_token');
@@ -114,7 +178,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
               ),
               const SizedBox(height: 4),
               const Text(
-                'A strong password is a good place to start.',
+                'A strong password protects your health records.',
                 style: TextStyle(fontSize: 14, color: textSub),
               ),
               const SizedBox(height: 32),
@@ -126,7 +190,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                 controller: _currentPasswordController,
                 obscureText: _obscureAll,
                 style: const TextStyle(fontSize: 14),
-                decoration: _pillInputDecoration('Enter your password'),
+                decoration: _pillInputDecoration('Enter your current password'),
                 validator: (val) => (val == null || val.isEmpty) ? 'Please enter current password' : null,
               ),
               const SizedBox(height: 20),
@@ -138,13 +202,51 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                 controller: _newPasswordController,
                 obscureText: _obscureAll,
                 style: const TextStyle(fontSize: 14),
-                decoration: _pillInputDecoration('At least 8 characters'),
+                decoration: _pillInputDecoration('At least 8 characters (letters, numbers, symbols)'),
                 validator: (val) {
                   if (val == null || val.isEmpty) return 'Please enter new password';
                   if (val.length < 8) return 'Password must be at least 8 characters';
                   return null;
                 },
               ),
+
+              // Dynamic Password Strength Meter
+              if (_newPasswordController.text.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Row(
+                  children: List.generate(4, (index) {
+                    final segmentActive = index < _strengthScore;
+                    return Expanded(
+                      child: Container(
+                        height: 4,
+                        margin: EdgeInsets.only(right: index < 3 ? 6.0 : 0.0),
+                        decoration: BoxDecoration(
+                          color: segmentActive ? _getStrengthColor() : const Color(0xFFE2EBE1),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    );
+                  }),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Strength: $_strengthLabel',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: _getStrengthColor(),
+                      ),
+                    ),
+                    const Text(
+                      'All symbols & spaces allowed',
+                      style: TextStyle(fontSize: 11, color: textSub),
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 20),
 
               // Confirm New Password
@@ -154,7 +256,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                 controller: _confirmPasswordController,
                 obscureText: _obscureAll,
                 style: const TextStyle(fontSize: 14),
-                decoration: _pillInputDecoration('Enter your password'),
+                decoration: _pillInputDecoration('Re-enter new password'),
                 validator: (val) {
                   if (val != _newPasswordController.text) return 'Passwords do not match';
                   return null;
@@ -162,7 +264,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
               ),
               const SizedBox(height: 14),
 
-              // Show Passwords Toggle
+              // Toggle visibility
               Row(
                 children: [
                   IconButton(
@@ -195,14 +297,6 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                   label: const Text('Update password', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                 ),
               ),
-              const SizedBox(height: 18),
-
-              const Center(
-                child: Text(
-                  'Protected under R.A. 10173 data privacy protocols.',
-                  style: TextStyle(fontSize: 12, color: textSub),
-                ),
-              ),
             ],
           ),
         ),
@@ -213,7 +307,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   InputDecoration _pillInputDecoration(String hint) {
     return InputDecoration(
       hintText: hint,
-      hintStyle: const TextStyle(color: Color(0xFF94A396), fontSize: 14),
+      hintStyle: const TextStyle(color: Color(0xFF94A396), fontSize: 13),
       filled: true,
       fillColor: Colors.white,
       contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
