@@ -145,6 +145,7 @@ router.post('/replay', authenticateToken, async (req, res) => {
             notes,
             appointment_id,
             vitals,
+            dental_chart,
           } = payload;
 
           // Check if appointment was already processed while this PC was offline
@@ -197,6 +198,15 @@ router.post('/replay', authenticateToken, async (req, res) => {
             ]
           );
           serverRecordId = emrResult.insertId;
+          
+          // Dentist-only odontogram from an offline-queued encounter
+          if (dental_chart && typeof dental_chart === 'object' && (req.user.roles || []).includes('DENTIST')) {
+            await connection.query(
+              `INSERT INTO DENTAL_CHARTS (emr_id, patient_user_id, dentist_user_id, chart_data)
+               VALUES (?, ?, ?, ?)`,
+              [serverRecordId, patient_user_id, userId, encrypt(JSON.stringify(dental_chart))]
+            );
+          }
 
           // Link appointment and queue to done
           if (appointment_id) {
@@ -231,7 +241,7 @@ router.post('/replay', authenticateToken, async (req, res) => {
             serverRecordId,
             record_uuid || client_mutation_id,
             action,
-            JSON.stringify(payload),
+            JSON.stringify({ ...payload, dental_chart: undefined }),
             local_version,
           ]
         );
@@ -269,7 +279,7 @@ router.post('/replay', authenticateToken, async (req, res) => {
             table_name,
             record_uuid || client_mutation_id,
             action,
-            JSON.stringify(payload),
+            JSON.stringify({ ...payload, dental_chart: undefined }),
             local_version,
             mutationErr.message,
           ]
