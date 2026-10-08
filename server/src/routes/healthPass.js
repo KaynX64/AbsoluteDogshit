@@ -103,15 +103,15 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
       return res.status(404).json({ error: 'Patient not found or deactivated.' });
     }
 
-    // Log PHI read access
-    logPhiAccess({
-      viewerUserId: req.user.user_id,
-      patientUserId: Number(patientUserId),
-      table: 'HEALTH_PROFILES',
-      recordId: Number(patientUserId),
-      purpose: 'Touchless Clinic Check-In Scan',
-      ipAddress: req.ip,
-    });
+//logphiaccess
+const parsedPatientId = Number(patientUserId);
+if (!isNaN(parsedPatientId) && parsedPatientId > 0) {
+  logPhiAccess({
+    viewerUserId: req.user.user_id,
+    patientUserId: parsedPatientId,
+    // ...
+  });
+}
 
     await connection.commit();
 

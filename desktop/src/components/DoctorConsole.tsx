@@ -1924,6 +1924,7 @@ export default function DoctorConsole({
                       📎 Attach diagnostic lab result (CBC, urinalysis, X-ray PDF/image)
                     </label>
                     <input
+                      key={selectedApp?.appointment_id || 'no-patient'}
                       type="file"
                       accept=".pdf,image/png,image/jpeg,.jpg"
                       onChange={(e) => {
