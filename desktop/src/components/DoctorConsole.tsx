@@ -2662,6 +2662,7 @@ export default function DoctorConsole({
                       PDF/image)
                     </label>
                     <input
+                      key={selectedApp?.appointment_id || 'no-patient'}
                       type="file"
                       accept=".pdf,image/png,image/jpeg,.jpg"
                       onChange={(e) => {
