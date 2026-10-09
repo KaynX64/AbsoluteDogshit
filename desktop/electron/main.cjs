@@ -2,6 +2,7 @@
 const { app, BrowserWindow, ipcMain, Notification, Menu, shell, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { autoUpdater } = require('electron-updater');
 
 // ── Unified backend configuration ───────────────────────────────────
 const appConfig = require('../app-config.json');
@@ -253,6 +254,31 @@ ipcMain.handle('offline-search-patients', async (event, query) => {
   }
 });
 
+function setupAutoUpdater(win) {
+  if (!app.isPackaged) return; // updater only runs in installed builds
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  const send = (payload) => {
+    if (!win.isDestroyed()) win.webContents.send('update-status', payload);
+  };
+
+  autoUpdater.on('checking-for-update', () => send({ state: 'checking' }));
+  autoUpdater.on('update-available', (i) => send({ state: 'available', version: i.version }));
+  autoUpdater.on('update-not-available', () => send({ state: 'none' }));
+  autoUpdater.on('download-progress', (p) => send({ state: 'downloading', percent: Math.round(p.percent) }));
+  autoUpdater.on('update-downloaded', (i) => send({ state: 'downloaded', version: i.version }));
+  autoUpdater.on('error', (e) => send({ state: 'error', message: String((e && e.message) || e) }));
+
+  const check = () => autoUpdater.checkForUpdates().catch(() => {});
+  check();
+  setInterval(check, 4 * 60 * 60 * 1000); // re-check every 4 hours
+}
+
+ipcMain.handle('install-update', () => { autoUpdater.quitAndInstall(true, true); });
+ipcMain.handle('get-app-version', () => app.getVersion());
+
 function createWindow() {
   const isDev = !app.isPackaged;
 
@@ -297,6 +323,7 @@ function createWindow() {
     win.setTitle('Valetudo HealthLink - PSU Lingayen Infirmary');
     win.show();
     win.focus();
+    setupAutoUpdater(win);
   });
 
   win.webContents.on('before-input-event', (event, input) => {

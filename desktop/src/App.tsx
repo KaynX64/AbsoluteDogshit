@@ -483,6 +483,9 @@ function LoginScreen({ email, setEmail, password, setPassword, error, onSubmit }
 /* APP ROOT                                                           */
 /* ================================================================= */
 export default function App() {
+  const [updateStatus, setUpdateStatus] = useState<{ state: string; version?: string; percent?: number } | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [user, setUser] = useState<any>(null);
@@ -654,8 +657,14 @@ export default function App() {
     } finally {
       setIsSubmittingPassword(false);
     }
-  };
+  };  
 
+  useEffect(() => {
+  const api = window.electronAPI;
+  if (!api?.onUpdateStatus) return;
+  return api.onUpdateStatus((s) => setUpdateStatus(s));
+
+}, []);
   if (!user) {
     return (
       <LoginScreen
@@ -705,6 +714,46 @@ export default function App() {
           roles={user.roles}
           onChangeRoleView={setActiveRoleView}
         />
+
+        {updateStatus && !updateDismissed &&
+  (updateStatus.state === 'downloading' || updateStatus.state === 'downloaded') && (
+  <div
+    style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+      padding: '10px 20px', background: 'var(--sage-100)', color: 'var(--text)',
+      fontSize: 13, fontWeight: 600, fontFamily: 'var(--font)',
+    }}
+  >
+    <span>
+      {updateStatus.state === 'downloading'
+        ? `⬇️ Downloading update… ${updateStatus.percent ?? 0}%`
+        : `✅ Update ${updateStatus.version ?? ''} is ready to install.`}
+    </span>
+
+    {updateStatus.state === 'downloaded' && (
+      <span style={{ display: 'flex', gap: 8 }}>
+        <button
+          type="button"
+          onClick={() => setUpdateDismissed(true)}
+          style={{ padding: '6px 14px', borderRadius: 'var(--r-pill)', border: 'none', cursor: 'pointer', fontWeight: 700, fontFamily: 'var(--font)', background: '#fff', color: 'var(--text)' }}
+        >
+          Later
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            if (offlineQueueCount > 0 &&
+                !window.confirm(`${offlineQueueCount} offline changes are still queued. Restart anyway? They stay saved locally and sync after restart.`)) return;
+            window.electronAPI?.installUpdate();
+          }}
+          style={{ padding: '6px 14px', borderRadius: 'var(--r-pill)', border: 'none', cursor: 'pointer', fontWeight: 700, fontFamily: 'var(--font)', background: 'var(--primary)', color: '#fff' }}
+        >
+          Restart now
+        </button>
+      </span>
+    )}
+  </div>
+)}
 
         <main className="app-content">
           {activeRoleView === 'NURSE' && (

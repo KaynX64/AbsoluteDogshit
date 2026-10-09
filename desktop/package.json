@@ -1,7 +1,7 @@
 {
   "name": "valetudo-desktop",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:127.0.0.1:5173 && electron .\"",
@@ -10,6 +10,7 @@
     "dist": "npm run build && electron-builder --win --x64"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "jsqr": "^1.4.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -40,9 +41,18 @@
       "package.json"
     ],
     "win": {
-      "target": "portable",
+      "target": "nsis",
       "signAndEditExecutable": false
     },
+      "nsis": {
+  "oneClick": true,
+  "perMachine": false,
+  "deleteAppDataOnUninstall": false,
+  "artifactName": "ValetudoHealthLink-Setup-${version}.${ext}"
+},
+"publish": [
+  { "provider": "generic", "url": "http://localhost:8080/" }
+],
     "asar": true
   }
 }
