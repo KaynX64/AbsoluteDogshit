@@ -219,7 +219,7 @@ router.get('/by-department', async (req, res) => {
   }
 });
 
-// 3. GET /api/analytics/export/csv
+// 3. GET /api/analytics/export/csv (Kept for backward compatibility)
 router.get('/export/csv', async (req, res) => {
   try {
     const topDiagnoses = (await getDiagnosisCounts()).slice(0, 10);

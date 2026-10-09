@@ -89,6 +89,13 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF7F9F6),
@@ -275,7 +282,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ],
               ),
 
-              // Error Banner & User Guidance Tip
+              // Error Banner
               if (_errorMessage.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 Container(
