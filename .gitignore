@@ -30,3 +30,6 @@ server/certs/*.crt
 #googleFirebaseCredentials.json
 server/serviceAccountKey.json
 mobile/android/app/google-services.json
+
+#repomix
+repomix-output.xml

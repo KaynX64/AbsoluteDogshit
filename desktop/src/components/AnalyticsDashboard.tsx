@@ -729,9 +729,6 @@ export default function AnalyticsDashboard() {
           </button>
           <button
             type="button"
- HEAD
-            onClick={handleDownloadExcelXLSX}
-
             onClick={handleDownloadExcelXlsx}
             style={{
               ...btnGhost,
@@ -745,31 +742,17 @@ export default function AnalyticsDashboard() {
           </button>
           <button
             type="button"
-            onClick={handleDownloadExcelCSV}
- origin/Stage1
-            style={{
-              ...btnGhost,
-              background: '#D6E3F0',
-              color: '#1F4462',
-              border: 'none',
-            }}
-          >
-            📊 Export XLSX
-          </button>
- HEAD
-          <button type="button" onClick={handleDownloadPdfReport} style={btnPrimary}>
-            🖨️ Export PDF
-
-          <button
-            type="button"
             onClick={handleDownloadServerPdf}
             style={btnPrimary}
           >
             📑 Official PDF Report
           </button>
-          <button type="button" onClick={handlePrintPDFReport} style={btnGhost}>
+          <button
+            type="button"
+            onClick={() => window.print()}
+            style={btnGhost}
+          >
             🖨️ Print View
- origin/Stage1
           </button>
         </div>
       </div>
