@@ -1175,7 +1175,7 @@ const loadPatientTimeline = async (patient: any) => {
                           border: `1px solid ${T.primaryTint}`,
                         }}
                       >
-                        🎫 {app.queue_ticket || 'DONE'}
+                        🎫 {app.queue_ticket || (app.status === 'completed' ? 'DONE' : 'WAITING')}
                       </span>
                       <span
                         style={{
@@ -1217,7 +1217,7 @@ const loadPatientTimeline = async (patient: any) => {
                         fontFamily: T.mono,
                       }}
                     >
-                      ⏰ {app.time_slot}
+                         📅 {app.date_str} · ⏰ {app.time_slot}
                     </div>
                   </button>
                 );

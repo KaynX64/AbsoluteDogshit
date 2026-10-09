@@ -15,6 +15,8 @@ interface MedicineMaster {
   generic_name: string;
   form: string;
   strength: string;
+  unit?: string;
+  available_stock?: number;
 }
 
 interface PrescriptionGeneratorProps {
@@ -32,7 +34,7 @@ interface PrescriptionGeneratorProps {
   onPrescriptionError?: (message: string) => void;
 }
 
-/* ── Custom themed dropdown (replaces native <select>) ─────────── */
+/* ── Custom themed dropdown showing live stock levels ─────────── */
 function FormularySelect({
   medicines,
   value,
@@ -86,24 +88,40 @@ function FormularySelect({
             ? `${selected.name} (${selected.generic_name}) · ${selected.strength} [${selected.form}]`
             : 'Select medicine…'}
         </span>
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke={T.textSub}
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          style={{
-            width: 14,
-            height: 14,
-            flexShrink: 0,
-            marginLeft: 8,
-            transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
-            transition: 'transform 140ms ease',
-          }}
-        >
-          <path d="M6 9l6 6 6-6" />
-        </svg>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {selected && selected.available_stock !== undefined && (
+            <span
+              style={{
+                fontSize: 10.5,
+                fontWeight: 700,
+                padding: '2px 8px',
+                borderRadius: T.radius.pill,
+                background: selected.available_stock <= 0 ? T.dangerSoft : T.successSoft,
+                color: selected.available_stock <= 0 ? T.danger : T.success,
+              }}
+            >
+              {selected.available_stock <= 0
+                ? 'Out of stock'
+                : `${selected.available_stock} ${selected.unit || 'pcs'}`}
+            </span>
+          )}
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke={T.textSub}
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{
+              width: 14,
+              height: 14,
+              transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 140ms ease',
+            }}
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </div>
       </button>
       {open && !disabled && (
         <div
@@ -123,19 +141,13 @@ function FormularySelect({
           }}
         >
           {medicines.length === 0 ? (
-            <div
-              style={{
-                padding: '10px 12px',
-                fontSize: 12.5,
-                color: T.textMuted,
-                fontStyle: 'italic',
-              }}
-            >
+            <div style={{ padding: '10px 12px', fontSize: 12.5, color: T.textMuted, fontStyle: 'italic' }}>
               Loading formulary…
             </div>
           ) : (
             medicines.map((m) => {
               const isSelected = m.medicine_id === value;
+              const isOutOfStock = m.available_stock !== undefined && m.available_stock <= 0;
               return (
                 <button
                   key={m.medicine_id}
@@ -145,15 +157,17 @@ function FormularySelect({
                     setOpen(false);
                   }}
                   style={{
-                    display: 'block',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
                     width: '100%',
                     textAlign: 'left',
-                    padding: '10px 12px',
+                    padding: '9px 12px',
                     borderRadius: T.radius.sm,
                     border: 'none',
                     background: isSelected ? T.primaryTint : 'transparent',
-                    color: isSelected ? T.primary : T.text,
-                    fontSize: 13,
+                    color: isOutOfStock ? T.textMuted : isSelected ? T.primary : T.text,
+                    fontSize: 12.5,
                     fontWeight: isSelected ? 700 : 500,
                     cursor: 'pointer',
                     fontFamily: T.font,
@@ -166,7 +180,23 @@ function FormularySelect({
                     if (!isSelected) e.currentTarget.style.background = 'transparent';
                   }}
                 >
-                  {m.name} ({m.generic_name}) · {m.strength} [{m.form}]
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {m.name} ({m.generic_name}) · {m.strength} [{m.form}]
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: T.radius.pill,
+                      background: isOutOfStock ? T.dangerSoft : T.successSoft,
+                      color: isOutOfStock ? T.danger : T.success,
+                      flexShrink: 0,
+                      marginLeft: 8,
+                    }}
+                  >
+                    {isOutOfStock ? '0 in stock' : `${m.available_stock ?? '—'} ${m.unit || 'pcs'}`}
+                  </span>
                 </button>
               );
             })
@@ -201,10 +231,10 @@ export default function PrescriptionGenerator({
   const [isSaving, setIsSaving] = useState(false);
 
   const [stockError, setStockError] = useState<{
-  medicine: string;
-  available: number;
-  requested: number;
-} | null>(null);
+    medicine: string;
+    available: number;
+    requested: number;
+  } | null>(null);
 
   /* ── Drug-interaction state ─────────────────────────────────── */
   const [interactionResult, setInteractionResult] =
@@ -223,38 +253,40 @@ export default function PrescriptionGenerator({
 
   /* ── Formulary fetch with bounded retry (self-heals after a
        server restart / nodemon reload instead of sticking at
-       "Loading formulary…" forever) ───────────────────────────── */
-  useEffect(() => {
-    let cancelled = false;
-    const fetchCatalog = async (attempt = 0) => {
-      const token = localStorage.getItem('valetudo_token');
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/inventory/medicines`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data: MedicineMaster[] = await res.json();
-        if (cancelled) return;
-        setMedicines(data);
-        if (data.length > 0) {
-          setSelectedMedicineId(data[0].medicine_id);
-          setRxMedName(`${data[0].name} (${data[0].generic_name})`);
-          setRxDosage(data[0].strength);
-        }
-      } catch (err) {
-        if (cancelled) return;
-        if (attempt < 2) {
-          window.setTimeout(() => fetchCatalog(attempt + 1), 1500 * (attempt + 1));
-        } else {
-          console.error('Could not fetch medicines catalog:', err);
-        }
+       "Loading formulary…" forever). Hoisted so the successful
+       prescription handler can refresh live stock levels. ────── */
+  const hasInitializedRef = useRef(false);
+
+  const fetchCatalog = async (attempt = 0) => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/inventory/medicines`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: MedicineMaster[] = await res.json();
+      setMedicines(data);
+      if (data.length > 0 && !hasInitializedRef.current) {
+        hasInitializedRef.current = true;
+        setSelectedMedicineId(data[0].medicine_id);
+        setRxMedName(`${data[0].name} (${data[0].generic_name})`);
+        setRxDosage(data[0].strength);
       }
-    };
+    } catch (err) {
+      if (attempt < 2) {
+        window.setTimeout(() => fetchCatalog(attempt + 1), 1500 * (attempt + 1));
+      } else {
+        console.error('Could not fetch medicines catalog:', err);
+      }
+    }
+  };
+
+  useEffect(() => {
     fetchCatalog();
-    return () => {
-      cancelled = true;
-    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const selectedMed = medicines.find((m) => m.medicine_id === selectedMedicineId);
 
   /* ── Live interaction check whenever the selected medicine changes ── */
   useEffect(() => {
@@ -292,6 +324,25 @@ export default function PrescriptionGenerator({
       }
       return;
     }
+
+    // ── Client-side Stock Safeguard ──────────────────────────────
+    if (selectedMed && selectedMed.available_stock !== undefined) {
+      if (selectedMed.available_stock <= 0) {
+        if (onPrescriptionError) {
+          onPrescriptionError(`❌ Cannot issue prescription: "${selectedMed.name}" is OUT OF STOCK in the infirmary.`);
+        }
+        return;
+      }
+      if (Number(rxQuantity) > selectedMed.available_stock) {
+        if (onPrescriptionError) {
+          onPrescriptionError(
+            `❌ Insufficient stock: Requested ${rxQuantity} ${selectedMed.unit || 'pcs'}, but only ${selectedMed.available_stock} unexpired units are available.`
+          );
+        }
+        return;
+      }
+    }
+
     setIsSaving(true);
     const token = localStorage.getItem('valetudo_token');
 
@@ -333,21 +384,24 @@ export default function PrescriptionGenerator({
           ],
         }),
       });
-   const data = await res.json();
-   if (!res.ok) {
-     if (data.code === 'INSUFFICIENT_STOCK') {
-       setStockError({
-         medicine: data.medicine || rxMedName,
-         available: Number(data.available ?? 0),
-         requested: Number(data.requested ?? rxQuantity ?? 0),
-       });
-       return; // `finally` below still clears isSaving
-     }
-     throw new Error(data.error || 'Failed to issue prescription.');
-   }
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.code === 'INSUFFICIENT_STOCK') {
+          setStockError({
+            medicine: data.medicine || rxMedName,
+            available: Number(data.available ?? 0),
+            requested: Number(data.requested ?? rxQuantity ?? 0),
+          });
+          return; // `finally` below still clears isSaving
+        }
+        throw new Error(data.error || 'Failed to issue prescription.');
+      }
       const realQrToken = data.qrToken;
       const prescriptionId = data.prescriptionId;
       const emrId = data.emrId;
+
+      // Refresh stock numbers so the dropdown reflects the deduction
+      await fetchCatalog();
 
       if (onPrescriptionIssued) {
         onPrescriptionIssued({ prescriptionId, qrToken: realQrToken, emrId });
@@ -437,7 +491,6 @@ export default function PrescriptionGenerator({
     }
   };
 
-  /* ── Field wrapper ────────────────────────────────────────── */
   const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <div>
       <label
@@ -455,11 +508,19 @@ export default function PrescriptionGenerator({
     </div>
   );
 
+  const isOutOfStock =
+    selectedMed &&
+    selectedMed.available_stock !== undefined &&
+    selectedMed.available_stock <= 0;
+  const isOverStock =
+    selectedMed &&
+    selectedMed.available_stock !== undefined &&
+    selectedMed.available_stock > 0 &&
+    Number(rxQuantity) > selectedMed.available_stock;
   const isBlocked = interactionResult?.blocking ?? false;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* Formulary picker (custom themed dropdown) */}
       <Field label="Medicine (formulary)">
         <FormularySelect
           medicines={medicines}
@@ -469,7 +530,6 @@ export default function PrescriptionGenerator({
         />
       </Field>
 
-      {/* Dosage & quantity */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field label="Dosage">
           <input
@@ -479,19 +539,37 @@ export default function PrescriptionGenerator({
             onChange={(e) => setRxDosage(e.target.value)}
           />
         </Field>
-        <Field label="Quantity (pcs/bottles)">
+        <Field label="Quantity to dispense">
           <input
             type="number"
             min="1"
-            style={inputStyle}
+            style={{
+              ...inputStyle,
+              borderColor: isOutOfStock || isOverStock ? T.danger : undefined,
+            }}
             disabled={isArchived}
             value={rxQuantity}
             onChange={(e) => setRxQuantity(e.target.value)}
           />
+          {selectedMed && selectedMed.available_stock !== undefined && (
+            <div
+              style={{
+                fontSize: 10.5,
+                fontWeight: 700,
+                marginTop: 4,
+                color: isOutOfStock ? T.danger : isOverStock ? T.warning : T.textSub,
+              }}
+            >
+              {isOutOfStock
+                ? '⚠️ Currently OUT OF STOCK'
+                : isOverStock
+                ? `⚠️ Exceeds unexpired stock (${selectedMed.available_stock} available)`
+                : `Stock on hand: ${selectedMed.available_stock} ${selectedMed.unit || 'pcs'} (FEFO)`}
+            </div>
+          )}
         </Field>
       </div>
 
-      {/* Frequency & duration */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field label="Frequency">
           <input
@@ -513,7 +591,6 @@ export default function PrescriptionGenerator({
         </Field>
       </div>
 
-      {/* Instructions */}
       <Field label="Instructions (sig)">
         <textarea
           rows={2}
@@ -524,7 +601,6 @@ export default function PrescriptionGenerator({
         />
       </Field>
 
-      {/* Physician dietary / clinical notes */}
       <Field label="Physician dietary / clinical notes">
         <input
           style={inputStyle}
@@ -561,158 +637,173 @@ export default function PrescriptionGenerator({
       <button
         type="button"
         onClick={handleSaveAndPrintPrescription}
-        disabled={isSaving || isArchived || isBlocked}
+        disabled={
+          isSaving ||
+          isArchived ||
+          isBlocked ||
+          Boolean(isOutOfStock) ||
+          Boolean(isOverStock)
+        }
         style={{
           ...btnPrimary,
           width: '100%',
           padding: 13,
-          opacity: isSaving || isArchived || isBlocked ? 0.5 : 1,
-          cursor: isSaving || isArchived || isBlocked ? 'not-allowed' : 'pointer',
+          opacity:
+            isSaving || isArchived || isBlocked || isOutOfStock || isOverStock
+              ? 0.5
+              : 1,
+          cursor:
+            isSaving || isArchived || isBlocked || isOutOfStock || isOverStock
+              ? 'not-allowed'
+              : 'pointer',
         }}
       >
         {isArchived
           ? '🔒 Prescription issued & archived'
+          : isOutOfStock
+          ? '❌ Cannot issue: Formulary Out of Stock'
+          : isOverStock
+          ? '⚠️ Cannot issue: Quantity exceeds available stock'
           : isBlocked
           ? '🚫 Blocked by interaction safety check'
           : isSaving
-          ? 'Signing & printing…'
-          : '🖨️ Issue, sign & print prescription'}
+          ? 'Signing & deducting inventory…'
+          : '🖨️ Issue, deduct inventory & print prescription'}
       </button>
-   {/* No local feedback line — parent renders it in the issuance panel header */}
 
-   {/* ── Elegant stock-shortfall modal ─────────────────────────── */}
-   {stockError && (
-     <div className="modal-backdrop" onClick={() => setStockError(null)}>
-       <style>{`@keyframes rxStockIn { from { opacity: 0; transform: translateY(14px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }`}</style>
-       <div
-         className="modal-card"
-         onClick={(e) => e.stopPropagation()}
-         style={{
-           maxWidth: 440,
-           padding: 0,
-           overflow: 'hidden',
-           borderRadius: T.radius.xl,
-           animation: 'rxStockIn 220ms cubic-bezier(0.34, 1.3, 0.64, 1)',
-         }}
-       >
-         {/* Accent header */}
-         <div
-           style={{
-             padding: '26px 28px 20px',
-             background: `linear-gradient(135deg, ${T.dangerSoft} 0%, #FFF7F5 100%)`,
-             borderBottom: `1px solid ${T.dangerBorder}`,
-             textAlign: 'center',
-           }}
-         >
-           <div
-             style={{
-               width: 56,
-               height: 56,
-               margin: '0 auto 14px',
-               borderRadius: '50%',
-               background: T.surface,
-               border: `1.5px solid ${T.dangerBorder}`,
-               boxShadow: T.shadow.md,
-               display: 'grid',
-               placeItems: 'center',
-               fontSize: 26,
-             }}
-           >
-             💊
-           </div>
-           <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.danger, letterSpacing: -0.3 }}>
-             Pharmacy stock shortfall
-           </h3>
-           <p style={{ margin: '6px 0 0', fontSize: 12.5, color: T.textSub, lineHeight: 1.55 }}>
-             The infirmary cannot dispense{' '}
-             <b style={{ color: T.text }}>{stockError.medicine}</b> — unexpired stock on
-             hand is lower than the requested quantity.
-           </p>
-         </div>
+      {/* ── Elegant stock-shortfall modal ─────────────────────────── */}
+      {stockError && (
+        <div className="modal-backdrop" onClick={() => setStockError(null)}>
+          <style>{`@keyframes rxStockIn { from { opacity: 0; transform: translateY(14px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }`}</style>
+          <div
+            className="modal-card"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: 440,
+              padding: 0,
+              overflow: 'hidden',
+              borderRadius: T.radius.xl,
+              animation: 'rxStockIn 220ms cubic-bezier(0.34, 1.3, 0.64, 1)',
+            }}
+          >
+            {/* Accent header */}
+            <div
+              style={{
+                padding: '26px 28px 20px',
+                background: `linear-gradient(135deg, ${T.dangerSoft} 0%, #FFF7F5 100%)`,
+                borderBottom: `1px solid ${T.dangerBorder}`,
+                textAlign: 'center',
+              }}
+            >
+              <div
+                style={{
+                  width: 56,
+                  height: 56,
+                  margin: '0 auto 14px',
+                  borderRadius: '50%',
+                  background: T.surface,
+                  border: `1.5px solid ${T.dangerBorder}`,
+                  boxShadow: T.shadow.md,
+                  display: 'grid',
+                  placeItems: 'center',
+                  fontSize: 26,
+                }}
+              >
+                💊
+              </div>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.danger, letterSpacing: -0.3 }}>
+                Pharmacy stock shortfall
+              </h3>
+              <p style={{ margin: '6px 0 0', fontSize: 12.5, color: T.textSub, lineHeight: 1.55 }}>
+                The infirmary cannot dispense{' '}
+                <b style={{ color: T.text }}>{stockError.medicine}</b> — unexpired stock on
+                hand is lower than the requested quantity.
+              </p>
+            </div>
 
-         {/* Available / Requested / Shortfall stat trio */}
-         <div
-           style={{
-             display: 'grid',
-             gridTemplateColumns: '1fr 1fr 1fr',
-             gap: 10,
-             padding: '18px 28px 6px',
-           }}
-         >
-           {[
-             { label: 'Available', value: stockError.available, color: T.success, bg: T.successSoft, border: T.successBorder },
-             { label: 'Requested', value: stockError.requested, color: T.info, bg: T.infoSoft, border: T.infoBorder },
-             { label: 'Shortfall', value: Math.max(stockError.requested - stockError.available, 0), color: T.danger, bg: T.dangerSoft, border: T.dangerBorder },
-           ].map((s) => (
-             <div
-               key={s.label}
-               style={{
-                 background: s.bg,
-                 border: `1px solid ${s.border}`,
-                 borderRadius: T.radius.md,
-                 padding: '12px 8px',
-                 textAlign: 'center',
-               }}
-             >
-               <div style={{ fontSize: 22, fontWeight: 800, color: s.color, letterSpacing: -0.6, lineHeight: 1 }}>
-                 {s.value}
-               </div>
-               <div
-                 style={{
-                   fontSize: 10,
-                   fontWeight: 800,
-                   letterSpacing: 1,
-                   textTransform: 'uppercase',
-                   color: s.color,
-                   opacity: 0.8,
-                   marginTop: 6,
-                 }}
-               >
-                 {s.label}
-               </div>
-             </div>
-           ))}
-         </div>
+            {/* Available / Requested / Shortfall stat trio */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr 1fr',
+                gap: 10,
+                padding: '18px 28px 6px',
+              }}
+            >
+              {[
+                { label: 'Available', value: stockError.available, color: T.success, bg: T.successSoft, border: T.successBorder },
+                { label: 'Requested', value: stockError.requested, color: T.info, bg: T.infoSoft, border: T.infoBorder },
+                { label: 'Shortfall', value: Math.max(stockError.requested - stockError.available, 0), color: T.danger, bg: T.dangerSoft, border: T.dangerBorder },
+              ].map((s) => (
+                <div
+                  key={s.label}
+                  style={{
+                    background: s.bg,
+                    border: `1px solid ${s.border}`,
+                    borderRadius: T.radius.md,
+                    padding: '12px 8px',
+                    textAlign: 'center',
+                  }}
+                >
+                  <div style={{ fontSize: 22, fontWeight: 800, color: s.color, letterSpacing: -0.6, lineHeight: 1 }}>
+                    {s.value}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 800,
+                      letterSpacing: 1,
+                      textTransform: 'uppercase',
+                      color: s.color,
+                      opacity: 0.8,
+                      marginTop: 6,
+                    }}
+                  >
+                    {s.label}
+                  </div>
+                </div>
+              ))}
+            </div>
 
-         <p style={{ padding: '12px 28px 0', margin: 0, fontSize: 11.5, color: T.textMuted, lineHeight: 1.55 }}>
-             Dispensing follows FEFO (first-expiry-first-out): only unexpired batches with
-             stock on hand are counted. Restock via <b>Nurse Console → Inventory</b>, or
-             reduce the quantity below.
-         </p>
+            <p style={{ padding: '12px 28px 0', margin: 0, fontSize: 11.5, color: T.textMuted, lineHeight: 1.55 }}>
+              Dispensing follows FEFO (first-expiry-first-out): only unexpired batches with
+              stock on hand are counted. Restock via <b>Nurse Console → Inventory</b>, or
+              reduce the quantity below.
+            </p>
 
-         {/* Actions */}
-         <div
-           style={{
-             display: 'flex',
-             gap: 10,
-             padding: '18px 28px 24px',
-             justifyContent: 'flex-end',
-             flexWrap: 'wrap',
-           }}
-         >
-           <button type="button" onClick={() => setStockError(null)} style={btnGhost}>
-             Dismiss
-           </button>
-           {stockError.available > 0 ? (
-             <button
-               type="button"
-               onClick={() => {
-                 setRxQuantity(String(stockError.available));
-                 setStockError(null);
-               }}
-               style={{ ...btnPrimary, background: T.danger }}
-             >
-               Set quantity to {stockError.available}
-             </button>
-           ) : (
-             <button type="button" onClick={() => setStockError(null)} style={btnPrimary}>
-               Understood
-             </button>
-           )}
-         </div>
-       </div>
-     </div>
-   )}
- </div>
-);
+            {/* Actions */}
+            <div
+              style={{
+                display: 'flex',
+                gap: 10,
+                padding: '18px 28px 24px',
+                justifyContent: 'flex-end',
+                flexWrap: 'wrap',
+              }}
+            >
+              <button type="button" onClick={() => setStockError(null)} style={btnGhost}>
+                Dismiss
+              </button>
+              {stockError.available > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRxQuantity(String(stockError.available));
+                    setStockError(null);
+                  }}
+                  style={{ ...btnPrimary, background: T.danger }}
+                >
+                  Set quantity to {stockError.available}
+                </button>
+              ) : (
+                <button type="button" onClick={() => setStockError(null)} style={btnPrimary}>
+                  Understood
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

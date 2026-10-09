@@ -9,47 +9,82 @@ import { logAudit } from '../utils/auditLogger.js';
 import { redis, isRedisActive, invalidateCache } from '../utils/redisClient.js';
 import { SOS_LIMIT } from '../config/limits.js';
 
-export default function emergencyRouter(io) {
-  const router = express.Router();
+// ── Rate Limiter Middleware para sa SOS ─────────────────────────────
+function sosRateLimitKey(userIdOrIp) {
+  return `ratelimit:sos:${userIdOrIp}`;
+}
 
-  function sosRateLimitKey(userIdOrIp) {
-    return `ratelimit:sos:${userIdOrIp}`;
+async function sosRateLimit(req, res, next) {
+  if (!isRedisActive()) return next();
+
+  const identifier = req.user?.user_id || req.ip || 'unknown';
+  const key = sosRateLimitKey(identifier);
+
+  try {
+    const count = await redis.incr(key);
+
+    if (count === 1) {
+      await redis.expire(key, SOS_LIMIT.windowSeconds);
+    }
+
+    if (count > SOS_LIMIT.maxAttempts) {
+      const ttl = await redis.ttl(key);
+      const retrySec = ttl > 0 ? ttl : SOS_LIMIT.windowSeconds;
+      res.setHeader('Retry-After', String(retrySec));
+      return res.status(429).json({
+        error: `Emergency alert throttle exceeded. Please wait ${retrySec} second(s) before triggering another SOS.`,
+      });
+    }
+
+    res.setHeader(
+      'X-RateLimit-Remaining',
+      String(Math.max(0, SOS_LIMIT.maxAttempts - count))
+    );
+    next();
+  } catch (err) {
+    console.error('[SOS Rate Limit Error]:', err.message);
+    next();
+  }
+}
+
+// ── Reverse Geocoding Address Resolver ──────────────────────────────
+async function resolveCampusAddress(lat, lng) {
+  // 1. Kung may Google Maps API Key sa environment
+  if (process.env.GOOGLE_MAPS_API_KEY) {
+    try {
+      const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
+      const response = await fetch(url);
+      const data = await response.json();
+      if (data.results && data.results.length > 0) {
+        return data.results[0].formatted_address;
+      }
+    } catch (_) {}
   }
 
-  async function sosRateLimit(req, res, next) {
-    if (!isRedisActive()) return next();
+  // 2. Intelligent PSU Lingayen Campus Boundary Landmark Resolver (Offline/Fallback)
+  // Campus center: 16.0298, 120.2285
+  const dLat = Math.abs(lat - 16.0298);
+  const dLng = Math.abs(lng - 120.2285);
 
-    const identifier = req.user?.user_id || req.ip || 'unknown';
-    const key = sosRateLimitKey(identifier);
-
-    try {
-      const count = await redis.incr(key);
-
-      if (count === 1) {
-        await redis.expire(key, SOS_LIMIT.windowSeconds);
-      }
-
-      if (count > SOS_LIMIT.maxAttempts) {
-        const ttl = await redis.ttl(key);
-        const retrySec = ttl > 0 ? ttl : SOS_LIMIT.windowSeconds;
-        res.setHeader('Retry-After', String(retrySec));
-        return res.status(429).json({
-          error: `Emergency alert throttle exceeded. Please wait ${retrySec} second(s) before triggering another SOS.`,
-        });
-      }
-
-      res.setHeader(
-        'X-RateLimit-Remaining',
-        String(Math.max(0, SOS_LIMIT.maxAttempts - count))
-      );
-      next();
-    } catch (err) {
-      console.error('[SOS Rate Limit Error]:', err.message);
-      next();
+  if (dLat < 0.005 && dLng < 0.005) {
+    if (lat >= 16.0298 && lng >= 120.2285) {
+      return 'PSU Lingayen - Science & Technology Complex / East Grounds';
+    } else if (lat < 16.0298 && lng < 120.2285) {
+      return 'PSU Lingayen - University Infirmary & Student Pavilion';
+    } else {
+      return 'PSU Lingayen - Administration Building / Library Quadrangle';
     }
   }
 
-  // 1. POST /api/emergency/sos - Trigger Campus Emergency SOS
+  return `Pangasinan State University - Lingayen (${lat.toFixed(5)}, ${lng.toFixed(5)})`;
+}
+
+export default function emergencyRouter(io) {
+  const router = express.Router();
+
+  // ===========================================================================
+  // 1. POST /api/emergency/sos - Trigger SOS & Auto-prioritize in Queue
+  // ===========================================================================
   router.post('/sos', authenticateToken, sosRateLimit, async (req, res) => {
     try {
       const userId = req.user.user_id;
@@ -66,19 +101,23 @@ export default function emergencyRouter(io) {
         return res.status(400).json({ error: 'Invalid geographic coordinates provided.' });
       }
 
-      const connection = await pool.getConnection();
+      const formattedAddress = await resolveCampusAddress(lat, lng);
+      const enrichedNotes = `${notes || 'Emergency SOS pressed'} · Loc: ${formattedAddress}`;
 
+      const connection = await pool.getConnection();
       let alertId;
+
       try {
         await connection.beginTransaction();
 
+        // 1. Insert Emergency Alert
         const [insertResult] = await connection.query(
           `INSERT INTO EMERGENCY_ALERTS (user_id, location, status, notes)
            VALUES (?, ST_SRID(POINT(?, ?), 4326), 'triggered', ?)`,
-          [userId, lng, lat, notes || 'Emergency SOS pressed'] //lng (X), lat (Y)
+          [userId, lng, lat, enrichedNotes]
         );
 
-alertId = insertResult.insertId;
+        alertId = insertResult.insertId;
 
         // Feature 4 & 7: Auto-insert prioritized emergency ticket into daily triage QUEUE
         const [existingQueue] = await connection.query(
@@ -116,11 +155,13 @@ alertId = insertResult.insertId;
           table: 'EMERGENCY_ALERTS',
           recordId: alertId,
           oldValue: null,
-          newValue: { 
-            latitude: lat, 
-            longitude: lng, 
-            notes: notes || 'Emergency SOS pressed',
-            triage_escalation: 'QUEUE_PRIORITY_ESCALATED'
+          newValue: {
+            latitude: lat,
+            longitude: lng,
+            formattedAddress,
+            notes: enrichedNotes,
+            queued_to_triage: true,
+            triage_escalation: 'QUEUE_PRIORITY_ESCALATED',
           },
           ipAddress: req.ip,
         });
@@ -182,19 +223,20 @@ alertId = insertResult.insertId;
         emergencyContact: `${patientInfo.emergency_contact_name || 'N/A'} (${patientInfo.emergency_contact_phone || 'N/A'})`,
         latitude: lat,
         longitude: lng,
+        formattedAddress,
         googleMapsUrl: `https://www.google.com/maps?q=${lat},${lng}`,
         status: 'triggered',
         createdAt: new Date().toISOString(),
       };
 
-      // 1. Dispatch Firebase Cloud Messaging (FCM) background push to responders & medical staff
+      // 1. Dispatch Firebase Cloud Messaging (FCM) background push
       sendPushToRoles(['EMERGENCY_RESPONDER', 'NURSE', 'DOCTOR', 'ADMIN'], {
         title: `🚨 EMERGENCY SOS: ${alertPayload.patientName}`,
-        body: `Location: ${lat.toFixed(5)}, ${lng.toFixed(5)} | Blood: ${alertPayload.bloodType} | Allergies: ${alertPayload.allergies}`,
+        body: `Location: ${formattedAddress} | Blood: ${alertPayload.bloodType} | Allergies: ${alertPayload.allergies}`,
         data: { alertId: String(alertId), type: 'EMERGENCY_SOS' },
       }).catch((err) => console.error('[FCM SOS Push Error]:', err.message));
 
-// 2. Broadcast via WebSockets (Socket.IO) to both responder room and clinical consoles
+      // 2. Broadcast via WebSockets (Socket.IO) to both responder room and clinical consoles
       if (io) {
         io.to('responders').emit('emergency:new_alert', alertPayload);
         io.emit('emergency:new_alert', alertPayload);
@@ -202,8 +244,9 @@ alertId = insertResult.insertId;
       }
 
       res.status(201).json({
-        message: 'Emergency alert dispatched to PSU Clinic and Quick-Response team.',
+        message: 'Emergency alert dispatched to PSU Clinic and prioritized in Live Queue.',
         alertId,
+        formattedAddress,
       });
     } catch (error) {
       console.error('SOS Trigger Error:', error);
@@ -211,7 +254,9 @@ alertId = insertResult.insertId;
     }
   });
 
-  // 2. GET /api/emergency/active - Retrieve Active/Dispatched Alerts
+  // ===========================================================================
+  // 2. GET /api/emergency/active - Retrieve Active Alerts
+  // ===========================================================================
   router.get('/active', authenticateToken, requireRoles('EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'), async (req, res) => {
     try {
       const [alerts] = await pool.query(
@@ -247,7 +292,9 @@ alertId = insertResult.insertId;
     }
   });
 
-  // 3. PATCH /api/emergency/:alertId/status - Update Incident Status (Acknowledge / Dispatch / Resolve)
+  // ===========================================================================
+  // 3. PATCH /api/emergency/:alertId/status - Update Status & Sync Queue
+  // ===========================================================================
   router.patch('/:alertId/status', authenticateToken, requireRoles('EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'), async (req, res) => {
     try {
       const { alertId } = req.params;
@@ -258,41 +305,54 @@ alertId = insertResult.insertId;
         return res.status(400).json({ error: 'Invalid status update.' });
       }
 
-      let extraUpdate = '';
-      const params = [status, responderId];
+      const connection = await pool.getConnection();
 
-      if (status === 'acknowledged') {
-        extraUpdate = ', acknowledged_at = CURRENT_TIMESTAMP';
-      } else if (status === 'resolved' || status === 'false_alarm') {
-        extraUpdate = `, resolved_at = CURRENT_TIMESTAMP,
-                       response_time_seconds = TIMESTAMPDIFF(SECOND, created_at, CURRENT_TIMESTAMP)`;
-      }
+      try {
+        await connection.beginTransaction();
 
-      params.push(alertId);
+        let extraUpdate = '';
+        const params = [status, responderId];
 
-await pool.query(
-        `UPDATE EMERGENCY_ALERTS
-         SET status = ?, assigned_responder_id = ? ${extraUpdate}
-         WHERE alert_id = ?`,
-        params
-      );
-
-      // If resolving or closing out an SOS, mark its queue ticket as done or cancelled
-      if (status === 'resolved' || status === 'false_alarm') {
-        const queueFinalStatus = status === 'resolved' ? 'done' : 'cancelled';
-        const [alertRows] = await pool.query(
-          'SELECT user_id FROM EMERGENCY_ALERTS WHERE alert_id = ?',
-          [alertId]
-        );
-        if (alertRows.length > 0) {
-          await pool.query(
-            `UPDATE QUEUE 
-             SET status = ?, served_at = CURRENT_TIMESTAMP 
-             WHERE patient_user_id = ? AND queue_date = CURDATE() AND status IN ('in-consultation', 'waiting')`,
-            [queueFinalStatus, alertRows[0].user_id]
-          );
-          await invalidateCache('queue:*');
+        if (status === 'acknowledged') {
+          extraUpdate = ', acknowledged_at = CURRENT_TIMESTAMP';
+        } else if (status === 'resolved' || status === 'false_alarm') {
+          extraUpdate = `, resolved_at = CURRENT_TIMESTAMP,
+                         response_time_seconds = TIMESTAMPDIFF(SECOND, created_at, CURRENT_TIMESTAMP)`;
         }
+
+        params.push(alertId);
+
+        await connection.query(
+          `UPDATE EMERGENCY_ALERTS
+           SET status = ?, assigned_responder_id = ? ${extraUpdate}
+           WHERE alert_id = ?`,
+          params
+        );
+
+        // If resolving or closing out an SOS, mark its queue ticket as done or cancelled
+        if (status === 'resolved' || status === 'false_alarm') {
+          const queueFinalStatus = status === 'resolved' ? 'done' : 'cancelled';
+          const [alertRows] = await connection.query(
+            'SELECT user_id FROM EMERGENCY_ALERTS WHERE alert_id = ?',
+            [alertId]
+          );
+          if (alertRows.length > 0) {
+            await connection.query(
+              `UPDATE QUEUE 
+               SET status = ?, served_at = CURRENT_TIMESTAMP 
+               WHERE patient_user_id = ? AND queue_date = CURDATE() AND status IN ('in-consultation', 'waiting')`,
+              [queueFinalStatus, alertRows[0].user_id]
+            );
+          }
+        }
+
+        await connection.commit();
+        await invalidateCache('queue:*');
+      } catch (err) {
+        await connection.rollback();
+        throw err;
+      } finally {
+        connection.release();
       }
 
       if (io) {

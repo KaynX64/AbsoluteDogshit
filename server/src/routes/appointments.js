@@ -21,7 +21,7 @@ import {
 import { BOOKING_LIMIT } from '../config/limits.js';
 import { validateDentalChart } from '../utils/dentalValidator.js';
 
-// Odontogram helpers (the chart lives in DENTAL_CHARTS, never in treatment_plan)
+// Odontogram helpers
 function stripLegacyOdontogram(text) {
   return (text || '').replace(/\n*\[DENTAL ODONTOGRAM CHART\]:[^\n]*/g, '').trim();
 }
@@ -30,11 +30,44 @@ function readDentalChart(cipher) {
   try { return JSON.parse(decrypt(cipher)); } catch { return null; }
 }
 
+// ── Rate Limiter Middleware para sa Booking (Audit Security Issue #6) ───────
+async function bookingRateLimit(req, res, next) {
+  if (!isRedisActive()) return next();
+
+  const identifier = req.user?.user_id || req.ip || 'unknown';
+  const key = `ratelimit:booking:${identifier}`;
+
+  try {
+    const count = await redis.incr(key);
+
+    if (count === 1) {
+      await redis.expire(key, BOOKING_LIMIT.windowSeconds);
+    }
+
+    if (count > BOOKING_LIMIT.maxAttempts) {
+      const ttl = await redis.ttl(key);
+      const retrySec = ttl > 0 ? ttl : BOOKING_LIMIT.windowSeconds;
+      res.setHeader('Retry-After', String(retrySec));
+      return res.status(429).json({
+        error: `Too many booking attempts. Please wait ${retrySec} second(s) before trying again.`,
+      });
+    }
+
+    res.setHeader(
+      'X-RateLimit-Remaining',
+      String(Math.max(0, BOOKING_LIMIT.maxAttempts - count))
+    );
+    next();
+  } catch (err) {
+    console.error('[Booking Rate Limit Error]:', err.message);
+    next();
+  }
+}
+
 export default function appointmentRoutes(io) {
   const router = express.Router();
 
-  // Shared guard: does this patient already have a live queue ticket today?
-  // Used by both /:id/checkin and /walk-in to prevent duplicate tickets.
+  // Shared guard: active queue ticket check
   async function findActiveQueueEntry(connection, patientUserId) {
     const [rows] = await connection.query(
       `SELECT q.queue_id, q.queue_number, q.status, q.appointment_id,
@@ -80,7 +113,7 @@ export default function appointmentRoutes(io) {
   });
 
   // ===========================================================================
-  // 2. TIME SLOT AVAILABILITY (per-role, per-type capacity model)
+  // 2. TIME SLOT AVAILABILITY
   // ===========================================================================
   router.get('/slots', authenticateToken, async (req, res) => {
     const { doctorId, date } = req.query;
@@ -90,7 +123,6 @@ export default function appointmentRoutes(io) {
     }
 
     try {
-      // ── 1. Identify the doctor's role (DOCTOR vs DENTIST) ─────────────
       const [roleRows] = await pool.query(
         `SELECT r.code
          FROM USERS u
@@ -103,7 +135,6 @@ export default function appointmentRoutes(io) {
       const doctorRole = roleRows[0]?.code || 'DOCTOR';
       const rules = APPOINTMENT_RULES[doctorRole];
 
-      // ── 2. Fetch today's live bookings for this doctor/date ───────────
       const [bookings] = await pool.query(
         `SELECT DATE_FORMAT(date_time, '%H:%i') AS time_slot, appointment_type
          FROM APPOINTMENTS
@@ -114,7 +145,6 @@ export default function appointmentRoutes(io) {
         [doctorId, date]
       );
 
-      // Group: hourBlock -> { typeName -> count }
       const bookingsByHour = {};
       for (const b of bookings) {
         const hour = getHourBlock(b.time_slot);
@@ -123,9 +153,7 @@ export default function appointmentRoutes(io) {
           (bookingsByHour[hour][b.appointment_type] || 0) + 1;
       }
 
-      // ── 3. Determine which hour blocks are "blocked" ──────────────────
       const blockedHours = new Set();
-
       for (const [hourBlock, typeCounts] of Object.entries(bookingsByHour)) {
         let isFull = false;
 
@@ -148,7 +176,6 @@ export default function appointmentRoutes(io) {
         }
       }
 
-      // ── 4. Generate the day's 15-min grid and evaluate each slot ──────
       const defaultSlots = [];
       const [openH, openM] = CLINIC_HOURS.openTime.split(':').map(Number);
       const [closeH, closeM] = CLINIC_HOURS.closeTime.split(':').map(Number);
@@ -259,43 +286,6 @@ export default function appointmentRoutes(io) {
       res.status(500).json({ error: 'Failed to retrieve appointments.' });
     }
   });
-
-  function bookingRateLimitKey(userIdOrIp) {
-    return `ratelimit:booking:${userIdOrIp}`;
-  }
-
-  async function bookingRateLimit(req, res, next) {
-    if (!isRedisActive()) return next();
-
-    const identifier = req.user?.user_id || req.ip || 'unknown';
-    const key = bookingRateLimitKey(identifier);
-
-    try {
-      const count = await redis.incr(key);
-
-      if (count === 1) {
-        await redis.expire(key, BOOKING_LIMIT.windowSeconds);
-      }
-
-      if (count > BOOKING_LIMIT.maxAttempts) {
-        const ttl = await redis.ttl(key);
-        const retrySec = ttl > 0 ? ttl : BOOKING_LIMIT.windowSeconds;
-        res.setHeader('Retry-After', String(retrySec));
-        return res.status(429).json({
-          error: `Too many booking attempts. Please wait ${retrySec} second(s) before trying again.`,
-        });
-      }
-
-      res.setHeader(
-        'X-RateLimit-Remaining',
-        String(Math.max(0, BOOKING_LIMIT.maxAttempts - count))
-      );
-      next();
-    } catch (err) {
-      console.error('[Booking Rate Limit Error]:', err.message);
-      next();
-    }
-  }
 
   router.post('/', authenticateToken, requirePrivacyConsent, bookingRateLimit, async (req, res) => {
     const { doctor_user_id, date_time, appointment_type, notes } = req.body;
@@ -512,18 +502,6 @@ export default function appointmentRoutes(io) {
         });
       }
 
-      const activeEntry = await findActiveQueueEntry(connection, app.patient_user_id);
-      if (activeEntry) {
-        await connection.rollback();
-        return res.status(409).json({
-          error: `Patient is already in today's queue as ${activeEntry.ticket_no} (${activeEntry.status.replace('-', ' ')}).`,
-          code: 'ALREADY_IN_QUEUE',
-          existingTicket: activeEntry.ticket_no,
-          existingStatus: activeEntry.status,
-          arrivalTime: activeEntry.arrival_time,
-        });
-      }
-
       await connection.query(
         "UPDATE APPOINTMENTS SET status = 'cancelled', cancelled_reason = ? WHERE appointment_id = ?",
         [cancelled_reason || 'Cancelled by user', appointmentId]
@@ -655,6 +633,7 @@ export default function appointmentRoutes(io) {
                 a.doctor_user_id,
                 a.date_time,
                 DATE_FORMAT(a.date_time, '%h:%i %p') AS time_slot,
+                DATE_FORMAT(a.date_time, '%Y-%m-%d') AS date_str,
                 a.appointment_type,
                 a.status,
                 a.notes,
@@ -674,7 +653,7 @@ export default function appointmentRoutes(io) {
          LEFT JOIN STAFF_PROFILES stp ON doc.user_id = stp.user_id
          LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
          WHERE a.status = 'scheduled'
-           AND DATE(a.date_time) = CURDATE()
+           AND DATE(a.date_time) <= CURDATE()
            AND a.deleted_at IS NULL
          ORDER BY a.date_time ASC`
       );
@@ -693,7 +672,7 @@ export default function appointmentRoutes(io) {
   });
 
   // ===========================================================================
-  // 5. LIVE CLINIC TRIAGE QUEUE
+  // 5. LIVE CLINIC TRIAGE QUEUE (WITH FEATURE 4 EMERGENCY PRIORITIZATION)
   // ===========================================================================
 
   router.get('/queue/today', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'DENTIST', 'ADMIN'), async (req, res) => {
@@ -703,25 +682,44 @@ export default function appointmentRoutes(io) {
         return res.json(cachedQueue);
       }
 
+      // Feature 4: Left join sa active emergency alerts para umakyat sa top-priority (is_emergency = 1)
       const [rows] = await pool.query(
         `SELECT q.queue_id,
-                CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS ticket_no,
+                CASE 
+                  WHEN ea.alert_id IS NOT NULL AND ea.status IN ('triggered', 'acknowledged', 'dispatched')
+                  THEN '🚨 SOS'
+                  ELSE CONCAT('Q-', LPAD(q.queue_number, 2, '0'))
+                END AS ticket_no,
                 u.first_name, u.last_name,
-                sp.student_no,
-                COALESCE(a.appointment_type, 'General Walk-in') AS visit_type,
+                COALESCE(sp.student_no, st.license_no, 'PSU Member') AS student_no,
+                CASE 
+                  WHEN ea.alert_id IS NOT NULL AND ea.status IN ('triggered', 'acknowledged', 'dispatched')
+                  THEN '🚨 CRITICAL EMERGENCY SOS'
+                  ELSE COALESCE(a.appointment_type, 'General Walk-in')
+                END AS visit_type,
                 q.status,
                 DATE_FORMAT(q.checked_in_at, '%h:%i %p') AS arrival_time,
-                q.queue_number
+                q.queue_number,
+                CASE 
+                  WHEN ea.alert_id IS NOT NULL AND ea.status IN ('triggered', 'acknowledged', 'dispatched') 
+                  THEN 1 
+                  ELSE 0 
+                END AS is_emergency
          FROM QUEUE q
          JOIN USERS u ON q.patient_user_id = u.user_id
          LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+         LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
+         LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
          LEFT JOIN APPOINTMENTS a ON q.appointment_id = a.appointment_id
+         LEFT JOIN EMERGENCY_ALERTS ea ON ea.user_id = q.patient_user_id
+              AND ea.status IN ('triggered', 'acknowledged', 'dispatched')
+              AND DATE(ea.created_at) = CURDATE()
          WHERE q.queue_date = CURDATE()
            AND q.status IN ('waiting', 'in-consultation')
-         ORDER BY q.status = 'in-consultation' DESC, q.queue_number ASC`
+         ORDER BY is_emergency DESC, q.status = 'in-consultation' DESC, q.queue_number ASC`
       );
 
-      await setCache('queue:today', rows, 60);
+      await setCache('queue:today', rows, 30);
       res.json(rows);
     } catch (error) {
       console.error('[Appointments] Error fetching daily queue:', error);
@@ -767,7 +765,6 @@ export default function appointmentRoutes(io) {
         io.emit('appointment:status_changed', { queue_id: queueId, status });
       }
 
-      // Dispatch FCM Push Notification when patient is called
       if (status === 'in-consultation') {
         try {
           const [details] = await pool.query(
@@ -956,7 +953,6 @@ export default function appointmentRoutes(io) {
 
       const app = appRows[0];
 
-      // Guard 1: Prevent duplicate check-in if appointment was already processed
       if (['checked_in', 'serving', 'completed'].includes(app.status)) {
         await connection.rollback();
         return res.status(409).json({
@@ -966,7 +962,6 @@ export default function appointmentRoutes(io) {
         });
       }
 
-      // Guard 2: Prevent duplicate check-in if patient already holds an active ticket today
       const activeEntry = await findActiveQueueEntry(connection, app.patient_user_id);
       if (activeEntry) {
         await connection.rollback();
@@ -1260,7 +1255,6 @@ export default function appointmentRoutes(io) {
         io.emit('queue:updated');
       }
 
-      // Dispatch FCM Push Notification when doctor marks status as serving
       if (status === 'serving') {
         try {
           const [details] = await pool.query(
@@ -1322,7 +1316,7 @@ export default function appointmentRoutes(io) {
       return res.status(400).json({ error: 'Chief complaint and diagnosis are required.' });
     }
 
-        // ── Dental Odontogram Schema Validation ───────────────────────────────────
+    // ── Dental Odontogram Schema Validation ───────────────────────────────────
     if (dental_chart !== undefined && dental_chart !== null && (req.user.roles || []).includes('DENTIST')) {
       const chartValidation = validateDentalChart(dental_chart);
       if (!chartValidation.valid) {
@@ -1351,8 +1345,7 @@ export default function appointmentRoutes(io) {
         ]
       );
       const emrId = emrResult.insertId;
-      
-      // Dentist-only odontogram: stored separately, silently ignored for any other role
+
       if (
         dental_chart &&
         typeof dental_chart === 'object' &&

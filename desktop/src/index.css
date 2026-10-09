@@ -109,6 +109,30 @@ html, body, #root {
   font-family: var(--font);
   letter-spacing: -0.1px;
 }
+
+   .sb-item { position: relative; }
+   .sb-badge {
+     position: absolute;
+     top: 4px;
+     left: calc(50% + 4px);
+     min-width: 18px;
+     height: 18px;
+     padding: 0 5px;
+     border-radius: 999px;
+     background: #DC2626;
+     color: #fff;
+     font-size: 10px;
+     font-weight: 800;
+     line-height: 18px;
+     text-align: center;
+     box-shadow: 0 0 0 2px #fff;
+     animation: sb-badge-pop 240ms ease;
+   }
+   @keyframes sb-badge-pop {
+     0% { transform: scale(0.4); }
+     70% { transform: scale(1.15); }
+     100% { transform: scale(1); }
+   }
 .sb-item:hover { background: var(--sage-100); color: var(--text); }
 .sb-item.is-active {
   background: var(--primary-tint);

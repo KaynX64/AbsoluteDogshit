@@ -5,467 +5,472 @@ import { authenticateToken } from '../auth.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { logAudit } from '../utils/auditLogger.js';
 
-const router = express.Router();
+export default function inventoryRoutes(io) {
+  const router = express.Router();
 
-// =============================================================================
-// 1. READ / QUERY CATALOGUE & LOGS
-// =============================================================================
+  // =============================================================================
+  // 1. READ / QUERY CATALOGUE & LOGS
+  // =============================================================================
 
-// GET /api/inventory/batches - Fetch only batches with available stock (> 0)
-router.get('/batches', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
-  try {
-    const [rows] = await pool.query(
-      `SELECT b.batch_id, m.medicine_id, m.name, m.generic_name, m.form, m.strength,
-              b.batch_no, b.quantity_on_hand, b.manufacture_date, b.expiry_date, b.supplier,
-              DATEDIFF(b.expiry_date, CURDATE()) as days_until_expiry
-       FROM MEDICINE_BATCHES b 
-       JOIN MEDICINES m ON b.medicine_id = m.medicine_id 
-       WHERE b.deleted_at IS NULL 
-         AND b.quantity_on_hand > 0   -- 👈 DAGDAG ITO: Itago kapag ubos na
-       ORDER BY b.expiry_date ASC`
-    );
-    res.json(rows);
-  } catch (error) {
-    console.error('Error fetching inventory batches:', error);
-    res.status(500).json({ error: 'Failed to fetch inventory batches.' });
-  }
-});
+  // GET /api/inventory/batches - Fetch batches with active stock
+  router.get('/batches', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'DENTIST', 'ADMIN'), async (req, res) => {
+    try {
+      const [rows] = await pool.query(
+        `SELECT b.batch_id, m.medicine_id, m.name, m.generic_name, m.form, m.strength, m.unit,
+                b.batch_no, b.quantity_on_hand, b.manufacture_date, b.expiry_date, b.supplier,
+                DATEDIFF(b.expiry_date, CURDATE()) as days_until_expiry
+         FROM MEDICINE_BATCHES b 
+         JOIN MEDICINES m ON b.medicine_id = m.medicine_id 
+         WHERE b.deleted_at IS NULL 
+           AND b.quantity_on_hand > 0
+         ORDER BY b.expiry_date ASC`
+      );
+      res.json(rows);
+    } catch (error) {
+      console.error('Error fetching inventory batches:', error);
+      res.status(500).json({ error: 'Failed to fetch inventory batches.' });
+    }
+  });
 
-// GET /api/inventory/medicines - Master drug catalogue for prescriptions & stock-in dropdowns
-router.get('/medicines', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
-  try {
-    const [medicines] = await pool.query(
-      `SELECT medicine_id, name, generic_name, form, strength, unit, reorder_level 
-       FROM MEDICINES 
-       WHERE is_active = TRUE AND deleted_at IS NULL 
-       ORDER BY name ASC`
-    );
-    res.json(medicines);
-  } catch (error) {
-    console.error('Failed to fetch medicine master:', error);
-    res.status(500).json({ error: 'Failed to fetch medicines catalogue.' });
-  }
-});
+  // GET /api/inventory/medicines - Master drug catalogue with unexpired available stock
+  router.get('/medicines', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
+    try {
+      const [medicines] = await pool.query(
+        `SELECT m.medicine_id, m.name, m.generic_name, m.form, m.strength, m.unit, m.reorder_level,
+                COALESCE(SUM(CASE WHEN b.expiry_date > CURDATE() AND b.deleted_at IS NULL AND b.quantity_on_hand > 0 THEN b.quantity_on_hand ELSE 0 END), 0) AS available_stock
+         FROM MEDICINES m 
+         LEFT JOIN MEDICINE_BATCHES b ON m.medicine_id = b.medicine_id
+         WHERE m.is_active = TRUE AND m.deleted_at IS NULL 
+         GROUP BY m.medicine_id, m.name, m.generic_name, m.form, m.strength, m.unit, m.reorder_level
+         ORDER BY m.name ASC`
+      );
+      res.json(medicines);
+    } catch (error) {
+      console.error('Failed to fetch medicine master:', error);
+      res.status(500).json({ error: 'Failed to fetch medicines catalogue.' });
+    }
+  });
 
-// GET /api/inventory/expiring-soon - Sweeps ONLY for remaining stock (> 0) expiring within 90 days
-router.get('/expiring-soon', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
-  try {
-    const [rows] = await pool.query(
-      `SELECT b.batch_id, m.name, m.generic_name, b.batch_no, b.quantity_on_hand, m.reorder_level,
-              DATE_FORMAT(b.expiry_date, '%Y-%m-%d') as expiry_date,
-              DATEDIFF(b.expiry_date, CURDATE()) as days_until_expiry,
-              CASE 
-                WHEN DATEDIFF(b.expiry_date, CURDATE()) < 0 THEN 'EXPIRED'
-                WHEN DATEDIFF(b.expiry_date, CURDATE()) <= 30 THEN 'CRITICAL (<30d)'
-                ELSE 'EXPIRING SOON'
-              END AS alert_level
-       FROM MEDICINE_BATCHES b
-       JOIN MEDICINES m ON b.medicine_id = m.medicine_id
-       WHERE b.deleted_at IS NULL 
-         AND b.quantity_on_hand > 0                        -- 👈 DAPAT MAY STOCK PA
-         AND DATEDIFF(b.expiry_date, CURDATE()) <= 90     -- 👈 EXPIRING LANG TALAGA
-       ORDER BY b.expiry_date ASC`
-    );
-    res.json(rows);
-  } catch (error) {
-    console.error('Error in expiry sweep:', error);
-    res.status(500).json({ error: 'Failed to execute expiry sweep.' });
-  }
-});
+  // GET /api/inventory/expiring-soon
+  router.get('/expiring-soon', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+    try {
+      const [rows] = await pool.query(
+        `SELECT b.batch_id, m.name, m.generic_name, b.batch_no, b.quantity_on_hand, m.reorder_level,
+                DATE_FORMAT(b.expiry_date, '%Y-%m-%d') as expiry_date,
+                DATEDIFF(b.expiry_date, CURDATE()) as days_until_expiry,
+                CASE 
+                  WHEN DATEDIFF(b.expiry_date, CURDATE()) < 0 THEN 'EXPIRED'
+                  WHEN DATEDIFF(b.expiry_date, CURDATE()) <= 30 THEN 'CRITICAL (<30d)'
+                  ELSE 'EXPIRING SOON'
+                END AS alert_level
+         FROM MEDICINE_BATCHES b
+         JOIN MEDICINES m ON b.medicine_id = m.medicine_id
+         WHERE b.deleted_at IS NULL 
+           AND b.quantity_on_hand > 0
+           AND DATEDIFF(b.expiry_date, CURDATE()) <= 90
+         ORDER BY b.expiry_date ASC`
+      );
+      res.json(rows);
+    } catch (error) {
+      console.error('Error in expiry sweep:', error);
+      res.status(500).json({ error: 'Failed to execute expiry sweep.' });
+    }
+  });
 
-// GET /api/inventory/reorder-suggestions - Dynamic replenishment algorithm comparing unexpired stock vs reorder_level
-router.get('/reorder-suggestions', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
-  try {
-    const [rows] = await pool.query(
-      `SELECT m.medicine_id, m.name, m.generic_name, m.form, m.strength, m.unit, m.reorder_level,
-              COALESCE(SUM(b.quantity_on_hand), 0) AS total_stock_on_hand,
-              CASE 
-                WHEN COALESCE(SUM(b.quantity_on_hand), 0) <= m.reorder_level 
-                THEN GREATEST((m.reorder_level * 2) - COALESCE(SUM(b.quantity_on_hand), 0), m.reorder_level)
-                ELSE 0 
-              END AS suggested_reorder_qty,
-              CASE 
-                WHEN COALESCE(SUM(b.quantity_on_hand), 0) = 0 THEN 'OUT_OF_STOCK'
-                WHEN COALESCE(SUM(b.quantity_on_hand), 0) <= m.reorder_level THEN 'CRITICAL_BUFFER'
-                ELSE 'ADEQUATE'
-              END AS stock_status
-       FROM MEDICINES m
-       LEFT JOIN MEDICINE_BATCHES b ON m.medicine_id = b.medicine_id 
-            AND b.deleted_at IS NULL 
-            AND b.expiry_date > CURDATE()
-       WHERE m.is_active = TRUE AND m.deleted_at IS NULL
-       GROUP BY m.medicine_id, m.name, m.generic_name, m.form, m.strength, m.unit, m.reorder_level
-       ORDER BY total_stock_on_hand ASC`
-    );
-    res.json(rows);
-  } catch (error) {
-    console.error('Error computing reorder suggestions:', error);
-    res.status(500).json({ error: 'Failed to calculate reorder suggestions.' });
-  }
-});
+  // GET /api/inventory/reorder-suggestions
+  router.get('/reorder-suggestions', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+    try {
+      const [rows] = await pool.query(
+        `SELECT m.medicine_id, m.name, m.generic_name, m.form, m.strength, m.unit, m.reorder_level,
+                COALESCE(SUM(b.quantity_on_hand), 0) AS total_stock_on_hand,
+                CASE 
+                  WHEN COALESCE(SUM(b.quantity_on_hand), 0) <= m.reorder_level 
+                  THEN GREATEST((m.reorder_level * 2) - COALESCE(SUM(b.quantity_on_hand), 0), m.reorder_level)
+                  ELSE 0 
+                END AS suggested_reorder_qty,
+                CASE 
+                  WHEN COALESCE(SUM(b.quantity_on_hand), 0) = 0 THEN 'OUT_OF_STOCK'
+                  WHEN COALESCE(SUM(b.quantity_on_hand), 0) <= m.reorder_level THEN 'CRITICAL_BUFFER'
+                  ELSE 'ADEQUATE'
+                END AS stock_status
+         FROM MEDICINES m
+         LEFT JOIN MEDICINE_BATCHES b ON m.medicine_id = b.medicine_id 
+              AND b.deleted_at IS NULL 
+              AND b.expiry_date > CURDATE()
+         WHERE m.is_active = TRUE AND m.deleted_at IS NULL
+         GROUP BY m.medicine_id, m.name, m.generic_name, m.form, m.strength, m.unit, m.reorder_level
+         ORDER BY total_stock_on_hand ASC`
+      );
+      res.json(rows);
+    } catch (error) {
+      console.error('Error computing reorder suggestions:', error);
+      res.status(500).json({ error: 'Failed to calculate reorder suggestions.' });
+    }
+  });
 
-// GET /api/inventory/logs - Audit & Consumption log retrieval
-router.get('/logs', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
-  try {
-    const [logs] = await pool.query(
-      `SELECT l.log_id, l.batch_id, l.quantity_change, l.transaction_type, l.reason, l.created_at,
-              b.batch_no, b.expiry_date,
-              m.name AS medicine_name, m.generic_name, m.strength, m.form,
-              CONCAT(u.first_name, ' ', u.last_name) AS performed_by_name,
-              u.email AS performed_by_email
-       FROM INVENTORY_LOGS l
-       JOIN MEDICINE_BATCHES b ON l.batch_id = b.batch_id
-       JOIN MEDICINES m ON b.medicine_id = m.medicine_id
-       JOIN USERS u ON l.performed_by = u.user_id
-       ORDER BY l.log_id DESC
-       LIMIT 100`
-    );
-    res.json(logs);
-  } catch (error) {
-    console.error('Error fetching inventory consumption logs:', error);
-    res.status(500).json({ error: 'Failed to retrieve inventory logs.' });
-  }
-});
+  // GET /api/inventory/logs
+  router.get('/logs', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+    try {
+      const [logs] = await pool.query(
+        `SELECT l.log_id, l.batch_id, l.quantity_change, l.transaction_type, l.reason, l.created_at,
+                b.batch_no, b.expiry_date,
+                m.name AS medicine_name, m.generic_name, m.strength, m.form,
+                CONCAT(u.first_name, ' ', u.last_name) AS performed_by_name,
+                u.email AS performed_by_email
+         FROM INVENTORY_LOGS l
+         JOIN MEDICINE_BATCHES b ON l.batch_id = b.batch_id
+         JOIN MEDICINES m ON b.medicine_id = m.medicine_id
+         JOIN USERS u ON l.performed_by = u.user_id
+         ORDER BY l.log_id DESC
+         LIMIT 100`
+      );
+      res.json(logs);
+    } catch (error) {
+      console.error('Error fetching inventory consumption logs:', error);
+      res.status(500).json({ error: 'Failed to retrieve inventory logs.' });
+    }
+  });
 
-// =============================================================================
-// 2. INBOUND & STOCK REPLENISHMENT
-// =============================================================================
+  // =============================================================================
+  // 2. INBOUND & STOCK REPLENISHMENT
+  // =============================================================================
 
-// POST /api/inventory/receive - Log a new shipment delivery / stock-in
-router.post('/receive', authenticateToken, requireRoles('NURSE', 'ADMIN'), async (req, res) => {
-  const { medicine_id, batch_no, manufacture_date, expiry_date, supplier, quantity_received } = req.body;
+  router.post('/receive', authenticateToken, requireRoles('NURSE', 'ADMIN'), async (req, res) => {
+    const { medicine_id, batch_no, manufacture_date, expiry_date, supplier, quantity_received } = req.body;
 
-  if (!medicine_id || !batch_no || !manufacture_date || !expiry_date || !quantity_received) {
-    return res.status(400).json({
-      error: 'medicine_id, batch_no, manufacture_date, expiry_date, and quantity_received are required.',
-    });
-  }
+    if (!medicine_id || !batch_no || !manufacture_date || !expiry_date || !quantity_received) {
+      return res.status(400).json({
+        error: 'medicine_id, batch_no, manufacture_date, expiry_date, and quantity_received are required.',
+      });
+    }
 
-  if (!Number.isInteger(Number(quantity_received)) || Number(quantity_received) <= 0) {
-    return res.status(400).json({ error: 'Quantity received must be a positive integer.' });
-  }
+    if (!Number.isInteger(Number(quantity_received)) || Number(quantity_received) <= 0) {
+      return res.status(400).json({ error: 'Quantity received must be a positive integer.' });
+    }
 
-  if (new Date(expiry_date) <= new Date(manufacture_date)) {
-    return res.status(400).json({ error: 'Expiry date must be later than manufacture date.' });
-  }
+    if (new Date(expiry_date) <= new Date(manufacture_date)) {
+      return res.status(400).json({ error: 'Expiry date must be later than manufacture date.' });
+    }
 
-  const connection = await pool.getConnection();
+    const connection = await pool.getConnection();
 
-  try {
-    await connection.beginTransaction();
+    try {
+      await connection.beginTransaction();
 
-    const [medRows] = await connection.query(
-      'SELECT name FROM MEDICINES WHERE medicine_id = ? AND deleted_at IS NULL',
-      [medicine_id]
-    );
-    if (medRows.length === 0) throw new Error('Medicine not found in master formulary.');
+      const [medRows] = await connection.query(
+        'SELECT name FROM MEDICINES WHERE medicine_id = ? AND deleted_at IS NULL',
+        [medicine_id]
+      );
+      if (medRows.length === 0) throw new Error('Medicine not found in master formulary.');
 
-    const [existingBatch] = await connection.query(
-      'SELECT batch_id, quantity_on_hand FROM MEDICINE_BATCHES WHERE medicine_id = ? AND batch_no = ? FOR UPDATE',
-      [medicine_id, batch_no]
-    );
+      const [existingBatch] = await connection.query(
+        'SELECT batch_id, quantity_on_hand FROM MEDICINE_BATCHES WHERE medicine_id = ? AND batch_no = ? FOR UPDATE',
+        [medicine_id, batch_no]
+      );
 
-    let targetBatchId;
-    let newQty;
+      let targetBatchId;
+      let newQty;
 
-    if (existingBatch.length > 0) {
-      targetBatchId = existingBatch[0].batch_id;
-      newQty = existingBatch[0].quantity_on_hand + Number(quantity_received);
+      if (existingBatch.length > 0) {
+        targetBatchId = existingBatch[0].batch_id;
+        newQty = existingBatch[0].quantity_on_hand + Number(quantity_received);
+
+        await connection.query(
+          'UPDATE MEDICINE_BATCHES SET quantity_on_hand = ?, supplier = ? WHERE batch_id = ?',
+          [newQty, supplier || null, targetBatchId]
+        );
+      } else {
+        const [batchResult] = await connection.query(
+          `INSERT INTO MEDICINE_BATCHES 
+           (medicine_id, batch_no, manufacture_date, expiry_date, supplier, quantity_on_hand)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [medicine_id, batch_no, manufacture_date, expiry_date, supplier || 'PSU Central Depot', Number(quantity_received)]
+        );
+        targetBatchId = batchResult.insertId;
+        newQty = Number(quantity_received);
+      }
 
       await connection.query(
-        'UPDATE MEDICINE_BATCHES SET quantity_on_hand = ?, supplier = ? WHERE batch_id = ?',
-        [newQty, supplier || null, targetBatchId]
+        `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
+         VALUES (?, ?, 'receive', ?, ?)`,
+        [targetBatchId, Number(quantity_received), `Shipment received from ${supplier || 'Depot'}`, req.user.user_id]
       );
-    } else {
-      const [batchResult] = await connection.query(
-        `INSERT INTO MEDICINE_BATCHES 
-         (medicine_id, batch_no, manufacture_date, expiry_date, supplier, quantity_on_hand)
+
+      await logAudit(connection, {
+        userId: req.user.user_id,
+        action: 'CREATE',
+        table: 'MEDICINE_BATCHES',
+        recordId: targetBatchId,
+        oldValue: null,
+        newValue: {
+          medicine: medRows[0].name,
+          batch_no,
+          quantity_received: Number(quantity_received),
+          new_total_stock: newQty,
+          supplier,
+        },
+        ipAddress: req.ip,
+      });
+
+      await connection.commit();
+
+      if (io) io.emit('inventory:updated');
+
+      res.status(201).json({
+        message: `Stock successfully logged. Batch ${batch_no} now has ${newQty} units.`,
+        batchId: targetBatchId,
+        quantityOnHand: newQty,
+      });
+    } catch (error) {
+      await connection.rollback();
+      console.error('Stock-in error:', error);
+      res.status(400).json({ error: error.message || 'Failed to process shipment intake.' });
+    } finally {
+      connection.release();
+    }
+  });
+
+  // =============================================================================
+  // 3. MASTER FORMULARY REGISTRATION
+  // =============================================================================
+
+  router.post('/medicines', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+    const { name, generic_name, form, strength, unit, reorder_level } = req.body;
+
+    if (!name || !generic_name || !form || !strength) {
+      return res.status(400).json({ error: 'name, generic_name, form, and strength are required.' });
+    }
+
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.beginTransaction();
+
+      const [result] = await connection.query(
+        `INSERT INTO MEDICINES (name, generic_name, form, strength, unit, reorder_level)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        [medicine_id, batch_no, manufacture_date, expiry_date, supplier || 'PSU Central Depot', Number(quantity_received)]
+        [name, generic_name, form, strength, unit || 'pcs', Number(reorder_level) || 15]
       );
-      targetBatchId = batchResult.insertId;
-      newQty = Number(quantity_received);
+
+      const medicineId = result.insertId;
+
+      await logAudit(connection, {
+        userId: req.user.user_id,
+        action: 'CREATE',
+        table: 'MEDICINES',
+        recordId: medicineId,
+        oldValue: null,
+        newValue: { name, generic_name, form, strength, reorder_level },
+        ipAddress: req.ip,
+      });
+
+      await connection.commit();
+
+      if (io) io.emit('inventory:updated');
+
+      res.status(201).json({
+        message: `Medicine "${name}" (${generic_name}) added to hospital formulary.`,
+        medicineId,
+      });
+    } catch (error) {
+      await connection.rollback();
+      console.error('Add medicine error:', error);
+      res.status(500).json({ error: 'Failed to create medicine definition.' });
+    } finally {
+      connection.release();
     }
+  });
 
-    await connection.query(
-      `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
-       VALUES (?, ?, 'receive', ?, ?)`,
-      [targetBatchId, Number(quantity_received), `Shipment received from ${supplier || 'Depot'}`, req.user.user_id]
-    );
+  router.delete('/medicines/:id', authenticateToken, requireRoles('NURSE', 'ADMIN'), async (req, res) => {
+    const medicineId = Number(req.params.id);
+    const connection = await pool.getConnection();
 
-    await logAudit(connection, {
-      userId: req.user.user_id,
-      action: 'CREATE',
-      table: 'MEDICINE_BATCHES',
-      recordId: targetBatchId,
-      oldValue: null,
-      newValue: {
-        medicine: medRows[0].name,
-        batch_no,
-        quantity_received: Number(quantity_received),
-        new_total_stock: newQty,
-        supplier,
-      },
-      ipAddress: req.ip,
-    });
+    try {
+      await connection.beginTransaction();
 
-    await connection.commit();
-
-    res.status(201).json({
-      message: `Stock successfully logged. Batch ${batch_no} now has ${newQty} units.`,
-      batchId: targetBatchId,
-      quantityOnHand: newQty,
-    });
-  } catch (error) {
-    await connection.rollback();
-    console.error('Stock-in error:', error);
-    res.status(400).json({ error: error.message || 'Failed to process shipment intake.' });
-  } finally {
-    connection.release();
-  }
-});
-
-// =============================================================================
-// 3. MASTER FORMULARY REGISTRATION
-// =============================================================================
-
-// POST /api/inventory/medicines - Add a new drug definition to the University formulary
-router.post('/medicines', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
-  const { name, generic_name, form, strength, unit, reorder_level } = req.body;
-
-  if (!name || !generic_name || !form || !strength) {
-    return res.status(400).json({ error: 'name, generic_name, form, and strength are required.' });
-  }
-
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    const [result] = await connection.query(
-      `INSERT INTO MEDICINES (name, generic_name, form, strength, unit, reorder_level)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [name, generic_name, form, strength, unit || 'pcs', Number(reorder_level) || 15]
-    );
-
-    const medicineId = result.insertId;
-
-    await logAudit(connection, {
-      userId: req.user.user_id,
-      action: 'CREATE',
-      table: 'MEDICINES',
-      recordId: medicineId,
-      oldValue: null,
-      newValue: { name, generic_name, form, strength, reorder_level },
-      ipAddress: req.ip,
-    });
-
-    await connection.commit();
-
-    res.status(201).json({
-      message: `Medicine "${name}" (${generic_name}) added to hospital formulary.`,
-      medicineId,
-    });
-  } catch (error) {
-    await connection.rollback();
-    console.error('Add medicine error:', error);
-    res.status(500).json({ error: 'Failed to create medicine definition.' });
-  } finally {
-    connection.release();
-  }
-});
-
-// DELETE /api/inventory/medicines/:id - Delete / retire a formulary entry
-router.delete('/medicines/:id', authenticateToken, requireRoles('NURSE', 'ADMIN'), async (req, res) => {
-  const medicineId = Number(req.params.id);
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    const [medRows] = await connection.query(
-      'SELECT name, generic_name, strength FROM MEDICINES WHERE medicine_id = ? AND deleted_at IS NULL',
-      [medicineId]
-    );
-
-    if (medRows.length === 0) {
-      throw new Error('Medicine definition not found or already deleted.');
-    }
-
-    // Safety check: block deletion if any batches still have active stock
-    const [activeBatches] = await connection.query(
-      'SELECT COALESCE(SUM(quantity_on_hand), 0) as total_stock FROM MEDICINE_BATCHES WHERE medicine_id = ? AND deleted_at IS NULL AND quantity_on_hand > 0',
-      [medicineId]
-    );
-
-    const stockRemaining = activeBatches[0]?.total_stock || 0;
-    if (stockRemaining > 0) {
-      throw new Error(
-        `Cannot delete "${medRows[0].name}". There are still ${stockRemaining} units in active stock. Dispose or dispense the stock before deleting this formulary entry.`
+      const [medRows] = await connection.query(
+        'SELECT name, generic_name, strength FROM MEDICINES WHERE medicine_id = ? AND deleted_at IS NULL',
+        [medicineId]
       );
+
+      if (medRows.length === 0) {
+        throw new Error('Medicine definition not found or already deleted.');
+      }
+
+      const [activeBatches] = await connection.query(
+        'SELECT COALESCE(SUM(quantity_on_hand), 0) as total_stock FROM MEDICINE_BATCHES WHERE medicine_id = ? AND deleted_at IS NULL AND quantity_on_hand > 0',
+        [medicineId]
+      );
+
+      const stockRemaining = activeBatches[0]?.total_stock || 0;
+      if (stockRemaining > 0) {
+        throw new Error(
+          `Cannot delete "${medRows[0].name}". There are still ${stockRemaining} units in active stock. Dispose or dispense the stock before deleting this formulary entry.`
+        );
+      }
+
+      await connection.query(
+        'UPDATE MEDICINES SET is_active = FALSE, deleted_at = CURRENT_TIMESTAMP WHERE medicine_id = ?',
+        [medicineId]
+      );
+
+      await connection.query(
+        'UPDATE MEDICINE_BATCHES SET deleted_at = CURRENT_TIMESTAMP WHERE medicine_id = ?',
+        [medicineId]
+      );
+
+      await logAudit(connection, {
+        userId: req.user.user_id,
+        action: 'DELETE',
+        table: 'MEDICINES',
+        recordId: medicineId,
+        oldValue: medRows[0],
+        newValue: { operation: 'FORMULARY_DELETED', is_active: false },
+        ipAddress: req.ip,
+      });
+
+      await connection.commit();
+
+      if (io) io.emit('inventory:updated');
+
+      res.json({ message: `Medicine "${medRows[0].name}" (${medRows[0].strength}) deleted from formulary.` });
+    } catch (error) {
+      await connection.rollback();
+      console.error('Delete medicine error:', error);
+      res.status(400).json({ error: error.message || 'Failed to delete medicine definition.' });
+    } finally {
+      connection.release();
+    }
+  });
+
+  // =============================================================================
+  // 4. MANUAL DEDUCTION & STOCK ADJUSTMENT
+  // =============================================================================
+
+  router.post('/deduct', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+    const { batch_id, quantity_deducted, reason } = req.body;
+
+    if (!Number.isInteger(Number(quantity_deducted)) || Number(quantity_deducted) <= 0) {
+      return res.status(400).json({ error: 'Quantity deducted must be a positive integer.' });
     }
 
-    // Soft-delete the medicine master
-    await connection.query(
-      'UPDATE MEDICINES SET is_active = FALSE, deleted_at = CURRENT_TIMESTAMP WHERE medicine_id = ?',
-      [medicineId]
-    );
+    const connection = await pool.getConnection();
 
-    // Soft-delete any 0-quantity lots linked to it
-    await connection.query(
-      'UPDATE MEDICINE_BATCHES SET deleted_at = CURRENT_TIMESTAMP WHERE medicine_id = ?',
-      [medicineId]
-    );
+    try {
+      await connection.beginTransaction();
 
-    await logAudit(connection, {
-      userId: req.user.user_id,
-      action: 'DELETE',
-      table: 'MEDICINES',
-      recordId: medicineId,
-      oldValue: medRows[0],
-      newValue: { operation: 'FORMULARY_DELETED', is_active: false },
-      ipAddress: req.ip,
-    });
+      const [batchRows] = await connection.query(
+        'SELECT quantity_on_hand, batch_no FROM MEDICINE_BATCHES WHERE batch_id = ? FOR UPDATE',
+        [batch_id]
+      );
 
-    await connection.commit();
-    res.json({ message: `Medicine "${medRows[0].name}" (${medRows[0].strength}) deleted from formulary.` });
-  } catch (error) {
-    await connection.rollback();
-    console.error('Delete medicine error:', error);
-    res.status(400).json({ error: error.message || 'Failed to delete medicine definition.' });
-  } finally {
-    connection.release();
-  }
-});
+      if (batchRows.length === 0) throw new Error('Medicine batch not found.');
 
-// =============================================================================
-// 4. DISPENSATION & OUTBOUND DEDUCTIONS
-// =============================================================================
+      const oldQuantity = batchRows[0].quantity_on_hand;
+      if (oldQuantity < Number(quantity_deducted)) {
+        throw new Error(`Insufficient stock. Batch ${batchRows[0].batch_no} only has ${oldQuantity} units left.`);
+      }
 
-// POST /api/inventory/deduct - Deduct stock from a specific batch for prescription
-router.post('/deduct', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
-  const { batch_id, quantity_deducted, reason } = req.body;
+      const newQuantity = oldQuantity - Number(quantity_deducted);
 
-  if (!Number.isInteger(Number(quantity_deducted)) || Number(quantity_deducted) <= 0) {
-    return res.status(400).json({ error: 'Quantity deducted must be a positive integer.' });
-  }
+      await connection.query(
+        'UPDATE MEDICINE_BATCHES SET quantity_on_hand = ? WHERE batch_id = ?',
+        [newQuantity, batch_id]
+      );
 
-  const connection = await pool.getConnection();
+      await connection.query(
+        `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
+         VALUES (?, ?, 'dispense', ?, ?)`,
+        [batch_id, -Number(quantity_deducted), reason || 'Manual dispensation', req.user.user_id]
+      );
 
-  try {
-    await connection.beginTransaction();
+      await logAudit(connection, {
+        userId: req.user.user_id,
+        action: 'UPDATE',
+        table: 'MEDICINE_BATCHES',
+        recordId: batch_id,
+        oldValue: { quantity_on_hand: oldQuantity },
+        newValue: { quantity_on_hand: newQuantity },
+        ipAddress: req.ip,
+      });
 
-    const [batchRows] = await connection.query(
-      'SELECT quantity_on_hand, batch_no FROM MEDICINE_BATCHES WHERE batch_id = ? FOR UPDATE',
-      [batch_id]
-    );
+      await connection.commit();
 
-    if (batchRows.length === 0) throw new Error('Medicine batch not found.');
+      if (io) io.emit('inventory:updated');
 
-    const oldQuantity = batchRows[0].quantity_on_hand;
-    if (oldQuantity < Number(quantity_deducted)) {
-      throw new Error(`Insufficient stock. Batch ${batchRows[0].batch_no} only has ${oldQuantity} units left.`);
+      res.json({ message: 'Stock successfully deducted and logged.', remainingStock: newQuantity });
+    } catch (error) {
+      await connection.rollback();
+      res.status(400).json({ error: error.message });
+    } finally {
+      connection.release();
+    }
+  });
+
+  router.post('/adjust', authenticateToken, requireRoles('NURSE', 'ADMIN'), async (req, res) => {
+    const { batch_id, quantity_removed, transaction_type, reason } = req.body;
+    const validTypes = ['dispose', 'adjust', 'recall', 'return'];
+
+    if (!validTypes.includes(transaction_type)) {
+      return res.status(400).json({ error: `transaction_type must be one of: ${validTypes.join(', ')}` });
     }
 
-    const newQuantity = oldQuantity - Number(quantity_deducted);
-
-    await connection.query(
-      'UPDATE MEDICINE_BATCHES SET quantity_on_hand = ? WHERE batch_id = ?',
-      [newQuantity, batch_id]
-    );
-
-    await connection.query(
-      `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
-       VALUES (?, ?, 'dispense', ?, ?)`,
-      [batch_id, -Number(quantity_deducted), reason || 'Prescription issuance', req.user.user_id]
-    );
-
-    await logAudit(connection, {
-      userId: req.user.user_id,
-      action: 'UPDATE',
-      table: 'MEDICINE_BATCHES',
-      recordId: batch_id,
-      oldValue: { quantity_on_hand: oldQuantity },
-      newValue: { quantity_on_hand: newQuantity },
-      ipAddress: req.ip,
-    });
-
-    await connection.commit();
-    res.json({ message: 'Stock successfully deducted and logged.', remainingStock: newQuantity });
-  } catch (error) {
-    await connection.rollback();
-    res.status(400).json({ error: error.message });
-  } finally {
-    connection.release();
-  }
-});
-
-// =============================================================================
-// 5. STOCK ADJUSTMENT & EXPIRED DRUG DISPOSAL
-// =============================================================================
-
-// POST /api/inventory/adjust - Discard expired medicine, damaged bottles, or log returns
-router.post('/adjust', authenticateToken, requireRoles('NURSE', 'ADMIN'), async (req, res) => {
-  const { batch_id, quantity_removed, transaction_type, reason } = req.body;
-  const validTypes = ['dispose', 'adjust', 'recall', 'return'];
-
-  if (!validTypes.includes(transaction_type)) {
-    return res.status(400).json({ error: `transaction_type must be one of: ${validTypes.join(', ')}` });
-  }
-
-  if (!Number.isInteger(Number(quantity_removed)) || Number(quantity_removed) <= 0) {
-    return res.status(400).json({ error: 'Quantity removed must be a positive integer.' });
-  }
-
-  const connection = await pool.getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    const [batchRows] = await connection.query(
-      'SELECT quantity_on_hand, batch_no FROM MEDICINE_BATCHES WHERE batch_id = ? FOR UPDATE',
-      [batch_id]
-    );
-
-    if (batchRows.length === 0) throw new Error('Medicine batch not found.');
-
-    const oldQty = batchRows[0].quantity_on_hand;
-    if (oldQty < Number(quantity_removed)) {
-      throw new Error(`Cannot discard ${quantity_removed} units; lot only has ${oldQty} units.`);
+    if (!Number.isInteger(Number(quantity_removed)) || Number(quantity_removed) <= 0) {
+      return res.status(400).json({ error: 'Quantity removed must be a positive integer.' });
     }
 
-    const newQty = oldQty - Number(quantity_removed);
+    const connection = await pool.getConnection();
 
-    await connection.query('UPDATE MEDICINE_BATCHES SET quantity_on_hand = ? WHERE batch_id = ?', [newQty, batch_id]);
+    try {
+      await connection.beginTransaction();
 
-    await connection.query(
-      `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
-       VALUES (?, ?, ?, ?, ?)`,
-      [batch_id, -Number(quantity_removed), transaction_type, reason || 'Disposal of spoiled/expired drugs', req.user.user_id]
-    );
+      const [batchRows] = await connection.query(
+        'SELECT quantity_on_hand, batch_no FROM MEDICINE_BATCHES WHERE batch_id = ? FOR UPDATE',
+        [batch_id]
+      );
 
-    await logAudit(connection, {
-      userId: req.user.user_id,
-      action: 'UPDATE',
-      table: 'MEDICINE_BATCHES',
-      recordId: batch_id,
-      oldValue: { quantity_on_hand: oldQty },
-      newValue: { quantity_on_hand: newQty, transaction_type, reason },
-      ipAddress: req.ip,
-    });
+      if (batchRows.length === 0) throw new Error('Medicine batch not found.');
 
-    await connection.commit();
+      const oldQty = batchRows[0].quantity_on_hand;
+      if (oldQty < Number(quantity_removed)) {
+        throw new Error(`Cannot discard ${quantity_removed} units; lot only has ${oldQty} units.`);
+      }
 
-    res.json({
-      message: `Adjustment logged. ${quantity_removed} units marked as '${transaction_type}'. Remaining: ${newQty}.`,
-      remainingStock: newQty,
-    });
-  } catch (error) {
-    await connection.rollback();
-    res.status(400).json({ error: error.message });
-  } finally {
-    connection.release();
-  }
-});
+      const newQty = oldQty - Number(quantity_removed);
 
-export default router;
+      await connection.query('UPDATE MEDICINE_BATCHES SET quantity_on_hand = ? WHERE batch_id = ?', [newQty, batch_id]);
+
+      await connection.query(
+        `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
+         VALUES (?, ?, ?, ?, ?)`,
+        [batch_id, -Number(quantity_removed), transaction_type, reason || 'Disposal of spoiled/expired drugs', req.user.user_id]
+      );
+
+      await logAudit(connection, {
+        userId: req.user.user_id,
+        action: 'UPDATE',
+        table: 'MEDICINE_BATCHES',
+        recordId: batch_id,
+        oldValue: { quantity_on_hand: oldQty },
+        newValue: { quantity_on_hand: newQty, transaction_type, reason },
+        ipAddress: req.ip,
+      });
+
+      await connection.commit();
+
+      if (io) io.emit('inventory:updated');
+
+      res.json({
+        message: `Adjustment logged. ${quantity_removed} units marked as '${transaction_type}'. Remaining: ${newQty}.`,
+        remainingStock: newQty,
+      });
+    } catch (error) {
+      await connection.rollback();
+      res.status(400).json({ error: error.message });
+    } finally {
+      connection.release();
+    }
+  });
+
+  return router;
+}
