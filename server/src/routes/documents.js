@@ -102,8 +102,59 @@ router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST
 
 const prescriptionId = headerResult.insertId;
 
-    // Feature 9: Automated FEFO (First-Expiry, First-Out) Inventory Verification & Deduction
-    for (const item of items) {
+// ── DRUG INTERACTION CHECK (before dispensing) ──────────────────
+// Collect all medicine IDs from the prescription items
+const allMedicineIds = items.map((it) => Number(it.medicine_id)).filter(Boolean);
+
+if (allMedicineIds.length >= 2) {
+  const { checkInteractions } = await import('../utils/interactionChecker.js');
+  const foundInteractions = await checkInteractions(connection, allMedicineIds);
+
+  // Block if any contraindicated interaction exists
+  const contraindicated = foundInteractions.filter(
+    (i) => i.severity === 'contraindicated'
+  );
+  if (contraindicated.length > 0) {
+    await connection.rollback();
+    return res.status(409).json({
+      error: 'CONTRAINDICATED_DRUG_INTERACTION',
+      message: 'This prescription contains a contraindicated drug combination and cannot be issued.',
+      interactions: contraindicated.map((i) => ({
+        severity: i.severity,
+        medicine_a: i.medicine_a_name,
+        medicine_b: i.medicine_b_name,
+        description: i.description,
+        recommendation: i.recommendation,
+      })),
+    });
+  }
+
+  // Warn (but allow) for severe interactions — log them in the audit trail
+  const severe = foundInteractions.filter((i) => i.severity === 'severe');
+  if (severe.length > 0) {
+    await logAudit(connection, {
+      userId: doctorUserId,
+      action: 'CREATE',
+      table: 'PRESCRIPTIONS',
+      recordId: prescriptionId,
+      oldValue: null,
+      newValue: {
+        event: 'SEVERE_INTERACTION_OVERRIDE',
+        interactions: severe.map((i) => ({
+          medicine_a: i.medicine_a_name,
+          medicine_b: i.medicine_b_name,
+          severity: i.severity,
+          description: i.description,
+        })),
+      },
+      ipAddress: req.ip,
+    });
+  }
+}
+// ── END DRUG INTERACTION CHECK ──────────────────────────────────
+
+// Feature 9: Automated FEFO ...
+for (const item of items) {
       const medId = Number(item.medicine_id) || 1;
       const qtyRequested = Number(item.quantity_dispensed) || 1;
 
@@ -130,12 +181,17 @@ const prescriptionId = headerResult.insertId;
         [medId]
       );
 
-      const totalStock = availableBatches.reduce((acc, b) => acc + Number(b.quantity_on_hand), 0);
-      if (totalStock < qtyRequested) {
-        throw new Error(
-          `Insufficient unexpired stock for "${medName}". Available: ${totalStock} units, Requested: ${qtyRequested} units.`
-        );
-      }
+   const totalStock = availableBatches.reduce((acc, b) => acc + Number(b.quantity_on_hand), 0);
+   if (totalStock < qtyRequested) {
+     const stockErr = new Error(
+       `Insufficient unexpired stock for "${medName}". Available: ${totalStock} units, Requested: ${qtyRequested} units.`
+     );
+     stockErr.code = 'INSUFFICIENT_STOCK';
+     stockErr.medicine = medName;
+     stockErr.available = totalStock;
+     stockErr.requested = qtyRequested;
+     throw stockErr;
+   }
 
       // 3. Deduct stock across earliest-expiring lots and log each deduction
       let qtyRemainingToDeduct = qtyRequested;
@@ -230,6 +286,14 @@ const prescriptionId = headerResult.insertId;
   } catch (error) {
     await connection.rollback();
     console.error('Prescription Issuance Error:', error);
+    if (error.code === 'INSUFFICIENT_STOCK') {
+      return res.status(409).json({
+        error: 'Insufficient stock available.',
+        medicine: error.medicine,
+        available: error.available,
+        requested: error.requested,
+      });
+    }
     res.status(500).json({ error: 'Failed to issue prescription.' });
   } finally {
     connection.release();

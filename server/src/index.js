@@ -27,6 +27,7 @@ import analyticsRoutes from './routes/analytics.js';
 import syncRoutes from './routes/sync.js';
 import { startReminderScheduler } from './utils/reminderWorker.js';
 import { JWT_SECRET } from './utils/secrets.js';
+import interactionsRoutes from './routes/interactions.js';
 
 
 // Utilities (MinIO S3 & Redis)
@@ -137,6 +138,7 @@ app.use('/api/documents', documentRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/sync', syncRoutes);
+app.use('/api/interactions', interactionsRoutes);
 
 app.get('/api/users/me', authenticateToken, (req, res) => {
   res.json({ message: 'Authenticated', user: req.user });

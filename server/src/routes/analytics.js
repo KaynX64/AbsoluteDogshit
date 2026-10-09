@@ -8,6 +8,7 @@ import { getDiagnosisCounts, getRiskCounts } from '../utils/analyticsStats.js';
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 
+
 const router = express.Router();
 
 router.use(authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'ADMIN'));
