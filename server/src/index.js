@@ -31,6 +31,7 @@ import { JWT_SECRET } from './utils/secrets.js';
 // Utilities (MinIO S3 & Redis)
 import { ensureBucketExists } from './utils/s3Vault.js';
 import { initRedis } from './utils/redisClient.js';
+import { runAutoMigrations } from './db.js';
 
 dotenv.config();
 
@@ -130,8 +131,8 @@ app.use('/api/profile', profileRoutes);
 app.use('/api/health-pass', healthPassRoutes);
 app.use('/api/appointments', appointmentRoutes(io));
 app.use('/api/emergency', emergencyRouter(io));
-app.use('/api/inventory', inventoryRoutes);
-app.use('/api/documents', documentRoutes);
+app.use('/api/inventory', inventoryRoutes(io));
+app.use('/api/documents', documentRoutes(io));
 app.use('/api/admin', adminRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/sync', syncRoutes);
@@ -149,6 +150,7 @@ server.listen(PORT, async () => {
   console.log(`✅ Valetudo HealthLink API & WebSockets running on ${isHttps ? 'HTTPS/WSS' : 'HTTP/WS'} port ${PORT}`);
   await initRedis().catch(() => {});
   await ensureBucketExists().catch(() => {});
+  await runAutoMigrations().catch(() => {});
   logActiveLimits();
   startReminderScheduler(io);
 });

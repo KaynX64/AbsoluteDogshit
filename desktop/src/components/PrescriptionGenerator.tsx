@@ -9,6 +9,8 @@ interface MedicineMaster {
   generic_name: string;
   form: string;
   strength: string;
+  unit?: string;
+  available_stock?: number;
 }
 
 interface PrescriptionGeneratorProps {
@@ -26,7 +28,7 @@ interface PrescriptionGeneratorProps {
   onPrescriptionError?: (message: string) => void;
 }
 
-/* ── Custom themed dropdown (replaces native <select>) ─────────── */
+/* ── Custom themed dropdown showing live stock levels ─────────── */
 function FormularySelect({
   medicines,
   value,
@@ -81,24 +83,40 @@ function FormularySelect({
             ? `${selected.name} (${selected.generic_name}) · ${selected.strength} [${selected.form}]`
             : 'Select medicine…'}
         </span>
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke={T.textSub}
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          style={{
-            width: 14,
-            height: 14,
-            flexShrink: 0,
-            marginLeft: 8,
-            transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
-            transition: 'transform 140ms ease',
-          }}
-        >
-          <path d="M6 9l6 6 6-6" />
-        </svg>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {selected && selected.available_stock !== undefined && (
+            <span
+              style={{
+                fontSize: 10.5,
+                fontWeight: 700,
+                padding: '2px 8px',
+                borderRadius: T.radius.pill,
+                background: selected.available_stock <= 0 ? T.dangerSoft : T.successSoft,
+                color: selected.available_stock <= 0 ? T.danger : T.success,
+              }}
+            >
+              {selected.available_stock <= 0
+                ? 'Out of stock'
+                : `${selected.available_stock} ${selected.unit || 'pcs'}`}
+            </span>
+          )}
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke={T.textSub}
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{
+              width: 14,
+              height: 14,
+              transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 140ms ease',
+            }}
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </div>
       </button>
 
       {open && !disabled && (
@@ -119,19 +137,13 @@ function FormularySelect({
           }}
         >
           {medicines.length === 0 ? (
-            <div
-              style={{
-                padding: '10px 12px',
-                fontSize: 12.5,
-                color: T.textMuted,
-                fontStyle: 'italic',
-              }}
-            >
+            <div style={{ padding: '10px 12px', fontSize: 12.5, color: T.textMuted, fontStyle: 'italic' }}>
               Loading formulary…
             </div>
           ) : (
             medicines.map((m) => {
               const isSelected = m.medicine_id === value;
+              const isOutOfStock = m.available_stock !== undefined && m.available_stock <= 0;
               return (
                 <button
                   key={m.medicine_id}
@@ -141,15 +153,17 @@ function FormularySelect({
                     setOpen(false);
                   }}
                   style={{
-                    display: 'block',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
                     width: '100%',
                     textAlign: 'left',
-                    padding: '10px 12px',
+                    padding: '9px 12px',
                     borderRadius: T.radius.sm,
                     border: 'none',
                     background: isSelected ? T.primaryTint : 'transparent',
-                    color: isSelected ? T.primary : T.text,
-                    fontSize: 13,
+                    color: isOutOfStock ? T.textMuted : isSelected ? T.primary : T.text,
+                    fontSize: 12.5,
                     fontWeight: isSelected ? 700 : 500,
                     cursor: 'pointer',
                     fontFamily: T.font,
@@ -162,7 +176,23 @@ function FormularySelect({
                     if (!isSelected) e.currentTarget.style.background = 'transparent';
                   }}
                 >
-                  {m.name} ({m.generic_name}) · {m.strength} [{m.form}]
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {m.name} ({m.generic_name}) · {m.strength} [{m.form}]
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: T.radius.pill,
+                      background: isOutOfStock ? T.dangerSoft : T.successSoft,
+                      color: isOutOfStock ? T.danger : T.success,
+                      flexShrink: 0,
+                      marginLeft: 8,
+                    }}
+                  >
+                    {isOutOfStock ? '0 in stock' : `${m.available_stock ?? '—'} ${m.unit || 'pcs'}`}
+                  </span>
                 </button>
               );
             })
@@ -206,28 +236,31 @@ export default function PrescriptionGenerator({
     }
   }, [initialNotes, isArchived]);
 
-  useEffect(() => {
-    const fetchCatalog = async () => {
-      const token = localStorage.getItem('valetudo_token');
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/inventory/medicines`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const data: MedicineMaster[] = await res.json();
-          setMedicines(data);
-          if (data.length > 0) {
-            setSelectedMedicineId(data[0].medicine_id);
-            setRxMedName(`${data[0].name} (${data[0].generic_name})`);
-            setRxDosage(data[0].strength);
-          }
+  const fetchCatalog = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/inventory/medicines`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data: MedicineMaster[] = await res.json();
+        setMedicines(data);
+        if (data.length > 0 && !selectedMedicineId) {
+          setSelectedMedicineId(data[0].medicine_id);
+          setRxMedName(`${data[0].name} (${data[0].generic_name})`);
+          setRxDosage(data[0].strength);
         }
-      } catch (err) {
-        console.error('Could not fetch medicines catalog:', err);
       }
-    };
+    } catch (err) {
+      console.error('Could not fetch medicines catalog:', err);
+    }
+  };
+
+  useEffect(() => {
     fetchCatalog();
   }, []);
+
+  const selectedMed = medicines.find((m) => m.medicine_id === selectedMedicineId);
 
   const handleSelectMedicine = (medId: number) => {
     setSelectedMedicineId(medId);
@@ -245,6 +278,25 @@ export default function PrescriptionGenerator({
       }
       return;
     }
+
+    // ── Client-side Stock Safeguard ──────────────────────────────
+    if (selectedMed && selectedMed.available_stock !== undefined) {
+      if (selectedMed.available_stock <= 0) {
+        if (onPrescriptionError) {
+          onPrescriptionError(`❌ Cannot issue prescription: "${selectedMed.name}" is OUT OF STOCK in the infirmary.`);
+        }
+        return;
+      }
+      if (Number(rxQuantity) > selectedMed.available_stock) {
+        if (onPrescriptionError) {
+          onPrescriptionError(
+            `❌ Insufficient stock: Requested ${rxQuantity} ${selectedMed.unit || 'pcs'}, but only ${selectedMed.available_stock} unexpired units are available.`
+          );
+        }
+        return;
+      }
+    }
+
     setIsSaving(true);
     const token = localStorage.getItem('valetudo_token');
 
@@ -274,7 +326,8 @@ export default function PrescriptionGenerator({
       const prescriptionId = data.prescriptionId;
       const emrId = data.emrId;
 
-      // Route success to the parent — it owns the shared feedback banner
+      await fetchCatalog();
+
       if (onPrescriptionIssued) {
         onPrescriptionIssued({ prescriptionId, qrToken: realQrToken, emrId });
       }
@@ -355,7 +408,6 @@ export default function PrescriptionGenerator({
         }
       }
     } catch (err: any) {
-      // Route error to the parent — no more blocking alert()
       if (onPrescriptionError) {
         onPrescriptionError('❌ Error issuing prescription: ' + err.message);
       } else {
@@ -366,22 +418,24 @@ export default function PrescriptionGenerator({
     }
   };
 
-  /* ── Field wrapper ────────────────────────────────────────── */
   const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <div>
-      <label style={{
-        display: 'block', fontSize: 11.5, fontWeight: 700,
-        color: T.textSub, marginBottom: 6,
-      }}>
+      <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, color: T.textSub, marginBottom: 6 }}>
         {label}
       </label>
       {children}
     </div>
   );
 
+  const isOutOfStock = selectedMed && selectedMed.available_stock !== undefined && selectedMed.available_stock <= 0;
+  const isOverStock =
+    selectedMed &&
+    selectedMed.available_stock !== undefined &&
+    selectedMed.available_stock > 0 &&
+    Number(rxQuantity) > selectedMed.available_stock;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* Formulary picker (custom themed dropdown) */}
       <Field label="Medicine (formulary)">
         <FormularySelect
           medicines={medicines}
@@ -391,7 +445,6 @@ export default function PrescriptionGenerator({
         />
       </Field>
 
-      {/* Dosage & quantity */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field label="Dosage">
           <input
@@ -401,19 +454,37 @@ export default function PrescriptionGenerator({
             onChange={(e) => setRxDosage(e.target.value)}
           />
         </Field>
-        <Field label="Quantity (pcs/bottles)">
+        <Field label="Quantity to dispense">
           <input
             type="number"
             min="1"
-            style={inputStyle}
+            style={{
+              ...inputStyle,
+              borderColor: isOutOfStock || isOverStock ? T.danger : undefined,
+            }}
             disabled={isArchived}
             value={rxQuantity}
             onChange={(e) => setRxQuantity(e.target.value)}
           />
+          {selectedMed && selectedMed.available_stock !== undefined && (
+            <div
+              style={{
+                fontSize: 10.5,
+                fontWeight: 700,
+                marginTop: 4,
+                color: isOutOfStock ? T.danger : isOverStock ? T.warning : T.textSub,
+              }}
+            >
+              {isOutOfStock
+                ? '⚠️ Currently OUT OF STOCK'
+                : isOverStock
+                ? `⚠️ Exceeds unexpired stock (${selectedMed.available_stock} available)`
+                : `Stock on hand: ${selectedMed.available_stock} ${selectedMed.unit || 'pcs'} (FEFO)`}
+            </div>
+          )}
         </Field>
       </div>
 
-      {/* Frequency & duration */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field label="Frequency">
           <input
@@ -435,7 +506,6 @@ export default function PrescriptionGenerator({
         </Field>
       </div>
 
-      {/* Instructions */}
       <Field label="Instructions (sig)">
         <textarea
           rows={2}
@@ -446,7 +516,6 @@ export default function PrescriptionGenerator({
         />
       </Field>
 
-      {/* Physician dietary / clinical notes */}
       <Field label="Physician dietary / clinical notes">
         <input
           style={inputStyle}
@@ -456,26 +525,28 @@ export default function PrescriptionGenerator({
         />
       </Field>
 
-      {/* Submit */}
       <button
         type="button"
         onClick={handleSaveAndPrintPrescription}
-        disabled={isSaving || isArchived}
+        disabled={isSaving || isArchived || Boolean(isOutOfStock) || Boolean(isOverStock)}
         style={{
           ...btnPrimary,
           width: '100%',
           padding: 13,
-          opacity: (isSaving || isArchived) ? 0.5 : 1,
-          cursor: (isSaving || isArchived) ? 'not-allowed' : 'pointer',
+          opacity: isSaving || isArchived || isOutOfStock || isOverStock ? 0.5 : 1,
+          cursor: isSaving || isArchived || isOutOfStock || isOverStock ? 'not-allowed' : 'pointer',
         }}
       >
         {isArchived
           ? '🔒 Prescription issued & archived'
+          : isOutOfStock
+          ? '❌ Cannot issue: Formulary Out of Stock'
+          : isOverStock
+          ? '⚠️ Cannot issue: Quantity exceeds available stock'
           : isSaving
-          ? 'Signing & printing…'
-          : '🖨️ Issue, sign & print prescription'}
+          ? 'Signing & deducting inventory…'
+          : '🖨️ Issue, deduct inventory & print prescription'}
       </button>
-      {/* No local feedback line — parent renders it in the issuance panel header */}
     </div>
   );
 }
