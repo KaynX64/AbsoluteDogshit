@@ -52,7 +52,7 @@ export const PHI_PATIENT_SOURCE = {
 };
 
 const BCRYPT_RE = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/;
-const CIPHERTEXT_RE = /^enc:v1:[0-9a-f]{24}:[0-9a-f]{32}:[0-9a-f]+$/;
+const CIPHERTEXT_RE = /^enc:v[12]:[0-9a-f]{24}:[0-9a-f]{32}:[0-9a-f]+$/;
 
 export const isReadOnlyTable = (table) => READ_ONLY_TABLES.includes(table);
 export const isEncryptedCol = (table, col) => (ENCRYPTED_COLUMNS[table] || []).includes(col);
@@ -156,7 +156,7 @@ export function protectValues(table, values) {
     } else if (isEncryptedCol(table, col)) {
       if (val === null || val === '') {
         out[col] = val;
-      } else if (typeof val === 'string' && val.startsWith('enc:v1:')) {
+      } else if (typeof val === 'string' && /^enc:v[12]:/.test(val)) {
         if (!isValidCiphertext(val)) throw fail(`${table}.${col} contains malformed or tampered ciphertext.`);
         out[col] = val;
       } else {

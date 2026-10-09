@@ -1457,7 +1457,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                             )}
                             {tableSchema.map((col) => {
                               const val = row[col.columnName];
-                              const isEncrypted = typeof val === 'string' && val.startsWith('enc:v1:');
+                              const isEncrypted = typeof val === 'string' && /^enc:v[12]:/.test(val);
                               return (
                                 <td key={col.columnName} style={{
                                   padding: '8px 12px',
