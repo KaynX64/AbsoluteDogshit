@@ -617,6 +617,15 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   Future<void> _handleSignOut() async {
+    final token = await _storage.read(key: 'jwt_token');
+    if (token != null) {
+      try {
+        await ApiConfig.client.post(
+          Uri.parse('${ApiConfig.baseUrl}/api/auth/logout'),
+          headers: {'Authorization': 'Bearer $token'},
+        );
+      } catch (_) {}
+    }
     await _storage.delete(key: 'jwt_token');
     await _storage.delete(key: 'user_data');
     if (!mounted) return;

@@ -4,7 +4,7 @@ import NurseConsole from './components/NurseConsole';
 import DoctorConsole from './components/DoctorConsole';
 import AdminConsole from './components/AdminConsole';
 import ResponderConsole from './components/ResponderConsole';
-import {useBookingBadge } from './hooks/useBookingBadge';
+import { useBookingBadge } from './hooks/useBookingBadge';
 import {
   getOfflineQueue,
   replayOfflineQueue,
@@ -145,7 +145,7 @@ interface SidebarProps {
   badgeCounts?: Record<string, number>;
 }
 
-function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick,badgeCounts }: SidebarProps) {
+function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, badgeCounts }: SidebarProps) {
   const navByRole: Record<string, { key: string; label: string; icon: React.ReactNode }[]> = {
     ADMIN: [
       { key: 'users',     label: 'Users',      icon: <I.Users /> },
@@ -226,10 +226,10 @@ function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick,ba
             >
               {item.icon}
               {(badgeCounts?.[item.key] ?? 0) > 0 && (
-  <span key={badgeCounts![item.key]} className="sb-badge">
-    {badgeCounts![item.key] > 99 ? '99+' : badgeCounts![item.key]}
-  </span>
-)}
+                <span key={badgeCounts![item.key]} className="sb-badge">
+                  {badgeCounts![item.key] > 99 ? '99+' : badgeCounts![item.key]}
+                </span>
+              )}
               <span>{item.label}</span>
             </button>
           );
@@ -509,15 +509,37 @@ export default function App() {
   const [passwordMsg, setPasswordMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const [isSubmittingPassword, setIsSubmittingPassword] = useState(false);
 
+  // ── Session Logout & Token Invalidation ───────────────────────
+  const handleSignOut = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    if (token) {
+      try {
+        await fetch(`${API_BASE_URL}/api/auth/logout`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } catch (_) {}
+    }
+    localStorage.removeItem('valetudo_token');
+    localStorage.removeItem('token');
+
+    // Purge cached credentials and role state from React memory
+    setPassword('');
+    setEmail('');
+    setActiveRoleView('');
+    setUser(null);
+  };
+
   const isResponder =
     activeRoleView === 'EMERGENCY_RESPONDER' ||
     (user?.roles?.length === 1 && user.roles[0] === 'EMERGENCY_RESPONDER');
   useSessionTimeout(Boolean(user) && !isResponder, 480);
-       const bookingBadge = useBookingBadge(activeRoleView, Boolean(user));
-     const badgeKey =
-       activeRoleView === 'NURSE' ? 'expected'
-       : (activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST') ? 'scheduled'
-       : null;
+
+  const bookingBadge = useBookingBadge(activeRoleView, Boolean(user));
+  const badgeKey =
+    activeRoleView === 'NURSE' ? 'expected'
+    : (activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST') ? 'scheduled'
+    : null;
 
   useEffect(() => {
     const updateOnline = () => setIsOnline(true);
@@ -652,7 +674,7 @@ export default function App() {
       <Sidebar
         role={activeRoleView}
         badgeCounts={badgeKey ? { [badgeKey]: bookingBadge } : undefined}
-        onSignOut={() => setUser(null)}
+        onSignOut={handleSignOut}
         onChangePassword={() => { setShowPasswordModal(true); setPasswordMsg(null); }}
         activeItem={
           activeRoleView === 'ADMIN' ? adminTab

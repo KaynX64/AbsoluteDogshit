@@ -6,24 +6,40 @@ import { decrypt } from '../utils/cryptoVault.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { sendPushToRoles } from '../utils/fcmNotifier.js';
 import { logAudit } from '../utils/auditLogger.js';
-import { SOS_LIMIT } from '../config/limits.js';
 import { redis, isRedisActive, invalidateCache } from '../utils/redisClient.js';
+import { SOS_LIMIT } from '../config/limits.js';
 
 // ── Rate Limiter Middleware para sa SOS ─────────────────────────────
+function sosRateLimitKey(userIdOrIp) {
+  return `ratelimit:sos:${userIdOrIp}`;
+}
+
 async function sosRateLimit(req, res, next) {
   if (!isRedisActive()) return next();
-  const userId = req.user?.user_id || req.ip || 'unknown';
-  const key = `ratelimit:sos:${userId}`;
+
+  const identifier = req.user?.user_id || req.ip || 'unknown';
+  const key = sosRateLimitKey(identifier);
+
   try {
     const count = await redis.incr(key);
-    if (count === 1) await redis.expire(key, SOS_LIMIT.windowSeconds);
+
+    if (count === 1) {
+      await redis.expire(key, SOS_LIMIT.windowSeconds);
+    }
+
     if (count > SOS_LIMIT.maxAttempts) {
       const ttl = await redis.ttl(key);
-      res.setHeader('Retry-After', String(ttl > 0 ? ttl : SOS_LIMIT.windowSeconds));
+      const retrySec = ttl > 0 ? ttl : SOS_LIMIT.windowSeconds;
+      res.setHeader('Retry-After', String(retrySec));
       return res.status(429).json({
-        error: `SOS rate limit exceeded. Please wait ${ttl > 0 ? ttl : SOS_LIMIT.windowSeconds}s before retrying.`,
+        error: `Emergency alert throttle exceeded. Please wait ${retrySec} second(s) before triggering another SOS.`,
       });
     }
+
+    res.setHeader(
+      'X-RateLimit-Remaining',
+      String(Math.max(0, SOS_LIMIT.maxAttempts - count))
+    );
     next();
   } catch (err) {
     console.error('[SOS Rate Limit Error]:', err.message);
@@ -100,30 +116,34 @@ export default function emergencyRouter(io) {
            VALUES (?, ST_SRID(POINT(?, ?), 4326), 'triggered', ?)`,
           [userId, lng, lat, enrichedNotes]
         );
+
         alertId = insertResult.insertId;
 
-        // 2. Automated Live Queue Insertion (Feature 4 Requirement)
-        // I-check kung may active ticket na siya sa QUEUE ngayong araw
+        // Feature 4 & 7: Auto-insert prioritized emergency ticket into daily triage QUEUE
         const [existingQueue] = await connection.query(
           `SELECT queue_id FROM QUEUE 
-           WHERE patient_user_id = ? 
-             AND queue_date = CURDATE() 
-             AND status IN ('waiting', 'in-consultation')
+           WHERE patient_user_id = ? AND queue_date = CURDATE() AND status IN ('waiting', 'in-consultation') 
            LIMIT 1`,
           [userId]
         );
 
-        if (existingQueue.length === 0) {
-          // Kunin ang next queue number
+        if (existingQueue.length > 0) {
+          // Elevate existing waiting ticket to immediate priority consultation
+          await connection.query(
+            `UPDATE QUEUE SET status = 'in-consultation', served_at = CURRENT_TIMESTAMP 
+             WHERE queue_id = ?`,
+            [existingQueue[0].queue_id]
+          );
+        } else {
+          // Generate next queue ticket number and insert as prioritized in-consultation ticket
           const [numRows] = await connection.query(
-            'SELECT COALESCE(MAX(queue_number), 0) + 1 AS next_num FROM QUEUE WHERE queue_date = CURDATE() AND counter_id = 1'
+            'SELECT COALESCE(MAX(queue_number), 0) + 1 AS next_num FROM QUEUE WHERE queue_date = CURDATE()'
           );
           const nextNum = numRows[0].next_num;
 
           await connection.query(
-            `INSERT INTO QUEUE 
-               (patient_user_id, appointment_id, queue_date, counter_id, queue_number, status, checked_in_at)
-             VALUES (?, NULL, CURDATE(), 1, ?, 'waiting', CURRENT_TIMESTAMP)`,
+            `INSERT INTO QUEUE (patient_user_id, appointment_id, queue_date, counter_id, queue_number, status, checked_in_at, served_at)
+             VALUES (?, NULL, CURDATE(), 1, ?, 'in-consultation', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
             [userId, nextNum]
           );
         }
@@ -141,6 +161,7 @@ export default function emergencyRouter(io) {
             formattedAddress,
             notes: enrichedNotes,
             queued_to_triage: true,
+            triage_escalation: 'QUEUE_PRIORITY_ESCALATED',
           },
           ipAddress: req.ip,
         });
@@ -215,11 +236,11 @@ export default function emergencyRouter(io) {
         data: { alertId: String(alertId), type: 'EMERGENCY_SOS' },
       }).catch((err) => console.error('[FCM SOS Push Error]:', err.message));
 
-      // 2. Broadcast via WebSockets sa responders at sa Live Triage Queue
+      // 2. Broadcast via WebSockets (Socket.IO) to both responder room and clinical consoles
       if (io) {
         io.to('responders').emit('emergency:new_alert', alertPayload);
         io.emit('emergency:new_alert', alertPayload);
-        io.emit('queue:updated'); // 👈 Papasok agad ang emergency sa Live Queue!
+        io.emit('queue:updated'); // Instantly refreshes Nurse live triage queue
       }
 
       res.status(201).json({
@@ -308,8 +329,9 @@ export default function emergencyRouter(io) {
           params
         );
 
-        // Kapag na-resolve o naging false alarm, tapusin din ang ticket sa QUEUE
+        // If resolving or closing out an SOS, mark its queue ticket as done or cancelled
         if (status === 'resolved' || status === 'false_alarm') {
+          const queueFinalStatus = status === 'resolved' ? 'done' : 'cancelled';
           const [alertRows] = await connection.query(
             'SELECT user_id FROM EMERGENCY_ALERTS WHERE alert_id = ?',
             [alertId]
@@ -317,9 +339,9 @@ export default function emergencyRouter(io) {
           if (alertRows.length > 0) {
             await connection.query(
               `UPDATE QUEUE 
-               SET status = 'done', served_at = CURRENT_TIMESTAMP 
-               WHERE patient_user_id = ? AND queue_date = CURDATE() AND status IN ('waiting', 'in-consultation')`,
-              [alertRows[0].user_id]
+               SET status = ?, served_at = CURRENT_TIMESTAMP 
+               WHERE patient_user_id = ? AND queue_date = CURDATE() AND status IN ('in-consultation', 'waiting')`,
+              [queueFinalStatus, alertRows[0].user_id]
             );
           }
         }
@@ -335,7 +357,7 @@ export default function emergencyRouter(io) {
 
       if (io) {
         io.emit('emergency:status_change', { alertId: Number(alertId), status, responderId });
-        io.emit('queue:updated'); // 👈 Auto-clear o update sa queue
+        io.emit('queue:updated');
       }
 
       res.json({ message: `Alert #${alertId} updated to ${status}.` });

@@ -9,8 +9,9 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
-import { loginUser, authenticateToken, changePassword, loginRateLimit } from './auth.js';
+import { loginUser, authenticateToken, changePassword, loginRateLimit, logoutUser } from './auth.js';
 import { logActiveLimits } from './config/limits.js';
+
 
 
 // Route imports
@@ -26,6 +27,7 @@ import analyticsRoutes from './routes/analytics.js';
 import syncRoutes from './routes/sync.js';
 import { startReminderScheduler } from './utils/reminderWorker.js';
 import { JWT_SECRET } from './utils/secrets.js';
+import interactionsRoutes from './routes/interactions.js';
 
 
 // Utilities (MinIO S3 & Redis)
@@ -124,6 +126,7 @@ io.on('connection', (socket) => {
 // API ROUTES
 // =============================================================================
 app.post('/api/auth/login', loginRateLimit, loginUser);
+app.post('/api/auth/logout', authenticateToken, logoutUser);  
 app.put('/api/auth/change-password', authenticateToken, changePassword);
 
 app.use('/api/privacy', privacyRouter);
@@ -136,6 +139,7 @@ app.use('/api/documents', documentRoutes(io));
 app.use('/api/admin', adminRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/sync', syncRoutes);
+app.use('/api/interactions', interactionsRoutes);
 
 app.get('/api/users/me', authenticateToken, (req, res) => {
   res.json({ message: 'Authenticated', user: req.user });

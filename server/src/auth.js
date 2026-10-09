@@ -6,6 +6,7 @@ import { logAudit } from './utils/auditLogger.js';
 import { JWT_SECRET } from './utils/secrets.js';
 import { redis, isRedisActive } from './utils/redisClient.js';
 import { LOGIN_LIMIT } from './config/limits.js';
+import crypto from 'crypto';
 
 // S-09: Pre-computed dummy hash to prevent user-enumeration timing attacks
 // bcrypt.compare against this hash takes the same ~100ms as a real check,
@@ -144,12 +145,14 @@ export async function loginUser(req, res) {
       });
     }
 
-    // 3. Issue JWT Token (Valid 24 hours)
+    // 3. Issue JWT Token (Valid 24 hours) with unique JTI for Redis revocation tracking
+    const jti = crypto.randomUUID();
     const token = jwt.sign(
       {
         user_id: user.user_id,
         email: user.email,
         roles: roleCodes,
+        jti,
       },
       JWT_SECRET,
       { expiresIn: '24h' }
@@ -205,9 +208,27 @@ export function authenticateToken(req, res, next) {
     return res.status(401).json({ error: 'Access token required.' });
   }
 
-  jwt.verify(token, JWT_SECRET, (err, user) => {
+  jwt.verify(token, JWT_SECRET, async (err, user) => {
     if (err) return res.status(403).json({ error: 'Token expired or invalid.' });
+
+    // Check Redis revocation blocklist
+    if (isRedisActive()) {
+      try {
+        const blacklistKey = user.jti ? `token:blacklist:${user.jti}` : `token:blacklist:${token}`;
+        const isRevoked = await redis.get(blacklistKey);
+        if (isRevoked) {
+          return res.status(401).json({
+            error: 'TOKEN_REVOKED',
+            message: 'Session has been invalidated. Please log in again.',
+          });
+        }
+      } catch (redisErr) {
+        console.error('[Token Revocation Check Warning]:', redisErr.message);
+      }
+    }
+
     req.user = user;
+    req.token = token;
     next();
   });
 }
@@ -248,6 +269,13 @@ export async function changePassword(req, res) {
     const newHash = await bcrypt.hash(newPassword, 10);
     await pool.query('UPDATE USERS SET password_hash = ? WHERE user_id = ?', [newHash, userId]);
 
+    // Invalidate current JWT in Redis so caller is forced to re-authenticate with new credentials
+    if (req.user && isRedisActive()) {
+      const now = Math.floor(Date.now() / 1000);
+      const remainingSeconds = req.user.exp ? Math.max(req.user.exp - now, 60) : 86400;
+      const blacklistKey = req.user.jti ? `token:blacklist:${req.user.jti}` : `token:blacklist:${req.token}`;
+      await redis.set(blacklistKey, 'revoked_password_change', 'EX', remainingSeconds).catch(() => {});
+    }
     const connection = await pool.getConnection();
     try {
       await logAudit(connection, {
@@ -267,5 +295,46 @@ export async function changePassword(req, res) {
   } catch (error) {
     console.error('[Change Password Error]:', error);
     res.status(500).json({ error: 'Failed to update password.' });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// LOGOUT & SESSION TERMINATION
+// ─────────────────────────────────────────────────────────────────────────
+export async function logoutUser(req, res) {
+  try {
+    const user = req.user;
+    const token = req.token;
+
+    // Invalidate token in Redis until its natural expiration
+    if (user && isRedisActive()) {
+      const now = Math.floor(Date.now() / 1000);
+      const remainingSeconds = user.exp ? Math.max(user.exp - now, 60) : 86400;
+      const blacklistKey = user.jti ? `token:blacklist:${user.jti}` : `token:blacklist:${token}`;
+      await redis.set(blacklistKey, 'revoked_logout', 'EX', remainingSeconds);
+    }
+
+    // Record session termination to R.A. 10173 Audit Ledger
+    const connection = await pool.getConnection();
+    try {
+      await logAudit(connection, {
+        userId: user?.user_id || null,
+        action: 'UPDATE',
+        table: 'AUTH_SESSIONS',
+        recordId: user?.user_id || null,
+        oldValue: null,
+        newValue: { event: 'USER_LOGOUT_SESSION_TERMINATED', email: user?.email },
+        ipAddress: req.ip,
+      });
+    } catch (auditErr) {
+      console.error('[Logout Audit Warning]:', auditErr.message);
+    } finally {
+      connection.release();
+    }
+
+    res.json({ message: 'Session terminated and token invalidated successfully.' });
+  } catch (error) {
+    console.error('[Logout Error]:', error);
+    res.status(500).json({ error: 'Failed to process session logout.' });
   }
 }

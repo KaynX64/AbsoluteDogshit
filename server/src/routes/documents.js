@@ -18,6 +18,8 @@ import {
 } from '../utils/documentService.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
 import { JWT_SECRET } from '../utils/secrets.js';
+import { redis, isRedisActive } from '../utils/redisClient.js';
+import { VERIFY_LIMIT } from '../config/limits.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,6 +53,37 @@ export default function documentRoutes(io) {
           throw new Error(`Quantity dispensed for all prescribed items must be a positive integer.`);
         }
         requestedByMedicine[medId] = (requestedByMedicine[medId] || 0) + qty;
+      }
+
+      // ── DRUG INTERACTION CHECK (read-only; blocks contraindicated combos) ───
+      // Runs before any writes so a blocked pair cannot leave orphan records.
+      let severeInteractions = [];
+      {
+        const allMedicineIds = items.map((it) => Number(it.medicine_id)).filter(Boolean);
+        if (allMedicineIds.length >= 2) {
+          const { checkInteractions } = await import('../utils/interactionChecker.js');
+          const foundInteractions = await checkInteractions(connection, allMedicineIds);
+
+          const contraindicated = foundInteractions.filter(
+            (i) => i.severity === 'contraindicated'
+          );
+          if (contraindicated.length > 0) {
+            await connection.rollback();
+            return res.status(409).json({
+              error: 'CONTRAINDICATED_DRUG_INTERACTION',
+              message: 'This prescription contains a contraindicated drug combination and cannot be issued.',
+              interactions: contraindicated.map((i) => ({
+                severity: i.severity,
+                medicine_a: i.medicine_a_name,
+                medicine_b: i.medicine_b_name,
+                description: i.description,
+                recommendation: i.recommendation,
+              })),
+            });
+          }
+
+          severeInteractions = foundInteractions.filter((i) => i.severity === 'severe');
+        }
       }
 
       // ── FEFO Verification & Batch Allocation ────────────────────────────────
@@ -90,10 +123,15 @@ export default function documentRoutes(io) {
         const totalAvailable = batches.reduce((sum, b) => sum + Number(b.quantity_on_hand), 0);
 
         if (totalAvailable < qtyNeeded) {
-          throw new Error(
+          const stockErr = new Error(
             `Insufficient unexpired stock for "${medName} (${genericName})". ` +
             `Requested: ${qtyNeeded}, Available in pharmacy: ${totalAvailable}.`
           );
+          stockErr.code = 'INSUFFICIENT_STOCK';
+          stockErr.medicine = medName;
+          stockErr.available = totalAvailable;
+          stockErr.requested = qtyNeeded;
+          throw stockErr;
         }
 
         // Allocate across earliest-expiring batches
@@ -235,6 +273,27 @@ export default function documentRoutes(io) {
         });
       }
 
+      // ── Log severe-but-not-blocking interactions (physician override trail) ─
+      if (severeInteractions.length > 0) {
+        await logAudit(connection, {
+          userId: doctorUserId,
+          action: 'CREATE',
+          table: 'PRESCRIPTIONS',
+          recordId: prescriptionId,
+          oldValue: null,
+          newValue: {
+            event: 'SEVERE_INTERACTION_OVERRIDE',
+            interactions: severeInteractions.map((i) => ({
+              medicine_a: i.medicine_a_name,
+              medicine_b: i.medicine_b_name,
+              severity: i.severity,
+              description: i.description,
+            })),
+          },
+          ipAddress: req.ip,
+        });
+      }
+
       // ── R.A. 10173 Audit Ledger Entries ─────────────────────────────────────
       await logAudit(connection, {
         userId: doctorUserId,
@@ -287,13 +346,21 @@ export default function documentRoutes(io) {
     } catch (error) {
       await connection.rollback();
       console.error('Prescription Issuance Error:', error);
+      if (error.code === 'INSUFFICIENT_STOCK') {
+        return res.status(409).json({
+          error: 'Insufficient stock available.',
+          medicine: error.medicine,
+          available: error.available,
+          requested: error.requested,
+        });
+      }
       res.status(400).json({ error: error.message || 'Failed to issue prescription.' });
     } finally {
       connection.release();
     }
   });
 
-  // GET /api/documents/prescriptions/my
+  // GET /api/documents/prescriptions/my (Decrypted for authorized patient)
   router.get('/prescriptions/my', authenticateToken, requirePrivacyConsent, async (req, res) => {
     try {
       const userId = req.user.user_id;
@@ -635,6 +702,11 @@ export default function documentRoutes(io) {
           return res.status(409).json({ error: 'Clearance is already revoked.', code: 'ALREADY_REVOKED' });
         }
 
+        if (clearance.status === 'expired') {
+          await connection.rollback();
+          return res.status(409).json({ error: 'Cannot revoke an already-expired clearance.', code: 'ALREADY_EXPIRED' });
+        }
+
         const revokedAt = new Date().toISOString();
         const revocationPatch = {
           revoked_at: revokedAt,
@@ -680,6 +752,7 @@ export default function documentRoutes(io) {
         });
       } catch (error) {
         await connection.rollback();
+        console.error('[Clearance Revoke Error]:', error);
         res.status(400).json({ error: error.message || 'Failed to revoke clearance.' });
       } finally {
         connection.release();
@@ -688,9 +761,10 @@ export default function documentRoutes(io) {
   );
 
   // =============================================================================
-  // 3. UNIVERSAL QR VERIFICATION
+  // 3. PUBLIC VERIFICATION HELPERS (privacy-minimizing + throttling)
   // =============================================================================
 
+  // Helper to reliably locate verify.html across environments
   function getVerifyHtmlPath() {
     const candidates = [
       path.join(__dirname, '../../public/verify.html'),
@@ -701,21 +775,104 @@ export default function documentRoutes(io) {
     return candidates.find((p) => fs.existsSync(p)) || null;
   }
 
-  router.get('/verify/:qrToken', async (req, res) => {
+  // "Juan Dela Cruz" -> "Juan D."
+  function maskPatientName(first, last) {
+    const f = String(first || '').trim();
+    const l = String(last || '').trim();
+    if (!f) return 'Patient';
+    return l ? `${f} ${l.charAt(0).toUpperCase()}.` : f;
+  }
+
+  function parseMetadata(raw) {
+    if (!raw) return {};
+    if (typeof raw === 'object') return raw;
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  // Only expose integrity info — never signer IDs, license numbers, or free-text fields.
+  function pickPublicSignature(meta) {
+    return {
+      algorithm: meta.algorithm ?? null,
+      signed_at: meta.signed_at ?? null,
+      document_sha256: meta.document_sha256 ?? null,
+    };
+  }
+
+  // Per-IP limiter for unauthenticated verification. Uses Redis when available,
+  // falls back to an in-memory counter so it never fails open.
+  const verifyMemoryHits = new Map();
+
+  async function verifyRateLimit(req, res, next) {
+    const identifier = req.ip || 'unknown';
+    let count;
+    let retrySec = VERIFY_LIMIT.windowSeconds;
+
+    try {
+      if (isRedisActive()) {
+        const key = `ratelimit:verify:${identifier}`;
+        count = await redis.incr(key);
+        if (count === 1) await redis.expire(key, VERIFY_LIMIT.windowSeconds);
+        if (count > VERIFY_LIMIT.maxAttempts) {
+          const ttl = await redis.ttl(key);
+          if (ttl > 0) retrySec = ttl;
+        }
+      }
+    } catch (err) {
+      console.error('[Verify Rate Limit Error]:', err.message);
+      count = undefined;
+    }
+
+    if (count === undefined) {
+      const now = Date.now();
+      let entry = verifyMemoryHits.get(identifier);
+      if (!entry || entry.resetAt <= now) {
+        entry = { count: 0, resetAt: now + VERIFY_LIMIT.windowSeconds * 1000 };
+        verifyMemoryHits.set(identifier, entry);
+      }
+      entry.count += 1;
+      count = entry.count;
+      retrySec = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
+
+      if (verifyMemoryHits.size > 5000) {
+        for (const [k, v] of verifyMemoryHits) {
+          if (v.resetAt <= now) verifyMemoryHits.delete(k);
+        }
+      }
+    }
+
+    if (count > VERIFY_LIMIT.maxAttempts) {
+      res.setHeader('Retry-After', String(retrySec));
+      return res.status(429).json({
+        valid: false,
+        verified: false,
+        error: `Too many verification attempts. Try again in ${retrySec} second(s).`,
+      });
+    }
+    next();
+  }
+
+  // =============================================================================
+  // 4. UNIVERSAL QR VERIFICATION (PUBLIC — privacy-minimized)
+  // =============================================================================
+
+  router.get('/verify/:qrToken', verifyRateLimit, async (req, res) => {
     const { qrToken } = req.params;
     const acceptsHtml = req.accepts('html') && !req.xhr && !req.headers['accept']?.includes('application/json');
 
     try {
+      // 1. Check if token is a Medical Clearance
       const [clearances] = await pool.query(
-        `SELECT mc.clearance_id, mc.purpose, mc.status, mc.issued_at, mc.expires_at,
-                mc.signature_metadata,
+        `SELECT mc.purpose, mc.status, mc.issued_at, mc.expires_at, mc.signature_metadata,
                 u.first_name AS patient_first_name, u.last_name AS patient_last_name,
-                sp.student_no, sp.course,
                 doc.first_name AS doc_first_name, doc.last_name AS doc_last_name,
                 staff.license_no AS doc_license
          FROM MEDICAL_CLEARANCES mc
          JOIN USERS u ON mc.user_id = u.user_id
-         LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
          JOIN USERS doc ON mc.issued_by = doc.user_id
          LEFT JOIN STAFF_PROFILES staff ON doc.user_id = staff.user_id
          WHERE mc.qr_token = ? AND mc.deleted_at IS NULL`,
@@ -727,11 +884,7 @@ export default function documentRoutes(io) {
         const isExpired = new Date(c.expires_at) < new Date();
         const isRevoked = c.status === 'revoked';
         const isValid = !isExpired && !isRevoked && c.status === 'approved';
-
-        const metadata =
-          typeof c.signature_metadata === 'string'
-            ? JSON.parse(c.signature_metadata)
-            : c.signature_metadata || {};
+        const metadata = parseMetadata(c.signature_metadata);
 
         if (acceptsHtml) {
           const verifyHtml = getVerifyHtmlPath();
@@ -744,28 +897,27 @@ export default function documentRoutes(io) {
           type: 'MEDICAL_CLEARANCE',
           purpose: c.purpose,
           status: isRevoked ? 'revoked' : isExpired ? 'expired' : c.status,
-          revokeReason: isRevoked ? metadata.revocation_reason || null : null,
+          revokeReason: null,   // free-text reason may contain medical details — staff only
           revokedAt: isRevoked ? metadata.revoked_at || null : null,
-          patient: `${c.patient_first_name} ${c.patient_last_name}`,
-          studentNo: c.student_no || 'N/A',
-          course: c.course || 'N/A',
+          patient: maskPatientName(c.patient_first_name, c.patient_last_name),
+          studentNo: 'N/A',     // placeholder so existing verify.html does not break
+          course: 'N/A',        // placeholder so existing verify.html does not break
           issuedBy: `Dr. ${c.doc_first_name} ${c.doc_last_name} (${c.doc_license || 'PRC Verified'})`,
           issuedAt: c.issued_at,
           expiresAt: c.expires_at,
-          metadata,
-          clearance: c,
+          metadata: pickPublicSignature(metadata),
         });
       }
 
+      // 2. Check if token is a Prescription
+      // PUBLIC view = authenticity only. No medications, dosages, notes, student no., or course.
       const [prescriptions] = await pool.query(
-        `SELECT p.prescription_id, p.status, p.issued_at, p.notes, p.signature_metadata,
+        `SELECT p.status, p.issued_at, p.signature_metadata,
                 u.first_name AS patient_first_name, u.last_name AS patient_last_name,
-                sp.student_no, sp.course,
                 doc.first_name AS doc_first_name, doc.last_name AS doc_last_name,
                 staff.license_no AS doc_license
          FROM PRESCRIPTIONS p
          JOIN USERS u ON p.patient_user_id = u.user_id
-         LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
          JOIN USERS doc ON p.doctor_user_id = doc.user_id
          LEFT JOIN STAFF_PROFILES staff ON doc.user_id = staff.user_id
          WHERE p.qr_token = ? AND p.deleted_at IS NULL`,
@@ -777,20 +929,6 @@ export default function documentRoutes(io) {
         const isCancelled = p.status === 'cancelled';
         const isValid = !isCancelled && (p.status === 'active' || p.status === 'dispensed');
 
-        const [items] = await pool.query(
-          `SELECT pi.dosage, pi.frequency, pi.route, pi.duration_days, pi.quantity_dispensed, pi.instructions,
-                  m.name AS medicine_name, m.generic_name
-           FROM PRESCRIPTION_ITEMS pi
-           JOIN MEDICINES m ON pi.medicine_id = m.medicine_id
-           WHERE pi.prescription_id = ?`,
-          [p.prescription_id]
-        );
-
-        const decryptedItems = items.map((it) => ({
-          ...it,
-          instructions: decrypt(it.instructions),
-        }));
-
         if (acceptsHtml) {
           const verifyHtml = getVerifyHtmlPath();
           if (verifyHtml) return res.sendFile(verifyHtml);
@@ -801,17 +939,18 @@ export default function documentRoutes(io) {
           verified: isValid,
           type: 'PRESCRIPTION',
           status: p.status,
-          patient: `${p.patient_first_name} ${p.patient_last_name}`,
-          studentNo: p.student_no || 'N/A',
-          course: p.course || 'PSU Lingayen',
+          patient: maskPatientName(p.patient_first_name, p.patient_last_name),
+          studentNo: 'N/A',   // placeholder so existing verify.html does not break
+          course: 'N/A',      // placeholder so existing verify.html does not break
           issuedBy: `Dr. ${p.doc_first_name} ${p.doc_last_name} (${p.doc_license || 'PRC Verified'})`,
           issuedAt: p.issued_at,
-          notes: decrypt(p.notes),
-          items: decryptedItems,
-          metadata: p.signature_metadata,
+          notes: null,
+          items: [],
+          metadata: pickPublicSignature(parseMetadata(p.signature_metadata)),
         });
       }
 
+      // 3. Fallback: Not found
       if (acceptsHtml) {
         const verifyHtml = getVerifyHtmlPath();
         if (verifyHtml) return res.status(404).sendFile(verifyHtml);
@@ -824,40 +963,174 @@ export default function documentRoutes(io) {
     }
   });
 
-  // GET /api/documents/attachments/my
-  router.get('/attachments/my', authenticateToken, requirePrivacyConsent, async (req, res) => {
+  // PUBLIC: returns authenticity status only — no student number, course, or raw DB row.
+  router.get('/clearances/verify/:token', verifyRateLimit, async (req, res) => {
+    const qrToken = req.params.token;
     try {
-      const userId = req.user.user_id;
-
-      const [rows] = await pool.query(
-        `SELECT a.attachment_id, a.emr_id, a.file_name, a.file_size, a.mime_type, a.created_at,
-                e.encounter_date,
-                doc.first_name AS doctor_first_name, doc.last_name AS doctor_last_name,
-                COALESCE(sp.specialty, 'Infirmary Physician') AS doctor_specialty
-         FROM EMR_ATTACHMENTS a
-         JOIN EMR_RECORDS e ON a.emr_id = e.emr_id
-         JOIN USERS doc ON e.doctor_user_id = doc.user_id
-         LEFT JOIN STAFF_PROFILES sp ON doc.user_id = sp.user_id
-         WHERE e.patient_user_id = ? AND e.deleted_at IS NULL
-         ORDER BY a.created_at DESC`,
-        [userId]
+      const [clearances] = await pool.query(
+        `SELECT mc.purpose, mc.status, mc.issued_at, mc.expires_at,
+                u.first_name AS patient_first_name, u.last_name AS patient_last_name
+         FROM MEDICAL_CLEARANCES mc
+         JOIN USERS u ON mc.user_id = u.user_id
+         WHERE mc.qr_token = ? AND mc.deleted_at IS NULL`,
+        [qrToken]
       );
 
-      logPhiAccess({
-        viewerUserId: userId,
-        patientUserId: userId,
-        table: 'EMR_ATTACHMENTS',
-        recordId: userId,
-        purpose: 'Patient Mobile Lab Results Review',
-        ipAddress: req.ip,
-      });
+      if (clearances.length === 0) {
+        return res.status(404).json({ verified: false, error: 'Medical certificate record not found or expired.' });
+      }
 
-      res.json(rows);
+      const c = clearances[0];
+      const isExpired = new Date(c.expires_at) < new Date();
+      const isRevoked = c.status === 'revoked';
+      res.json({
+        verified: !isExpired && !isRevoked && c.status === 'approved',
+        clearance: {
+          purpose: c.purpose,
+          status: isRevoked ? 'revoked' : isExpired ? 'expired' : c.status,
+          issued_at: c.issued_at,
+          expires_at: c.expires_at,
+          patient: maskPatientName(c.patient_first_name, c.patient_last_name),
+        },
+      });
     } catch (error) {
-      console.error('[Documents] Error fetching patient attachments:', error);
-      res.status(500).json({ error: 'Failed to retrieve diagnostic attachments.' });
+      console.error('[Documents] Clearance verification error:', error);
+      res.status(500).json({ error: 'Verification failed.' });
     }
   });
+
+  // =============================================================================
+  // 5. STAFF-ONLY VERIFICATION DETAILS (full view for clinic staff)
+  // =============================================================================
+  // GET /api/documents/verify/:qrToken/details
+  // Returns what the public /verify route deliberately hides: full name, student no.,
+  // course, medications, notes, and revocation reason.
+  // Every successful lookup is recorded in PHI_ACCESS_LOGS.
+  router.get(
+    '/verify/:qrToken/details',
+    authenticateToken,
+    requireRoles('DOCTOR', 'DENTIST', 'NURSE'),
+    async (req, res) => {
+      const { qrToken } = req.params;
+
+      try {
+        // 1. Medical Clearance
+        const [clearances] = await pool.query(
+          `SELECT mc.clearance_id, mc.user_id AS patient_user_id, mc.purpose, mc.status,
+                  mc.issued_at, mc.expires_at, mc.signature_metadata,
+                  u.first_name AS patient_first_name, u.last_name AS patient_last_name,
+                  sp.student_no, sp.course,
+                  doc.first_name AS doc_first_name, doc.last_name AS doc_last_name,
+                  staff.license_no AS doc_license
+           FROM MEDICAL_CLEARANCES mc
+           JOIN USERS u ON mc.user_id = u.user_id
+           LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+           JOIN USERS doc ON mc.issued_by = doc.user_id
+           LEFT JOIN STAFF_PROFILES staff ON doc.user_id = staff.user_id
+           WHERE mc.qr_token = ? AND mc.deleted_at IS NULL`,
+          [qrToken]
+        );
+
+        if (clearances.length > 0) {
+          const c = clearances[0];
+          const metadata = parseMetadata(c.signature_metadata);
+          const isExpired = new Date(c.expires_at) < new Date();
+          const isRevoked = c.status === 'revoked';
+          const isValid = !isExpired && !isRevoked && c.status === 'approved';
+
+          logPhiAccess({
+            viewerUserId: req.user.user_id,
+            patientUserId: c.patient_user_id,
+            table: 'MEDICAL_CLEARANCES',
+            recordId: c.clearance_id,
+            purpose: 'Staff QR verification (clearance details)',
+            ipAddress: req.ip,
+          });
+
+          return res.json({
+            valid: isValid,
+            type: 'MEDICAL_CLEARANCE',
+            purpose: c.purpose,
+            status: isRevoked ? 'revoked' : isExpired ? 'expired' : c.status,
+            revokeReason: isRevoked ? metadata.revocation_reason || null : null,
+            revokedAt: isRevoked ? metadata.revoked_at || null : null,
+            patient: `${c.patient_first_name} ${c.patient_last_name}`,
+            studentNo: c.student_no || 'N/A',
+            course: c.course || 'N/A',
+            issuedBy: `Dr. ${c.doc_first_name} ${c.doc_last_name} (${c.doc_license || 'PRC Verified'})`,
+            issuedAt: c.issued_at,
+            expiresAt: c.expires_at,
+            metadata,
+          });
+        }
+
+        // 2. Prescription
+        const [prescriptions] = await pool.query(
+          `SELECT p.prescription_id, p.patient_user_id, p.status, p.issued_at, p.notes,
+                  p.signature_metadata,
+                  u.first_name AS patient_first_name, u.last_name AS patient_last_name,
+                  sp.student_no, sp.course,
+                  doc.first_name AS doc_first_name, doc.last_name AS doc_last_name,
+                  staff.license_no AS doc_license
+           FROM PRESCRIPTIONS p
+           JOIN USERS u ON p.patient_user_id = u.user_id
+           LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+           JOIN USERS doc ON p.doctor_user_id = doc.user_id
+           LEFT JOIN STAFF_PROFILES staff ON doc.user_id = staff.user_id
+           WHERE p.qr_token = ? AND p.deleted_at IS NULL`,
+          [qrToken]
+        );
+
+        if (prescriptions.length > 0) {
+          const p = prescriptions[0];
+          const isValid = p.status === 'active' || p.status === 'dispensed';
+
+          const [items] = await pool.query(
+            `SELECT pi.dosage, pi.frequency, pi.route, pi.duration_days,
+                    pi.quantity_dispensed, pi.instructions,
+                    m.name AS medicine_name, m.generic_name
+             FROM PRESCRIPTION_ITEMS pi
+             JOIN MEDICINES m ON pi.medicine_id = m.medicine_id
+             WHERE pi.prescription_id = ?`,
+            [p.prescription_id]
+          );
+
+          logPhiAccess({
+            viewerUserId: req.user.user_id,
+            patientUserId: p.patient_user_id,
+            table: 'PRESCRIPTIONS',
+            recordId: p.prescription_id,
+            purpose: 'Staff QR verification (prescription details)',
+            ipAddress: req.ip,
+          });
+
+          return res.json({
+            valid: isValid,
+            type: 'PRESCRIPTION',
+            status: p.status,
+            patient: `${p.patient_first_name} ${p.patient_last_name}`,
+            studentNo: p.student_no || 'N/A',
+            course: p.course || 'N/A',
+            issuedBy: `Dr. ${p.doc_first_name} ${p.doc_last_name} (${p.doc_license || 'PRC Verified'})`,
+            issuedAt: p.issued_at,
+            notes: decrypt(p.notes),
+            items: items.map((it) => ({ ...it, instructions: decrypt(it.instructions) })),
+            metadata: parseMetadata(p.signature_metadata),
+          });
+        }
+
+        // 3. Not found (nothing is logged)
+        return res.status(404).json({ valid: false, error: 'Document token not found or invalid.' });
+      } catch (error) {
+        console.error('[Documents] Staff verification details error:', error);
+        res.status(500).json({ error: 'Verification details failed.' });
+      }
+    }
+  );
+
+  // =============================================================================
+  // 6. EMR DIAGNOSTIC & LAB ATTACHMENTS (MINIO S3)
+  // =============================================================================
 
   const upload = multer({
     storage: multer.memoryStorage(),
@@ -940,6 +1213,41 @@ export default function documentRoutes(io) {
     }
   );
 
+  // GET /api/documents/attachments/my (Fetch all diagnostic attachments for patient)
+  router.get('/attachments/my', authenticateToken, requirePrivacyConsent, async (req, res) => {
+    try {
+      const userId = req.user.user_id;
+
+      const [rows] = await pool.query(
+        `SELECT a.attachment_id, a.emr_id, a.file_name, a.file_size, a.mime_type, a.created_at,
+                e.encounter_date,
+                doc.first_name AS doctor_first_name, doc.last_name AS doctor_last_name,
+                COALESCE(sp.specialty, 'Infirmary Physician') AS doctor_specialty
+         FROM EMR_ATTACHMENTS a
+         JOIN EMR_RECORDS e ON a.emr_id = e.emr_id
+         JOIN USERS doc ON e.doctor_user_id = doc.user_id
+         LEFT JOIN STAFF_PROFILES sp ON doc.user_id = sp.user_id
+         WHERE e.patient_user_id = ? AND e.deleted_at IS NULL
+         ORDER BY a.created_at DESC`,
+        [userId]
+      );
+
+      logPhiAccess({
+        viewerUserId: userId,
+        patientUserId: userId,
+        table: 'EMR_ATTACHMENTS',
+        recordId: userId,
+        purpose: 'Patient Mobile Lab Results Review',
+        ipAddress: req.ip,
+      });
+
+      res.json(rows);
+    } catch (error) {
+      console.error('[Documents] Error fetching patient attachments:', error);
+      res.status(500).json({ error: 'Failed to retrieve diagnostic attachments.' });
+    }
+  });
+
   // GET /api/documents/attachments/:attachmentId/download
   router.get('/attachments/:attachmentId/download', authenticateToken, async (req, res) => {
     const { attachmentId } = req.params;
@@ -962,141 +1270,4 @@ export default function documentRoutes(io) {
       const isClinicalStaff = userRoles.some((r) => ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'].includes(r));
       const isOwner = req.user.user_id === att.patient_user_id;
 
-      if (!isClinicalStaff && !isOwner) {
-        return res.status(403).json({ error: 'Unauthorized to access this clinical file.' });
-      }
-
-      const s3Object = await getFromS3(att.s3_key);
-
-      logPhiAccess({
-        viewerUserId: req.user.user_id,
-        patientUserId: att.patient_user_id,
-        table: 'EMR_ATTACHMENTS',
-        recordId: Number(attachmentId),
-        purpose: 'Lab/Diagnostic Document Review',
-        ipAddress: req.ip,
-      });
-
-      res.setHeader('Content-Type', att.mime_type || 'application/octet-stream');
-      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(att.file_name)}"`);
-      s3Object.Body.pipe(res);
-    } catch (error) {
-      console.error('[Attachment Download Error]:', error);
-      res.status(500).json({ error: 'Failed to retrieve document from storage.' });
-    }
-  });
-
-  // GET /api/documents/prescriptions/:id/pdf
-  router.get('/prescriptions/:id/pdf', authenticateToken, async (req, res) => {
-    const prescriptionId = Number(req.params.id);
-    if (!prescriptionId) return res.status(400).json({ error: 'Invalid prescription id.' });
-
-    try {
-      const [rows] = await pool.query(
-        `SELECT prescription_id, patient_user_id, doctor_user_id, pdf_s3_key, qr_token
-         FROM PRESCRIPTIONS
-         WHERE prescription_id = ? AND deleted_at IS NULL`,
-        [prescriptionId]
-      );
-
-      if (rows.length === 0) return res.status(404).json({ error: 'Prescription not found.' });
-      const rx = rows[0];
-
-      const roles = req.user.roles || [];
-      const isOwner = Number(req.user.user_id) === Number(rx.patient_user_id);
-      const isStaff = roles.some((r) => ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'].includes(r));
-
-      if (!isOwner && !isStaff) {
-        return res.status(403).json({ error: 'Not authorized to access this document.' });
-      }
-
-      let key = rx.pdf_s3_key;
-      if (!key) {
-        key = await generateAndStorePrescriptionPDF(prescriptionId);
-        if (!key) {
-          return res.status(503).json({
-            error: 'Document is being generated. Please try again shortly.',
-            retryAfterSeconds: 5,
-          });
-        }
-      }
-
-      const buffer = await getBufferFromS3(key);
-
-      logPhiAccess({
-        viewerUserId: req.user.user_id,
-        patientUserId: rx.patient_user_id,
-        table: 'PRESCRIPTIONS',
-        recordId: prescriptionId,
-        purpose: 'Prescription PDF download',
-        ipAddress: req.ip,
-      });
-
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="prescription-${prescriptionId}.pdf"`);
-      res.setHeader('Content-Length', String(buffer.length));
-      res.send(buffer);
-    } catch (err) {
-      console.error('[Prescription PDF Download Error]:', err);
-      res.status(500).json({ error: 'Failed to retrieve prescription PDF.' });
-    }
-  });
-
-  // GET /api/documents/clearances/:id/pdf
-  router.get('/clearances/:id/pdf', authenticateToken, async (req, res) => {
-    const clearanceId = Number(req.params.id);
-    if (!clearanceId) return res.status(400).json({ error: 'Invalid clearance id.' });
-
-    try {
-      const [rows] = await pool.query(
-        `SELECT clearance_id, user_id, pdf_s3_key, status
-         FROM MEDICAL_CLEARANCES
-         WHERE clearance_id = ? AND deleted_at IS NULL`,
-        [clearanceId]
-      );
-
-      if (rows.length === 0) return res.status(404).json({ error: 'Clearance not found.' });
-      const clr = rows[0];
-
-      const roles = req.user.roles || [];
-      const isOwner = Number(req.user.user_id) === Number(clr.user_id);
-      const isStaff = roles.some((r) => ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'].includes(r));
-
-      if (!isOwner && !isStaff) {
-        return res.status(403).json({ error: 'Not authorized to access this document.' });
-      }
-
-      let key = clr.pdf_s3_key;
-      if (!key) {
-        key = await generateAndStoreClearancePDF(clearanceId);
-        if (!key) {
-          return res.status(503).json({
-            error: 'Document is being generated. Please try again shortly.',
-            retryAfterSeconds: 5,
-          });
-        }
-      }
-
-      const buffer = await getBufferFromS3(key);
-
-      logPhiAccess({
-        viewerUserId: req.user.user_id,
-        patientUserId: clr.user_id,
-        table: 'MEDICAL_CLEARANCES',
-        recordId: clearanceId,
-        purpose: 'Clearance PDF download',
-        ipAddress: req.ip,
-      });
-
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="clearance-${clearanceId}.pdf"`);
-      res.setHeader('Content-Length', String(buffer.length));
-      res.send(buffer);
-    } catch (err) {
-      console.error('[Clearance PDF Download Error]:', err);
-      res.status(500).json({ error: 'Failed to retrieve clearance PDF.' });
-    }
-  });
-
-  return router;
-}
+      if

@@ -7,10 +7,9 @@ import { requirePrivacyConsent } from '../middleware/consent.js';
 import { logAudit } from '../utils/auditLogger.js';
 import { encrypt, decrypt } from '../utils/cryptoVault.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
-import { getCache, setCache, invalidateCache, redis, isRedisActive } from '../utils/redisClient.js';
+import { redis, isRedisActive, getCache, setCache, invalidateCache } from '../utils/redisClient.js';
 import { sendAppointmentEmail } from '../utils/mailer.js';
 import { sendPushToUser } from '../utils/fcmNotifier.js';
-import { BOOKING_LIMIT } from '../config/limits.js';
 import {
   APPOINTMENT_RULES,
   CLINIC_HOURS,
@@ -19,6 +18,8 @@ import {
   isLunchBreak,
   isPastSlot,
 } from '../config/appointmentRules.js';
+import { BOOKING_LIMIT } from '../config/limits.js';
+import { validateDentalChart } from '../utils/dentalValidator.js';
 
 // Odontogram helpers
 function stripLegacyOdontogram(text) {
@@ -32,18 +33,30 @@ function readDentalChart(cipher) {
 // ── Rate Limiter Middleware para sa Booking (Audit Security Issue #6) ───────
 async function bookingRateLimit(req, res, next) {
   if (!isRedisActive()) return next();
-  const userId = req.user?.user_id || req.ip || 'unknown';
-  const key = `ratelimit:booking:${userId}`;
+
+  const identifier = req.user?.user_id || req.ip || 'unknown';
+  const key = `ratelimit:booking:${identifier}`;
+
   try {
     const count = await redis.incr(key);
-    if (count === 1) await redis.expire(key, BOOKING_LIMIT.windowSeconds);
+
+    if (count === 1) {
+      await redis.expire(key, BOOKING_LIMIT.windowSeconds);
+    }
+
     if (count > BOOKING_LIMIT.maxAttempts) {
       const ttl = await redis.ttl(key);
-      res.setHeader('Retry-After', String(ttl > 0 ? ttl : BOOKING_LIMIT.windowSeconds));
+      const retrySec = ttl > 0 ? ttl : BOOKING_LIMIT.windowSeconds;
+      res.setHeader('Retry-After', String(retrySec));
       return res.status(429).json({
-        error: `Booking rate limit exceeded. Please wait ${ttl > 0 ? ttl : BOOKING_LIMIT.windowSeconds}s before scheduling again.`,
+        error: `Too many booking attempts. Please wait ${retrySec} second(s) before trying again.`,
       });
     }
+
+    res.setHeader(
+      'X-RateLimit-Remaining',
+      String(Math.max(0, BOOKING_LIMIT.maxAttempts - count))
+    );
     next();
   } catch (err) {
     console.error('[Booking Rate Limit Error]:', err.message);
@@ -1303,6 +1316,17 @@ export default function appointmentRoutes(io) {
       return res.status(400).json({ error: 'Chief complaint and diagnosis are required.' });
     }
 
+    // ── Dental Odontogram Schema Validation ───────────────────────────────────
+    if (dental_chart !== undefined && dental_chart !== null && (req.user.roles || []).includes('DENTIST')) {
+      const chartValidation = validateDentalChart(dental_chart);
+      if (!chartValidation.valid) {
+        return res.status(400).json({
+          error: chartValidation.error,
+          code: 'INVALID_DENTAL_CHART',
+        });
+      }
+    }
+
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
@@ -1321,7 +1345,7 @@ export default function appointmentRoutes(io) {
         ]
       );
       const emrId = emrResult.insertId;
-      
+
       if (
         dental_chart &&
         typeof dental_chart === 'object' &&

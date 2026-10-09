@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../config/api_config.dart';
 import '../screens/login_screen.dart';
 
 class SessionTimeoutListener extends StatefulWidget {
@@ -44,6 +45,15 @@ class _SessionTimeoutListenerState extends State<SessionTimeoutListener> {
   }
 
   Future<void> _handleTimeout() async {
+    final token = await _storage.read(key: 'jwt_token');
+    if (token != null) {
+      try {
+        await ApiConfig.client.post(
+          Uri.parse('${ApiConfig.baseUrl}/api/auth/logout'),
+          headers: {'Authorization': 'Bearer $token'},
+        );
+      } catch (_) {}
+    }
     await _storage.deleteAll();
     if (!mounted) return;
 
