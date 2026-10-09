@@ -144,7 +144,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
     setActiveTicket(null);
 
     const jwt = localStorage.getItem('valetudo_token');
-    try {
+try {
       const res = await fetch(`${API_BASE_URL}/api/appointments/lookup?query=${encodeURIComponent(searchQuery.trim())}`, {
         headers: { Authorization: `Bearer ${jwt}` },
       });
@@ -173,6 +173,32 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
         setScanStatus('❌ No scheduled appointments found matching that query.');
       }
     } catch (err: any) {
+      // Feature 6: Offline SQLite Fallback for Intake Station
+      if (window.electronAPI?.offlineSearchPatients) {
+        try {
+          const offlineMatches = await window.electronAPI.offlineSearchPatients(searchQuery.trim());
+          if (offlineMatches.length > 0) {
+            const p = offlineMatches[0];
+            setVerifiedPatient({
+              user_id: p.user_id,
+              first_name: p.first_name,
+              last_name: p.last_name,
+              student_no: p.student_no,
+              course: p.course,
+              blood_type: p.blood_type,
+              allergies: p.allergies,
+              chronic_conditions: p.chronic_conditions,
+              height: null,
+              weight: null,
+            });
+            setPendingAppointment(null); // Offline walk-in mode
+            setScanStatus(`🌐 [Offline Cache] Patient located: ${p.first_name} ${p.last_name} (${p.student_no})`);
+            return;
+          }
+        } catch (sqliteErr) {
+          console.error('[SQLite Intake Search Error]:', sqliteErr);
+        }
+      }
       setScanStatus('❌ Search error: ' + err.message);
     }
   };

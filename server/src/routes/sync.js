@@ -6,6 +6,7 @@ import { requireRoles } from '../middleware/rbac.js';
 import { logAudit } from '../utils/auditLogger.js';
 import { encrypt, decrypt } from '../utils/cryptoVault.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
+import { validateDentalChart } from '../utils/dentalValidator.js';
 
 const router = express.Router();
 
@@ -201,6 +202,17 @@ router.post('/replay', authenticateToken, async (req, res) => {
           
           // Dentist-only odontogram from an offline-queued encounter
           if (dental_chart && typeof dental_chart === 'object' && (req.user.roles || []).includes('DENTIST')) {
+            const chartValidation = validateDentalChart(dental_chart);
+            if (!chartValidation.valid) {
+              await connection.rollback();
+              results.push({
+                client_mutation_id,
+                status: 'error',
+                error: `Odontogram validation error: ${chartValidation.error}`,
+              });
+              continue;
+            }
+
             await connection.query(
               `INSERT INTO DENTAL_CHARTS (emr_id, patient_user_id, dentist_user_id, chart_data)
                VALUES (?, ?, ?, ?)`,

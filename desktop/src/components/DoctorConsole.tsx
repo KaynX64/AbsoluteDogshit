@@ -629,7 +629,7 @@ export default function DoctorConsole({
   /* HISTORY MODAL                                               */
   /* ═══════════════════════════════════════════════════════════ */
 
-  const handleViewPatientHistory = async () => {
+const handleViewPatientHistory = async () => {
     if (!selectedApp) return;
     setShowHistoryModal(true);
     setLoadingHistory(true);
@@ -640,8 +640,22 @@ export default function DoctorConsole({
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const data = await res.json();
-      if (Array.isArray(data)) setPatientHistory(data);
+      if (Array.isArray(data)) {
+        setPatientHistory(data);
+        return;
+      }
+      throw new Error('Server returned non-200');
     } catch (err) {
+      // Feature 6: Offline SQLite Fallback for Past EMR History Modal
+      if (window.electronAPI?.offlineGetEmrHistory) {
+        try {
+          const offlineEmrs = await window.electronAPI.offlineGetEmrHistory(selectedApp.patient_id);
+          setPatientHistory(offlineEmrs);
+          return;
+        } catch (sqliteErr) {
+          console.error('[SQLite History Error]:', sqliteErr);
+        }
+      }
       console.error('History fetch error:', err);
     } finally {
       setLoadingHistory(false);
@@ -652,7 +666,7 @@ export default function DoctorConsole({
   /* PATIENT DIRECTORY (ARCHIVE TAB)                             */
   /* ═══════════════════════════════════════════════════════════ */
 
-  const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
+const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!patientSearchQuery.trim()) return;
     setIsSearchingPatients(true);
@@ -664,15 +678,34 @@ export default function DoctorConsole({
         )}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      if (res.ok) setSearchResults(await res.json());
+      if (res.ok) {
+        setSearchResults(await res.json());
+        return;
+      }
+      throw new Error('Server returned non-200');
     } catch (err) {
+      // Feature 6: Offline SQLite Fallback for Patient Search
+      if (window.electronAPI?.offlineSearchPatients) {
+        try {
+          const offlineMatches = await window.electronAPI.offlineSearchPatients(patientSearchQuery.trim());
+          const mapped = offlineMatches.map((p: any) => ({
+            ...p,
+            identifier_no: p.student_no,
+            affiliation: p.course,
+          }));
+          setSearchResults(mapped);
+          return;
+        } catch (sqliteErr) {
+          console.error('[SQLite Search Error]:', sqliteErr);
+        }
+      }
       console.error('Failed to search patients:', err);
     } finally {
       setIsSearchingPatients(false);
     }
   };
 
-  const loadPatientTimeline = async (patient: any) => {
+const loadPatientTimeline = async (patient: any) => {
     setSelectedDirectoryPatient(patient);
     setLoadingTimeline(true);
     const token = localStorage.getItem('valetudo_token');
@@ -681,8 +714,22 @@ export default function DoctorConsole({
         `${API_BASE_URL}/api/appointments/patient/${patient.user_id}/history`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      if (res.ok) setDirectoryTimeline(await res.json());
+      if (res.ok) {
+        setDirectoryTimeline(await res.json());
+        return;
+      }
+      throw new Error('Server returned non-200');
     } catch (err) {
+      // Feature 6: Offline SQLite Fallback for EMR Timeline
+      if (window.electronAPI?.offlineGetEmrHistory) {
+        try {
+          const offlineEmrs = await window.electronAPI.offlineGetEmrHistory(patient.user_id);
+          setDirectoryTimeline(offlineEmrs);
+          return;
+        } catch (sqliteErr) {
+          console.error('[SQLite Timeline Error]:', sqliteErr);
+        }
+      }
       console.error('Failed to load patient timeline:', err);
     } finally {
       setLoadingTimeline(false);

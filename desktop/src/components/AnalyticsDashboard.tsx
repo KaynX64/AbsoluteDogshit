@@ -1,6 +1,6 @@
 // desktop/src/components/AnalyticsDashboard.tsx
 import { useEffect, useState } from 'react';
-import { T, btnGhost, btnPrimary } from '../theme';
+import { btnGhost, btnPrimary } from '../theme';
 import { API_BASE_URL } from '../config/api';
 
 interface TimePoint {
@@ -541,6 +541,47 @@ export default function AnalyticsDashboard() {
 
   const handlePrintPDFReport = () => window.print();
 
+  const handleDownloadExcelXlsx = async () => {
+    const token = localStorage.getItem('valetudo_token') || localStorage.getItem('token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/analytics/export/excel`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Excel export failed');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `PSU_Health_Analytics_${Date.now()}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err: any) {
+      alert('Excel export failed: ' + err.message);
+    }
+  };
+
+  const handleDownloadServerPdf = async () => {
+    const token = localStorage.getItem('valetudo_token') || localStorage.getItem('token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/analytics/export/pdf`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Server PDF generation failed');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `PSU_Health_Analytics_Report_${Date.now()}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => window.URL.revokeObjectURL(url), 1000); 
+    } catch (err: any) {
+      alert('PDF generation failed: ' + err.message);
+    }
+  };
+
   if (loading) {
     return (
       <div
@@ -670,6 +711,19 @@ export default function AnalyticsDashboard() {
           </button>
           <button
             type="button"
+            onClick={handleDownloadExcelXlsx}
+            style={{
+              ...btnGhost,
+              background: '#D7E8D2',
+              color: '#264D36',
+              border: 'none',
+              fontWeight: 700,
+            }}
+          >
+            📗 Export Excel (.xlsx)
+          </button>
+          <button
+            type="button"
             onClick={handleDownloadExcelCSV}
             style={{
               ...btnGhost,
@@ -680,8 +734,15 @@ export default function AnalyticsDashboard() {
           >
             📊 Export CSV
           </button>
-          <button type="button" onClick={handlePrintPDFReport} style={btnPrimary}>
-            🖨️ Export PDF
+          <button
+            type="button"
+            onClick={handleDownloadServerPdf}
+            style={btnPrimary}
+          >
+            📑 Official PDF Report
+          </button>
+          <button type="button" onClick={handlePrintPDFReport} style={btnGhost}>
+            🖨️ Print View
           </button>
         </div>
       </div>

@@ -370,21 +370,24 @@ ipcMain.handle('show-notification', (event, { title, body }) => {
   return { success: false, error: 'Notifications not supported' };
 });
 
-// 3. ALLOW SELF-SIGNED CERTS
+// 3. ALLOW SELF-SIGNED CERTS (RESTRICTED TO LOCAL DEVELOPMENT ONLY)
 app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
-  if (
-    url.startsWith(API_BASE_URL) ||
-    url.startsWith(API_WS_URL) ||
-    url.startsWith(VITE_URL) ||
-    url.startsWith(VITE_WS_URL) ||
-    url.startsWith('https://localhost:5173') ||
-    url.startsWith('https://127.0.0.1:5173')
-  ) {
-    event.preventDefault();
-    callback(true);
-  } else {
-    callback(false);
+  // Security Enforcement: Enforce strict TLS validation in packaged production builds
+  if (!app.isPackaged) {
+    if (
+      url.startsWith(API_BASE_URL) ||
+      url.startsWith(API_WS_URL) ||
+      url.startsWith(VITE_URL) ||
+      url.startsWith(VITE_WS_URL) ||
+      url.startsWith('https://localhost:5173') ||
+      url.startsWith('https://127.0.0.1:5173')
+    ) {
+      event.preventDefault();
+      callback(true);
+      return;
+    }
   }
+  callback(false);
 });
 
 app.whenReady().then(createWindow);

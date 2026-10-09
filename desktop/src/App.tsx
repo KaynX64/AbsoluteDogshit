@@ -502,6 +502,27 @@ export default function App() {
   const [passwordMsg, setPasswordMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const [isSubmittingPassword, setIsSubmittingPassword] = useState(false);
 
+  // ── Session Logout & Token Invalidation ───────────────────────
+  const handleSignOut = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    if (token) {
+      try {
+        await fetch(`${API_BASE_URL}/api/auth/logout`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } catch (_) {}
+    }
+    localStorage.removeItem('valetudo_token');
+    localStorage.removeItem('token');
+    
+    // Purge cached credentials and role state from React memory
+    setPassword('');
+    setEmail('');
+    setActiveRoleView('');
+    setUser(null);
+  };
+
   const isResponder =
     activeRoleView === 'EMERGENCY_RESPONDER' ||
     (user?.roles?.length === 1 && user.roles[0] === 'EMERGENCY_RESPONDER');
@@ -638,9 +659,9 @@ export default function App() {
   return (
     <div className="app-shell">
       <Sidebar
-        role={activeRoleView}
-        onSignOut={() => setUser(null)}
-        onChangePassword={() => { setShowPasswordModal(true); setPasswordMsg(null); }}
+          role={activeRoleView}
+          onSignOut={handleSignOut}
+          onChangePassword={() => { setShowPasswordModal(true); setPasswordMsg(null); }}
         activeItem={
           activeRoleView === 'ADMIN' ? adminTab
           : (activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST') ? doctorViewMode
