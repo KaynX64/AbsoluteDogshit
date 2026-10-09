@@ -20,7 +20,7 @@ class DevHttpOverrides extends HttpOverrides {
   HttpClient createHttpClient(SecurityContext? context) {
     return super.createHttpClient(context)
       ..badCertificateCallback = (X509Certificate cert, String host, int port) {
-        return true; // Always allow self-signed local certificates
+        return kDebugMode; // Never allow invalid certificates in release builds
       };
   }
 }
@@ -30,15 +30,22 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Apply certificate overrides unconditionally
-  HttpOverrides.global = DevHttpOverrides();
-
-  try {
-    await Firebase.initializeApp();
-    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-    debugPrint("🔥 [Firebase] Initialized successfully.");
-  } catch (e) {
-    debugPrint("⚠️ [Firebase] Could not initialize: $e");
+// Security Enforcement: Restrict self-signed TLS override strictly to debug mode
+  if (kDebugMode) {
+    HttpOverrides.global = DevHttpOverrides();
+  }
+  
+  // Only initialize native Firebase on Android / iOS
+  if (!kIsWeb) {
+    try {
+      await Firebase.initializeApp();
+      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+      debugPrint("🔥 [Firebase] Initialized successfully.");
+    } catch (e) {
+      debugPrint("⚠️ [Firebase] Could not initialize: $e");
+    }
+  } else {
+    debugPrint("🌐 [Firebase] Running on Web - skipping native Firebase setup.");
   }
 
   await EmergencyAlertService().initialize();

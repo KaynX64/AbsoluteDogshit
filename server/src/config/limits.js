@@ -18,33 +18,39 @@ function envInt(name, fallback) {
 // ─────────────────────────────────────────────────────────────────────────
 // LOGIN — brute-force protection on POST /api/auth/login
 // ─────────────────────────────────────────────────────────────────────────
-// Rationale for 5 / 900:
+// Rationale for 5 / 300:
 //   • 5 attempts is enough for a user who mistyped 2–3 times.
-//   • 900s (15 min) is short enough to be a real obstacle to scripted attacks
-//     but long enough that a legitimate user isn't frustrated.
-//   • Looser than typical API defaults (3/15min) because campus NAT means
-//     many students share one public IP.
+//   • 300s (5 min) still slows scripted guessing to ~60 tries/hour per IP,
+//     while limiting lockouts for students sharing one campus IP.
 // ─────────────────────────────────────────────────────────────────────────
 export const LOGIN_LIMIT = {
   maxAttempts:   envInt('LOGIN_RATE_LIMIT_MAX',    5),
-  windowSeconds: envInt('LOGIN_RATE_LIMIT_WINDOW', 10),
+  windowSeconds: envInt('LOGIN_RATE_LIMIT_WINDOW', 300),
 };
 
 // ─────────────────────────────────────────────────────────────────────────
 // SOS — panic-button throttle (wired in server/src/routes/emergency.js
-// when you want it — constants are here so the policy lives in one place)
 // ─────────────────────────────────────────────────────────────────────────
 export const SOS_LIMIT = {
-  maxAttempts:   envInt('SOS_RATE_LIMIT_MAX',    3),
-  windowSeconds: envInt('SOS_RATE_LIMIT_WINDOW', 10),
+  maxAttempts:   envInt('SOS_RATE_LIMIT_MAX',    10),
+  windowSeconds: envInt('SOS_RATE_LIMIT_WINDOW', 60),      // was 10
 };
+
 
 // ─────────────────────────────────────────────────────────────────────────
 // APPOINTMENT BOOKING — mobile patient self-booking throttle
 // ─────────────────────────────────────────────────────────────────────────
 export const BOOKING_LIMIT = {
   maxAttempts:   envInt('BOOKING_RATE_LIMIT_MAX',    10),
-  windowSeconds: envInt('BOOKING_RATE_LIMIT_WINDOW', 10),
+  windowSeconds: envInt('BOOKING_RATE_LIMIT_WINDOW', 60),  // was 10
+};  
+
+// ─────────────────────────────────────────────────────────────────────────
+// PUBLIC DOCUMENT VERIFICATION — per-IP throttle on unauthenticated QR checks
+// ─────────────────────────────────────────────────────────────────────────
+export const VERIFY_LIMIT = {
+  maxAttempts:   envInt('VERIFY_RATE_LIMIT_MAX',    30),
+  windowSeconds: envInt('VERIFY_RATE_LIMIT_WINDOW', 60),
 };
 
 // ─────────────────────────────────────────────────────────────────────────

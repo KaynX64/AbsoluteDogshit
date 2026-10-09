@@ -6,12 +6,51 @@ import { decrypt } from '../utils/cryptoVault.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { sendPushToRoles } from '../utils/fcmNotifier.js';
 import { logAudit } from '../utils/auditLogger.js';
+import { redis, isRedisActive, invalidateCache } from '../utils/redisClient.js';
+import { SOS_LIMIT } from '../config/limits.js';
 
 export default function emergencyRouter(io) {
   const router = express.Router();
 
+  function sosRateLimitKey(userIdOrIp) {
+    return `ratelimit:sos:${userIdOrIp}`;
+  }
+
+  async function sosRateLimit(req, res, next) {
+    if (!isRedisActive()) return next();
+
+    const identifier = req.user?.user_id || req.ip || 'unknown';
+    const key = sosRateLimitKey(identifier);
+
+    try {
+      const count = await redis.incr(key);
+
+      if (count === 1) {
+        await redis.expire(key, SOS_LIMIT.windowSeconds);
+      }
+
+      if (count > SOS_LIMIT.maxAttempts) {
+        const ttl = await redis.ttl(key);
+        const retrySec = ttl > 0 ? ttl : SOS_LIMIT.windowSeconds;
+        res.setHeader('Retry-After', String(retrySec));
+        return res.status(429).json({
+          error: `Emergency alert throttle exceeded. Please wait ${retrySec} second(s) before triggering another SOS.`,
+        });
+      }
+
+      res.setHeader(
+        'X-RateLimit-Remaining',
+        String(Math.max(0, SOS_LIMIT.maxAttempts - count))
+      );
+      next();
+    } catch (err) {
+      console.error('[SOS Rate Limit Error]:', err.message);
+      next();
+    }
+  }
+
   // 1. POST /api/emergency/sos - Trigger Campus Emergency SOS
-  router.post('/sos', authenticateToken, async (req, res) => {
+  router.post('/sos', authenticateToken, sosRateLimit, async (req, res) => {
     try {
       const userId = req.user.user_id;
       const { latitude, longitude, notes } = req.body;
@@ -39,7 +78,36 @@ export default function emergencyRouter(io) {
           [userId, lng, lat, notes || 'Emergency SOS pressed'] //lng (X), lat (Y)
         );
 
-        alertId = insertResult.insertId;
+alertId = insertResult.insertId;
+
+        // Feature 4 & 7: Auto-insert prioritized emergency ticket into daily triage QUEUE
+        const [existingQueue] = await connection.query(
+          `SELECT queue_id FROM QUEUE 
+           WHERE patient_user_id = ? AND queue_date = CURDATE() AND status IN ('waiting', 'in-consultation') 
+           LIMIT 1`,
+          [userId]
+        );
+
+        if (existingQueue.length > 0) {
+          // Elevate existing waiting ticket to immediate priority consultation
+          await connection.query(
+            `UPDATE QUEUE SET status = 'in-consultation', served_at = CURRENT_TIMESTAMP 
+             WHERE queue_id = ?`,
+            [existingQueue[0].queue_id]
+          );
+        } else {
+          // Generate next queue ticket number and insert as prioritized in-consultation ticket
+          const [numRows] = await connection.query(
+            'SELECT COALESCE(MAX(queue_number), 0) + 1 AS next_num FROM QUEUE WHERE queue_date = CURDATE()'
+          );
+          const nextNum = numRows[0].next_num;
+
+          await connection.query(
+            `INSERT INTO QUEUE (patient_user_id, appointment_id, queue_date, counter_id, queue_number, status, checked_in_at, served_at)
+             VALUES (?, NULL, CURDATE(), 1, ?, 'in-consultation', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+            [userId, nextNum]
+          );
+        }
 
         // R.A. 10173 Audit Logging
         await logAudit(connection, {
@@ -48,11 +116,17 @@ export default function emergencyRouter(io) {
           table: 'EMERGENCY_ALERTS',
           recordId: alertId,
           oldValue: null,
-          newValue: { latitude: lat, longitude: lng, notes: notes || 'Emergency SOS pressed' },
+          newValue: { 
+            latitude: lat, 
+            longitude: lng, 
+            notes: notes || 'Emergency SOS pressed',
+            triage_escalation: 'QUEUE_PRIORITY_ESCALATED'
+          },
           ipAddress: req.ip,
         });
 
         await connection.commit();
+        await invalidateCache('queue:*');
       } catch (dbErr) {
         await connection.rollback();
         throw dbErr;
@@ -120,10 +194,11 @@ export default function emergencyRouter(io) {
         data: { alertId: String(alertId), type: 'EMERGENCY_SOS' },
       }).catch((err) => console.error('[FCM SOS Push Error]:', err.message));
 
-      // 2. Broadcast via WebSockets (Socket.IO) to both responder room and clinical consoles
+// 2. Broadcast via WebSockets (Socket.IO) to both responder room and clinical consoles
       if (io) {
         io.to('responders').emit('emergency:new_alert', alertPayload);
         io.emit('emergency:new_alert', alertPayload);
+        io.emit('queue:updated'); // Instantly refreshes Nurse live triage queue
       }
 
       res.status(201).json({
@@ -195,15 +270,34 @@ export default function emergencyRouter(io) {
 
       params.push(alertId);
 
-      await pool.query(
+await pool.query(
         `UPDATE EMERGENCY_ALERTS
          SET status = ?, assigned_responder_id = ? ${extraUpdate}
          WHERE alert_id = ?`,
         params
       );
 
+      // If resolving or closing out an SOS, mark its queue ticket as done or cancelled
+      if (status === 'resolved' || status === 'false_alarm') {
+        const queueFinalStatus = status === 'resolved' ? 'done' : 'cancelled';
+        const [alertRows] = await pool.query(
+          'SELECT user_id FROM EMERGENCY_ALERTS WHERE alert_id = ?',
+          [alertId]
+        );
+        if (alertRows.length > 0) {
+          await pool.query(
+            `UPDATE QUEUE 
+             SET status = ?, served_at = CURRENT_TIMESTAMP 
+             WHERE patient_user_id = ? AND queue_date = CURDATE() AND status IN ('in-consultation', 'waiting')`,
+            [queueFinalStatus, alertRows[0].user_id]
+          );
+          await invalidateCache('queue:*');
+        }
+      }
+
       if (io) {
         io.emit('emergency:status_change', { alertId: Number(alertId), status, responderId });
+        io.emit('queue:updated');
       }
 
       res.json({ message: `Alert #${alertId} updated to ${status}.` });

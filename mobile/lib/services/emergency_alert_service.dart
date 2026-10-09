@@ -73,6 +73,7 @@ class EmergencyAlertService {
   Uint8List? _cachedWavBytes;
   bool _isInitialized = false;
   bool _isFcmListening = false;
+  StreamSubscription<String>? _tokenRefreshSub;
 
   bool _isResponderActive = false;
   int? _lastAlertIdProcessed;
@@ -109,6 +110,16 @@ class EmergencyAlertService {
     enableVibration: true,
   );
 
+  // 4. Consultation Appointments Channel
+  static const AndroidNotificationChannel _appointmentChannel = AndroidNotificationChannel(
+    'appointment_channel',
+    '📅 Consultation Appointments',
+    description: 'Appointment booking confirmations and scheduled reminders',
+    importance: Importance.high,
+    playSound: true,
+    enableVibration: true,
+  );
+
   Future<void> initialize() async {
     if (_isInitialized) return;
     _isInitialized = true;
@@ -127,6 +138,7 @@ class EmergencyAlertService {
     await androidImplementation?.createNotificationChannel(_responderCriticalChannel);
     await androidImplementation?.createNotificationChannel(_studentConfirmChannel);
     await androidImplementation?.createNotificationChannel(_queueTurnChannel);
+    await androidImplementation?.createNotificationChannel(_appointmentChannel);
     await androidImplementation?.requestNotificationsPermission();
 
     // 2. Pre-generate procedural WAV on background isolate so UI never stutters during alarm
@@ -151,8 +163,10 @@ class EmergencyAlertService {
     await connectSocket();
   }
 
+
   // --- FIREBASE CLOUD MESSAGING (FCM) TOKEN REGISTRATION ---
   Future<void> syncFcmTokenWithBackend() async {
+      if (kIsWeb) return; // Skip FCM token registration on Web
     try {
       final messaging = FirebaseMessaging.instance;
       
@@ -164,20 +178,18 @@ class EmergencyAlertService {
 
       String? token = await messaging.getToken();
 
+
       if (token != null && token.isNotEmpty) {
-        final jwt = await _storage.read(key: 'jwt_token');
-        if (jwt != null) {
-          // Reuses persistent connection pool
-          await ApiConfig.client.post(
-            Uri.parse('${ApiConfig.baseUrl}/api/profile/fcm-token'),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $jwt',
-            },
-            body: jsonEncode({'fcm_token': token, 'device_type': 'android'}),
-          );
-        }
+        await _postTokenToServer(token);
       }
+
+      // Handle automatic FCM token rotation
+      _tokenRefreshSub?.cancel();
+      _tokenRefreshSub = messaging.onTokenRefresh.listen((newToken) async {
+        if (newToken.isNotEmpty) {
+          await _postTokenToServer(newToken);
+        }
+      });
 
       if (!_isFcmListening) {
         _isFcmListening = true;
@@ -190,8 +202,8 @@ class EmergencyAlertService {
             }
           } else if (type == 'QUEUE_TURN') {
             showQueueTurnNotification(
-              ticketNo: message.data['ticketNo'] ?? 'Your Ticket',
-              doctorName: message.data['doctorName'] ?? 'Attending Doctor',
+              ticketNo: message.data['ticketNo'] ?? message.data['ticket_no'] ?? 'Your Ticket',
+              doctorName: message.data['doctorName'] ?? message.data['doctor_name'] ?? 'Attending Doctor',
             );
           } else {
             showAppointmentConfirmedNotification(
@@ -203,6 +215,24 @@ class EmergencyAlertService {
       }
     } catch (e) {
       debugPrint("❌ [FCM Mobile Token Error]: $e");
+    }
+  }
+
+  Future<void> _postTokenToServer(String token) async {
+    try {
+      final jwt = await _storage.read(key: 'jwt_token');
+      if (jwt != null) {
+        await ApiConfig.client.post(
+          Uri.parse('${ApiConfig.baseUrl}/api/profile/fcm-token'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $jwt',
+          },
+          body: jsonEncode({'fcm_token': token, 'device_type': 'android'}),
+        );
+      }
+    } catch (e) {
+      debugPrint("⚠️ [FCM Post Token Error]: $e");
     }
   }
 
@@ -257,7 +287,10 @@ class EmergencyAlertService {
       );
 
       _socket!.onConnect((_) {
-        _socket!.emit('join:responders');
+        // Only join privileged responder room if user is actively in responder mode
+        if (_isResponderActive) {
+          _socket!.emit('join:responders');
+        }
       });
 
       _socket!.on('emergency:new_alert', (data) async {
@@ -326,12 +359,13 @@ class EmergencyAlertService {
   Future<void> showAppointmentConfirmedNotification([String? title, String? body]) async {
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'appointment_channel',
-      'Consultation Appointments',
-      channelDescription: 'Appointment booking confirmations and reminders',
+      '📅 Consultation Appointments',
+      channelDescription: 'Appointment booking confirmations and scheduled reminders',
       importance: Importance.high,
       priority: Priority.high,
       ticker: 'Appointment Confirmed',
       playSound: true,
+      enableVibration: true,
     );
 
     const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
@@ -385,7 +419,7 @@ class EmergencyAlertService {
       try {
         await _audioPlayer.play(AssetSource('emr_sound.ogg'));
       } catch (assetErr) {
-        // Fallback to pre-cached WAV bytes without recalculating math
+        // Fallback to pre-cached procedural WAV bytes if asset cannot be opened
         _cachedWavBytes ??= await compute(_generateWavBytesIsolate, 3);
         await _audioPlayer.play(BytesSource(_cachedWavBytes!, mimeType: 'audio/wav'));
       }

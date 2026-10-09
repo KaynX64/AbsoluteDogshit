@@ -4,6 +4,21 @@ import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { logAudit } from '../utils/auditLogger.js';
+import { logPhiAccess } from '../utils/phiLogger.js';
+import {
+  isReadOnlyTable,
+  readOnlyMessage,
+  phiPatientSource,
+  fail,
+  normalizeValue,
+  maskRowForDisplay,
+  auditSafe,
+  assertKnownColumns,
+  assertPrimaryKey,
+  protectValues,
+  planDelete,
+  shouldBumpVersion,
+} from '../utils/dbStudioGuard.js';
 import { isRedisActive } from '../utils/redisClient.js';
 import bcrypt from 'bcryptjs';
 
@@ -486,6 +501,78 @@ async function getWhitelistedTables() {
   return rows;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DB STUDIO SAFETY LAYER (Audit Issue #3)
+// Pure rules (encrypted columns, secret columns, read-only tables, audit fingerprints,
+// value protection, soft-delete / version-bump policy) live in utils/dbStudioGuard.js and
+// are unit-tested in server/tests/dbStudioGuard.test.js. Only DB-bound helpers stay here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function getTableColumns(connection, tableName) {
+  const [cols] = await connection.query(
+    `SELECT COLUMN_NAME AS name, COLUMN_KEY AS columnKey
+     FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+    [tableName]
+  );
+  if (cols.length === 0) throw fail('Table does not exist.', 404);
+  return {
+    names: new Set(cols.map((c) => c.name)),
+    pk: cols.filter((c) => c.columnKey === 'PRI').map((c) => c.name),
+  };
+}
+
+// Works out which patients' records a table page exposes, so browsing PHI in DB Studio
+// leaves the same PHI_ACCESS_LOGS trail as every other read path.
+async function resolvePhiTargets(table, rows, pkCols) {
+  const src = phiPatientSource(table);
+  if (!src || rows.length === 0) return [];
+  const recordIdOf = (row) => (pkCols.length ? row[pkCols[0]] : 0) ?? 0;
+
+  const byPatient = new Map(); // patientUserId -> first recordId seen
+  if (!src.via) {
+    for (const row of rows) {
+      const patientId = row[src.col];
+      if (patientId !== null && patientId !== undefined && !byPatient.has(patientId)) {
+        byPatient.set(patientId, recordIdOf(row));
+      }
+    }
+  } else {
+    const parentKeys = [...new Set(rows.map((r) => r[src.col]).filter((v) => v !== null && v !== undefined))];
+    if (parentKeys.length === 0) return [];
+    const [parents] = await pool.query(
+      `SELECT ?? AS k, ?? AS patient FROM ?? WHERE ?? IN (?)`,
+      [src.via.key, src.via.patient, src.via.table, src.via.key, parentKeys]
+    );
+    const patientOfParent = new Map(parents.map((p) => [p.k, p.patient]));
+    for (const row of rows) {
+      const patientId = patientOfParent.get(row[src.col]);
+      if (patientId !== null && patientId !== undefined && !byPatient.has(patientId)) {
+        byPatient.set(patientId, recordIdOf(row));
+      }
+    }
+  }
+  return [...byPatient].map(([patientUserId, recordId]) => ({ patientUserId, recordId }));
+}
+
+async function logDbStudioRead(req, table, rows, pkCols) {
+  try {
+    const targets = await resolvePhiTargets(table, rows, pkCols);
+    for (const t of targets) {
+      await logPhiAccess({
+        viewerUserId: req.user.user_id,
+        patientUserId: t.patientUserId,
+        table,
+        recordId: t.recordId,
+        purpose: 'Admin DB Studio table browse',
+        ipAddress: req.ip,
+      });
+    }
+  } catch (err) {
+    console.error('[DB Studio PHI Read Log Error]:', err.message);
+  }
+}
+
 // 1. GET /api/admin/db/tables - List all tables and estimated row counts
 router.get('/db/tables', async (req, res) => {
   try {
@@ -524,7 +611,12 @@ router.get('/db/tables/:table', async (req, res) => {
     const totalRows = countResult[0]?.total || 0;
 
     // 3. Fetch paginated records
-    const [rows] = await pool.query(`SELECT * FROM ?? LIMIT ? OFFSET ?`, [tableName, limit, offset]);
+    const [rawRows] = await pool.query(`SELECT * FROM ?? LIMIT ? OFFSET ?`, [tableName, limit, offset]);
+    const rows = rawRows.map((r) => maskRowForDisplay(tableName, r));
+
+    // R.A. 10173: browsing PHI is an access event. Fire-and-forget so paging stays fast.
+    const pkCols = columns.filter((c) => c.columnKey === 'PRI').map((c) => c.columnName);
+    void logDbStudioRead(req, tableName, rawRows, pkCols);
 
     res.json({
       tableName,
@@ -534,7 +626,7 @@ router.get('/db/tables/:table', async (req, res) => {
       limit,
       totalPages: Math.ceil(totalRows / limit) || 1,
       rows,
-      isReadOnly: ['AUDIT_LOGS', 'PHI_ACCESS_LOGS'].includes(tableName),
+      isReadOnly: isReadOnlyTable(tableName),
     });
   } catch (error) {
     console.error('[DB Studio] Table query error:', error);
@@ -547,20 +639,30 @@ router.post('/db/tables/:table/rows', async (req, res) => {
   const tableName = req.params.table;
   const rowData = req.body;
 
-  if (['AUDIT_LOGS', 'PHI_ACCESS_LOGS'].includes(tableName)) {
-    return res.status(403).json({ error: 'Statutory compliance violation: Audit logs are append-only.' });
+  if (isReadOnlyTable(tableName)) {
+    return res.status(403).json({ error: readOnlyMessage(tableName) });
+  }
+
+  if (!rowData || typeof rowData !== 'object' || Array.isArray(rowData) || Object.keys(rowData).length === 0) {
+    return res.status(400).json({ error: 'A non-empty row object is required.' });
   }
 
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
 
-    const tables = await getWhitelistedTables();
-    if (!tables.some((t) => t.tableName === tableName)) {
-      throw new Error('Table does not exist.');
-    }
+    const { names } = await getTableColumns(connection, tableName);
+    assertKnownColumns(Object.keys(rowData), names);
 
-    const [insertResult] = await connection.query(`INSERT INTO ?? SET ?`, [tableName, rowData]);
+    // Plaintext meant for an encrypted column is encrypted before it is stored.
+    const safeData = protectValues(tableName, rowData);
+
+    const [insertResult] = await connection.query(`INSERT INTO ?? SET ?`, [tableName, safeData]);
+
+    const loggedData = {};
+    for (const [col, val] of Object.entries(safeData)) {
+      loggedData[col] = auditSafe(tableName, col, val);
+    }
 
     await logAudit(connection, {
       userId: req.user.user_id,
@@ -568,7 +670,7 @@ router.post('/db/tables/:table/rows', async (req, res) => {
       table: tableName,
       recordId: insertResult.insertId || 0,
       oldValue: null,
-      newValue: { operation: 'ADMIN_DB_STUDIO_INSERT', insertedData: rowData },
+      newValue: { operation: 'ADMIN_DB_STUDIO_INSERT', insertedData: loggedData },
       ipAddress: req.ip,
     });
 
@@ -577,7 +679,7 @@ router.post('/db/tables/:table/rows', async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('[DB Studio Insert Error]:', error);
-    res.status(400).json({ error: error.message || 'Failed to insert row.' });
+    res.status(error.status || 400).json({ error: error.message || 'Failed to insert row.' });
   } finally {
     connection.release();
   }
@@ -588,37 +690,78 @@ router.put('/db/tables/:table/rows', async (req, res) => {
   const tableName = req.params.table;
   const { primaryKey, updates } = req.body;
 
-  if (['AUDIT_LOGS', 'PHI_ACCESS_LOGS'].includes(tableName)) {
-    return res.status(403).json({ error: 'Statutory compliance violation: Audit logs are immutable.' });
+  if (isReadOnlyTable(tableName)) {
+    return res.status(403).json({ error: readOnlyMessage(tableName) });
   }
 
-  if (!primaryKey || typeof primaryKey !== 'object' || Object.keys(primaryKey).length === 0) {
+  if (!primaryKey || typeof primaryKey !== 'object' || Array.isArray(primaryKey) || Object.keys(primaryKey).length === 0) {
     return res.status(400).json({ error: 'Primary key specification is required to update a row.' });
+  }
+
+  if (!updates || typeof updates !== 'object' || Array.isArray(updates)) {
+    return res.status(400).json({ error: 'An updates object is required.' });
   }
 
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
 
-    const tables = await getWhitelistedTables();
-    if (!tables.some((t) => t.tableName === tableName)) throw new Error('Table does not exist.');
+    const { names, pk } = await getTableColumns(connection, tableName);
+    assertPrimaryKey(primaryKey, pk);
+    assertKnownColumns(Object.keys(updates), names);
+    if (Object.keys(updates).some((c) => pk.includes(c))) {
+      throw fail('Primary key columns cannot be changed.');
+    }
 
-    // Build WHERE clause based on composite or single PK
-    const pkClauses = Object.keys(primaryKey).map((col) => `\`${col}\` = ?`).join(' AND ');
-    const pkValues = Object.values(primaryKey);
+    const pkClauses = pk.map(() => '?? = ?').join(' AND ');
+    const pkParams = pk.flatMap((c) => [c, primaryKey[c]]);
 
-    const [result] = await connection.query(
-      `UPDATE ?? SET ? WHERE ${pkClauses}`,
-      [tableName, updates, ...pkValues]
+    // Lock and read the current row so the audit log can record a real before/after diff.
+    const [existing] = await connection.query(
+      `SELECT * FROM ?? WHERE ${pkClauses} FOR UPDATE`,
+      [tableName, ...pkParams]
     );
+    if (existing.length === 0) throw fail('Record not found.', 404);
+    const oldRow = existing[0];
+
+    // The editor re-sends the whole row, so keep only the columns that really changed.
+    const changedInput = {};
+    for (const [col, val] of Object.entries(updates)) {
+      if (normalizeValue(val) !== normalizeValue(oldRow[col])) changedInput[col] = val;
+    }
+
+    const writeData = protectValues(tableName, changedInput);
+    if (Object.keys(writeData).length === 0) {
+      await connection.rollback();
+      return res.json({ message: 'No changes detected.', affectedRows: 0 });
+    }
+
+    // Sync tables carry a `version`; bump it so offline clients detect the admin edit.
+    const bumpVersion = shouldBumpVersion(names, writeData);
+    const [result] = bumpVersion
+      ? await connection.query(`UPDATE ?? SET ?, ?? = ?? + 1 WHERE ${pkClauses}`, [
+          tableName, writeData, 'version', 'version', ...pkParams,
+        ])
+      : await connection.query(`UPDATE ?? SET ? WHERE ${pkClauses}`, [tableName, writeData, ...pkParams]);
+
+    const oldLogged = {};
+    const newLogged = {};
+    for (const col of Object.keys(writeData)) {
+      oldLogged[col] = auditSafe(tableName, col, oldRow[col]);
+      newLogged[col] = auditSafe(tableName, col, writeData[col]);
+    }
+    if (bumpVersion) {
+      oldLogged.version = normalizeValue(oldRow.version);
+      newLogged.version = String((Number(oldRow.version) || 0) + 1);
+    }
 
     await logAudit(connection, {
       userId: req.user.user_id,
       action: 'UPDATE',
       table: tableName,
       recordId: Object.values(primaryKey)[0] || 0,
-      oldValue: null,
-      newValue: { operation: 'ADMIN_DB_STUDIO_UPDATE', primaryKey, updates },
+      oldValue: { primaryKey, fields: oldLogged },
+      newValue: { operation: 'ADMIN_DB_STUDIO_UPDATE', primaryKey, fields: newLogged },
       ipAddress: req.ip,
     });
 
@@ -627,7 +770,7 @@ router.put('/db/tables/:table/rows', async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('[DB Studio Update Error]:', error);
-    res.status(400).json({ error: error.message || 'Failed to update row.' });
+    res.status(error.status || 400).json({ error: error.message || 'Failed to update row.' });
   } finally {
     connection.release();
   }
@@ -638,11 +781,11 @@ router.delete('/db/tables/:table/rows', async (req, res) => {
   const tableName = req.params.table;
   const { primaryKey } = req.body;
 
-  if (['AUDIT_LOGS', 'PHI_ACCESS_LOGS'].includes(tableName)) {
-    return res.status(403).json({ error: 'Statutory compliance violation: Audit logs cannot be deleted.' });
+  if (isReadOnlyTable(tableName)) {
+    return res.status(403).json({ error: readOnlyMessage(tableName) });
   }
 
-  if (!primaryKey || typeof primaryKey !== 'object') {
+  if (!primaryKey || typeof primaryKey !== 'object' || Array.isArray(primaryKey) || Object.keys(primaryKey).length === 0) {
     return res.status(400).json({ error: 'Primary key specification is required to delete a row.' });
   }
 
@@ -650,27 +793,64 @@ router.delete('/db/tables/:table/rows', async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const pkClauses = Object.keys(primaryKey).map((col) => `\`${col}\` = ?`).join(' AND ');
-    const pkValues = Object.values(primaryKey);
+    const { names, pk } = await getTableColumns(connection, tableName);
+    assertPrimaryKey(primaryKey, pk);
 
-    const [result] = await connection.query(`DELETE FROM ?? WHERE ${pkClauses}`, [tableName, ...pkValues]);
+    const pkClauses = pk.map(() => '?? = ?').join(' AND ');
+    const pkParams = pk.flatMap((c) => [c, primaryKey[c]]);
+    const mode = planDelete(names); // 'soft' when the table has a deleted_at tombstone
+
+    // Snapshot the row first so the audit log shows exactly what was removed.
+    const [existing] = await connection.query(
+      `SELECT * FROM ?? WHERE ${pkClauses} FOR UPDATE`,
+      [tableName, ...pkParams]
+    );
+    if (existing.length === 0) throw fail('Record not found.', 404);
+
+    if (mode === 'soft' && existing[0].deleted_at !== null && existing[0].deleted_at !== undefined) {
+      throw fail('Record is already deleted.', 409);
+    }
+
+    const snapshot = {};
+    for (const [col, val] of Object.entries(existing[0])) {
+      snapshot[col] = auditSafe(tableName, col, val);
+    }
+
+    // Clinical/sync tables are tombstoned, never physically removed: this keeps the
+    // retention trail intact and lets the deletion propagate to offline Electron clients.
+    let result;
+    if (mode === 'soft') {
+      const setVersion = names.has('version') ? ', version = version + 1' : '';
+      [result] = await connection.query(
+        `UPDATE ?? SET deleted_at = NOW()${setVersion} WHERE ${pkClauses}`,
+        [tableName, ...pkParams]
+      );
+    } else {
+      [result] = await connection.query(`DELETE FROM ?? WHERE ${pkClauses}`, [tableName, ...pkParams]);
+    }
 
     await logAudit(connection, {
       userId: req.user.user_id,
       action: 'DELETE',
       table: tableName,
       recordId: Object.values(primaryKey)[0] || 0,
-      oldValue: primaryKey,
-      newValue: { operation: 'ADMIN_DB_STUDIO_DELETE' },
+      oldValue: { primaryKey, row: snapshot },
+      newValue: { operation: mode === 'soft' ? 'ADMIN_DB_STUDIO_SOFT_DELETE' : 'ADMIN_DB_STUDIO_DELETE' },
       ipAddress: req.ip,
     });
 
     await connection.commit();
-    res.json({ message: `Record deleted from ${tableName}.`, affectedRows: result.affectedRows });
+    res.json({
+      message: mode === 'soft'
+        ? `Record in ${tableName} archived (soft-deleted).`
+        : `Record deleted from ${tableName}.`,
+      softDeleted: mode === 'soft',
+      affectedRows: result.affectedRows,
+    });
   } catch (error) {
     await connection.rollback();
     console.error('[DB Studio Delete Error]:', error);
-    res.status(400).json({ error: error.message || 'Failed to delete row.' });
+    res.status(error.status || 400).json({ error: error.message || 'Failed to delete row.' });
   } finally {
     connection.release();
   }

@@ -79,3 +79,21 @@ export async function getFromS3(key) {
   );
   return response;
 }
+
+/**
+ * Reads an S3 object into a Buffer (for small PDFs where streaming isn't worth it).
+ */
+export async function getBufferFromS3(key) {
+  const response = await s3.send(
+    new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key })
+  );
+  const chunks = [];
+  for await (const chunk of response.Body) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
+
+/** Deletes an object (used when a PDF is regenerated). */
+export async function deleteFromS3(key) {
+  const { DeleteObjectCommand } = await import('@aws-sdk/client-s3');
+  await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
+}

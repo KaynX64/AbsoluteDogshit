@@ -4,7 +4,12 @@ import NurseConsole from './components/NurseConsole';
 import DoctorConsole from './components/DoctorConsole';
 import AdminConsole from './components/AdminConsole';
 import ResponderConsole from './components/ResponderConsole';
-import { getOfflineQueue, replayOfflineQueue } from './services/offlineSync';
+import {
+  getOfflineQueue,
+  replayOfflineQueue,
+  bootstrapOfflineCache,
+  refreshOfflineQueueFromBackend,
+} from './services/offlineSync';
 import { API_BASE_URL } from './config/api';
 
 /* ── Inline SVG icons ──────────────────────────────────────────── */
@@ -139,64 +144,64 @@ interface SidebarProps {
 }
 
 function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick }: SidebarProps) {
-const navByRole: Record<string, { key: string; label: string; icon: React.ReactNode }[]> = {
-  ADMIN: [
-    { key: 'users',     label: 'Users',      icon: <I.Users /> },
-    { key: 'audit',     label: 'Audit',      icon: <I.Shield /> },
-    { key: 'telemetry', label: 'Health',     icon: <I.Activity /> },
-    { key: 'analytics', label: 'Analytics',  icon: <I.Chart /> },
-    { key: 'db',        label: 'Database',   icon: <I.Database /> },
-  ],
-  NURSE: [
-    {
-      key: 'triage',
-      label: 'Triage',
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-        </svg>
-      )
-    },
-    {
-      key: 'expected',
-      label: 'Expected',
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="3" y="4" width="18" height="18" rx="2" />
-          <path d="M16 2v4M8 2v4M3 10h18" />
-          <path d="M9 15l2 2 4-4" />
-        </svg>
-      )
-    },
-    {
-      key: 'inventory',
-      label: 'Inventory',
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M10.5 20.5a7 7 0 0 1-9.9-9.9l6.4-6.4a7 7 0 0 1 9.9 9.9z" />
-          <path d="M8.5 8.5l7 7" />
-        </svg>
-      )
-    },
-  ],
-  DOCTOR: [
-    { key: 'active',    label: 'Queue',     icon: <I.Stethoscope /> },
-    { key: 'scheduled', label: 'Bookings',  icon: <I.Calendar /> },
-    { key: 'history',   label: 'History',   icon: <I.History /> },
-    { key: 'archive',   label: 'EMR',       icon: <I.Folder /> },
-    { key: 'analytics', label: 'Analytics', icon: <I.Chart /> },
-  ],
-  DENTIST: [
-    { key: 'active',    label: 'Queue',     icon: <I.Stethoscope /> },
-    { key: 'scheduled', label: 'Bookings',  icon: <I.Calendar /> },
-    { key: 'history',   label: 'History',   icon: <I.History /> },
-    { key: 'archive',   label: 'EMR',       icon: <I.Folder /> },
-    { key: 'analytics', label: 'Analytics', icon: <I.Chart /> },
-  ],
-  EMERGENCY_RESPONDER: [
-    { key: 'dispatch', label: 'Dispatch', icon: <I.Alert /> },
-  ],
-};
+  const navByRole: Record<string, { key: string; label: string; icon: React.ReactNode }[]> = {
+    ADMIN: [
+      { key: 'users',     label: 'Users',      icon: <I.Users /> },
+      { key: 'audit',     label: 'Audit',      icon: <I.Shield /> },
+      { key: 'telemetry', label: 'Health',     icon: <I.Activity /> },
+      { key: 'analytics', label: 'Analytics',  icon: <I.Chart /> },
+      { key: 'db',        label: 'Database',   icon: <I.Database /> },
+    ],
+    NURSE: [
+      {
+        key: 'triage',
+        label: 'Triage',
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+          </svg>
+        )
+      },
+      {
+        key: 'expected',
+        label: 'Expected',
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="4" width="18" height="18" rx="2" />
+            <path d="M16 2v4M8 2v4M3 10h18" />
+            <path d="M9 15l2 2 4-4" />
+          </svg>
+        )
+      },
+      {
+        key: 'inventory',
+        label: 'Inventory',
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10.5 20.5a7 7 0 0 1-9.9-9.9l6.4-6.4a7 7 0 0 1 9.9 9.9z" />
+            <path d="M8.5 8.5l7 7" />
+          </svg>
+        )
+      },
+    ],
+    DOCTOR: [
+      { key: 'active',    label: 'Queue',     icon: <I.Stethoscope /> },
+      { key: 'scheduled', label: 'Bookings',  icon: <I.Calendar /> },
+      { key: 'history',   label: 'History',   icon: <I.History /> },
+      { key: 'archive',   label: 'EMR',       icon: <I.Folder /> },
+      { key: 'analytics', label: 'Analytics', icon: <I.Chart /> },
+    ],
+    DENTIST: [
+      { key: 'active',    label: 'Queue',     icon: <I.Stethoscope /> },
+      { key: 'scheduled', label: 'Bookings',  icon: <I.Calendar /> },
+      { key: 'history',   label: 'History',   icon: <I.History /> },
+      { key: 'archive',   label: 'EMR',       icon: <I.Folder /> },
+      { key: 'analytics', label: 'Analytics', icon: <I.Chart /> },
+    ],
+    EMERGENCY_RESPONDER: [
+      { key: 'dispatch', label: 'Dispatch', icon: <I.Alert /> },
+    ],
+  };
 
   const navItems = navByRole[role] ?? navByRole.ADMIN;
 
@@ -497,6 +502,27 @@ export default function App() {
   const [passwordMsg, setPasswordMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const [isSubmittingPassword, setIsSubmittingPassword] = useState(false);
 
+  // ── Session Logout & Token Invalidation ───────────────────────
+  const handleSignOut = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    if (token) {
+      try {
+        await fetch(`${API_BASE_URL}/api/auth/logout`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } catch (_) {}
+    }
+    localStorage.removeItem('valetudo_token');
+    localStorage.removeItem('token');
+    
+    // Purge cached credentials and role state from React memory
+    setPassword('');
+    setEmail('');
+    setActiveRoleView('');
+    setUser(null);
+  };
+
   const isResponder =
     activeRoleView === 'EMERGENCY_RESPONDER' ||
     (user?.roles?.length === 1 && user.roles[0] === 'EMERGENCY_RESPONDER');
@@ -510,6 +536,10 @@ export default function App() {
     window.addEventListener('online', updateOnline);
     window.addEventListener('offline', updateOffline);
     window.addEventListener('offline-queue-changed', updateQueueCount);
+
+    // Sync the offline badge with the real SQLite queue on mount.
+    // Falls back to localStorage silently when running outside Electron.
+    refreshOfflineQueueFromBackend().catch(() => {});
 
     return () => {
       window.removeEventListener('online', updateOnline);
@@ -541,6 +571,11 @@ export default function App() {
         }
 
         localStorage.setItem('valetudo_token', data.token);
+
+        // Pull the offline SQLite bootstrap cache (patients + recent EMR)
+        // in the background. Non-blocking; fails silently outside Electron.
+        bootstrapOfflineCache().catch(() => {});
+
         setUser(data.user);
 
         const defaultRole = userRoles.find((r) => staffRoles.includes(r)) || staffRoles[0];
@@ -624,9 +659,9 @@ export default function App() {
   return (
     <div className="app-shell">
       <Sidebar
-        role={activeRoleView}
-        onSignOut={() => setUser(null)}
-        onChangePassword={() => { setShowPasswordModal(true); setPasswordMsg(null); }}
+          role={activeRoleView}
+          onSignOut={handleSignOut}
+          onChangePassword={() => { setShowPasswordModal(true); setPasswordMsg(null); }}
         activeItem={
           activeRoleView === 'ADMIN' ? adminTab
           : (activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST') ? doctorViewMode
@@ -668,6 +703,7 @@ export default function App() {
             <DoctorConsole
               viewMode={doctorViewMode}
               onViewModeChange={setDoctorViewMode}
+              currentRole={activeRoleView}
             />
           )}
           {activeRoleView === 'ADMIN' && (

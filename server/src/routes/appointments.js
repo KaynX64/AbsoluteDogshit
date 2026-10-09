@@ -7,45 +7,48 @@ import { requirePrivacyConsent } from '../middleware/consent.js';
 import { logAudit } from '../utils/auditLogger.js';
 import { encrypt, decrypt } from '../utils/cryptoVault.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
-import { getCache, setCache, invalidateCache } from '../utils/redisClient.js';
+import { redis, isRedisActive, getCache, setCache, invalidateCache } from '../utils/redisClient.js';
 import { sendAppointmentEmail } from '../utils/mailer.js';
+import { sendPushToUser } from '../utils/fcmNotifier.js';
+import {
+  APPOINTMENT_RULES,
+  CLINIC_HOURS,
+  getHourBlock,
+  addHourBlock,
+  isLunchBreak,
+  isPastSlot,
+} from '../config/appointmentRules.js';
+import { BOOKING_LIMIT } from '../config/limits.js';
+import { validateDentalChart } from '../utils/dentalValidator.js';
+
+// Odontogram helpers (the chart lives in DENTAL_CHARTS, never in treatment_plan)
+function stripLegacyOdontogram(text) {
+  return (text || '').replace(/\n*\[DENTAL ODONTOGRAM CHART\]:[^\n]*/g, '').trim();
+}
+function readDentalChart(cipher) {
+  if (!cipher) return null;
+  try { return JSON.parse(decrypt(cipher)); } catch { return null; }
+}
 
 export default function appointmentRoutes(io) {
   const router = express.Router();
 
-// Shared guard: does this patient already have a live queue ticket today?
-// Used by both /:id/checkin and /walk-in to prevent duplicate tickets.
-async function findActiveQueueEntry(connection, patientUserId) {
-  const [rows] = await connection.query(
-    `SELECT q.queue_id, q.queue_number, q.status, q.appointment_id,
-            CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS ticket_no,
-            DATE_FORMAT(q.checked_in_at, '%h:%i %p') AS arrival_time
-     FROM QUEUE q
-     WHERE q.patient_user_id = ?
-       AND q.queue_date = CURDATE()
-       AND q.status IN ('waiting', 'in-consultation')
-     ORDER BY q.queue_id DESC
-     LIMIT 1`,
-    [patientUserId]
-  );
-  return rows.length > 0 ? rows[0] : null;
-}
-  // Symmetric consultation buffer: a booking at HH:MM blocks
-  // HH:MM-30 and HH:MM+30 as well.
-  const CONSULTATION_BUFFER_MINUTES = 15;
-
-  function subtractMinutes(hhmm, minutes) {
-    const [h, m] = hhmm.split(':').map(Number);
-    const total = h * 60 + m - minutes;
-    if (total < 0) return null;
-    return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
-  }
-
-  function addMinutes(hhmm, minutes) {
-    const [h, m] = hhmm.split(':').map(Number);
-    const total = h * 60 + m + minutes;
-    if (total >= 24 * 60) return null;
-    return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+  // Shared guard: does this patient already have a live queue ticket today?
+  // Used by both /:id/checkin and /walk-in to prevent duplicate tickets.
+  async function findActiveQueueEntry(connection, patientUserId) {
+    const [rows] = await connection.query(
+      `SELECT q.queue_id, q.queue_number, q.status, q.appointment_id,
+              CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS ticket_no,
+              DATE_FORMAT(q.checked_in_at, '%h:%i %p') AS arrival_time
+       FROM QUEUE q
+       WHERE q.patient_user_id = ?
+         AND q.queue_date = CURDATE()
+         AND q.status IN ('waiting', 'in-consultation')
+       ORDER BY q.queue_id DESC
+       LIMIT 1`,
+      [patientUserId]
+    );
+    return rows.length > 0 ? rows[0] : null;
   }
 
   // ===========================================================================
@@ -77,9 +80,8 @@ async function findActiveQueueEntry(connection, patientUserId) {
   });
 
   // ===========================================================================
-  // 2. TIME SLOT AVAILABILITY (symmetric 30-minute buffer)
+  // 2. TIME SLOT AVAILABILITY (per-role, per-type capacity model)
   // ===========================================================================
-
   router.get('/slots', authenticateToken, async (req, res) => {
     const { doctorId, date } = req.query;
 
@@ -88,45 +90,137 @@ async function findActiveQueueEntry(connection, patientUserId) {
     }
 
     try {
-          const defaultSlots = [
-            // Morning: 8:00 AM – 12:00 PM
-            '08:00', '08:15', '08:30', '08:45',
-            '09:00', '09:15', '09:30', '09:45',
-            '10:00', '10:15', '10:30', '10:45',
-            '11:00', '11:15', '11:30', '11:45',
-            // Afternoon: 1:00 PM – 5:00 PM (lunch break 12:00–13:00)
-            '13:00', '13:15', '13:30', '13:45',
-            '14:00', '14:15', '14:30', '14:45',
-            '15:00', '15:15', '15:30', '15:45',
-            '16:00', '16:15', '16:30', '16:45',
-          ];
+      // ── 1. Identify the doctor's role (DOCTOR vs DENTIST) ─────────────
+      const [roleRows] = await pool.query(
+        `SELECT r.code
+         FROM USERS u
+         JOIN USER_ROLES ur ON u.user_id = ur.user_id
+         JOIN ROLES r ON ur.role_id = r.role_id
+         WHERE u.user_id = ? AND r.code IN ('DOCTOR', 'DENTIST')
+         LIMIT 1`,
+        [doctorId]
+      );
+      const doctorRole = roleRows[0]?.code || 'DOCTOR';
+      const rules = APPOINTMENT_RULES[doctorRole];
 
-    const [booked] = await pool.query(
-      `SELECT DATE_FORMAT(date_time, '%H:%i') AS time_slot
-       FROM APPOINTMENTS
-       WHERE doctor_user_id = ?
-         AND DATE(date_time) = ?
-         AND status IN ('scheduled', 'checked_in', 'serving')
-         AND deleted_at IS NULL`,
-      [doctorId, date]
-    );
+      // ── 2. Fetch today's live bookings for this doctor/date ───────────
+      const [bookings] = await pool.query(
+        `SELECT DATE_FORMAT(date_time, '%H:%i') AS time_slot, appointment_type
+         FROM APPOINTMENTS
+         WHERE doctor_user_id = ?
+           AND DATE(date_time) = ?
+           AND status IN ('scheduled', 'checked_in', 'serving')
+           AND deleted_at IS NULL`,
+        [doctorId, date]
+      );
 
-      const bookedSet = new Set(booked.map((b) => b.time_slot));
+      // Group: hourBlock -> { typeName -> count }
+      const bookingsByHour = {};
+      for (const b of bookings) {
+        const hour = getHourBlock(b.time_slot);
+        if (!bookingsByHour[hour]) bookingsByHour[hour] = {};
+        bookingsByHour[hour][b.appointment_type] =
+          (bookingsByHour[hour][b.appointment_type] || 0) + 1;
+      }
+
+      // ── 3. Determine which hour blocks are "blocked" ──────────────────
+      const blockedHours = new Set();
+
+      for (const [hourBlock, typeCounts] of Object.entries(bookingsByHour)) {
+        let isFull = false;
+
+        if (rules.mode === 'exclusive-hour') {
+          const totalInHour = Object.values(typeCounts).reduce((a, b) => a + b, 0);
+          isFull = totalInHour >= rules.hourlyCapacity;
+        } else if (rules.mode === 'shared-hour') {
+          for (const typeRule of rules.appointmentTypes) {
+            const count = typeCounts[typeRule.name] || 0;
+            if (count >= typeRule.hourlyCapacity) {
+              isFull = true;
+              break;
+            }
+          }
+        }
+
+        if (isFull && rules.cascadeNextHour) {
+          const nextHour = addHourBlock(hourBlock, 1);
+          if (nextHour) blockedHours.add(nextHour);
+        }
+      }
+
+      // ── 4. Generate the day's 15-min grid and evaluate each slot ──────
+      const defaultSlots = [];
+      const [openH, openM] = CLINIC_HOURS.openTime.split(':').map(Number);
+      const [closeH, closeM] = CLINIC_HOURS.closeTime.split(':').map(Number);
+      const startMins = openH * 60 + openM;
+      const endMins = closeH * 60 + closeM;
+
+      for (let m = startMins; m < endMins; m += CLINIC_HOURS.slotMinutes) {
+        const hh = String(Math.floor(m / 60)).padStart(2, '0');
+        const mm = String(m % 60).padStart(2, '0');
+        defaultSlots.push(`${hh}:${mm}`);
+      }
 
       const slots = defaultSlots.map((time) => {
-        const prevSlot = subtractMinutes(time, CONSULTATION_BUFFER_MINUTES);
-        const nextSlot = addMinutes(time, CONSULTATION_BUFFER_MINUTES);
+        const hourBlock = getHourBlock(time);
+        const isLunch = isLunchBreak(time);
+        const isPast = isPastSlot(time, date);
+        const isCascadeBlocked = blockedHours.has(hourBlock);
 
-        const isBlockedByPrevious = prevSlot !== null && bookedSet.has(prevSlot);
-        const isBlockedByNext = nextSlot !== null && bookedSet.has(nextSlot);
+        const availabilityByType = {};
+
+        if (rules.mode === 'exclusive-hour') {
+          const totalBooked = Object.values(bookingsByHour[hourBlock] || {})
+            .reduce((a, b) => a + b, 0);
+          const anyAvailable =
+            !isLunch && !isPast && !isCascadeBlocked &&
+            totalBooked < rules.hourlyCapacity;
+
+          for (const typeName of rules.appointmentTypes) {
+            availabilityByType[typeName] = {
+              booked: totalBooked,
+              capacity: rules.hourlyCapacity,
+              available: anyAvailable,
+            };
+          }
+        } else {
+          for (const typeRule of rules.appointmentTypes) {
+            const booked = (bookingsByHour[hourBlock] || {})[typeRule.name] || 0;
+            availabilityByType[typeRule.name] = {
+              booked,
+              capacity: typeRule.hourlyCapacity,
+              available:
+                !isLunch && !isPast && !isCascadeBlocked &&
+                booked < typeRule.hourlyCapacity,
+            };
+          }
+        }
+
+        const isAvailable = Object.values(availabilityByType).some((v) => v.available);
 
         return {
           time,
-          isAvailable: !bookedSet.has(time) && !isBlockedByPrevious && !isBlockedByNext,
+          hourBlock,
+          isPast,
+          isLunchBreak: isLunch,
+          isCascadeBlocked,
+          availabilityByType,
+          isAvailable,
         };
       });
 
-      res.json({ slots });
+      res.json({
+        doctorRole,
+        doctorId: Number(doctorId),
+        date,
+        rules: {
+          mode: rules.mode,
+          hourlyCapacity: rules.hourlyCapacity,
+          cascadeNextHour: rules.cascadeNextHour || false,
+          appointmentTypes: rules.appointmentTypes,
+        },
+        slots,
+      });
     } catch (error) {
       console.error('[Appointments] Error fetching slots:', error);
       res.status(500).json({ error: 'Failed to retrieve available slots.' });
@@ -166,7 +260,44 @@ async function findActiveQueueEntry(connection, patientUserId) {
     }
   });
 
-  router.post('/', authenticateToken, requirePrivacyConsent, async (req, res) => {
+  function bookingRateLimitKey(userIdOrIp) {
+    return `ratelimit:booking:${userIdOrIp}`;
+  }
+
+  async function bookingRateLimit(req, res, next) {
+    if (!isRedisActive()) return next();
+
+    const identifier = req.user?.user_id || req.ip || 'unknown';
+    const key = bookingRateLimitKey(identifier);
+
+    try {
+      const count = await redis.incr(key);
+
+      if (count === 1) {
+        await redis.expire(key, BOOKING_LIMIT.windowSeconds);
+      }
+
+      if (count > BOOKING_LIMIT.maxAttempts) {
+        const ttl = await redis.ttl(key);
+        const retrySec = ttl > 0 ? ttl : BOOKING_LIMIT.windowSeconds;
+        res.setHeader('Retry-After', String(retrySec));
+        return res.status(429).json({
+          error: `Too many booking attempts. Please wait ${retrySec} second(s) before trying again.`,
+        });
+      }
+
+      res.setHeader(
+        'X-RateLimit-Remaining',
+        String(Math.max(0, BOOKING_LIMIT.maxAttempts - count))
+      );
+      next();
+    } catch (err) {
+      console.error('[Booking Rate Limit Error]:', err.message);
+      next();
+    }
+  }
+
+  router.post('/', authenticateToken, requirePrivacyConsent, bookingRateLimit, async (req, res) => {
     const { doctor_user_id, date_time, appointment_type, notes } = req.body;
     const patientUserId = req.user.user_id;
 
@@ -174,39 +305,113 @@ async function findActiveQueueEntry(connection, patientUserId) {
       return res.status(400).json({ error: 'doctor_user_id, date_time, and appointment_type are required.' });
     }
 
+    const dt = new Date(date_time);
+    if (isNaN(dt.getTime())) {
+      return res.status(400).json({ error: 'Invalid date_time format.' });
+    }
+    const dateStr = dt.toISOString().split('T')[0];
+    const timeStr = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
+
+    if (isLunchBreak(timeStr)) {
+      return res.status(409).json({
+        error: 'The clinic is closed for lunch (12:00–1:00 PM). Please choose another time.',
+        code: 'LUNCH_BREAK',
+      });
+    }
+
+    if (isPastSlot(timeStr, dateStr)) {
+      return res.status(409).json({
+        error: 'That time has already passed. Please choose a future slot.',
+        code: 'SLOT_IN_PAST',
+      });
+    }
+
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
 
-      // Symmetric buffer collision check:
-      //   reject if the requested time, 30 min before, or 30 min after
-      //   already has a live appointment with the same doctor.
-      // FOR UPDATE locks the range to prevent concurrent races.
-      const [conflict] = await connection.query(
-        `SELECT appointment_id FROM APPOINTMENTS
+      const [roleRows] = await connection.query(
+        `SELECT r.code
+         FROM USERS u
+         JOIN USER_ROLES ur ON u.user_id = ur.user_id
+         JOIN ROLES r ON ur.role_id = r.role_id
+         WHERE u.user_id = ? AND r.code IN ('DOCTOR', 'DENTIST')
+         LIMIT 1`,
+        [doctor_user_id]
+      );
+
+      if (roleRows.length === 0) {
+        throw new Error('Selected practitioner is not a valid doctor or dentist.');
+      }
+
+      const doctorRole = roleRows[0].code;
+      const rules = APPOINTMENT_RULES[doctorRole];
+
+      const typeNames = rules.mode === 'shared-hour'
+        ? rules.appointmentTypes.map((t) => t.name)
+        : rules.appointmentTypes;
+
+      if (!typeNames.includes(appointment_type)) {
+        throw new Error(`${doctorRole} practitioners do not offer "${appointment_type}".`);
+      }
+
+      const [bookings] = await connection.query(
+        `SELECT DATE_FORMAT(date_time, '%H:%i') AS time_slot, appointment_type
+         FROM APPOINTMENTS
          WHERE doctor_user_id = ?
-           AND (
-             date_time = ?
-             OR date_time = DATE_SUB(?, INTERVAL ? MINUTE)
-             OR date_time = DATE_ADD(?, INTERVAL ? MINUTE)
-           )
+           AND DATE(date_time) = ?
            AND status IN ('scheduled', 'checked_in', 'serving')
            AND deleted_at IS NULL
          FOR UPDATE`,
-        [
-          doctor_user_id,
-          date_time,
-          date_time,
-          CONSULTATION_BUFFER_MINUTES,
-          date_time,
-          CONSULTATION_BUFFER_MINUTES,
-        ]
+        [doctor_user_id, dateStr]
       );
 
-      if (conflict.length > 0) {
-        throw new Error(
-          'This time slot conflicts with another consultation (30-minute buffer). Please choose a different time.'
-        );
+      const hourBlock = getHourBlock(timeStr);
+
+      const bookingsByHour = {};
+      for (const b of bookings) {
+        const h = getHourBlock(b.time_slot);
+        if (!bookingsByHour[h]) bookingsByHour[h] = {};
+        bookingsByHour[h][b.appointment_type] =
+          (bookingsByHour[h][b.appointment_type] || 0) + 1;
+      }
+
+      if (rules.cascadeNextHour) {
+        const [prevHourNum] = hourBlock.split(':').map(Number);
+        if (prevHourNum > 0) {
+          const prevHourBlock = `${String(prevHourNum - 1).padStart(2, '0')}:00`;
+          const prevTypeCounts = bookingsByHour[prevHourBlock] || {};
+
+          for (const typeRule of rules.appointmentTypes) {
+            const count = prevTypeCounts[typeRule.name] || 0;
+            if (count >= typeRule.hourlyCapacity) {
+              throw new Error(
+                `The ${prevHourBlock} block is full for ${typeRule.name}. ` +
+                `This hour is reserved as a recovery buffer — please choose a later slot.`
+              );
+            }
+          }
+        }
+      }
+
+      const thisHourCounts = bookingsByHour[hourBlock] || {};
+
+      if (rules.mode === 'exclusive-hour') {
+        const totalInHour = Object.values(thisHourCounts).reduce((a, b) => a + b, 0);
+        if (totalInHour >= rules.hourlyCapacity) {
+          throw new Error(
+            `This hour is fully booked. Only ${rules.hourlyCapacity} patient per hour can be seen by the ${doctorRole.toLowerCase()}.`
+          );
+        }
+      } else {
+        const typeRule = rules.appointmentTypes.find((t) => t.name === appointment_type);
+        const existingCount = thisHourCounts[appointment_type] || 0;
+        if (existingCount >= typeRule.hourlyCapacity) {
+          throw new Error(
+            `"${appointment_type}" is fully booked for this hour ` +
+            `(${existingCount}/${typeRule.hourlyCapacity}). Please choose a different time.`
+          );
+        }
       }
 
       const [insertResult] = await connection.query(
@@ -239,7 +444,9 @@ async function findActiveQueueEntry(connection, patientUserId) {
         [patientUserId, doctor_user_id]
       );
 
-      const patientName = details.length > 0 ? `${details[0].patient_first_name} ${details[0].patient_last_name}` : 'Student';
+      const patientName = details.length > 0
+        ? `${details[0].patient_first_name} ${details[0].patient_last_name}`
+        : 'Student';
 
       if (details.length > 0) {
         sendAppointmentEmail({
@@ -280,8 +487,6 @@ async function findActiveQueueEntry(connection, patientUserId) {
     const appointmentId = Number(req.params.id);
     const { cancelled_reason } = req.body;
     const userId = req.user.user_id;
-    const userRoles = req.user.roles || [];
-    const isStaff = userRoles.some((r) => ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'].includes(r));
 
     const connection = await pool.getConnection();
     try {
@@ -298,7 +503,6 @@ async function findActiveQueueEntry(connection, patientUserId) {
 
       const app = appRows[0];
 
-      // ── Guard 1: appointment was already processed ─────────────
       if (['checked_in', 'serving', 'completed'].includes(app.status)) {
         await connection.rollback();
         return res.status(409).json({
@@ -308,7 +512,6 @@ async function findActiveQueueEntry(connection, patientUserId) {
         });
       }
 
-      // ── Guard 2: patient already has a live queue ticket today ─
       const activeEntry = await findActiveQueueEntry(connection, app.patient_user_id);
       if (activeEntry) {
         await connection.rollback();
@@ -321,7 +524,7 @@ async function findActiveQueueEntry(connection, patientUserId) {
         });
       }
 
-      const [numRows] = await connection.query(
+      await connection.query(
         "UPDATE APPOINTMENTS SET status = 'cancelled', cancelled_reason = ? WHERE appointment_id = ?",
         [cancelled_reason || 'Cancelled by user', appointmentId]
       );
@@ -342,7 +545,6 @@ async function findActiveQueueEntry(connection, patientUserId) {
       });
 
       await connection.commit();
-
       await invalidateCache('queue:*');
 
       if (io) {
@@ -367,6 +569,7 @@ async function findActiveQueueEntry(connection, patientUserId) {
   router.get('/today', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
     const { filter } = req.query;
     const userRoles = req.user.roles || [];
+    const canViewDental = userRoles.includes('DENTIST');
     const isPractitionerOnly = (userRoles.includes('DOCTOR') || userRoles.includes('DENTIST')) && !userRoles.includes('ADMIN') && !userRoles.includes('NURSE');
 
     let statusCondition = "a.status IN ('checked_in', 'serving')";
@@ -406,7 +609,8 @@ async function findActiveQueueEntry(connection, patientUserId) {
                 emr.diagnosis AS past_diagnosis,
                 emr.treatment_plan AS past_treatment,
                 emr.notes AS past_clinical_notes,
-                rx.notes AS past_dietary_notes
+                rx.notes AS past_dietary_notes,
+                dc.chart_data AS past_dental_chart
          FROM APPOINTMENTS a
          JOIN USERS u ON a.patient_user_id = u.user_id
          LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
@@ -415,6 +619,7 @@ async function findActiveQueueEntry(connection, patientUserId) {
          LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
          LEFT JOIN QUEUE q ON q.appointment_id = a.appointment_id AND q.queue_date = CURDATE()
          LEFT JOIN EMR_RECORDS emr ON emr.appointment_id = a.appointment_id
+         LEFT JOIN DENTAL_CHARTS dc ON dc.emr_id = emr.emr_id
          LEFT JOIN PRESCRIPTIONS rx ON rx.emr_id = emr.emr_id
          WHERE ${statusCondition}
            ${doctorCondition}
@@ -429,9 +634,10 @@ async function findActiveQueueEntry(connection, patientUserId) {
         chronic_conditions: decrypt(app.chronic_conditions) || 'None reported',
         past_chief_complaint: decrypt(app.past_chief_complaint) || '',
         past_diagnosis: decrypt(app.past_diagnosis) || '',
-        past_treatment: decrypt(app.past_treatment) || '',
+        past_treatment: stripLegacyOdontogram(decrypt(app.past_treatment)),
         past_clinical_notes: decrypt(app.past_clinical_notes) || '',
         past_dietary_notes: decrypt(app.past_dietary_notes) || '',
+        past_dental_chart: canViewDental ? readDentalChart(app.past_dental_chart) : null,
       }));
 
       res.json(decrypted);
@@ -441,11 +647,6 @@ async function findActiveQueueEntry(connection, patientUserId) {
     }
   });
 
-  // ===========================================================================
-  // 4.1 GET /api/appointments/expected-today
-  // Today's scheduled appointments that haven't been checked in yet.
-  // Powers the nurse console's "Expected arrivals" tab.
-  // ===========================================================================
   router.get('/expected-today', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'DENTIST', 'ADMIN'), async (req, res) => {
     try {
       const [rows] = await pool.query(
@@ -490,6 +691,7 @@ async function findActiveQueueEntry(connection, patientUserId) {
       res.status(500).json({ error: 'Failed to fetch expected patients.' });
     }
   });
+
   // ===========================================================================
   // 5. LIVE CLINIC TRIAGE QUEUE
   // ===========================================================================
@@ -558,12 +760,42 @@ async function findActiveQueueEntry(connection, patientUserId) {
       }
 
       await connection.commit();
-
       await invalidateCache('queue:*');
 
       if (io) {
         io.emit('queue:updated');
         io.emit('appointment:status_changed', { queue_id: queueId, status });
+      }
+
+      // Dispatch FCM Push Notification when patient is called
+      if (status === 'in-consultation') {
+        try {
+          const [details] = await pool.query(
+            `SELECT q.patient_user_id,
+                    CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS ticket_no,
+                    COALESCE(CONCAT('Dr. ', doc.first_name, ' ', doc.last_name), 'the Clinic Doctor') AS doctor_name
+             FROM QUEUE q
+             LEFT JOIN APPOINTMENTS a ON q.appointment_id = a.appointment_id
+             LEFT JOIN USERS doc ON a.doctor_user_id = doc.user_id
+             WHERE q.queue_id = ?`,
+            [queueId]
+          );
+
+          if (details.length > 0 && details[0].patient_user_id) {
+            const { patient_user_id, ticket_no, doctor_name } = details[0];
+            sendPushToUser(patient_user_id, {
+              title: `🔔 It's Your Turn! (${ticket_no})`,
+              body: `Please proceed to the consultation room with ${doctor_name}.`,
+              data: {
+                type: 'QUEUE_TURN',
+                ticketNo: ticket_no,
+                doctorName: doctor_name,
+              },
+            }).catch((err) => console.error('[FCM Queue Turn Error]:', err.message));
+          }
+        } catch (pushErr) {
+          console.error('[FCM Queue Turn Fetch Error]:', pushErr.message);
+        }
       }
 
       res.json({ message: 'Queue ticket updated successfully.' });
@@ -703,7 +935,7 @@ async function findActiveQueueEntry(connection, patientUserId) {
   });
 
   // ===========================================================================
-  // NURSE QR INTAKE CHECK-IN (now captures height & weight)
+  // NURSE QR INTAKE CHECK-IN
   // ===========================================================================
   router.post('/:id/checkin', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
     const appointmentId = Number(req.params.id);
@@ -724,6 +956,29 @@ async function findActiveQueueEntry(connection, patientUserId) {
 
       const app = appRows[0];
 
+      // Guard 1: Prevent duplicate check-in if appointment was already processed
+      if (['checked_in', 'serving', 'completed'].includes(app.status)) {
+        await connection.rollback();
+        return res.status(409).json({
+          error: `This appointment is already marked as ${app.status.replace('_', ' ')}.`,
+          code: 'APPOINTMENT_ALREADY_PROCESSED',
+          existingStatus: app.status,
+        });
+      }
+
+      // Guard 2: Prevent duplicate check-in if patient already holds an active ticket today
+      const activeEntry = await findActiveQueueEntry(connection, app.patient_user_id);
+      if (activeEntry) {
+        await connection.rollback();
+        return res.status(409).json({
+          error: `Patient is already in today's queue as ${activeEntry.ticket_no} (${activeEntry.status.replace('-', ' ')}).`,
+          code: 'ALREADY_IN_QUEUE',
+          existingTicket: activeEntry.ticket_no,
+          existingStatus: activeEntry.status,
+          arrivalTime: activeEntry.arrival_time,
+        });
+      }
+
       const [numRows] = await connection.query(
         'SELECT COALESCE(MAX(queue_number), 0) + 1 AS next_num FROM QUEUE WHERE queue_date = CURDATE()'
       );
@@ -743,9 +998,6 @@ async function findActiveQueueEntry(connection, patientUserId) {
         [combinedNotes, appointmentId]
       );
 
-      // Persist latest measured height/weight to the patient's master health profile.
-      // updated_at is forced to bump even if the values are unchanged,
-      // so "last verified" stays accurate for triage freshness.
       if (height || weight) {
         const [hpRows] = await connection.query(
           'SELECT profile_id FROM HEALTH_PROFILES WHERE user_id = ?',
@@ -784,7 +1036,6 @@ async function findActiveQueueEntry(connection, patientUserId) {
       });
 
       await connection.commit();
-
       await invalidateCache('queue:*');
 
       if (io) {
@@ -809,11 +1060,8 @@ async function findActiveQueueEntry(connection, patientUserId) {
     }
   });
 
-
   // ===========================================================================
   // 6.1 POST /api/appointments/walk-in
-  // Register a walk-in patient (no scheduled appointment) directly into the
-  // live queue. Uses QUEUE.appointment_id = NULL, which the schema permits.
   // ===========================================================================
   router.post('/walk-in', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
     const { patient_user_id, visit_type, notes, vitals } = req.body;
@@ -826,7 +1074,6 @@ async function findActiveQueueEntry(connection, patientUserId) {
     try {
       await connection.beginTransaction();
 
-      // 1. Verify patient exists and is active
       const [patientRows] = await connection.query(
         `SELECT u.user_id, u.first_name, u.last_name
          FROM USERS u
@@ -838,8 +1085,6 @@ async function findActiveQueueEntry(connection, patientUserId) {
         throw new Error('Patient not found or inactive.');
       }
 
-      // 2. Block duplicate tickets for the same day — return the existing
-      //    ticket so the client can surface it instead of a generic error.
       const activeEntry = await findActiveQueueEntry(connection, patient_user_id);
       if (activeEntry) {
         await connection.rollback();
@@ -852,13 +1097,11 @@ async function findActiveQueueEntry(connection, patientUserId) {
         });
       }
 
-      // 3. Allocate the next queue number for today
       const [numRows] = await connection.query(
         'SELECT COALESCE(MAX(queue_number), 0) + 1 AS next_num FROM QUEUE WHERE queue_date = CURDATE()'
       );
       const nextNum = numRows[0].next_num;
 
-      // 4. Insert the walk-in queue entry (appointment_id is NULL)
       const [queueResult] = await connection.query(
         `INSERT INTO QUEUE
          (patient_user_id, appointment_id, queue_date, counter_id, queue_number, status, checked_in_at)
@@ -866,7 +1109,6 @@ async function findActiveQueueEntry(connection, patientUserId) {
         [patient_user_id, nextNum]
       );
 
-      // 5. Persist latest height/weight to the master health profile if provided
       if (vitals && (vitals.height || vitals.weight)) {
         const [hpRows] = await connection.query(
           'SELECT profile_id FROM HEALTH_PROFILES WHERE user_id = ?',
@@ -898,7 +1140,6 @@ async function findActiveQueueEntry(connection, patientUserId) {
         }
       }
 
-      // 6. R.A. 10173 audit trail
       await logAudit(connection, {
         userId: req.user.user_id,
         action: 'CREATE',
@@ -917,8 +1158,7 @@ async function findActiveQueueEntry(connection, patientUserId) {
       });
 
       await connection.commit();
-
-      await invalidateCache('queue:*');Fsubtract
+      await invalidateCache('queue:*');
 
       if (io) {
         io.emit('queue:updated');
@@ -928,7 +1168,7 @@ async function findActiveQueueEntry(connection, patientUserId) {
       const arrivalTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
       res.status(201).json({
-        message: 'Walk-in patient registered and admitted to today\'s queue.',
+        message: "Walk-in patient registered and admitted to today's queue.",
         queueTicket,
         queueNumber: nextNum,
         arrivalTime,
@@ -942,11 +1182,8 @@ async function findActiveQueueEntry(connection, patientUserId) {
     }
   });
 
-
   // ===========================================================================
   // 6.2 GET /api/appointments/patient/:patientId/active-ticket
-  // Lightweight pre-check used by the nurse console UI before it shows
-  // a check-in confirmation, so the nurse never gets a stale "confirm" dialog.
   // ===========================================================================
   router.get(
     '/patient/:patientId/active-ticket',
@@ -1016,12 +1253,42 @@ async function findActiveQueueEntry(connection, patientUserId) {
       }
 
       await connection.commit();
-
       await invalidateCache('queue:*');
 
       if (io) {
         io.emit('appointment:status_changed', { appointment_id: appointmentId, status });
         io.emit('queue:updated');
+      }
+
+      // Dispatch FCM Push Notification when doctor marks status as serving
+      if (status === 'serving') {
+        try {
+          const [details] = await pool.query(
+            `SELECT a.patient_user_id,
+                    CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS ticket_no,
+                    COALESCE(CONCAT('Dr. ', doc.first_name, ' ', doc.last_name), 'the Clinic Doctor') AS doctor_name
+             FROM APPOINTMENTS a
+             LEFT JOIN QUEUE q ON q.appointment_id = a.appointment_id
+             LEFT JOIN USERS doc ON a.doctor_user_id = doc.user_id
+             WHERE a.appointment_id = ?`,
+            [appointmentId]
+          );
+
+          if (details.length > 0 && details[0].patient_user_id) {
+            const { patient_user_id, ticket_no, doctor_name } = details[0];
+            sendPushToUser(patient_user_id, {
+              title: `🔔 It's Your Turn! (${ticket_no || 'Consultation'})`,
+              body: `Please proceed to the consultation room with ${doctor_name}.`,
+              data: {
+                type: 'QUEUE_TURN',
+                ticketNo: ticket_no || '',
+                doctorName: doctor_name,
+              },
+            }).catch((err) => console.error('[FCM Queue Turn Error]:', err.message));
+          }
+        } catch (pushErr) {
+          console.error('[FCM Queue Turn Fetch Error]:', pushErr.message);
+        }
       }
 
       res.json({ message: `Appointment status updated to ${status}.` });
@@ -1035,7 +1302,7 @@ async function findActiveQueueEntry(connection, patientUserId) {
   });
 
   // ===========================================================================
-  // 7. CLINICAL ENCOUNTER COMPLETION & EMR RECORDING (now with height/weight)
+  // 7. CLINICAL ENCOUNTER COMPLETION & EMR RECORDING
   // ===========================================================================
 
   router.post('/:id/complete', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'ADMIN'), async (req, res) => {
@@ -1048,10 +1315,22 @@ async function findActiveQueueEntry(connection, patientUserId) {
       treatment_plan,
       notes,
       vitals,
+      dental_chart,
     } = req.body;
 
     if (!diagnosis || !chief_complaint) {
       return res.status(400).json({ error: 'Chief complaint and diagnosis are required.' });
+    }
+
+        // ── Dental Odontogram Schema Validation ───────────────────────────────────
+    if (dental_chart !== undefined && dental_chart !== null && (req.user.roles || []).includes('DENTIST')) {
+      const chartValidation = validateDentalChart(dental_chart);
+      if (!chartValidation.valid) {
+        return res.status(400).json({
+          error: chartValidation.error,
+          code: 'INVALID_DENTAL_CHART',
+        });
+      }
     }
 
     const connection = await pool.getConnection();
@@ -1072,6 +1351,19 @@ async function findActiveQueueEntry(connection, patientUserId) {
         ]
       );
       const emrId = emrResult.insertId;
+      
+      // Dentist-only odontogram: stored separately, silently ignored for any other role
+      if (
+        dental_chart &&
+        typeof dental_chart === 'object' &&
+        (req.user.roles || []).includes('DENTIST')
+      ) {
+        await connection.query(
+          `INSERT INTO DENTAL_CHARTS (emr_id, patient_user_id, dentist_user_id, chart_data)
+           VALUES (?, ?, ?, ?)`,
+          [emrId, patient_user_id, doctorUserId, encrypt(JSON.stringify(dental_chart))]
+        );
+      }
 
       if (vitals && typeof vitals === 'object') {
         const metricUnits = {
@@ -1097,8 +1389,6 @@ async function findActiveQueueEntry(connection, patientUserId) {
         }
       }
 
-      // Persist latest height/weight to master health profile if the doctor updated them.
-      // updated_at is forced to bump even if the values are unchanged.
       if (vitals && (vitals.height || vitals.weight)) {
         const [hpRows] = await connection.query(
           'SELECT profile_id FROM HEALTH_PROFILES WHERE user_id = ?',
@@ -1155,7 +1445,6 @@ async function findActiveQueueEntry(connection, patientUserId) {
       });
 
       await connection.commit();
-
       await invalidateCache('queue:*');
 
       if (io) {
@@ -1182,6 +1471,7 @@ async function findActiveQueueEntry(connection, patientUserId) {
 
   router.get('/patient/:patientId/history', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
     const patientId = Number(req.params.patientId);
+    const canViewDental = (req.user.roles || []).includes('DENTIST');
 
     try {
       const [emrs] = await pool.query(
@@ -1212,6 +1502,15 @@ async function findActiveQueueEntry(connection, patientUserId) {
             [emr.emr_id]
           );
 
+          let dentalChart = null;
+          if (canViewDental) {
+            const [dcRows] = await pool.query(
+              'SELECT chart_data FROM DENTAL_CHARTS WHERE emr_id = ?',
+              [emr.emr_id]
+            );
+            dentalChart = dcRows.length ? readDentalChart(dcRows[0].chart_data) : null;
+          }
+
           return {
             emr_id: emr.emr_id,
             encounter_date: emr.encounter_date,
@@ -1221,8 +1520,9 @@ async function findActiveQueueEntry(connection, patientUserId) {
             doctor_specialty: emr.doctor_specialty,
             chief_complaint: decrypt(emr.chief_complaint) || '',
             diagnosis: decrypt(emr.diagnosis) || '',
-            treatment_plan: decrypt(emr.treatment_plan) || '',
+            treatment_plan: stripLegacyOdontogram(decrypt(emr.treatment_plan)),
             notes: decrypt(emr.notes) || '',
+            dental_chart: dentalChart,
             vitals,
             attachments,
             prescriptions: rxRows.map((rx) => ({

@@ -60,16 +60,14 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
 
   final List<String> _medicalPurposes = [
     'General consultation',
-    'Physical examination',
     'Prescription refill',
     'Medical clearance',
   ];
 
   final List<String> _dentalPurposes = [
-    'Dental Check-up',
+    'Dental Checkup',
     'Tooth Extraction',
     'Oral Prophylaxis',
-    'Dental Filling',
     'Toothache Emergency',
   ];
 

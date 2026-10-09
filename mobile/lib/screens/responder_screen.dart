@@ -199,6 +199,15 @@ class _ResponderScreenState extends State<ResponderScreen> {
                       icon: const Icon(Icons.logout, size: 20, color: primaryCrimson),
                       onPressed: () async {
                         EmergencyAlertService().stopResponderListener();
+                        final token = await _storage.read(key: 'jwt_token');
+                        if (token != null) {
+                          try {
+                            await ApiConfig.client.post(
+                              Uri.parse('${ApiConfig.baseUrl}/api/auth/logout'),
+                              headers: {'Authorization': 'Bearer $token'},
+                            );
+                          } catch (_) {}
+                        }
                         await _storage.deleteAll();
                         if (!context.mounted) return;
                         Navigator.pushAndRemoveUntil(
