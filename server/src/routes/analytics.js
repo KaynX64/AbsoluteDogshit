@@ -4,6 +4,8 @@ import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { decrypt } from '../utils/cryptoVault.js';
+import ExcelJS from 'exceljs';
+import PDFDocument from 'pdfkit';
 
 const router = express.Router();
 
@@ -240,7 +242,7 @@ router.get('/by-department', async (req, res) => {
   }
 });
 
-// 3. GET /api/analytics/export/csv
+// 3. GET /api/analytics/export/csv (Kept for backward compatibility)
 router.get('/export/csv', async (req, res) => {
   try {
     const [allEmrs] = await pool.query(
@@ -324,6 +326,223 @@ router.get('/export/csv', async (req, res) => {
   } catch (error) {
     console.error('[Analytics] CSV Export error:', error);
     res.status(500).json({ error: 'Failed to export CSV report.' });
+  }
+});
+
+// 4. GET /api/analytics/export/xlsx
+router.get('/export/xlsx', async (req, res) => {
+  try {
+    // 1. Fetch all the data
+    const [allEmrs] = await pool.query(
+      `SELECT diagnosis FROM EMR_RECORDS WHERE diagnosis IS NOT NULL AND diagnosis != '' AND deleted_at IS NULL`
+    );
+
+    const diagCountMap = {};
+    for (const row of allEmrs) {
+      const plainDiag = decrypt(row.diagnosis) || 'General Health Check';
+      diagCountMap[plainDiag] = (diagCountMap[plainDiag] || 0) + 1;
+    }
+
+    const topDiagnoses = Object.entries(diagCountMap)
+      .map(([diagnosis, count]) => ({ diagnosis, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    const [deptBreakdown] = await pool.query(
+      `SELECT department, COUNT(*) as count
+       FROM (
+         SELECT COALESCE(sp.course, fp.department, 'General Walk-in') as department
+         FROM APPOINTMENTS a
+         LEFT JOIN STUDENT_PROFILES sp ON a.patient_user_id = sp.user_id
+         LEFT JOIN FACULTY_PROFILES fp ON a.patient_user_id = fp.user_id
+         WHERE a.status = 'completed' AND a.deleted_at IS NULL
+       ) as d_sub
+       GROUP BY department 
+       ORDER BY count DESC`
+    );
+
+    const [roles] = await pool.query(
+      `SELECT r.name, COUNT(u.user_id) as count
+       FROM ROLES r
+       LEFT JOIN USER_ROLES ur ON r.role_id = ur.role_id
+       LEFT JOIN USERS u ON ur.user_id = u.user_id AND u.is_active = TRUE AND u.deleted_at IS NULL
+       GROUP BY r.role_id, r.name
+       ORDER BY count DESC`
+    );
+
+    const [inventory] = await pool.query(
+      `SELECT m.name, b.batch_no, b.quantity_on_hand, b.expiry_date 
+       FROM MEDICINE_BATCHES b 
+       JOIN MEDICINES m ON b.medicine_id = m.medicine_id
+       WHERE b.deleted_at IS NULL`
+    );
+
+    // 2. Create the Excel Workbook
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Valetudo HealthLink';
+    workbook.created = new Date();
+
+    // --- Sheet 1: Summary ---
+    const summarySheet = workbook.addWorksheet('Summary');
+    summarySheet.columns = [
+      { header: 'Metric', key: 'metric', width: 30 },
+      { header: 'Value', key: 'value', width: 40 },
+    ];
+    summarySheet.addRow({ metric: 'Report Generated', value: new Date().toLocaleString() });
+    summarySheet.addRow({ metric: 'Institution', value: 'Pangasinan State University - Lingayen Campus' });
+    summarySheet.getRow(1).font = { bold: true };
+
+    // --- Sheet 2: Role Headcount ---
+    const rolesSheet = workbook.addWorksheet('User Roles');
+    rolesSheet.columns = [
+      { header: 'Role Designation', key: 'role', width: 30 },
+      { header: 'Active Users', key: 'count', width: 15 },
+    ];
+    roles.forEach(r => rolesSheet.addRow({ role: r.name, count: r.count }));
+    rolesSheet.getRow(1).font = { bold: true };
+
+    // --- Sheet 3: Top Diagnoses ---
+    const diagSheet = workbook.addWorksheet('Top Diagnoses');
+    diagSheet.columns = [
+      { header: 'Diagnosis', key: 'diagnosis', width: 40 },
+      { header: 'Cases Recorded', key: 'count', width: 20 },
+    ];
+    topDiagnoses.forEach(d => diagSheet.addRow({ diagnosis: d.diagnosis, count: d.count }));
+    diagSheet.getRow(1).font = { bold: true };
+
+    // --- Sheet 4: Department Breakdown ---
+    const deptSheet = workbook.addWorksheet('Department Breakdown');
+    deptSheet.columns = [
+      { header: 'Department / Course', key: 'department', width: 40 },
+      { header: 'Completed Consultations', key: 'count', width: 25 },
+    ];
+    deptBreakdown.forEach(d => deptSheet.addRow({ department: d.department, count: d.count }));
+    deptSheet.getRow(1).font = { bold: true };
+
+    // --- Sheet 5: Pharmacy Inventory ---
+    const invSheet = workbook.addWorksheet('Pharmacy Inventory');
+    invSheet.columns = [
+      { header: 'Medicine Name', key: 'name', width: 35 },
+      { header: 'Batch Number', key: 'batch_no', width: 20 },
+      { header: 'Stock on Hand', key: 'quantity', width: 15 },
+      { header: 'Expiry Date', key: 'expiry', width: 15 },
+    ];
+    inventory.forEach(i => invSheet.addRow({ 
+      name: i.name, 
+      batch_no: i.batch_no, 
+      quantity: i.quantity_on_hand, 
+      expiry: new Date(i.expiry_date).toISOString().split('T')[0]
+    }));
+    invSheet.getRow(1).font = { bold: true };
+
+    // 3. Stream the Excel file to the response
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="PSU_Health_Analytics_${Date.now()}.xlsx"`);
+    
+    await workbook.xlsx.write(res);
+    res.end();
+
+  } catch (error) {
+    console.error('[Analytics] XLSX Export error:', error);
+    res.status(500).json({ error: 'Failed to export XLSX report.' });
+  }
+});
+
+// 5. GET /api/analytics/export/pdf
+router.get('/export/pdf', async (req, res) => {
+  try {
+    // 1. Fetch the same data as the XLSX route
+    const [allEmrs] = await pool.query(
+      `SELECT diagnosis FROM EMR_RECORDS WHERE diagnosis IS NOT NULL AND diagnosis != '' AND deleted_at IS NULL`
+    );
+    const diagCountMap = {};
+    for (const row of allEmrs) {
+      const plainDiag = decrypt(row.diagnosis) || 'General Health Check';
+      diagCountMap[plainDiag] = (diagCountMap[plainDiag] || 0) + 1;
+    }
+    const topDiagnoses = Object.entries(diagCountMap)
+      .map(([diagnosis, count]) => ({ diagnosis, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    const [deptBreakdown] = await pool.query(
+      `SELECT department, COUNT(*) as count
+       FROM (SELECT COALESCE(sp.course, fp.department, 'General Walk-in') as department
+             FROM APPOINTMENTS a
+             LEFT JOIN STUDENT_PROFILES sp ON a.patient_user_id = sp.user_id
+             LEFT JOIN FACULTY_PROFILES fp ON a.patient_user_id = fp.user_id
+             WHERE a.status = 'completed' AND a.deleted_at IS NULL) as d_sub
+       GROUP BY department ORDER BY count DESC`
+    );
+
+    const [roles] = await pool.query(
+      `SELECT r.name, COUNT(u.user_id) as count
+       FROM ROLES r
+       LEFT JOIN USER_ROLES ur ON r.role_id = ur.role_id
+       LEFT JOIN USERS u ON ur.user_id = u.user_id AND u.is_active = TRUE AND u.deleted_at IS NULL
+       GROUP BY r.role_id, r.name ORDER BY count DESC`
+    );
+
+    // 2. Create the PDF document
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    
+    // Set response headers
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="PSU_Health_Analytics_${Date.now()}.pdf"`);
+
+    // Pipe the PDF directly to the response
+    doc.pipe(res);
+
+    // --- Letterhead ---
+    doc.fillColor('#1F4A34').fontSize(18).font('Helvetica-Bold').text('PANGASINAN STATE UNIVERSITY', { align: 'center' });
+    doc.fontSize(14).font('Helvetica-Bold').text('CAMPUS INFIRMARY MEDICAL SERVICES', { align: 'center' });
+    doc.fontSize(10).font('Helvetica').fillColor('#5A635B').text('Lingayen Campus · Health Analytics & Reporting', { align: 'center' });
+    doc.moveDown(0.5);
+    doc.moveTo(50, doc.y).lineTo(doc.page.width - 50, doc.y).strokeColor('#1F4A34').lineWidth(1.5).stroke();
+    doc.moveDown(1);
+
+    // --- Report Metadata ---
+    doc.fillColor('#191C1A').fontSize(12).font('Helvetica-Bold').text('EPIDEMIOLOGICAL REPORT');
+    doc.fontSize(9).font('Helvetica').fillColor('#5A635B').text(`Generated: ${new Date().toLocaleString()}`);
+    doc.moveDown(1.5);
+
+    // --- Section 1: Role Headcount ---
+    doc.fillColor('#1F4A34').fontSize(14).font('Helvetica-Bold').text('1. Campus Population & Headcount');
+    doc.moveDown(0.5);
+    doc.fontSize(10).font('Helvetica').fillColor('#191C1A');
+    roles.forEach(r => {
+      doc.text(`• ${r.name}: ${r.count} active users`);
+    });
+    doc.moveDown(1.5);
+
+    // --- Section 2: Top Diagnoses ---
+    doc.fillColor('#1F4A34').fontSize(14).font('Helvetica-Bold').text('2. Top Clinical Diagnoses');
+    doc.moveDown(0.5);
+    doc.fontSize(10).font('Helvetica').fillColor('#191C1A');
+    topDiagnoses.forEach(d => {
+      doc.text(`• ${d.diagnosis}: ${d.count} cases`);
+    });
+    doc.moveDown(1.5);
+
+    // --- Section 3: Department Breakdown ---
+    doc.fillColor('#1F4A34').fontSize(14).font('Helvetica-Bold').text('3. Consultation Volume by Department');
+    doc.moveDown(0.5);
+    doc.fontSize(10).font('Helvetica').fillColor('#191C1A');
+    deptBreakdown.forEach(d => {
+      doc.text(`• ${d.department}: ${d.count} completed consultations`);
+    });
+    doc.moveDown(1.5);
+
+    // --- Footer ---
+    const bottomY = doc.page.height - 50;
+    doc.fontSize(8).fillColor('#94A396').text('Protected under Republic Act No. 10173 (Data Privacy Act of 2012).', 50, bottomY, { align: 'center' });
+
+    // Finalize the PDF
+    doc.end();
+
+  } catch (error) {
+    console.error('[Analytics] PDF Export error:', error);
+    res.status(500).json({ error: 'Failed to export PDF report.' });
   }
 });
 
