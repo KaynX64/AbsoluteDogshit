@@ -4,6 +4,7 @@ import AnalyticsDashboard from './AnalyticsDashboard';
 import CreateUserModal from './CreateUserModal';
 import { T, rolePill, inputStyle, btnPrimary, btnGhost } from '../theme';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
+import ServerPingMonitor from './ServerPingMonitor';
 
 /* ── Icons (inline, no dependency) ─────────────────────────────── */
 const I = {
@@ -33,12 +34,10 @@ interface AdminConsoleProps {
 
 export default function AdminConsole({
   activeTab: controlledTab,
-  onTabChange,
 }: AdminConsoleProps = {}) {
   /* Controlled ⇄ uncontrolled: fall back to internal state when no parent props are passed. */
-  const [internalTab, setInternalTab] = useState<AdminTab>('users');
+  const [internalTab] = useState<AdminTab>('users');
   const activeTab = controlledTab ?? internalTab;
-  const setActiveTab = onTabChange ?? setInternalTab;
 
   const [auditSubTab, setAuditSubTab] = useState<'mutations' | 'phi'>('phi');
 
@@ -170,6 +169,23 @@ export default function AdminConsole({
     fetchRetention();
     fetchTelemetry();
   }, []);
+
+  // Refetch contextual data whenever the parent (sidebar) switches the active tab
+  useEffect(() => {
+    if (activeTab === 'audit') {
+      fetchPhiLogs();
+      fetchMutationLogs();
+    }
+    if (activeTab === 'telemetry') {
+      fetchRetention();
+      fetchTelemetry();
+    }
+    if (activeTab === 'db') {
+      fetchDbTables();
+      fetchTableData('USERS', 1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   /* ── Derived lists (unchanged) ───────────────────────────────── */
   const processedUsers = usersList
@@ -473,50 +489,6 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           {activeTab === 'analytics' && 'Campus illness trajectories, seasonal spike monitoring & health reports.'}
           {activeTab === 'db' && 'Inspect and maintain system records · valetudo_healthlink'}
         </p>
-      </div>
-
-      {/* ── Inner tab bar (matches Figma's segmented tabs) ─────── */}
-      <div style={{
-        display: 'flex', gap: 6, flexWrap: 'wrap',
-        padding: 4, background: T.sage100, borderRadius: T.radius.pill,
-        marginBottom: 22, width: 'fit-content',
-      }}>
-        {([
-          { id: 'users',     label: 'Users & roles',     icon: <I.Users /> },
-          { id: 'audit',     label: 'Privacy & audit',   icon: <I.Shield /> },
-          { id: 'telemetry', label: 'System health',     icon: <I.Activity /> },
-          { id: 'analytics', label: 'Health analytics',  icon: <I.Chart /> },
-          { id: 'db',        label: 'Database Studio',   icon: <I.Database /> },
-        ] as const).map((tab) => {
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => {
-                setActiveTab(tab.id);
-                if (tab.id === 'audit') { fetchPhiLogs(); fetchMutationLogs(); }
-                if (tab.id === 'telemetry') { fetchRetention(); fetchTelemetry(); }
-                if (tab.id === 'db') { fetchDbTables(); fetchTableData('USERS', 1); }
-              }}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 8,
-                padding: '9px 18px',
-                borderRadius: T.radius.pill,
-                border: 'none',
-                background: isActive ? T.surface : 'transparent',
-                color: isActive ? T.primary : T.textSub,
-                fontSize: 13, fontWeight: 700,
-                cursor: 'pointer',
-                fontFamily: T.font,
-                boxShadow: isActive ? T.shadow.xs : 'none',
-                transition: 'all 120ms ease',
-              }}
-            >
-              <span style={{ width: 16, height: 16, display: 'grid', placeItems: 'center' }}>{tab.icon}</span>
-              {tab.label}
-            </button>
-          );
-        })}
       </div>
 
       {/* ═══════════════════════════════════════════════════════════ */}
@@ -1128,6 +1100,9 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
               </div>
             ))}
           </div>
+
+          {/* Live server ping monitor */}
+          <ServerPingMonitor />
 
           {/* Retention governance panel */}
           <div style={{

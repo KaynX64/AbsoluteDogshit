@@ -141,8 +141,12 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/interactions', interactionsRoutes);
 
-app.get('/api/users/me', authenticateToken, (req, res) => {
-  res.json({ message: 'Authenticated', user: req.user });
+// ── Lightweight liveness probe for the desktop ping monitor ──────
+// Intentionally unauthenticated and DB-free so it measures pure
+// network + server-loop latency, not MySQL query time.
+app.get('/api/ping', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ ok: true, t: Date.now() });
 });
 
 // =============================================================================
