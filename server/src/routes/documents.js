@@ -1270,4 +1270,145 @@ export default function documentRoutes(io) {
       const isClinicalStaff = userRoles.some((r) => ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'].includes(r));
       const isOwner = req.user.user_id === att.patient_user_id;
 
-      if
+      if (!isClinicalStaff && !isOwner) {
+        return res.status(403).json({ error: 'Unauthorized to access this clinical file.' });
+      }
+
+      const s3Object = await getFromS3(att.s3_key);
+
+      logPhiAccess({
+        viewerUserId: req.user.user_id,
+        patientUserId: att.patient_user_id,
+        table: 'EMR_ATTACHMENTS',
+        recordId: Number(attachmentId),
+        purpose: 'Lab/Diagnostic Document Review',
+        ipAddress: req.ip,
+      });
+
+      res.setHeader('Content-Type', att.mime_type || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(att.file_name)}"`);
+      s3Object.Body.pipe(res);
+    } catch (error) {
+      console.error('[Attachment Download Error]:', error);
+      res.status(500).json({ error: 'Failed to retrieve document from storage.' });
+    }
+  });
+
+  // =============================================================================
+  // 7. SIGNED PDF DOWNLOADS
+  // =============================================================================
+
+  // GET /api/documents/prescriptions/:id/pdf
+  router.get('/prescriptions/:id/pdf', authenticateToken, async (req, res) => {
+    const prescriptionId = Number(req.params.id);
+    if (!prescriptionId) return res.status(400).json({ error: 'Invalid prescription id.' });
+
+    try {
+      const [rows] = await pool.query(
+        `SELECT prescription_id, patient_user_id, doctor_user_id, pdf_s3_key, qr_token
+         FROM PRESCRIPTIONS
+         WHERE prescription_id = ? AND deleted_at IS NULL`,
+        [prescriptionId]
+      );
+
+      if (rows.length === 0) return res.status(404).json({ error: 'Prescription not found.' });
+      const rx = rows[0];
+
+      const roles = req.user.roles || [];
+      const isOwner = Number(req.user.user_id) === Number(rx.patient_user_id);
+      const isStaff = roles.some((r) => ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'].includes(r));
+
+      if (!isOwner && !isStaff) {
+        return res.status(403).json({ error: 'Not authorized to access this document.' });
+      }
+
+      let key = rx.pdf_s3_key;
+      if (!key) {
+        key = await generateAndStorePrescriptionPDF(prescriptionId);
+        if (!key) {
+          return res.status(503).json({
+            error: 'Document is being generated. Please try again shortly.',
+            retryAfterSeconds: 5,
+          });
+        }
+      }
+
+      const buffer = await getBufferFromS3(key);
+
+      logPhiAccess({
+        viewerUserId: req.user.user_id,
+        patientUserId: rx.patient_user_id,
+        table: 'PRESCRIPTIONS',
+        recordId: prescriptionId,
+        purpose: 'Prescription PDF download',
+        ipAddress: req.ip,
+      });
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="prescription-${prescriptionId}.pdf"`);
+      res.setHeader('Content-Length', String(buffer.length));
+      res.send(buffer);
+    } catch (err) {
+      console.error('[Prescription PDF Download Error]:', err);
+      res.status(500).json({ error: 'Failed to retrieve prescription PDF.' });
+    }
+  });
+
+  // GET /api/documents/clearances/:id/pdf
+  router.get('/clearances/:id/pdf', authenticateToken, async (req, res) => {
+    const clearanceId = Number(req.params.id);
+    if (!clearanceId) return res.status(400).json({ error: 'Invalid clearance id.' });
+
+    try {
+      const [rows] = await pool.query(
+        `SELECT clearance_id, user_id, pdf_s3_key, status
+         FROM MEDICAL_CLEARANCES
+         WHERE clearance_id = ? AND deleted_at IS NULL`,
+        [clearanceId]
+      );
+
+      if (rows.length === 0) return res.status(404).json({ error: 'Clearance not found.' });
+      const clr = rows[0];
+
+      const roles = req.user.roles || [];
+      const isOwner = Number(req.user.user_id) === Number(clr.user_id);
+      const isStaff = roles.some((r) => ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'].includes(r));
+
+      if (!isOwner && !isStaff) {
+        return res.status(403).json({ error: 'Not authorized to access this document.' });
+      }
+
+      let key = clr.pdf_s3_key;
+      if (!key) {
+        key = await generateAndStoreClearancePDF(clearanceId);
+        if (!key) {
+          return res.status(503).json({
+            error: 'Document is being generated. Please try again shortly.',
+            retryAfterSeconds: 5,
+          });
+        }
+      }
+
+      const buffer = await getBufferFromS3(key);
+
+      logPhiAccess({
+        viewerUserId: req.user.user_id,
+        patientUserId: clr.user_id,
+        table: 'MEDICAL_CLEARANCES',
+        recordId: clearanceId,
+        purpose: 'Clearance PDF download',
+        ipAddress: req.ip,
+      });
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="clearance-${clearanceId}.pdf"`);
+      res.setHeader('Content-Length', String(buffer.length));
+      res.send(buffer);
+    } catch (err) {
+      console.error('[Clearance PDF Download Error]:', err);
+      res.status(500).json({ error: 'Failed to retrieve clearance PDF.' });
+    }
+  });
+
+  return router;
+}
