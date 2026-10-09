@@ -25,7 +25,7 @@ function envInt(name, fallback) {
 // ─────────────────────────────────────────────────────────────────────────
 export const LOGIN_LIMIT = {
   maxAttempts:   envInt('LOGIN_RATE_LIMIT_MAX',    5),
-  windowSeconds: envInt('LOGIN_RATE_LIMIT_WINDOW', 300),
+  windowSeconds: envInt('LOGIN_RATE_LIMIT_WINDOW', 60),
 };
 
 // ─────────────────────────────────────────────────────────────────────────

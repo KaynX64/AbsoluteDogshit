@@ -157,10 +157,10 @@ export async function renderPrescriptionPDF(rx) {
     'Lingayen Campus · Official Digital Prescription (R.A. 10173 Verified)'
   );
 
-  drawInfoRow(doc, 'Patient Name:',        `${patient.first_name} ${patient.last_name}`);
-  drawInfoRow(doc, 'Student / ID No:',     patient.student_no || 'N/A');
+  drawInfoRow(doc, 'Patient Name:',         `${patient.first_name} ${patient.last_name}`);
+  drawInfoRow(doc, 'Student / ID No:',      patient.student_no || 'N/A');
   drawInfoRow(doc, 'Course / Affiliation:', patient.course || 'PSU Lingayen');
-  drawInfoRow(doc, 'Blood Type:',          patient.blood_type || 'Unknown');
+  drawInfoRow(doc, 'Blood Type:',           patient.blood_type || 'Unknown');
   drawInfoRow(
     doc,
     'Allergies:',
@@ -172,76 +172,98 @@ export async function renderPrescriptionPDF(rx) {
   drawInfoRow(doc, 'PRC License:',         doctor.license_no || 'PRC Verified');
   drawInfoRow(doc, 'Issued:',              new Date(issued_at).toLocaleString('en-PH'));
 
-  // Rx glyph
-  doc.moveDown(0.4);
+  // Rx glyph — ASCII-safe "Rx" because U+211E ("℞") is not part of the
+  // standard 14 PDF fonts and would render as a blank box / .notdef marker.
+  // Explicit x=60 resets the cursor to the left margin (the previous
+  // drawInfoRow left doc.x in the value column, which pushed the glyph off-
+  // center in the old version).
+  doc.moveDown(0.6);
   doc
-    .font('Times-Bold')
-    .fontSize(28)
+    .font('Times-BoldItalic')
+    .fontSize(22)
     .fillColor(BRAND_GREEN)
-    .text('℞', { align: 'left' });
-  doc.moveDown(0.3);
+    .text('Rx', 60, doc.y, { align: 'left' });
+  doc.moveDown(0.5);
 
   drawSectionTitle(doc, 'PRESCRIBED FORMULARY MEDICATION');
 
+  // ── Fixed column grid (A4 = 595pt wide, margin 50 → content band 60..535) ──
+  const col1X    = 60;    // Medicine name
+  const colMedW  = 250;
+  const col2X    = 320;   // Dosage
+  const colDoseW = 65;
+  const col3X    = 395;   // Duration
+  const colDurW  = 60;
+  const col4X    = 465;   // Qty
+  const colQtyW  = 70;
+
   // Table header
-  const col1X = 60;
-  const col2X = 340;
-  const col3X = 420;
-  const col4X = 470;
   const headerY = doc.y;
-
   doc.font('Helvetica-Bold').fontSize(9.5).fillColor(TEXT_SUB);
-  doc.text('Medicine',  col1X, headerY, { width: 270 });
-  doc.text('Dosage',    col2X, headerY, { width: 70 });
-  doc.text('Duration',  col3X, headerY, { width: 50 });
-  doc.text('Qty',       col4X, headerY, { width: 60 });
+  doc.text('Medicine', col1X, headerY, { width: colMedW });
+  doc.text('Dosage',   col2X, headerY, { width: colDoseW });
+  doc.text('Duration', col3X, headerY, { width: colDurW });
+  doc.text('Qty',      col4X, headerY, { width: colQtyW });
 
-  doc.moveDown(0.4);
+  doc.y = headerY + 14;
   doc
     .moveTo(60, doc.y)
     .lineTo(doc.page.width - 60, doc.y)
     .strokeColor(BORDER)
     .lineWidth(0.6)
     .stroke();
-  doc.moveDown(0.3);
+  doc.moveDown(0.6);
 
+  // ── Table rows ──
   for (const it of items) {
-    const rowY = doc.y;
+    const rowTop = doc.y;
     const medName = it.medicine_name || 'Prescribed medication';
-    const generic = it.generic_name ? ` (${it.generic_name})` : '';
+    const generic = it.generic_name ? `(${it.generic_name})` : '';
+    const sigLine = `Sig: ${it.instructions || 'Take as directed'} · ${
+      it.frequency || 'As needed'
+    } · ${it.route || 'Oral'}`;
 
-    doc
-      .font('Helvetica-Bold')
-      .fontSize(10)
-      .fillColor(TEXT_DARK)
-      .text(medName, col1X, rowY, { width: 270 });
-    doc
-      .font('Helvetica')
-      .fontSize(9.5)
-      .fillColor(TEXT_SUB)
-      .text(generic, col1X, doc.y, { width: 270 });
+    // 1. Measure each block using the font it will be drawn in,
+    //    so we can size the whole row before writing anything.
+    doc.font('Helvetica-Bold').fontSize(10);
+    const medH = doc.heightOfString(medName, { width: colMedW });
 
-    doc
-      .font('Helvetica')
-      .fontSize(9.5)
-      .fillColor(TEXT_DARK)
-      .text(it.dosage || '—', col2X, rowY, { width: 70 });
-    doc.text(`${it.duration_days || '—'} d`, col3X, rowY, { width: 50 });
-    doc.text(`${it.quantity_dispensed || '—'}`, col4X, rowY, { width: 60 });
+    doc.font('Helvetica').fontSize(9);
+    const genericH = generic ? doc.heightOfString(generic, { width: colMedW }) : 0;
 
-    doc.moveDown(0.2);
-    doc
-      .font('Helvetica-Oblique')
-      .fontSize(9)
-      .fillColor(TEXT_SUB)
-      .text(
-        `Sig: ${it.instructions || 'Take as directed'} · ${
-          it.frequency || 'As needed'
-        } · ${it.route || 'Oral'}`,
-        col1X,
-        doc.y,
-        { width: doc.page.width - 120 }
-      );
+    doc.font('Helvetica-Oblique').fontSize(9);
+    const sigH = doc.heightOfString(sigLine, {
+      width: doc.page.width - 60 - col1X,
+    });
+
+    const nameBlockH = medH + (genericH ? genericH + 2 : 0);
+    const rowInnerH  = nameBlockH + sigH + 6;   // 6pt gap between name block and sig
+    const rowH       = Math.max(rowInnerH, 26); // min height so short rows breathe
+
+    // 2. Draw the brand name (bold).
+    doc.font('Helvetica-Bold').fontSize(10).fillColor(TEXT_DARK)
+      .text(medName, col1X, rowTop, { width: colMedW });
+
+    // 3. Draw the generic name (small grey) directly below the brand name.
+    if (generic) {
+      doc.font('Helvetica').fontSize(9).fillColor(TEXT_SUB)
+        .text(generic, col1X, rowTop + medH + 2, { width: colMedW });
+    }
+
+    // 4. Draw dosage / duration / qty — all top-aligned with the brand name.
+    doc.font('Helvetica').fontSize(9.5).fillColor(TEXT_DARK);
+    doc.text(it.dosage || '—',                  col2X, rowTop, { width: colDoseW });
+    doc.text(`${it.duration_days || '—'} d`,    col3X, rowTop, { width: colDurW  });
+    doc.text(`${it.quantity_dispensed || '—'}`, col4X, rowTop, { width: colQtyW  });
+
+    // 5. Draw the sig line — italic, full table width, below the name block.
+    doc.font('Helvetica-Oblique').fontSize(9).fillColor(TEXT_SUB)
+      .text(sigLine, col1X, rowTop + nameBlockH + 6, {
+        width: doc.page.width - 60 - col1X,
+      });
+
+    // 6. Advance the cursor past this row by exactly rowH, then add a small gap.
+    doc.y = rowTop + rowH;
     doc.moveDown(0.5);
   }
 
@@ -324,6 +346,7 @@ export async function renderPrescriptionPDF(rx) {
 }
 
 // ─── MEDICAL CLEARANCE PDF ────────────────────────────────────────────────
+// (unchanged — no layout bugs in this path)
 
 export async function renderClearancePDF(clearance) {
   const {

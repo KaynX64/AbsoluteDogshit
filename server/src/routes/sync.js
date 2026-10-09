@@ -62,9 +62,10 @@ router.get('/bootstrap', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'DEN
     }));
 
     // Statutory read log under R.A. 10173
+      
     logPhiAccess({
       viewerUserId: req.user.user_id,
-      patientUserId: 0,
+      patientUserId: null,   // bulk read — not tied to a single patient
       table: 'EMR_RECORDS',
       recordId: 0,
       purpose: 'Clinic Workstation Offline Cache Bootstrap',
