@@ -13,6 +13,14 @@ declare global {
     offlineCacheBootstrap: (data: { patients?: any[]; emrRecords?: any[] }) => Promise<{ success: boolean }>;
     offlineGetEmrHistory: (patientUserId: number) => Promise<any[]>;
     offlineSearchPatients: (query: string) => Promise<any[]>;
+
+        onUpdateStatus: (cb: (s: {
+      state: 'checking' | 'available' | 'none' | 'downloading' | 'downloaded' | 'error';
+      version?: string; percent?: number; message?: string;
+    }) => void) => () => void;
+    installUpdate: () => Promise<void>;
+    getAppVersion: () => Promise<string>;
+
   }
 
   interface Window {
