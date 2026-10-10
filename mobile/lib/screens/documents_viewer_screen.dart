@@ -228,136 +228,108 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      'PANGASINAN STATE UNIVERSITY',
+                      '℞',
                       style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 2.0,
-                        color: Color(0xFF4D6053),
-                      ),
-                    ),
-                    SizedBox(height: 2),
-                    Text(
-                      'CAMPUS INFIRMARY MEDICAL SERVICES',
-                      style: TextStyle(
-                        fontSize: 16,
+                        fontSize: 38,
                         fontWeight: FontWeight.w900,
                         color: primaryGreen,
+                        fontFamily: 'serif',
                       ),
                     ),
                     Text(
-                      'Lingayen Campus · Republic Act No. 10173 Verified E-Prescription',
-                      style: TextStyle(fontSize: 10.5, color: textSub),
+                      'OFFICIAL DIGITAL PRESCRIPTION',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.0,
+                        color: textSub,
+                      ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 10),
 
-              // Rx Emblem
-              const Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    '℞',
+                // Prescribed Items
+                const Text(
+                  'PRESCRIBED FORMULARY MEDICATION:',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.0,
+                    color: textSub,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                if (items.isEmpty)
+                  const Text(
+                    'No line items recorded.',
                     style: TextStyle(
-                      fontSize: 38,
-                      fontWeight: FontWeight.w900,
-                      color: primaryGreen,
-                      fontFamily: 'serif',
+                      fontSize: 13,
+                      fontStyle: FontStyle.italic,
+                      color: textSub,
+                    ),
+                  )
+                else
+                  ...items.map(
+                    (it) => Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF7F9F6),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: borderColor),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  "${it['medicine_name']} (${it['generic_name']})",
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 14,
+                                    color: textMain,
+                                  ),
+                                ),
+                              ),
+                              Text(
+                                "${it['dosage'] ?? '500mg'}",
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                  color: primaryGreen,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            "Sig: ${it['instructions'] ?? 'Take as directed'} • ${it['frequency'] ?? 'Daily'}",
+                            style: const TextStyle(fontSize: 12, color: textSub),
+                          ),
+                          Text(
+                            "Duration: ${it['duration_days'] ?? 3} days (Qty: ${it['quantity_dispensed'] ?? 10} pcs)",
+                            style: const TextStyle(fontSize: 11.5, color: textSub),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
+
+                if (rx['notes'] != null && rx['notes'].toString().isNotEmpty) ...[
+                  const SizedBox(height: 10),
                   Text(
-                    'OFFICIAL DIGITAL PRESCRIPTION',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.0,
+                    "Doctor Dietary Notes: ${rx['notes']}",
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontStyle: FontStyle.italic,
                       color: textSub,
                     ),
                   ),
                 ],
-              ),
-              const SizedBox(height: 10),
-
-              // Prescribed Items
-              const Text(
-                'PRESCRIBED FORMULARY MEDICATION:',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 1.0,
-                  color: textSub,
-                ),
-              ),
-              const SizedBox(height: 8),
-              if (items.isEmpty)
-                const Text(
-                  'No line items recorded.',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontStyle: FontStyle.italic,
-                    color: textSub,
-                  ),
-                )
-              else
-                ...items.map(
-                  (it) => Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF7F9F6),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: borderColor),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              "${it['medicine_name']} (${it['generic_name']})",
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 14,
-                                color: textMain,
-                              ),
-                            ),
-                            Text(
-                              "${it['dosage'] ?? '500mg'}",
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12,
-                                color: primaryGreen,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          "Sig: ${it['instructions'] ?? 'Take as directed'} • ${it['frequency'] ?? 'Daily'}",
-                          style: const TextStyle(fontSize: 12, color: textSub),
-                        ),
-                        Text(
-                          "Duration: ${it['duration_days'] ?? 3} days (Qty: ${it['quantity_dispensed'] ?? 10} pcs)",
-                          style: const TextStyle(fontSize: 11.5, color: textSub),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-              if (rx['notes'] != null && rx['notes'].toString().isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Text(
-                  "Doctor Dietary Notes: ${rx['notes']}",
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    fontStyle: FontStyle.italic,
-                    color: textSub,
-                  ),
-                ),
-              ],
 
                 const SizedBox(height: 20),
 
@@ -1183,29 +1155,29 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-OutlinedButton.icon(
-  style: OutlinedButton.styleFrom(
-    foregroundColor: primaryGreen,
-    side: const BorderSide(color: primaryGreen),
-    shape: const StadiumBorder(),
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-  ),
-  onPressed: () async {
-    // Read the stored JWT token
-    final token = await _storage.read(key: 'jwt_token');
-    final authenticatedUrl = '$downloadUrl?token=$token';
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: primaryGreen,
+                        side: const BorderSide(color: primaryGreen),
+                        shape: const StadiumBorder(),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      ),
+                      onPressed: () async {
+                        // Read the stored JWT token
+                        final token = await _storage.read(key: 'jwt_token');
+                        final authenticatedUrl = '$downloadUrl?token=$token';
 
-    launchUrl(
-      Uri.parse(authenticatedUrl),
-      mode: LaunchMode.externalApplication,
-    );
-  },
-  icon: const Icon(Icons.open_in_new, size: 14),
-  label: const Text(
-    'Open & View File',
-    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
-  ),
-),
+                        launchUrl(
+                          Uri.parse(authenticatedUrl),
+                          mode: LaunchMode.externalApplication,
+                        );
+                      },
+                      icon: const Icon(Icons.open_in_new, size: 14),
+                      label: const Text(
+                        'Open & View File',
+                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
+                      ),
+                    ),
                     Text(
                       "${((doc['file_size'] ?? 1024) / 1024).toStringAsFixed(0)} KB",
                       style: const TextStyle(

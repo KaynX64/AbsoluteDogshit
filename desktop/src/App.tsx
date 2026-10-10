@@ -12,6 +12,8 @@ import {
   refreshOfflineQueueFromBackend,
 } from './services/offlineSync';
 import { API_BASE_URL } from './config/api';
+import PasswordStrengthIndicator, { evaluatePassword } from './components/PasswordStrengthIndicator';
+
 
 /* ── Inline SVG icons ──────────────────────────────────────────── */
 const I = {
@@ -613,48 +615,62 @@ export default function App() {
     }
   };
 
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPasswordMsg(null);
+const handleChangePassword = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setPasswordMsg(null);
 
-    if (newPassword !== confirmPassword) {
-      setPasswordMsg({ text: 'New passwords do not match.', isError: true });
-      return;
+  // ── Strong-password policy check (mirrors the server) ─────────
+  const evaluation = evaluatePassword(newPassword);
+  if (!evaluation.isAcceptable) {
+    setPasswordMsg({
+      text:
+        evaluation.score < 2
+          ? 'Password is too weak. Please reach at least "Medium" strength before continuing.'
+          : 'Password is missing one or more required elements. Check the requirements list.',
+      isError: true,
+    });
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    setPasswordMsg({ text: 'New passwords do not match.', isError: true });
+    return;
+  }
+
+  setIsSubmittingPassword(true);
+  const token = localStorage.getItem('valetudo_token');
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/auth/change-password`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+
+    const data = await res.json();
+    if (res.ok) {
+      setPasswordMsg({ text: '✅ ' + data.message, isError: false });
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setTimeout(() => {
+        setShowPasswordModal(false);
+        setPasswordMsg(null);
+      }, 1500);
+    } else {
+      // Server may reject with a detailed issues array — surface it
+      const detailed =
+        Array.isArray(data.issues) && data.issues.length > 0
+          ? data.issues.join(' ')
+          : data.error || 'Failed to update password.';
+      setPasswordMsg({ text: '❌ ' + detailed, isError: true });
     }
-    if (newPassword.length < 8) {
-      setPasswordMsg({ text: 'New password must be at least 8 characters long.', isError: true });
-      return;
-    }
-
-    setIsSubmittingPassword(true);
-    const token = localStorage.getItem('valetudo_token');
-
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/auth/change-password`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ currentPassword, newPassword }),
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        setPasswordMsg({ text: '✅ ' + data.message, isError: false });
-        setCurrentPassword('');
-        setNewPassword('');
-        setConfirmPassword('');
-        setTimeout(() => {
-          setShowPasswordModal(false);
-          setPasswordMsg(null);
-        }, 1500);
-      } else {
-        setPasswordMsg({ text: '❌ ' + (data.error || 'Failed to update password.'), isError: true });
-      }
-    } catch (err: any) {
-      setPasswordMsg({ text: '❌ Network error: ' + err.message, isError: true });
-    } finally {
-      setIsSubmittingPassword(false);
-    }
-  };
+  } catch (err: any) {
+    setPasswordMsg({ text: '❌ Network error: ' + err.message, isError: true });
+  } finally {
+    setIsSubmittingPassword(false);
+  }
+};
 
   if (!user) {
     return (
@@ -729,7 +745,7 @@ export default function App() {
 
       {showPasswordModal && (
         <div className="modal-backdrop" onClick={() => setShowPasswordModal(false)}>
-          <div className="modal-card" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
               <h3 style={{ margin: 0, color: 'var(--primary)', fontSize: 17, fontWeight: 800 }}>
                 🔑 Update account password
@@ -752,15 +768,17 @@ export default function App() {
                 style={{ marginBottom: 14 }}
               />
 
-              <label className="field-label">New password (min 8 chars)</label>
+              <label className="field-label">New password</label>
               <input
                 type="password"
                 className="field-input"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 required
-                style={{ marginBottom: 14 }}
+                style={{ marginBottom: 4 }}
               />
+              <PasswordStrengthIndicator password={newPassword} />
+              <div style={{ marginBottom: 14 }} />
 
               <label className="field-label">Confirm new password</label>
               <input
@@ -806,24 +824,29 @@ export default function App() {
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={isSubmittingPassword}
-                  style={{
-                    flex: 1,
-                    padding: 12,
-                    borderRadius: 'var(--r-pill)',
-                    background: 'var(--primary)',
-                    color: '#fff',
-                    border: 'none',
-                    cursor: isSubmittingPassword ? 'not-allowed' : 'pointer',
-                    fontWeight: 700,
-                    fontFamily: 'var(--font)',
-                    opacity: isSubmittingPassword ? 0.6 : 1,
-                  }}
-                >
-                  {isSubmittingPassword ? 'Updating…' : 'Save password'}
-                </button>
+              <button
+                type="submit"
+                disabled={isSubmittingPassword || !evaluatePassword(newPassword).isAcceptable}
+                style={{
+                  flex: 1,
+                  padding: 12,
+                  borderRadius: 'var(--r-pill)',
+                  background: 'var(--primary)',
+                  color: '#fff',
+                  border: 'none',
+                  cursor:
+                    isSubmittingPassword || !evaluatePassword(newPassword).isAcceptable
+                      ? 'not-allowed'
+                      : 'pointer',
+                  fontWeight: 700,
+                  fontFamily: 'var(--font)',
+                  opacity:
+                    isSubmittingPassword || !evaluatePassword(newPassword).isAcceptable ? 0.55 : 1,
+                  transition: 'opacity 120ms ease',
+                }}
+              >
+                {isSubmittingPassword ? 'Updating…' : 'Save password'}
+              </button>
               </div>
             </form>
           </div>
