@@ -588,7 +588,7 @@ export default function App() {
 
         const isAuthorizedStaff = userRoles.some((r) => staffRoles.includes(r));
         if (!isAuthorizedStaff) {
-          setError('⛔ Access Denied: Student accounts are restricted to the Valetudo Mobile App.');
+          setError('Access Denied: Unauthorized Access');
           return;
         }
 

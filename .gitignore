@@ -27,9 +27,10 @@ server/certs/*.pem
 server/certs/*.key
 server/certs/*.crt
 
+#repomix
+repomix-output.xml
+mobile/android/app/google-services.json
+
 #googleFirebaseCredentials.json
 server/serviceAccountKey.json
 mobile/android/app/google-services.json
-
-#repomix
-repomix-output.xml

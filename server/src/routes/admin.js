@@ -41,15 +41,16 @@ router.get('/users', async (req, res) => {
               CASE WHEN u.is_active = TRUE THEN 'Active' ELSE 'Suspended' END as status,
               u.created_at,
               sp.student_no, sp.course, sp.year_level,
-              st.license_no, st.specialty,
+              fp.faculty_no,
+              ntp.employee_no,
+              st.admin_no, st.license_no, st.specialty,
               COALESCE(
                 st.department,
                 fp.department,
                 ntp.department,
                 'PSU Lingayen'
               ) as department,
-              COALESCE(fp.position, ntp.position) AS position,
-              ntp.employee_no
+              COALESCE(fp.position, ntp.position) AS position
        FROM USERS u
        LEFT JOIN USER_ROLES ur ON u.user_id = ur.user_id
        LEFT JOIN ROLES r ON ur.role_id = r.role_id
@@ -148,11 +149,13 @@ router.put('/users/:id', async (req, res) => {
     student_no,
     course,
     year_level,
+    faculty_no,
+    employee_no,
     license_no,
+    admin_no,
     specialty,
     department,
     position,
-    employee_no,
   } = req.body;
 
   if (!first_name || !last_name || !email) {
@@ -208,23 +211,44 @@ router.put('/users/:id', async (req, res) => {
         [targetUserId, student_no.trim(), course ? course.trim() : 'General', Number(year_level) || 1]
       );
     } else if (['DOCTOR', 'DENTIST', 'NURSE', 'EMERGENCY_RESPONDER', 'ADMIN'].includes(role_code)) {
+      // admin_no is only meaningful for the ADMIN role. For clinical staff
+      // it stays NULL so the column stays semantically clean.
+      const adminNoValue =
+        role_code === 'ADMIN' && admin_no ? admin_no.trim() : null;
+
       await connection.query(
-        `INSERT INTO STAFF_PROFILES (user_id, license_no, specialty, department)
-         VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE license_no = VALUES(license_no), specialty = VALUES(specialty), department = VALUES(department)`,
+        `INSERT INTO STAFF_PROFILES (user_id, admin_no, license_no, specialty, department)
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           admin_no   = VALUES(admin_no),
+           license_no = VALUES(license_no),
+           specialty  = VALUES(specialty),
+           department = VALUES(department)`,
         [
           targetUserId,
+          adminNoValue,
           license_no ? license_no.trim() : null,
           specialty ? specialty.trim() : null,
           department ? department.trim() : 'University Infirmary',
         ]
       );
     } else if (role_code === 'FACULTY') {
+      if (!faculty_no || !String(faculty_no).trim()) {
+        throw new Error('Faculty number is required for FACULTY accounts.');
+      }
       await connection.query(
-        `INSERT INTO FACULTY_PROFILES (user_id, department, position)
-         VALUES (?, ?, ?)
-         ON DUPLICATE KEY UPDATE department = VALUES(department), position = VALUES(position)`,
-        [targetUserId, department ? department.trim() : 'Academic Affairs', position ? position.trim() : 'Faculty Member']
+        `INSERT INTO FACULTY_PROFILES (user_id, faculty_no, department, position)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           faculty_no = VALUES(faculty_no),
+           department = VALUES(department),
+           position   = VALUES(position)`,
+        [
+          targetUserId,
+          String(faculty_no).trim(),
+          department ? department.trim() : 'Academic Affairs',
+          position ? position.trim() : 'Faculty Member',
+        ]
       );
     } else if (role_code === 'NON_TEACHING') {
       await connection.query(
@@ -323,11 +347,13 @@ router.post('/users', async (req, res) => {
     student_no,
     course,
     year_level,
+    faculty_no,
+    employee_no,
     license_no,
+    admin_no,
     specialty,
     department,
     position,
-    employee_no,
   } = req.body;
 
   // ── Validation ────────────────────────────────────────────────
@@ -401,22 +427,31 @@ router.post('/users', async (req, res) => {
         ]
       );
     } else if (['DOCTOR', 'DENTIST', 'NURSE', 'EMERGENCY_RESPONDER', 'ADMIN'].includes(role_code)) {
+      // admin_no is only meaningful for ADMIN. Clinical staff leave it NULL.
+      const adminNoValue =
+        role_code === 'ADMIN' && admin_no ? String(admin_no).trim() : null;
+
       await connection.query(
-        `INSERT INTO STAFF_PROFILES (user_id, license_no, specialty, department)
-         VALUES (?, ?, ?, ?)`,
+        `INSERT INTO STAFF_PROFILES (user_id, admin_no, license_no, specialty, department)
+         VALUES (?, ?, ?, ?, ?)`,
         [
           newUserId,
+          adminNoValue,
           license_no ? String(license_no).trim() : null,
           specialty ? String(specialty).trim() : null,
           department ? String(department).trim() : 'University Infirmary',
         ]
       );
     } else if (role_code === 'FACULTY') {
+      if (!faculty_no || !String(faculty_no).trim()) {
+        throw new Error('Faculty number is required for FACULTY accounts.');
+      }
       await connection.query(
-        `INSERT INTO FACULTY_PROFILES (user_id, department, position)
-         VALUES (?, ?, ?)`,
+        `INSERT INTO FACULTY_PROFILES (user_id, faculty_no, department, position)
+         VALUES (?, ?, ?, ?)`,
         [
           newUserId,
+          String(faculty_no).trim(),
           department ? String(department).trim() : 'Academic Affairs',
           position ? String(position).trim() : 'Faculty Member',
         ]

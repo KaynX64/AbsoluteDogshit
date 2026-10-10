@@ -254,11 +254,13 @@ export default function AdminConsole({
       student_no: u.student_no || '',
       course: u.course || '',
       year_level: u.year_level || 1,
+      faculty_no: u.faculty_no || '',
+      employee_no: u.employee_no || '',
       license_no: u.license_no || '',
+      admin_no: u.admin_no || '',
       specialty: u.specialty || '',
       department: u.department || '',
       position: u.position || '',
-      employee_no: u.employee_no || '',
       is_active: u.status === 'Active' || u.is_active === 1 || u.is_active === true,
     });
     setAdminPasswordInput('');
@@ -300,22 +302,24 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           const res = await fetch(`${API_BASE_URL}/api/admin/users/${editingUser.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({
-              first_name: editingUser.first_name,
-              last_name: editingUser.last_name,
-              email: editingUser.email,
-              phone: editingUser.phone,
-              role_code: editingUser.role,
-              is_active: editingUser.is_active,
-              student_no: editingUser.student_no,
-              course: editingUser.course,
-              year_level: editingUser.year_level,
-              license_no: editingUser.license_no,
-              specialty: editingUser.specialty,
-              department: editingUser.department,
-              position: editingUser.position,
-              employee_no: editingUser.employee_no,
-            }),
+        body: JSON.stringify({
+          first_name: editingUser.first_name,
+          last_name: editingUser.last_name,
+          email: editingUser.email,
+          phone: editingUser.phone,
+          role_code: editingUser.role,
+          is_active: editingUser.is_active,
+          student_no: editingUser.student_no,
+          course: editingUser.course,
+          year_level: editingUser.year_level,
+          faculty_no: editingUser.faculty_no,
+          employee_no: editingUser.employee_no,
+          license_no: editingUser.license_no,
+          admin_no: editingUser.admin_no,
+          specialty: editingUser.specialty,
+          department: editingUser.department,
+          position: editingUser.position,
+        }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -1797,7 +1801,8 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     </div>
                   )}
 
-                  {['DOCTOR', 'DENTIST', 'NURSE', 'EMERGENCY_RESPONDER', 'ADMIN'].includes(editingUser.role) && (
+                  {/* Clinical staff — doctors, dentists, nurses, responders */}
+                  {['DOCTOR', 'DENTIST', 'NURSE', 'EMERGENCY_RESPONDER'].includes(editingUser.role) && (
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 20 }}>
                       <div>
                         <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
@@ -1823,8 +1828,51 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     </div>
                   )}
 
+                  {/* ADMIN — admin number replaces PRC license */}
+                  {editingUser.role === 'ADMIN' && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 20 }}>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
+                          Admin number
+                        </label>
+                        <input
+                          style={inputStyle}
+                          value={editingUser.admin_no || ''}
+                          placeholder="PSU-ADM-2024-0001"
+                          onChange={(e) => setEditingUser({ ...editingUser, admin_no: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
+                          Specialty / scope
+                        </label>
+                        <input style={inputStyle} value={editingUser.specialty || ''}
+                               placeholder="System Administration"
+                               onChange={(e) => setEditingUser({ ...editingUser, specialty: e.target.value })} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
+                          Department / unit
+                        </label>
+                        <input style={inputStyle} value={editingUser.department || ''}
+                               onChange={(e) => setEditingUser({ ...editingUser, department: e.target.value })} />
+                      </div>
+                    </div>
+                  )}
+
                   {editingUser.role === 'FACULTY' && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1fr', gap: 14, marginBottom: 20 }}>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
+                          Faculty number
+                        </label>
+                        <input
+                          style={inputStyle}
+                          value={editingUser.faculty_no || ''}
+                          placeholder="PSU-FAC-2024-0451"
+                          onChange={(e) => setEditingUser({ ...editingUser, faculty_no: e.target.value })}
+                        />
+                      </div>
                       <div>
                         <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
                           Department

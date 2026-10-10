@@ -90,6 +90,7 @@ CREATE TABLE `STUDENT_PROFILES` (
 -- 5. FACULTY_PROFILES
 CREATE TABLE `FACULTY_PROFILES` (
   `user_id` BIGINT PRIMARY KEY,
+  `faculty_no` VARCHAR(50) NOT NULL UNIQUE COMMENT 'Institutional faculty identifier',
   `department` VARCHAR(100) NOT NULL,
   `position` VARCHAR(100) NOT NULL,
   CONSTRAINT `fk_fp_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE
@@ -108,9 +109,13 @@ CREATE TABLE `NON_TEACHING_PROFILES` (
   CONSTRAINT `fk_ntp_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- 7. STAFF_PROFILES (CLINICAL staff only — doctors, nurses, dentists, admins)
+-- 7. STAFF_PROFILES (CLINICAL staff + system administrators)
+-- `license_no` holds the PRC / professional license (populated for
+-- DOCTOR, DENTIST, NURSE — NULL for ADMIN and EMERGENCY_RESPONDER).
+-- `admin_no` is populated only for the ADMIN role; NULL for everyone else.
 CREATE TABLE `STAFF_PROFILES` (
   `user_id` BIGINT PRIMARY KEY,
+  `admin_no` VARCHAR(50) NULL UNIQUE COMMENT 'Populated only for ADMIN role users',
   `license_no` VARCHAR(100) NULL,
   `specialty` VARCHAR(100) NULL,
   `department` VARCHAR(100) NOT NULL DEFAULT 'University Infirmary',
@@ -488,13 +493,14 @@ CREATE TABLE `LOCAL_SYNC_LOGS` (
 --   • EMR_RECORDS / PRESCRIPTIONS / etc.    → Clinical workflows
 --
 -- PATIENT-SIDE ROLES on the mobile app (all route to PatientPortalScreen):
---   • STUDENT                    → STUDENT_PROFILES
---   • FACULTY                    → FACULTY_PROFILES
---   • NON_TEACHING               → NON_TEACHING_PROFILES
+--   • STUDENT                    → STUDENT_PROFILES.student_no
+--   • FACULTY                    → FACULTY_PROFILES.faculty_no
+--   • NON_TEACHING               → NON_TEACHING_PROFILES.employee_no
 --
 -- CLINICAL-STAFF ROLES on the desktop app:
---   • DOCTOR / DENTIST / NURSE / ADMIN        → STAFF_PROFILES
---   • EMERGENCY_RESPONDER                     → STAFF_PROFILES
+--   • DOCTOR / DENTIST / NURSE   → STAFF_PROFILES.license_no
+--   • ADMIN                      → STAFF_PROFILES.admin_no
+--   • EMERGENCY_RESPONDER        → STAFF_PROFILES (no license/admin_no)
 -- =============================================================================
 
 -- ROLES
@@ -538,18 +544,21 @@ INSERT INTO `STUDENT_PROFILES` (`user_id`, `student_no`, `course`, `year_level`)
 (5, '22-LN-0123', 'BS Information Technology', 3);
 
 -- FACULTY_PROFILES
-INSERT INTO `FACULTY_PROFILES` (`user_id`, `department`, `position`) VALUES
-(7, 'College of Computing Studies', 'Assistant Professor');
+INSERT INTO `FACULTY_PROFILES` (`user_id`, `faculty_no`, `department`, `position`) VALUES
+(7, 'PSU-FAC-2024-0451', 'College of Computing Studies', 'Assistant Professor');
 
 -- NON_TEACHING_PROFILES
 INSERT INTO `NON_TEACHING_PROFILES` (`user_id`, `employee_no`, `department`, `position`) VALUES
 (8, 'PSU-NT-2024-0187', 'Campus Maintenance & Facilities', 'Utility Worker');
 
--- STAFF_PROFILES (clinical only)
-INSERT INTO `STAFF_PROFILES` (`user_id`, `license_no`, `specialty`, `department`) VALUES
-(2, 'PRC-MD-098765',  'General Medicine',           'PSU Lingayen Clinic'),
-(3, 'PRC-RN-054321',  'Emergency & Triage Nursing', 'PSU Lingayen Clinic'),
-(6, 'PRC-DDS-045678', 'Dentistry & Oral Health',     'PSU Lingayen Clinic');
+-- STAFF_PROFILES (clinical + admin)
+-- admin_no is populated ONLY for the ADMIN role; NULL for the rest.
+-- license_no is populated for DOCTOR / NURSE / DENTIST; NULL for ADMIN.
+INSERT INTO `STAFF_PROFILES` (`user_id`, `admin_no`, `license_no`, `specialty`, `department`) VALUES
+(1, 'PSU-ADM-2024-0001', NULL,             'System Administration',      'PSU Lingayen Clinic'),
+(2, NULL,                'PRC-MD-098765',  'General Medicine',           'PSU Lingayen Clinic'),
+(3, NULL,                'PRC-RN-054321',  'Emergency & Triage Nursing', 'PSU Lingayen Clinic'),
+(6, NULL,                'PRC-DDS-045678', 'Dentistry & Oral Health',    'PSU Lingayen Clinic');
 
 -- HEALTH_PROFILES — minimal for the demo patient-side accounts
 INSERT INTO `HEALTH_PROFILES`

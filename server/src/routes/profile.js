@@ -21,7 +21,9 @@ router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
               COALESCE(r.code, 'STUDENT') AS primary_role,
               COALESCE(r.name, 'Student Patient') AS role_name,
               sp.student_no, sp.course, sp.year_level,
-              st.license_no, st.specialty,
+              fp.faculty_no,
+              ntp.employee_no,
+              st.admin_no, st.license_no, st.specialty,
               COALESCE(
                 st.department,
                 fp.department,
@@ -29,8 +31,7 @@ router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
                 sp.course,
                 'PSU Lingayen Campus'
               ) AS department,
-              COALESCE(fp.position, ntp.position) AS position,
-              ntp.employee_no
+              COALESCE(fp.position, ntp.position) AS position
        FROM USERS u
        LEFT JOIN USER_ROLES ur ON u.user_id = ur.user_id
        LEFT JOIN ROLES r ON ur.role_id = r.role_id
@@ -292,7 +293,6 @@ router.post('/fcm-token', authenticateToken, async (req, res) => {
 });
 
 // ── PUT /api/profile/patient/:userId/immunizations ────────────────────────────
-// Allows authorized Clinical Staff (Doctor, Dentist, Nurse, Admin) to update a patient's vaccines
 router.put('/patient/:userId/immunizations', authenticateToken, async (req, res) => {
   const targetUserId = Number(req.params.userId);
   const userRoles = req.user.roles || [];
