@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/api_config.dart';
+import '../utils/responsive.dart';
 import '../widgets/valetudo_logo.dart';
 import '../services/emergency_alert_service.dart';
 import 'login_screen.dart';
@@ -72,7 +73,8 @@ class _ResponderScreenState extends State<ResponderScreen> {
             orElse: () => null,
           );
 
-          if (triggeredAlert != null && _lastAlertAlarmedId != triggeredAlert['alert_id']) {
+          if (triggeredAlert != null &&
+              _lastAlertAlarmedId != triggeredAlert['alert_id']) {
             _lastAlertAlarmedId = triggeredAlert['alert_id'];
             EmergencyAlertService().triggerEmergencyBroadcast(triggeredAlert);
           }
@@ -111,14 +113,16 @@ class _ResponderScreenState extends State<ResponderScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Update failed: $e'), backgroundColor: primaryCrimson),
+          SnackBar(
+            content: Text('Update failed: $e'),
+            backgroundColor: primaryCrimson,
+          ),
         );
       }
       _fetchActiveAlerts(silent: true);
     }
   }
 
-  // Crash-proof Google Maps launcher for Android & iOS
   Future<void> _openGoogleMaps(double lat, double lng) async {
     if (lat == 0.0 && lng == 0.0) {
       if (mounted) {
@@ -133,22 +137,19 @@ class _ResponderScreenState extends State<ResponderScreen> {
     }
 
     final geoUri = Uri.parse('geo:$lat,$lng?q=$lat,$lng');
-    final webUri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
+    final webUri = Uri.parse(
+      'https://www.google.com/maps/search/?api=1&query=$lat,$lng',
+    );
 
     try {
-      // 1. Try launching the native Google Maps app directly
       if (await canLaunchUrl(geoUri)) {
         await launchUrl(geoUri, mode: LaunchMode.externalApplication);
         return;
       }
-
-      // 2. Try launching the web URL in Google Maps or external browser
       if (await canLaunchUrl(webUri)) {
         await launchUrl(webUri, mode: LaunchMode.externalApplication);
         return;
       }
-
-      // 3. Fallback: attempt direct launch without pre-check
       await launchUrl(webUri, mode: LaunchMode.platformDefault);
     } catch (e) {
       debugPrint('[Maps Error]: $e');
@@ -165,38 +166,66 @@ class _ResponderScreenState extends State<ResponderScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final rs = Rs.of(context);
+    final maxContentWidth = rs.isTablet ? 640.0 : double.infinity;
+
     return Scaffold(
       backgroundColor: const Color(0xFFF7F9F6),
       appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(64),
+        preferredSize: Size.fromHeight(rs.h(64).clamp(56.0, 74.0)),
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
+            padding: EdgeInsets.symmetric(
+              horizontal: rs.w(20),
+              vertical: rs.h(8),
+            ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Row(
                   children: [
-                    const ValetudoLogo(size: 34),
-                    const SizedBox(width: 8),
-                    const Text(
+                    ValetudoLogo(size: rs.w(34).clamp(28.0, 42.0)),
+                    SizedBox(width: rs.w(8)),
+                    Text(
                       'valetudo.',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: textMain, letterSpacing: -0.5),
+                      style: TextStyle(
+                        fontSize: rs.sp(18),
+                        fontWeight: FontWeight.w900,
+                        color: textMain,
+                        letterSpacing: -0.5,
+                      ),
                     ),
                   ],
                 ),
                 Row(
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.key, size: 20, color: textSub),
-                      onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChangePasswordScreen())),
+                      icon: Icon(
+                        Icons.key,
+                        size: rs.w(20).clamp(18.0, 22.0),
+                        color: textSub,
+                      ),
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const ChangePasswordScreen(),
+                        ),
+                      ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.refresh, size: 20, color: textSub),
+                      icon: Icon(
+                        Icons.refresh,
+                        size: rs.w(20).clamp(18.0, 22.0),
+                        color: textSub,
+                      ),
                       onPressed: () => _fetchActiveAlerts(),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.logout, size: 20, color: primaryCrimson),
+                      icon: Icon(
+                        Icons.logout,
+                        size: rs.w(20).clamp(18.0, 22.0),
+                        color: primaryCrimson,
+                      ),
                       onPressed: () async {
                         EmergencyAlertService().stopResponderListener();
                         final token = await _storage.read(key: 'jwt_token');
@@ -212,7 +241,9 @@ class _ResponderScreenState extends State<ResponderScreen> {
                         if (!context.mounted) return;
                         Navigator.pushAndRemoveUntil(
                           context,
-                          MaterialPageRoute(builder: (_) => const LoginScreen()),
+                          MaterialPageRoute(
+                            builder: (_) => const LoginScreen(),
+                          ),
                           (route) => false,
                         );
                       },
@@ -225,286 +256,513 @@ class _ResponderScreenState extends State<ResponderScreen> {
         ),
       ),
       body: SafeArea(
-        child: RefreshIndicator(
-          color: primaryCrimson,
-          onRefresh: () => _fetchActiveAlerts(),
-          child: ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-            children: [
-              const Text(
-                'PSU QUICK-RESPONSE UNIT · DISPATCH',
-                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, letterSpacing: 1.8, color: textSub),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Ready to respond.',
-                style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800, color: textMain, letterSpacing: -0.5),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'A clear view of campus emergencies and the people who need you.',
-                style: TextStyle(fontSize: 13.5, color: textSub),
-              ),
-              const SizedBox(height: 16),
-
-              // System Status Banner
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(color: const Color(0xFFF7EFE9), borderRadius: BorderRadius.circular(16)),
-                child: const Row(
-                  children: [
-                    Icon(Icons.info_outline, size: 18, color: primaryCrimson),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Live responder dashboard connected to infirmary emergency dispatch.',
-                        style: TextStyle(fontSize: 12, color: primaryCrimson, fontWeight: FontWeight.w500),
-                      ),
-                    ),
-                  ],
+        child: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxContentWidth),
+            child: RefreshIndicator(
+              color: primaryCrimson,
+              onRefresh: () => _fetchActiveAlerts(),
+              child: ListView(
+                padding: EdgeInsets.symmetric(
+                  horizontal: rs.w(20),
+                  vertical: rs.h(8),
                 ),
-              ),
-              const SizedBox(height: 16),
-
-              // Stats Row
-              Row(
                 children: [
-                  _buildStatPill('Active incidents', '${_activeAlerts.length}'),
-                  const SizedBox(width: 10),
-                  _buildStatPill('Units available', '3'),
-                  const SizedBox(width: 10),
-                  _buildStatPill('Campus', 'Lingayen'),
-                ],
-              ),
-              const SizedBox(height: 20),
-
-              // Alerts Roster
-              if (_isLoading && _activeAlerts.isEmpty)
-                const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator(color: primaryCrimson)))
-              else if (_activeAlerts.isEmpty)
-                Container(
-                  padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: borderColor),
-                  ),
-                  child: const Column(
-                    children: [
-                      Icon(Icons.check_circle_outline, size: 54, color: primaryGreen),
-                      SizedBox(height: 12),
-                      Text('No Active Campus Emergencies', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: textMain)),
-                      SizedBox(height: 4),
-                      Text('Campus quick-response units on standby.', style: TextStyle(color: textSub, fontSize: 13)),
-                    ],
-                  ),
-                )
-              else
-                ..._activeAlerts.map((alert) {
-                  final status = (alert['status'] ?? 'triggered').toString();
-                  final lat = double.tryParse(alert['latitude'].toString()) ?? 0.0;
-                  final lng = double.tryParse(alert['longitude'].toString()) ?? 0.0;
-
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 14),
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: borderColor),
+                  Text(
+                    'PSU QUICK-RESPONSE UNIT · DISPATCH',
+                    style: TextStyle(
+                      fontSize: rs.sp(10.5),
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.8,
+                      color: textSub,
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  ),
+                  SizedBox(height: rs.h(4)),
+                  Text(
+                    'Ready to respond.',
+                    style: TextStyle(
+                      fontSize: rs.sp(30),
+                      fontWeight: FontWeight.w800,
+                      color: textMain,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                  SizedBox(height: rs.h(4)),
+                  Text(
+                    'A clear view of campus emergencies and the people who need you.',
+                    style: TextStyle(fontSize: rs.sp(13.5), color: textSub),
+                  ),
+                  SizedBox(height: rs.h(16)),
+
+                  // System Status Banner
+                  Container(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: rs.w(14),
+                      vertical: rs.h(10),
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF7EFE9),
+                      borderRadius: BorderRadius.circular(rs.r(16)),
+                    ),
+                    child: Row(
                       children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Row(
-                              children: [
-                                Container(
-                                  width: 38,
-                                  height: 38,
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFF7EFE9),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: const Icon(Icons.emergency_outlined, size: 20, color: primaryCrimson),
-                                ),
-                                const SizedBox(width: 10),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      "${alert['first_name']} ${alert['last_name']}",
-                                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: textMain),
-                                    ),
-                                    Text(
-                                      "${alert['studentNo'] ?? '22-LN-0123'} · ${alert['phone'] ?? 'No contact'}",
-                                      style: const TextStyle(fontSize: 12, color: textSub),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: status == 'dispatched' ? const Color(0xFFE5EDE4) : const Color(0xFFFDE8E8),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                status.toUpperCase(),
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  color: status == 'dispatched' ? primaryGreen : primaryCrimson,
-                                ),
-                              ),
-                            ),
-                          ],
+                        Icon(
+                          Icons.info_outline,
+                          size: rs.w(18),
+                          color: primaryCrimson,
                         ),
-                        const SizedBox(height: 16),
-
-                        const Text('BLOOD TYPE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.2, color: textSub)),
-                        const SizedBox(height: 2),
-                        Text(alert['blood_type'] ?? 'O+', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: textMain)),
-                        const SizedBox(height: 10),
-
-                        const Text('KNOWN ALLERGY', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.2, color: textSub)),
-                        const SizedBox(height: 2),
-                        Text(
-                          alert['allergies'] ?? 'None',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: (alert['allergies'] != null && alert['allergies'] != 'None') ? primaryCrimson : primaryGreen,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Entire Coordinates Box is wrapped in InkWell with ripple feedback
-                        Material(
-                          color: const Color(0xFFE2EBE1),
-                          borderRadius: BorderRadius.circular(14),
-                          child: InkWell(
-                            onTap: () => _openGoogleMaps(lat, lng),
-                            borderRadius: BorderRadius.circular(14),
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      const Text(
-                                        'GPS COORDINATES',
-                                        style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, letterSpacing: 1.2, color: textSub),
-                                      ),
-                                      Text(
-                                        "${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}",
-                                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textMain),
-                                      ),
-                                    ],
-                                  ),
-                                  const Row(
-                                    children: [
-                                      Text(
-                                        'Open maps',
-                                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: primaryGreen),
-                                      ),
-                                      SizedBox(width: 4),
-                                      Icon(Icons.north_east_rounded, size: 14, color: primaryGreen),
-                                    ],
-                                  ),
-                                ],
-                              ),
+                        SizedBox(width: rs.w(8)),
+                        Expanded(
+                          child: Text(
+                            'Live responder dashboard connected to infirmary emergency dispatch.',
+                            style: TextStyle(
+                              fontSize: rs.sp(12),
+                              color: primaryCrimson,
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 16),
-
-                        if (status == 'triggered') ...[
-                          SizedBox(
-                            width: double.infinity,
-                            height: 44,
-                            child: ElevatedButton(
-                              style: ElevatedButton.styleFrom(backgroundColor: softSage, foregroundColor: primaryGreen, elevation: 0, shape: const StadiumBorder()),
-                              onPressed: () => _updateAlertStatus(alert['alert_id'], 'acknowledged'),
-                              child: const Text('Acknowledge', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                        ],
-
-                        if (status != 'dispatched') ...[
-                          SizedBox(
-                            width: double.infinity,
-                            height: 48,
-                            child: ElevatedButton(
-                              style: ElevatedButton.styleFrom(backgroundColor: primaryGreen, foregroundColor: Colors.white, elevation: 0, shape: const StadiumBorder()),
-                              onPressed: () => _updateAlertStatus(alert['alert_id'], 'dispatched'),
-                              child: const Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text('Dispatch unit', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                                  SizedBox(width: 6),
-                                  Icon(Icons.arrow_forward_rounded, size: 16),
-                                ],
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                        ],
-
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton(
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: primaryGreen,
-                                  side: const BorderSide(color: borderColor),
-                                  shape: const StadiumBorder(),
-                                ),
-                                onPressed: () => _updateAlertStatus(alert['alert_id'], 'resolved'),
-                                child: const Text('Mark resolved', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            TextButton(
-                              onPressed: () => _updateAlertStatus(alert['alert_id'], 'false_alarm'),
-                              child: const Text('False alarm', style: TextStyle(color: textSub, fontSize: 12.5)),
-                            ),
-                          ],
                         ),
                       ],
                     ),
-                  );
-                }),
-              const SizedBox(height: 20),
-            ],
+                  ),
+                  SizedBox(height: rs.h(16)),
+
+                  // Stats Row
+                  Row(
+                    children: [
+                      _buildStatPill(rs, 'Active incidents', '${_activeAlerts.length}'),
+                      SizedBox(width: rs.w(10)),
+                      _buildStatPill(rs, 'Units available', '3'),
+                      SizedBox(width: rs.w(10)),
+                      _buildStatPill(rs, 'Campus', 'Lingayen'),
+                    ],
+                  ),
+                  SizedBox(height: rs.h(20)),
+
+                  // Alerts Roster
+                  if (_isLoading && _activeAlerts.isEmpty)
+                    Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(rs.h(32)),
+                        child: const CircularProgressIndicator(
+                          color: primaryCrimson,
+                        ),
+                      ),
+                    )
+                  else if (_activeAlerts.isEmpty)
+                    Container(
+                      padding: EdgeInsets.symmetric(
+                        vertical: rs.h(40),
+                        horizontal: rs.w(20),
+                      ),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(rs.r(24)),
+                        border: Border.all(color: borderColor),
+                      ),
+                      child: Column(
+                        children: [
+                          Icon(
+                            Icons.check_circle_outline,
+                            size: rs.w(54).clamp(44.0, 60.0),
+                            color: primaryGreen,
+                          ),
+                          SizedBox(height: rs.h(12)),
+                          Text(
+                            'No Active Campus Emergencies',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: rs.sp(16),
+                              color: textMain,
+                            ),
+                          ),
+                          SizedBox(height: rs.h(4)),
+                          Text(
+                            'Campus quick-response units on standby.',
+                            style: TextStyle(
+                              color: textSub,
+                              fontSize: rs.sp(13),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    ..._activeAlerts.map((alert) {
+                      return _buildAlertCard(rs, alert);
+                    }),
+                  SizedBox(height: rs.h(20)),
+                ],
+              ),
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildStatPill(String label, String value) {
+  Widget _buildAlertCard(Rs rs, dynamic alert) {
+    final status = (alert['status'] ?? 'triggered').toString();
+    final lat = double.tryParse(alert['latitude'].toString()) ?? 0.0;
+    final lng = double.tryParse(alert['longitude'].toString()) ?? 0.0;
+
+    return Container(
+      margin: EdgeInsets.only(bottom: rs.h(14)),
+      padding: EdgeInsets.all(rs.w(20)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(rs.r(24)),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    Container(
+                      width: rs.w(38),
+                      height: rs.w(38),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF7EFE9),
+                        borderRadius: BorderRadius.circular(rs.r(10)),
+                      ),
+                      child: Icon(
+                        Icons.emergency_outlined,
+                        size: rs.w(20),
+                        color: primaryCrimson,
+                      ),
+                    ),
+                    SizedBox(width: rs.w(10)),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "${alert['first_name']} ${alert['last_name']}",
+                            style: TextStyle(
+                              fontSize: rs.sp(16),
+                              fontWeight: FontWeight.w800,
+                              color: textMain,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            "${alert['studentNo'] ?? '22-LN-0123'} · ${alert['phone'] ?? 'No contact'}",
+                            style: TextStyle(
+                              fontSize: rs.sp(12),
+                              color: textSub,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(width: rs.w(8)),
+              Container(
+                padding: EdgeInsets.symmetric(
+                  horizontal: rs.w(10),
+                  vertical: rs.h(4),
+                ),
+                decoration: BoxDecoration(
+                  color: status == 'dispatched'
+                      ? const Color(0xFFE5EDE4)
+                      : const Color(0xFFFDE8E8),
+                  borderRadius: BorderRadius.circular(rs.r(12)),
+                ),
+                child: Text(
+                  status.toUpperCase(),
+                  style: TextStyle(
+                    fontSize: rs.sp(11),
+                    fontWeight: FontWeight.w700,
+                    color: status == 'dispatched' ? primaryGreen : primaryCrimson,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: rs.h(16)),
+
+          Text(
+            'BLOOD TYPE',
+            style: TextStyle(
+              fontSize: rs.sp(10),
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.2,
+              color: textSub,
+            ),
+          ),
+          SizedBox(height: rs.h(2)),
+          Text(
+            alert['blood_type'] ?? 'O+',
+            style: TextStyle(
+              fontSize: rs.sp(14),
+              fontWeight: FontWeight.w700,
+              color: textMain,
+            ),
+          ),
+          SizedBox(height: rs.h(10)),
+
+          Text(
+            'KNOWN ALLERGY',
+            style: TextStyle(
+              fontSize: rs.sp(10),
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.2,
+              color: textSub,
+            ),
+          ),
+          SizedBox(height: rs.h(2)),
+          Text(
+            alert['allergies'] ?? 'None',
+            style: TextStyle(
+              fontSize: rs.sp(14),
+              fontWeight: FontWeight.w700,
+              color: (alert['allergies'] != null && alert['allergies'] != 'None')
+                  ? primaryCrimson
+                  : primaryGreen,
+            ),
+          ),
+          SizedBox(height: rs.h(16)),
+
+          // GPS coordinates row — fully tappable
+          Material(
+            color: const Color(0xFFE2EBE1),
+            borderRadius: BorderRadius.circular(rs.r(14)),
+            child: InkWell(
+              onTap: () => _openGoogleMaps(lat, lng),
+              borderRadius: BorderRadius.circular(rs.r(14)),
+              child: Padding(
+                padding: EdgeInsets.all(rs.w(12)),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'GPS COORDINATES',
+                            style: TextStyle(
+                              fontSize: rs.sp(9.5),
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.2,
+                              color: textSub,
+                            ),
+                          ),
+                          Text(
+                            "${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}",
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: rs.sp(13),
+                              color: textMain,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        Text(
+                          'Open maps',
+                          style: TextStyle(
+                            fontSize: rs.sp(12.5),
+                            fontWeight: FontWeight.w700,
+                            color: primaryGreen,
+                          ),
+                        ),
+                        SizedBox(width: rs.w(4)),
+                        Icon(
+                          Icons.north_east_rounded,
+                          size: rs.w(14),
+                          color: primaryGreen,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          SizedBox(height: rs.h(16)),
+
+          if (status == 'triggered') ...[
+            SizedBox(
+              width: double.infinity,
+              height: rs.h(44).clamp(40.0, 50.0),
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: softSage,
+                  foregroundColor: primaryGreen,
+                  elevation: 0,
+                  shape: const StadiumBorder(),
+                ),
+                onPressed: () => _updateAlertStatus(alert['alert_id'], 'acknowledged'),
+                child: Text(
+                  'Acknowledge',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: rs.sp(13.5),
+                  ),
+                ),
+              ),
+            ),
+            SizedBox(height: rs.h(8)),
+          ],
+
+          if (status != 'dispatched') ...[
+            SizedBox(
+              width: double.infinity,
+              height: rs.h(48).clamp(44.0, 54.0),
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: primaryGreen,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: const StadiumBorder(),
+                ),
+                onPressed: () => _updateAlertStatus(alert['alert_id'], 'dispatched'),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      'Dispatch unit',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: rs.sp(14),
+                      ),
+                    ),
+                    SizedBox(width: rs.w(6)),
+                    const Icon(Icons.arrow_forward_rounded, size: 16),
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(height: rs.h(8)),
+          ],
+
+          // On compact screens the two low-priority buttons stack so
+          // "False alarm" doesn't get squeezed against the edge.
+          rs.isCompact
+              ? Column(
+                  children: [
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: primaryGreen,
+                          side: const BorderSide(color: borderColor),
+                          shape: const StadiumBorder(),
+                          padding: EdgeInsets.symmetric(vertical: rs.h(10)),
+                        ),
+                        onPressed: () =>
+                            _updateAlertStatus(alert['alert_id'], 'resolved'),
+                        child: Text(
+                          'Mark resolved',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: rs.sp(13),
+                          ),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: rs.h(4)),
+                    TextButton(
+                      onPressed: () =>
+                          _updateAlertStatus(alert['alert_id'], 'false_alarm'),
+                      child: Text(
+                        'False alarm',
+                        style: TextStyle(
+                          color: textSub,
+                          fontSize: rs.sp(12.5),
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              : Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: primaryGreen,
+                          side: const BorderSide(color: borderColor),
+                          shape: const StadiumBorder(),
+                        ),
+                        onPressed: () =>
+                            _updateAlertStatus(alert['alert_id'], 'resolved'),
+                        child: Text(
+                          'Mark resolved',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: rs.sp(13),
+                          ),
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: rs.w(8)),
+                    TextButton(
+                      onPressed: () =>
+                          _updateAlertStatus(alert['alert_id'], 'false_alarm'),
+                      child: Text(
+                        'False alarm',
+                        style: TextStyle(
+                          color: textSub,
+                          fontSize: rs.sp(12.5),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatPill(Rs rs, String label, String value) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+        padding: EdgeInsets.symmetric(
+          vertical: rs.h(14),
+          horizontal: rs.w(12),
+        ),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(rs.r(18)),
           border: Border.all(color: borderColor),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: const TextStyle(fontSize: 11, color: textSub, fontWeight: FontWeight.w500)),
-            const SizedBox(height: 6),
-            Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: textMain)),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: rs.sp(11),
+                color: textSub,
+                fontWeight: FontWeight.w500,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            SizedBox(height: rs.h(6)),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: rs.sp(18),
+                fontWeight: FontWeight.w800,
+                color: textMain,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ],
         ),
       ),

@@ -3,6 +3,7 @@ import { pool } from '../db.js';
 import { sendAppointmentEmail } from './mailer.js';
 import { logAudit } from './auditLogger.js';
 import { sendPushToUser } from './fcmNotifier.js';
+import { NOSHOW_LIMIT } from '../config/limits.js';
 
 export function startReminderScheduler(io) {
   // Check every 15 minutes
@@ -68,11 +69,10 @@ for (const app of upcoming) {
       const [expired] = await pool.query(
         `SELECT appointment_id FROM APPOINTMENTS
          WHERE status = 'scheduled'
-           AND date_time < DATE_SUB(NOW(), INTERVAL 20 MINUTE)
+           AND date_time < DATE_SUB(NOW(), INTERVAL ${NOSHOW_LIMIT.graceMinutes} MINUTE)
            AND date_time > DATE_SUB(NOW(), INTERVAL 24 HOUR)
            AND deleted_at IS NULL`
       );
-
       if (expired.length === 0) return;
 
       const ids = expired.map((r) => r.appointment_id);

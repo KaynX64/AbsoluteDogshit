@@ -18,32 +18,26 @@ function envInt(name, fallback) {
 // ─────────────────────────────────────────────────────────────────────────
 // LOGIN — brute-force protection on POST /api/auth/login
 // ─────────────────────────────────────────────────────────────────────────
-// Rationale for 5 / 300:
-//   • 5 attempts is enough for a user who mistyped 2–3 times.
-//   • 300s (5 min) still slows scripted guessing to ~60 tries/hour per IP,
-//     while limiting lockouts for students sharing one campus IP.
-// ─────────────────────────────────────────────────────────────────────────
 export const LOGIN_LIMIT = {
   maxAttempts:   envInt('LOGIN_RATE_LIMIT_MAX',    5),
   windowSeconds: envInt('LOGIN_RATE_LIMIT_WINDOW', 60),
 };
 
 // ─────────────────────────────────────────────────────────────────────────
-// SOS — panic-button throttle (wired in server/src/routes/emergency.js
+// SOS — panic-button throttle (wired in server/src/routes/emergency.js)
 // ─────────────────────────────────────────────────────────────────────────
 export const SOS_LIMIT = {
   maxAttempts:   envInt('SOS_RATE_LIMIT_MAX',    10),
-  windowSeconds: envInt('SOS_RATE_LIMIT_WINDOW', 60),      // was 10
+  windowSeconds: envInt('SOS_RATE_LIMIT_WINDOW', 60),
 };
-
 
 // ─────────────────────────────────────────────────────────────────────────
 // APPOINTMENT BOOKING — mobile patient self-booking throttle
 // ─────────────────────────────────────────────────────────────────────────
 export const BOOKING_LIMIT = {
   maxAttempts:   envInt('BOOKING_RATE_LIMIT_MAX',    10),
-  windowSeconds: envInt('BOOKING_RATE_LIMIT_WINDOW', 60),  // was 10
-};  
+  windowSeconds: envInt('BOOKING_RATE_LIMIT_WINDOW', 60),
+};
 
 // ─────────────────────────────────────────────────────────────────────────
 // PUBLIC DOCUMENT VERIFICATION — per-IP throttle on unauthenticated QR checks
@@ -54,12 +48,29 @@ export const VERIFY_LIMIT = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────
-// Startup log — helpful to confirm the active policy in the server console
+// NO-SHOW GRACE PERIOD — how long past the appointment time the auto worker
+// waits before flipping status from 'scheduled' to 'no_show'.
+//
+// Read by server/src/utils/reminderWorker.js. The worker runs every 60s, so
+// a patient is marked no-show within ~1 minute of crossing this threshold.
+//
+// Default 20 minutes matches the original hardcoded value. Set it to 15 for
+// a tighter clinic, 30 for a more forgiving one.
+// ─────────────────────────────────────────────────────────────────────────
+export const NOSHOW_LIMIT = {
+  graceMinutes: envInt('NOSHOW_GRACE_MINUTES', 20),
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// Startup log — confirms the active policy in the server console
 // ─────────────────────────────────────────────────────────────────────────
 export function logActiveLimits() {
   console.log(
     `🛡️  [Rate Limits] Login: ${LOGIN_LIMIT.maxAttempts} / ${LOGIN_LIMIT.windowSeconds}s · ` +
     `SOS: ${SOS_LIMIT.maxAttempts} / ${SOS_LIMIT.windowSeconds}s · ` +
     `Booking: ${BOOKING_LIMIT.maxAttempts} / ${BOOKING_LIMIT.windowSeconds}s`
+  );
+  console.log(
+    `⏰ [No-Show] Grace period: ${NOSHOW_LIMIT.graceMinutes} minute(s) past appointment time`
   );
 }

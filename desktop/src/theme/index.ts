@@ -112,6 +112,7 @@ export const rolePill = (role: string): CSSProperties => {
     case 'NURSE':               return pill('#F0FDFA', '#0F766E');
     case 'EMERGENCY_RESPONDER': return pill('#FEE2E2', '#B91C1C');
     case 'FACULTY':             return pill('#FFF7ED', '#C2410C');
+    case 'NON_TEACHING':        return pill('#FEF9C3', '#854D0E');
     case 'STUDENT':             return pill(T.successSoft, T.success);
     default:                    return pill(T.sage100, T.textSub);
   }

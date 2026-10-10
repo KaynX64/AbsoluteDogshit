@@ -258,6 +258,7 @@ export default function AdminConsole({
       specialty: u.specialty || '',
       department: u.department || '',
       position: u.position || '',
+      employee_no: u.employee_no || '',
       is_active: u.status === 'Active' || u.is_active === 1 || u.is_active === true,
     });
     setAdminPasswordInput('');
@@ -296,24 +297,25 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
     setModalFeedback(null);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/users/${editingUser.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          first_name: editingUser.first_name,
-          last_name: editingUser.last_name,
-          email: editingUser.email,
-          phone: editingUser.phone,
-          role_code: editingUser.role,
-          is_active: editingUser.is_active,
-          student_no: editingUser.student_no,
-          course: editingUser.course,
-          year_level: editingUser.year_level,
-          license_no: editingUser.license_no,
-          specialty: editingUser.specialty,
-          department: editingUser.department,
-          position: editingUser.position,
-        }),
+          const res = await fetch(`${API_BASE_URL}/api/admin/users/${editingUser.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({
+              first_name: editingUser.first_name,
+              last_name: editingUser.last_name,
+              email: editingUser.email,
+              phone: editingUser.phone,
+              role_code: editingUser.role,
+              is_active: editingUser.is_active,
+              student_no: editingUser.student_no,
+              course: editingUser.course,
+              year_level: editingUser.year_level,
+              license_no: editingUser.license_no,
+              specialty: editingUser.specialty,
+              department: editingUser.department,
+              position: editingUser.position,
+              employee_no: editingUser.employee_no,
+            }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -567,6 +569,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
               { code: 'NURSE', label: 'Nurse' },
               { code: 'STUDENT', label: 'Student' },
               { code: 'FACULTY', label: 'Faculty' },
+              { code: 'NON_TEACHING', label: 'Non-Teaching' },
               { code: 'EMERGENCY_RESPONDER', label: 'Responder' },
               { code: 'ADMIN', label: 'Admin' },
             ].map((r) => {
@@ -1739,10 +1742,11 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                         onChange={(e) => setEditingUser({ ...editingUser, role: e.target.value })}
                       >
                         <option value="STUDENT">STUDENT</option>
+                        <option value="FACULTY">FACULTY</option>
+                        <option value="NON_TEACHING">NON_TEACHING</option>
                         <option value="DOCTOR">DOCTOR</option>
                         <option value="DENTIST">DENTIST</option>
                         <option value="NURSE">NURSE</option>
-                        <option value="FACULTY">FACULTY</option>
                         <option value="EMERGENCY_RESPONDER">EMERGENCY_RESPONDER</option>
                         <option value="ADMIN">ADMIN</option>
                       </select>
@@ -1833,6 +1837,35 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                           Position
                         </label>
                         <input style={inputStyle} value={editingUser.position || ''}
+                               onChange={(e) => setEditingUser({ ...editingUser, position: e.target.value })} />
+                      </div>
+                    </div>
+                  )}
+
+                  {editingUser.role === 'NON_TEACHING' && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1fr', gap: 14, marginBottom: 20 }}>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
+                          Employee no. (optional)
+                        </label>
+                        <input style={inputStyle} value={editingUser.employee_no || ''}
+                               placeholder="PSU-NT-2024-0187"
+                               onChange={(e) => setEditingUser({ ...editingUser, employee_no: e.target.value })} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
+                          Department / office
+                        </label>
+                        <input style={inputStyle} value={editingUser.department || ''}
+                               placeholder="Campus Maintenance & Facilities"
+                               onChange={(e) => setEditingUser({ ...editingUser, department: e.target.value })} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
+                          Position
+                        </label>
+                        <input style={inputStyle} value={editingUser.position || ''}
+                               placeholder="Utility Worker"
                                onChange={(e) => setEditingUser({ ...editingUser, position: e.target.value })} />
                       </div>
                     </div>

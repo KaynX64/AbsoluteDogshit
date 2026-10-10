@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
+import '../utils/responsive.dart';
 
 class ChangePasswordScreen extends StatefulWidget {
   const ChangePasswordScreen({super.key});
@@ -23,8 +24,6 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   bool _obscureAll = true;
   bool _isSaving = false;
 
-  // Real-time strength state
-  // 0 = Very Weak · 1 = Weak · 2 = Medium · 3 = Strong · 4 = Very Strong
   int _strengthScore = 0;
   String _strengthLabel = '';
 
@@ -72,13 +71,11 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     if (variety >= 3) score++;
     if (pwd.length >= 14 && variety == 4) score++;
 
-    // Fail-closed: any password missing the base bar can't exceed Weak.
     if (!hasMinLength || variety < 3) {
       if (score > 1) score = 1;
     }
     score = score.clamp(0, 4);
 
-    // 0 = Very Weak · 1 = Weak · 2 = Medium · 3 = Strong · 4 = Very Strong
     const labels = ['Very Weak', 'Weak', 'Medium', 'Strong', 'Very Strong'];
 
     setState(() {
@@ -90,13 +87,13 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   Color _getStrengthColor() {
     switch (_strengthScore) {
       case 1:
-        return const Color(0xFFDC2626); // Red
+        return const Color(0xFFDC2626);
       case 2:
-        return const Color(0xFFD97706); // Amber
+        return const Color(0xFFD97706);
       case 3:
-        return const Color(0xFF2563EB); // Blue
+        return const Color(0xFF2563EB);
       case 4:
-        return const Color(0xFF15803D); // Green
+        return const Color(0xFF15803D);
       default:
         return const Color(0xFF94A396);
     }
@@ -140,10 +137,10 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
         );
         Navigator.pop(context);
       } else {
-        // Server may reject with a detailed issues[] array — surface it
-        final detailed = (data['issues'] is List && (data['issues'] as List).isNotEmpty)
-            ? (data['issues'] as List).join(' ')
-            : data['error'] ?? 'Failed to update password.';
+        final detailed =
+            (data['issues'] is List && (data['issues'] as List).isNotEmpty)
+                ? (data['issues'] as List).join(' ')
+                : data['error'] ?? 'Failed to update password.';
         _showError(detailed);
       }
     } catch (e) {
@@ -156,12 +153,44 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   void _showError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: const Color(0xFF7A2E26)),
+      SnackBar(
+        content: Text(message),
+        backgroundColor: const Color(0xFF7A2E26),
+      ),
+    );
+  }
+
+  InputDecoration _pillInputDecoration(Rs rs, String hint) {
+    final radius = BorderRadius.circular(rs.r(22));
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: TextStyle(color: const Color(0xFF94A396), fontSize: rs.sp(13)),
+      filled: true,
+      fillColor: Colors.white,
+      contentPadding: EdgeInsets.symmetric(
+        horizontal: rs.w(20),
+        vertical: rs.h(16),
+      ),
+      border: OutlineInputBorder(
+        borderRadius: radius,
+        borderSide: const BorderSide(color: borderColor),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: radius,
+        borderSide: const BorderSide(color: borderColor),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: radius,
+        borderSide: const BorderSide(color: primaryGreen, width: 1.5),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final rs = Rs.of(context);
+    final maxContentWidth = rs.isTablet ? 560.0 : double.infinity;
+
     return Scaffold(
       backgroundColor: const Color(0xFFF7F9F6),
       appBar: AppBar(
@@ -171,250 +200,291 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
           icon: const Icon(Icons.arrow_back_rounded, color: textMain),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text(
+        title: Text(
           'Back to my profile',
-          style: TextStyle(fontSize: 14, color: textMain, fontWeight: FontWeight.w600),
+          style: TextStyle(
+            fontSize: rs.sp(14),
+            color: textMain,
+            fontWeight: FontWeight.w600,
+          ),
         ),
         titleSpacing: -6,
       ),
       body: SafeArea(
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
-            children: [
-              const Text(
-                'A LITTLE EXTRA PEACE OF MIND',
-                style: TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.8,
-                  color: textSub,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxContentWidth),
+            child: Form(
+              key: _formKey,
+              child: ListView(
+                padding: EdgeInsets.symmetric(
+                  horizontal: rs.w(24),
+                  vertical: rs.h(12),
                 ),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Keep your account safe.',
-                style: TextStyle(
-                  fontSize: 30,
-                  fontWeight: FontWeight.w800,
-                  color: textMain,
-                  letterSpacing: -0.5,
-                ),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'A strong password protects your health records.',
-                style: TextStyle(fontSize: 14, color: textSub),
-              ),
-              const SizedBox(height: 32),
-
-              // Current Password
-              const Text(
-                'Current password',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: textMain),
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _currentPasswordController,
-                obscureText: _obscureAll,
-                style: const TextStyle(fontSize: 14),
-                decoration: _pillInputDecoration('Enter your current password'),
-                validator: (val) =>
-                    (val == null || val.isEmpty) ? 'Please enter current password' : null,
-              ),
-              const SizedBox(height: 20),
-
-              // New Password
-              const Text(
-                'New password',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: textMain),
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _newPasswordController,
-                obscureText: _obscureAll,
-                style: const TextStyle(fontSize: 14),
-                decoration: _pillInputDecoration(
-                  'At least 8 characters (letters, numbers, symbols)',
-                ),
-                validator: (val) {
-                  if (val == null || val.isEmpty) return 'Please enter new password';
-                  if (val.length < 8) return 'Password must be at least 8 characters';
-                  return null;
-                },
-              ),
-
-              // Dynamic Password Strength Meter
-              if (_newPasswordController.text.isNotEmpty) ...[
-                const SizedBox(height: 10),
-
-                // 4-segment bar
-                Row(
-                  children: List.generate(4, (index) {
-                    final segmentActive = index < _strengthScore;
-                    return Expanded(
-                      child: Container(
-                        height: 4,
-                        margin: EdgeInsets.only(right: index < 3 ? 6.0 : 0.0),
-                        decoration: BoxDecoration(
-                          color: segmentActive
-                              ? _getStrengthColor()
-                              : const Color(0xFFE2EBE1),
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    );
-                  }),
-                ),
-                const SizedBox(height: 6),
-
-                // Label + min-strength hint
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Strength: $_strengthLabel',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: _getStrengthColor(),
-                      ),
+                children: [
+                  Text(
+                    'A LITTLE EXTRA PEACE OF MIND',
+                    style: TextStyle(
+                      fontSize: rs.sp(10.5),
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.8,
+                      color: textSub,
                     ),
-                    Text(
-                      _strengthScore >= 2
-                          ? '✓ Meets requirements'
-                          : '✕ Must be Medium or better',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: _strengthScore >= 2
-                            ? const Color(0xFF15803D)
-                            : const Color(0xFFDC2626),
-                      ),
+                  ),
+                  SizedBox(height: rs.h(6)),
+                  Text(
+                    'Keep your account safe.',
+                    style: TextStyle(
+                      fontSize: rs.sp(30),
+                      fontWeight: FontWeight.w800,
+                      color: textMain,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                  SizedBox(height: rs.h(4)),
+                  Text(
+                    'A strong password protects your health records.',
+                    style: TextStyle(fontSize: rs.sp(14), color: textSub),
+                  ),
+                  SizedBox(height: rs.h(32)),
+
+                  // Current Password
+                  Text(
+                    'Current password',
+                    style: TextStyle(
+                      fontSize: rs.sp(13),
+                      fontWeight: FontWeight.w700,
+                      color: textMain,
+                    ),
+                  ),
+                  SizedBox(height: rs.h(8)),
+                  TextFormField(
+                    controller: _currentPasswordController,
+                    obscureText: _obscureAll,
+                    style: TextStyle(fontSize: rs.sp(14)),
+                    decoration: _pillInputDecoration(
+                      rs,
+                      'Enter your current password',
+                    ),
+                    validator: (val) => (val == null || val.isEmpty)
+                        ? 'Please enter current password'
+                        : null,
+                  ),
+                  SizedBox(height: rs.h(20)),
+
+                  // New Password
+                  Text(
+                    'New password',
+                    style: TextStyle(
+                      fontSize: rs.sp(13),
+                      fontWeight: FontWeight.w700,
+                      color: textMain,
+                    ),
+                  ),
+                  SizedBox(height: rs.h(8)),
+                  TextFormField(
+                    controller: _newPasswordController,
+                    obscureText: _obscureAll,
+                    style: TextStyle(fontSize: rs.sp(14)),
+                    decoration: _pillInputDecoration(
+                      rs,
+                      'At least 8 characters (letters, numbers, symbols)',
+                    ),
+                    validator: (val) {
+                      if (val == null || val.isEmpty) {
+                        return 'Please enter new password';
+                      }
+                      if (val.length < 8) {
+                        return 'Password must be at least 8 characters';
+                      }
+                      return null;
+                    },
+                  ),
+
+                  // Strength meter
+                  if (_newPasswordController.text.isNotEmpty) ...[
+                    SizedBox(height: rs.h(10)),
+
+                    Row(
+                      children: List.generate(4, (index) {
+                        final segmentActive = index < _strengthScore;
+                        return Expanded(
+                          child: Container(
+                            height: 4,
+                            margin: EdgeInsets.only(
+                              right: index < 3 ? rs.w(6) : 0,
+                            ),
+                            decoration: BoxDecoration(
+                              color: segmentActive
+                                  ? _getStrengthColor()
+                                  : const Color(0xFFE2EBE1),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        );
+                      }),
+                    ),
+                    SizedBox(height: rs.h(6)),
+
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            'Strength: $_strengthLabel',
+                            style: TextStyle(
+                              fontSize: rs.sp(12),
+                              fontWeight: FontWeight.w700,
+                              color: _getStrengthColor(),
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        SizedBox(width: rs.w(6)),
+                        Flexible(
+                          child: Text(
+                            _strengthScore >= 2
+                                ? '✓ Meets requirements'
+                                : '✕ Must be Medium or better',
+                            style: TextStyle(
+                              fontSize: rs.sp(11),
+                              fontWeight: FontWeight.w700,
+                              color: _strengthScore >= 2
+                                  ? const Color(0xFF15803D)
+                                  : const Color(0xFFDC2626),
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.end,
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    _PasswordRequirementsPanel(
+                      rs: rs,
+                      password: _newPasswordController.text,
                     ),
                   ],
-                ),
+                  SizedBox(height: rs.h(20)),
 
-                // Live requirements checklist
-                _PasswordRequirementsPanel(password: _newPasswordController.text),
-              ],
-              const SizedBox(height: 20),
-
-              // Confirm New Password
-              const Text(
-                'Confirm new password',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: textMain),
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _confirmPasswordController,
-                obscureText: _obscureAll,
-                style: const TextStyle(fontSize: 14),
-                decoration: _pillInputDecoration('Re-enter new password'),
-                validator: (val) {
-                  if (val != _newPasswordController.text) return 'Passwords do not match';
-                  return null;
-                },
-              ),
-              const SizedBox(height: 14),
-
-              // Toggle visibility
-              Row(
-                children: [
-                  IconButton(
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    icon: Icon(
-                      _obscureAll
-                          ? Icons.visibility_outlined
-                          : Icons.visibility_off_outlined,
-                      size: 20,
-                      color: textSub,
-                    ),
-                    onPressed: () => setState(() => _obscureAll = !_obscureAll),
-                  ),
-                  const SizedBox(width: 8),
+                  // Confirm New Password
                   Text(
-                    _obscureAll ? 'Show passwords' : 'Hide passwords',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: textSub,
-                      fontWeight: FontWeight.w500,
+                    'Confirm new password',
+                    style: TextStyle(
+                      fontSize: rs.sp(13),
+                      fontWeight: FontWeight.w700,
+                      color: textMain,
+                    ),
+                  ),
+                  SizedBox(height: rs.h(8)),
+                  TextFormField(
+                    controller: _confirmPasswordController,
+                    obscureText: _obscureAll,
+                    style: TextStyle(fontSize: rs.sp(14)),
+                    decoration: _pillInputDecoration(
+                      rs,
+                      'Re-enter new password',
+                    ),
+                    validator: (val) {
+                      if (val != _newPasswordController.text) {
+                        return 'Passwords do not match';
+                      }
+                      return null;
+                    },
+                  ),
+                  SizedBox(height: rs.h(14)),
+
+                  // Toggle visibility
+                  Row(
+                    children: [
+                      IconButton(
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        icon: Icon(
+                          _obscureAll
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                          size: rs.w(20),
+                          color: textSub,
+                        ),
+                        onPressed: () =>
+                            setState(() => _obscureAll = !_obscureAll),
+                      ),
+                      SizedBox(width: rs.w(8)),
+                      Flexible(
+                        child: Text(
+                          _obscureAll ? 'Show passwords' : 'Hide passwords',
+                          style: TextStyle(
+                            fontSize: rs.sp(13),
+                            color: textSub,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: rs.h(28)),
+
+                  // Update button
+                  SizedBox(
+                    width: double.infinity,
+                    height: rs.h(52).clamp(46.0, 58.0),
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primaryGreen,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: const StadiumBorder(),
+                      ),
+                      onPressed:
+                          (_isSaving || _strengthScore < 2) ? null : _updatePassword,
+                      icon: _isSaving
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Icon(Icons.lock_outline, size: 18),
+                      label: Text(
+                        'Update password',
+                        style: TextStyle(
+                          fontSize: rs.sp(15),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 28),
-
-              // Update Button — disabled until the password clears the bar
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryGreen,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    shape: const StadiumBorder(),
-                  ),
-                  onPressed:
-                      (_isSaving || _strengthScore < 2) ? null : _updatePassword,
-                  icon: _isSaving
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : const Icon(Icons.lock_outline, size: 18),
-                  label: const Text(
-                    'Update password',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
-
-  InputDecoration _pillInputDecoration(String hint) {
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: const TextStyle(color: Color(0xFF94A396), fontSize: 13),
-      filled: true,
-      fillColor: Colors.white,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(22),
-        borderSide: const BorderSide(color: borderColor),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(22),
-        borderSide: const BorderSide(color: borderColor),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(22),
-        borderSide: const BorderSide(color: primaryGreen, width: 1.5),
-      ),
-    );
-  }
 }
 
-// ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
 // PASSWORD STRENGTH UI HELPERS
-// ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
 
 class _PasswordRequirement extends StatelessWidget {
+  final Rs rs;
   final bool met;
   final String label;
 
-  const _PasswordRequirement({required this.met, required this.label});
+  const _PasswordRequirement({
+    required this.rs,
+    required this.met,
+    required this.label,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -425,13 +495,15 @@ class _PasswordRequirement extends StatelessWidget {
     const pendingBg = Color(0xFFEEF3EC);
     const pendingBorder = Color(0xFFDCE4DA);
 
+    final checkSize = rs.w(14).clamp(12.0, 16.0);
+
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3.0),
+      padding: EdgeInsets.symmetric(vertical: rs.h(3)),
       child: Row(
         children: [
           Container(
-            width: 14,
-            height: 14,
+            width: checkSize,
+            height: checkSize,
             decoration: BoxDecoration(
               color: met ? okBg : pendingBg,
               shape: BoxShape.circle,
@@ -442,16 +514,18 @@ class _PasswordRequirement extends StatelessWidget {
             ),
             alignment: Alignment.center,
             child: met
-                ? const Icon(Icons.check, size: 9, color: okGreen)
+                ? Icon(Icons.check, size: checkSize * 0.65, color: okGreen)
                 : null,
           ),
-          const SizedBox(width: 8),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 11.5,
-              fontWeight: FontWeight.w600,
-              color: met ? okGreen : pendingGrey,
+          SizedBox(width: rs.w(8)),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: rs.sp(11.5),
+                fontWeight: FontWeight.w600,
+                color: met ? okGreen : pendingGrey,
+              ),
             ),
           ),
         ],
@@ -460,11 +534,14 @@ class _PasswordRequirement extends StatelessWidget {
   }
 }
 
-/// Live checklist of every policy requirement, colour-coded for pass/fail.
 class _PasswordRequirementsPanel extends StatelessWidget {
+  final Rs rs;
   final String password;
 
-  const _PasswordRequirementsPanel({required this.password});
+  const _PasswordRequirementsPanel({
+    required this.rs,
+    required this.password,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -475,31 +552,54 @@ class _PasswordRequirementsPanel extends StatelessWidget {
     final hasSpecial = RegExp(r'[^A-Za-z0-9]').hasMatch(password);
 
     return Container(
-      margin: const EdgeInsets.only(top: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      margin: EdgeInsets.only(top: rs.h(10)),
+      padding: EdgeInsets.symmetric(
+        horizontal: rs.w(14),
+        vertical: rs.h(12),
+      ),
       decoration: BoxDecoration(
         color: const Color(0xFFF7F9F6),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(rs.r(14)),
         border: Border.all(color: const Color(0xFFE8EDE6)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Password requirements',
             style: TextStyle(
-              fontSize: 10.5,
+              fontSize: rs.sp(10.5),
               fontWeight: FontWeight.w800,
               letterSpacing: 1.2,
-              color: Color(0xFF94A396),
+              color: const Color(0xFF94A396),
             ),
           ),
-          const SizedBox(height: 6),
-          _PasswordRequirement(met: hasMinLength, label: 'At least 8 characters'),
-          _PasswordRequirement(met: hasUpper, label: 'One uppercase letter (A–Z)'),
-          _PasswordRequirement(met: hasLower, label: 'One lowercase letter (a–z)'),
-          _PasswordRequirement(met: hasDigit, label: 'One number (0–9)'),
-          _PasswordRequirement(met: hasSpecial, label: 'One symbol (!@#\$%^&*…)'),
+          SizedBox(height: rs.h(6)),
+          _PasswordRequirement(
+            rs: rs,
+            met: hasMinLength,
+            label: 'At least 8 characters',
+          ),
+          _PasswordRequirement(
+            rs: rs,
+            met: hasUpper,
+            label: 'One uppercase letter (A–Z)',
+          ),
+          _PasswordRequirement(
+            rs: rs,
+            met: hasLower,
+            label: 'One lowercase letter (a–z)',
+          ),
+          _PasswordRequirement(
+            rs: rs,
+            met: hasDigit,
+            label: 'One number (0–9)',
+          ),
+          _PasswordRequirement(
+            rs: rs,
+            met: hasSpecial,
+            label: 'One symbol (!@#\$%^&*…)',
+          ),
         ],
       ),
     );

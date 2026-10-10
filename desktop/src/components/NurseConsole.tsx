@@ -70,6 +70,7 @@ export default function NurseConsole({
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [loadingQueue, setLoadingQueue] = useState(false);
   const [activeSosCount, setActiveSosCount] = useState<number>(0);
+  const [noShowCount, setNoShowCount] = useState<number>(0);
 
   /* ── Expected arrivals state ─────────────────────────────── */
   const [expected, setExpected] = useState<ExpectedItem[]>([]);
@@ -142,6 +143,19 @@ export default function NurseConsole({
     } catch (_) {}
   };
 
+  const fetchNoShowCount = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/appointments/no-shows-today`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setNoShowCount(Number(data.count) || 0);
+      }
+    } catch (_) {}
+  };
+
   const fetchExpected = async () => {
     setLoadingExpected(true);
     setExpectedFeedback(null);
@@ -164,6 +178,7 @@ export default function NurseConsole({
   useEffect(() => {
     fetchLiveQueue();
     fetchActiveSosCount();
+    fetchNoShowCount();
 
     const token = localStorage.getItem('valetudo_token');
     const socket = io(SOCKET_URL, {
@@ -174,6 +189,7 @@ export default function NurseConsole({
     socket.on('queue:updated', () => {
       fetchLiveQueue();
       fetchActiveSosCount();
+      fetchNoShowCount();
     });
 
     socket.on('emergency:new_alert', () => {
@@ -184,6 +200,12 @@ export default function NurseConsole({
     socket.on('emergency:status_change', () => {
       fetchLiveQueue();
       fetchActiveSosCount();
+    });
+
+    // The reminder worker flips appointments to 'no_show' every 60s and
+    // emits appointment:status_changed. Keep the tile live as that happens.
+    socket.on('appointment:status_changed', (evt: { status?: string }) => {
+      if (evt?.status === 'no_show') fetchNoShowCount();
     });
 
     socket.on('appointment:booked', (newBooking: any) => {
@@ -1141,10 +1163,11 @@ export default function NurseConsole({
       </div>
 
       {/* Stat row with Dynamic Open SOS count */}
+      {/* Stat row with Dynamic Open SOS count + No-shows today */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
+          gridTemplateColumns: 'repeat(5, 1fr)',
           gap: 14,
         }}
       >
@@ -1152,6 +1175,12 @@ export default function NurseConsole({
           { label: 'Seen today', value: '27', bg: '#DDEBD8', color: C.text },
           { label: 'Avg. wait', value: '6 min', bg: '#DDE7EE', color: C.text },
           { label: 'Low stock lots', value: '1', bg: '#EDE5D6', color: C.text },
+          {
+            label: 'No-shows today',
+            value: String(noShowCount),
+            bg: noShowCount > 0 ? '#FEF3C7' : '#E6E1EF',
+            color: noShowCount > 0 ? '#8C6826' : C.text,
+          },
           {
             label: 'Open SOS alerts',
             value: String(activeSosCount),

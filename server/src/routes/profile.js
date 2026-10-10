@@ -15,21 +15,29 @@ router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
   try {
     const userId = req.user.user_id;
 
-    // Join identity with role tables (Student, Staff, Faculty, Admin)
+    // Join identity with role tables (Student, Staff, Faculty, Non-Teaching, Admin)
     const [userRows] = await pool.query(
       `SELECT u.user_id, u.email, u.first_name, u.last_name, u.phone,
               COALESCE(r.code, 'STUDENT') AS primary_role,
               COALESCE(r.name, 'Student Patient') AS role_name,
               sp.student_no, sp.course, sp.year_level,
               st.license_no, st.specialty,
-              COALESCE(st.department, fp.department, sp.course, 'PSU Lingayen Campus') AS department,
-              fp.position
+              COALESCE(
+                st.department,
+                fp.department,
+                ntp.department,
+                sp.course,
+                'PSU Lingayen Campus'
+              ) AS department,
+              COALESCE(fp.position, ntp.position) AS position,
+              ntp.employee_no
        FROM USERS u
        LEFT JOIN USER_ROLES ur ON u.user_id = ur.user_id
        LEFT JOIN ROLES r ON ur.role_id = r.role_id
        LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
        LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
        LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
+       LEFT JOIN NON_TEACHING_PROFILES ntp ON u.user_id = ntp.user_id
        WHERE u.user_id = ? AND u.deleted_at IS NULL
        LIMIT 1`,
       [userId]
@@ -282,6 +290,7 @@ router.post('/fcm-token', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Failed to save device token.' });
   }
 });
+
 // ── PUT /api/profile/patient/:userId/immunizations ────────────────────────────
 // Allows authorized Clinical Staff (Doctor, Dentist, Nurse, Admin) to update a patient's vaccines
 router.put('/patient/:userId/immunizations', authenticateToken, async (req, res) => {
@@ -298,7 +307,6 @@ router.put('/patient/:userId/immunizations', authenticateToken, async (req, res)
     return res.status(400).json({ error: 'immunizations must be an array of vaccine names.' });
   }
 
-  // Sanitize: unique, non-empty trimmed strings
   const cleanedList = Array.from(new Set(immunizations.map((v) => String(v).trim()).filter(Boolean)));
   const jsonPayload = JSON.stringify(cleanedList);
 
@@ -380,4 +388,5 @@ router.get('/patient/:userId/immunizations', authenticateToken, async (req, res)
     res.status(500).json({ error: 'Failed to fetch immunization history.' });
   }
 });
+
 export default router;

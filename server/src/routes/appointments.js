@@ -671,6 +671,29 @@ export default function appointmentRoutes(io) {
     }
   });
 
+    // ===========================================================================
+  // 4b. TODAY'S NO-SHOW COUNT (nurse console stat tile)
+  // ===========================================================================
+  // Returns how many patients have been auto-flipped (or manually set) to
+  // 'no_show' today. Used by NurseConsole to render the "No-shows today"
+  // stat tile. Runs no PHI decryption — it's a pure count.
+  router.get('/no-shows-today', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'DENTIST', 'ADMIN'), async (req, res) => {
+    try {
+      const [rows] = await pool.query(
+        `SELECT COUNT(*) AS count
+         FROM APPOINTMENTS
+         WHERE status = 'no_show'
+           AND DATE(date_time) = CURDATE()
+           AND deleted_at IS NULL`
+      );
+      res.json({ count: rows[0]?.count || 0 });
+    } catch (error) {
+      console.error('[Appointments] No-shows today error:', error);
+      res.status(500).json({ error: 'Failed to fetch no-show count.' });
+    }
+  });
+
+
   // ===========================================================================
   // 5. LIVE CLINIC TRIAGE QUEUE (WITH FEATURE 4 EMERGENCY PRIORITIZATION)
   // ===========================================================================

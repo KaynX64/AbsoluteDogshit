@@ -42,14 +42,21 @@ router.get('/users', async (req, res) => {
               u.created_at,
               sp.student_no, sp.course, sp.year_level,
               st.license_no, st.specialty,
-              COALESCE(st.department, fp.department, 'PSU Lingayen') as department,
-              fp.position
+              COALESCE(
+                st.department,
+                fp.department,
+                ntp.department,
+                'PSU Lingayen'
+              ) as department,
+              COALESCE(fp.position, ntp.position) AS position,
+              ntp.employee_no
        FROM USERS u
        LEFT JOIN USER_ROLES ur ON u.user_id = ur.user_id
        LEFT JOIN ROLES r ON ur.role_id = r.role_id
        LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
        LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
        LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
+       LEFT JOIN NON_TEACHING_PROFILES ntp ON u.user_id = ntp.user_id
        WHERE u.deleted_at IS NULL
        ORDER BY u.user_id ASC`
     );
@@ -145,6 +152,7 @@ router.put('/users/:id', async (req, res) => {
     specialty,
     department,
     position,
+    employee_no,
   } = req.body;
 
   if (!first_name || !last_name || !email) {
@@ -218,6 +226,21 @@ router.put('/users/:id', async (req, res) => {
          ON DUPLICATE KEY UPDATE department = VALUES(department), position = VALUES(position)`,
         [targetUserId, department ? department.trim() : 'Academic Affairs', position ? position.trim() : 'Faculty Member']
       );
+    } else if (role_code === 'NON_TEACHING') {
+      await connection.query(
+        `INSERT INTO NON_TEACHING_PROFILES (user_id, employee_no, department, position)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           employee_no = VALUES(employee_no),
+           department = VALUES(department),
+           position = VALUES(position)`,
+        [
+          targetUserId,
+          employee_no ? employee_no.trim() : null,
+          department ? department.trim() : 'General Services',
+          position ? position.trim() : 'Support Staff',
+        ]
+      );
     }
 
     // 5. Append to Cryptographic R.A. 10173 Audit Ledger
@@ -266,7 +289,6 @@ router.post('/users/:id/reset-password', async (req, res) => {
     const newHash = await bcrypt.hash(newPassword, 10);
     await connection.query('UPDATE USERS SET password_hash = ? WHERE user_id = ?', [newHash, targetUserId]);
 
-    // Append password reset event to immutable audit log
     await logAudit(connection, {
       userId: req.user.user_id,
       action: 'UPDATE',
@@ -305,6 +327,7 @@ router.post('/users', async (req, res) => {
     specialty,
     department,
     position,
+    employee_no,
   } = req.body;
 
   // ── Validation ────────────────────────────────────────────────
@@ -398,6 +421,17 @@ router.post('/users', async (req, res) => {
           position ? String(position).trim() : 'Faculty Member',
         ]
       );
+    } else if (role_code === 'NON_TEACHING') {
+      await connection.query(
+        `INSERT INTO NON_TEACHING_PROFILES (user_id, employee_no, department, position)
+         VALUES (?, ?, ?, ?)`,
+        [
+          newUserId,
+          employee_no ? String(employee_no).trim() : null,
+          department ? String(department).trim() : 'General Services',
+          position ? String(position).trim() : 'Support Staff',
+        ]
+      );
     }
 
     // R.A. 10173 cryptographic audit trail
@@ -457,7 +491,7 @@ router.get('/audit-logs', async (req, res) => {
   }
 });
 
-// 5. GET /api/admin/telemetry - Health Status (Single Clean Route)
+// 5. GET /api/admin/telemetry - Health Status
 router.get('/telemetry', async (req, res) => {
   try {
     const [dbTest] = await pool.query('SELECT 1 as isAlive');
@@ -490,7 +524,6 @@ router.get('/telemetry', async (req, res) => {
 // DATABASE STUDIO: LIVE DB EXPLORER & EDITOR
 // =============================================================================
 
-// Helper: Fetch valid tables in current database to prevent SQL injection
 async function getWhitelistedTables() {
   const [rows] = await pool.query(
     `SELECT TABLE_NAME as tableName, TABLE_ROWS as estimatedRows
@@ -500,13 +533,6 @@ async function getWhitelistedTables() {
   );
   return rows;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DB STUDIO SAFETY LAYER (Audit Issue #3)
-// Pure rules (encrypted columns, secret columns, read-only tables, audit fingerprints,
-// value protection, soft-delete / version-bump policy) live in utils/dbStudioGuard.js and
-// are unit-tested in server/tests/dbStudioGuard.test.js. Only DB-bound helpers stay here.
-// ─────────────────────────────────────────────────────────────────────────────
 
 async function getTableColumns(connection, tableName) {
   const [cols] = await connection.query(
@@ -522,14 +548,12 @@ async function getTableColumns(connection, tableName) {
   };
 }
 
-// Works out which patients' records a table page exposes, so browsing PHI in DB Studio
-// leaves the same PHI_ACCESS_LOGS trail as every other read path.
 async function resolvePhiTargets(table, rows, pkCols) {
   const src = phiPatientSource(table);
   if (!src || rows.length === 0) return [];
   const recordIdOf = (row) => (pkCols.length ? row[pkCols[0]] : 0) ?? 0;
 
-  const byPatient = new Map(); // patientUserId -> first recordId seen
+  const byPatient = new Map();
   if (!src.via) {
     for (const row of rows) {
       const patientId = row[src.col];
@@ -573,7 +597,7 @@ async function logDbStudioRead(req, table, rows, pkCols) {
   }
 }
 
-// 1. GET /api/admin/db/tables - List all tables and estimated row counts
+// 1. GET /api/admin/db/tables
 router.get('/db/tables', async (req, res) => {
   try {
     const tables = await getWhitelistedTables();
@@ -584,7 +608,7 @@ router.get('/db/tables', async (req, res) => {
   }
 });
 
-// 2. GET /api/admin/db/tables/:table - Get schema & paginated rows
+// 2. GET /api/admin/db/tables/:table
 router.get('/db/tables/:table', async (req, res) => {
   const tableName = req.params.table;
   const page = Math.max(Number(req.query.page) || 1, 1);
@@ -596,7 +620,6 @@ router.get('/db/tables/:table', async (req, res) => {
     const isValid = tables.some((t) => t.tableName === tableName);
     if (!isValid) return res.status(404).json({ error: 'Table not found in database schema.' });
 
-    // 1. Fetch column metadata
     const [columns] = await pool.query(
       `SELECT COLUMN_NAME as columnName, DATA_TYPE as dataType, IS_NULLABLE as isNullable,
               COLUMN_KEY as columnKey, EXTRA as extra
@@ -606,15 +629,12 @@ router.get('/db/tables/:table', async (req, res) => {
       [tableName]
     );
 
-    // 2. Fetch total row count
     const [countResult] = await pool.query(`SELECT COUNT(*) as total FROM ??`, [tableName]);
     const totalRows = countResult[0]?.total || 0;
 
-    // 3. Fetch paginated records
     const [rawRows] = await pool.query(`SELECT * FROM ?? LIMIT ? OFFSET ?`, [tableName, limit, offset]);
     const rows = rawRows.map((r) => maskRowForDisplay(tableName, r));
 
-    // R.A. 10173: browsing PHI is an access event. Fire-and-forget so paging stays fast.
     const pkCols = columns.filter((c) => c.columnKey === 'PRI').map((c) => c.columnName);
     void logDbStudioRead(req, tableName, rawRows, pkCols);
 
@@ -634,7 +654,7 @@ router.get('/db/tables/:table', async (req, res) => {
   }
 });
 
-// 3. POST /api/admin/db/tables/:table/rows - Insert new row
+// 3. POST /api/admin/db/tables/:table/rows
 router.post('/db/tables/:table/rows', async (req, res) => {
   const tableName = req.params.table;
   const rowData = req.body;
@@ -654,7 +674,6 @@ router.post('/db/tables/:table/rows', async (req, res) => {
     const { names } = await getTableColumns(connection, tableName);
     assertKnownColumns(Object.keys(rowData), names);
 
-    // Plaintext meant for an encrypted column is encrypted before it is stored.
     const safeData = protectValues(tableName, rowData);
 
     const [insertResult] = await connection.query(`INSERT INTO ?? SET ?`, [tableName, safeData]);
@@ -685,7 +704,7 @@ router.post('/db/tables/:table/rows', async (req, res) => {
   }
 });
 
-// 4. PUT /api/admin/db/tables/:table/rows - Update an existing row
+// 4. PUT /api/admin/db/tables/:table/rows
 router.put('/db/tables/:table/rows', async (req, res) => {
   const tableName = req.params.table;
   const { primaryKey, updates } = req.body;
@@ -716,7 +735,6 @@ router.put('/db/tables/:table/rows', async (req, res) => {
     const pkClauses = pk.map(() => '?? = ?').join(' AND ');
     const pkParams = pk.flatMap((c) => [c, primaryKey[c]]);
 
-    // Lock and read the current row so the audit log can record a real before/after diff.
     const [existing] = await connection.query(
       `SELECT * FROM ?? WHERE ${pkClauses} FOR UPDATE`,
       [tableName, ...pkParams]
@@ -724,7 +742,6 @@ router.put('/db/tables/:table/rows', async (req, res) => {
     if (existing.length === 0) throw fail('Record not found.', 404);
     const oldRow = existing[0];
 
-    // The editor re-sends the whole row, so keep only the columns that really changed.
     const changedInput = {};
     for (const [col, val] of Object.entries(updates)) {
       if (normalizeValue(val) !== normalizeValue(oldRow[col])) changedInput[col] = val;
@@ -736,7 +753,6 @@ router.put('/db/tables/:table/rows', async (req, res) => {
       return res.json({ message: 'No changes detected.', affectedRows: 0 });
     }
 
-    // Sync tables carry a `version`; bump it so offline clients detect the admin edit.
     const bumpVersion = shouldBumpVersion(names, writeData);
     const [result] = bumpVersion
       ? await connection.query(`UPDATE ?? SET ?, ?? = ?? + 1 WHERE ${pkClauses}`, [
@@ -776,7 +792,7 @@ router.put('/db/tables/:table/rows', async (req, res) => {
   }
 });
 
-// 5. DELETE /api/admin/db/tables/:table/rows - Delete a row
+// 5. DELETE /api/admin/db/tables/:table/rows
 router.delete('/db/tables/:table/rows', async (req, res) => {
   const tableName = req.params.table;
   const { primaryKey } = req.body;
@@ -798,9 +814,8 @@ router.delete('/db/tables/:table/rows', async (req, res) => {
 
     const pkClauses = pk.map(() => '?? = ?').join(' AND ');
     const pkParams = pk.flatMap((c) => [c, primaryKey[c]]);
-    const mode = planDelete(names); // 'soft' when the table has a deleted_at tombstone
+    const mode = planDelete(names);
 
-    // Snapshot the row first so the audit log shows exactly what was removed.
     const [existing] = await connection.query(
       `SELECT * FROM ?? WHERE ${pkClauses} FOR UPDATE`,
       [tableName, ...pkParams]
@@ -816,8 +831,6 @@ router.delete('/db/tables/:table/rows', async (req, res) => {
       snapshot[col] = auditSafe(tableName, col, val);
     }
 
-    // Clinical/sync tables are tombstoned, never physically removed: this keeps the
-    // retention trail intact and lets the deletion propagate to offline Electron clients.
     let result;
     if (mode === 'soft') {
       const setVersion = names.has('version') ? ', version = version + 1' : '';

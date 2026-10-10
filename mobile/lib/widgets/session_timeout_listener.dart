@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../config/api_config.dart';
 import '../screens/login_screen.dart';
+import '../utils/responsive.dart';
 
 class SessionTimeoutListener extends StatefulWidget {
   final Widget child;
@@ -12,7 +13,7 @@ class SessionTimeoutListener extends StatefulWidget {
   const SessionTimeoutListener({
     super.key,
     required this.child,
-    this.timeoutMinutes = 480, // Default to 8 hours
+    this.timeoutMinutes = 480,
   });
 
   @override
@@ -41,7 +42,8 @@ class _SessionTimeoutListenerState extends State<SessionTimeoutListener> {
 
   void _resetTimer() {
     _inactivityTimer?.cancel();
-    _inactivityTimer = Timer(Duration(minutes: widget.timeoutMinutes), _handleTimeout);
+    _inactivityTimer =
+        Timer(Duration(minutes: widget.timeoutMinutes), _handleTimeout);
   }
 
   Future<void> _handleTimeout() async {
@@ -57,6 +59,8 @@ class _SessionTimeoutListenerState extends State<SessionTimeoutListener> {
     await _storage.deleteAll();
     if (!mounted) return;
 
+    final rs = Rs.of(context);
+
     final durationString = widget.timeoutMinutes >= 60
         ? '${(widget.timeoutMinutes / 60).round()} hours'
         : '${widget.timeoutMinutes} minutes';
@@ -66,17 +70,31 @@ class _SessionTimeoutListenerState extends State<SessionTimeoutListener> {
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        icon: const Icon(Icons.lock_clock_outlined, color: primaryGreen, size: 48),
-        title: const Text(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(rs.r(24)),
+        ),
+        icon: Icon(
+          Icons.lock_clock_outlined,
+          color: primaryGreen,
+          size: rs.w(48).clamp(40.0, 54.0),
+        ),
+        title: Text(
           'Session Expired',
-          style: TextStyle(fontWeight: FontWeight.w800, color: textMain, fontSize: 18),
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            color: textMain,
+            fontSize: rs.sp(18),
+          ),
         ),
         content: Text(
           'For your protection under Republic Act No. 10173 (Data Privacy Act of 2012), '
           'your session has ended due to $durationString of inactivity.',
           textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 13, color: textSub, height: 1.4),
+          style: TextStyle(
+            fontSize: rs.sp(13),
+            color: textSub,
+            height: 1.4,
+          ),
         ),
         actions: [
           ElevatedButton(
@@ -94,7 +112,10 @@ class _SessionTimeoutListenerState extends State<SessionTimeoutListener> {
                 (route) => false,
               );
             },
-            child: const Text('Log In Again', style: TextStyle(fontWeight: FontWeight.w700)),
+            child: const Text(
+              'Log In Again',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
           ),
         ],
       ),

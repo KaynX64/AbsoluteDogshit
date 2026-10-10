@@ -9,6 +9,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:open_filex/open_filex.dart';
 import '../config/api_config.dart';
+import '../utils/responsive.dart';
 
 class DocumentsViewerScreen extends StatefulWidget {
   const DocumentsViewerScreen({super.key});
@@ -20,7 +21,6 @@ class DocumentsViewerScreen extends StatefulWidget {
 class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
   final _storage = const FlutterSecureStorage();
 
-  // 0 = Prescriptions, 1 = Clearances, 2 = Diagnostics & Lab
   int _selectedSubTab = 0;
 
   List<dynamic> _prescriptions = [];
@@ -31,7 +31,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
 
   List<dynamic> _diagnosticAttachments = [];
   bool _loadingDiagnostics = false;
-  // Tracks which document id is currently downloading (null = nothing in flight)
   int? _downloadingId;
 
   static const primaryGreen = Color(0xFF284E3A);
@@ -107,12 +106,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // PDF DOWNLOAD — fetches with Bearer auth, saves to device, opens it
-  // ─────────────────────────────────────────────────────────────────
   Future<void> _downloadAndOpenPdf({
     required int documentId,
-    required String kind, // 'prescriptions' | 'clearances'
+    required String kind,
   }) async {
     if (_downloadingId != null) return;
 
@@ -120,12 +116,12 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
 
     try {
       final token = await _storage.read(key: 'jwt_token');
-      final url = Uri.parse('${ApiConfig.baseUrl}/api/documents/$kind/$documentId/pdf');
+      final url = Uri.parse(
+          '${ApiConfig.baseUrl}/api/documents/$kind/$documentId/pdf');
 
       final res = await http.get(url, headers: {'Authorization': 'Bearer $token'});
 
       if (res.statusCode != 200) {
-        // Try to read server error message
         String msg = 'Server returned ${res.statusCode}';
         try {
           final decoded = jsonDecode(res.body);
@@ -134,7 +130,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
         throw Exception(msg);
       }
 
-      // Save to app documents dir (iOS-friendly, Android-friendly)
       final dir = await getApplicationDocumentsDirectory();
       final fileName = kind == 'prescriptions'
           ? 'prescription-$documentId.pdf'
@@ -144,7 +139,6 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
 
       if (!mounted) return;
 
-      // Hand off to the OS PDF viewer
       final result = await OpenFilex.open(file.path);
       if (result.type != ResultType.done && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -176,12 +170,15 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     }
   }
 
-  // --- MODAL 1: FULL OFFICIAL DIGITAL PRESCRIPTION (℞) ---
+  // ── MODAL 1: PRESCRIPTION ─────────────────────────────────
   void _showPrescriptionDocumentModal(Map<String, dynamic> rx) {
+    final rs = Rs.of(context);
     final qrToken = rx['qr_token'] ?? '';
     final verificationUrl = '${ApiConfig.baseUrl}/api/documents/verify/$qrToken';
     final items = rx['items'] as List<dynamic>? ?? [];
     final prescriptionId = rx['prescription_id'] as int?;
+
+    final qrSealSize = rs.w(90).clamp(76.0, 110.0);
 
     showModalBottomSheet(
       context: context,
@@ -193,78 +190,107 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
           maxChildSize: 0.95,
           minChildSize: 0.5,
           builder: (_, scrollController) => Container(
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(rs.r(28))),
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+            padding: EdgeInsets.symmetric(
+              horizontal: rs.w(22),
+              vertical: rs.h(16),
+            ),
             child: ListView(
               controller: scrollController,
               children: [
                 Center(
                   child: Container(
-                    width: 44,
-                    height: 5,
-                    decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10)),
+                    width: rs.w(44),
+                    height: rs.h(5),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(rs.r(10)),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 18),
+                SizedBox(height: rs.h(18)),
 
                 // University Letterhead
-                const Center(
+                Center(
                   child: Column(
                     children: [
-                      Text('PANGASINAN STATE UNIVERSITY', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 2.0, color: Color(0xFF4D6053))),
-                      SizedBox(height: 2),
-                      Text('CAMPUS INFIRMARY MEDICAL SERVICES', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: primaryGreen)),
-                      Text('Lingayen Campus · Republic Act No. 10173 Verified E-Prescription', style: TextStyle(fontSize: 10.5, color: textSub)),
+                      Text(
+                        'PANGASINAN STATE UNIVERSITY',
+                        style: TextStyle(
+                          fontSize: rs.sp(11),
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 2.0,
+                          color: const Color(0xFF4D6053),
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      SizedBox(height: rs.h(2)),
+                      Text(
+                        'CAMPUS INFIRMARY MEDICAL SERVICES',
+                        style: TextStyle(
+                          fontSize: rs.sp(16),
+                          fontWeight: FontWeight.w900,
+                          color: primaryGreen,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      Text(
+                        'Lingayen Campus · Republic Act No. 10173 Verified E-Prescription',
+                        style: TextStyle(fontSize: rs.sp(10.5), color: textSub),
+                        textAlign: TextAlign.center,
+                      ),
                     ],
                   ),
                 ),
-                const Divider(color: primaryGreen, height: 28, thickness: 1.5),
+                Divider(color: primaryGreen, height: rs.h(28), thickness: 1.5),
 
-                // Rx Emblem
-                const Row(
+                // Rx emblem
+                Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
                       '℞',
                       style: TextStyle(
-                        fontSize: 38,
+                        fontSize: rs.sp(38),
                         fontWeight: FontWeight.w900,
                         color: primaryGreen,
                         fontFamily: 'serif',
                       ),
                     ),
-                    Text(
-                      'OFFICIAL DIGITAL PRESCRIPTION',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.0,
-                        color: textSub,
+                    Flexible(
+                      child: Text(
+                        'OFFICIAL DIGITAL PRESCRIPTION',
+                        style: TextStyle(
+                          fontSize: rs.sp(12),
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.0,
+                          color: textSub,
+                        ),
+                        textAlign: TextAlign.end,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 10),
+                SizedBox(height: rs.h(10)),
 
-                // Prescribed Items
-                const Text(
+                Text(
                   'PRESCRIBED FORMULARY MEDICATION:',
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: rs.sp(11),
                     fontWeight: FontWeight.w800,
                     letterSpacing: 1.0,
                     color: textSub,
                   ),
                 ),
-                const SizedBox(height: 8),
+                SizedBox(height: rs.h(8)),
                 if (items.isEmpty)
-                  const Text(
+                  Text(
                     'No line items recorded.',
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: rs.sp(13),
                       fontStyle: FontStyle.italic,
                       color: textSub,
                     ),
@@ -272,11 +298,11 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                 else
                   ...items.map(
                     (it) => Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.all(12),
+                      margin: EdgeInsets.only(bottom: rs.h(8)),
+                      padding: EdgeInsets.all(rs.w(12)),
                       decoration: BoxDecoration(
                         color: const Color(0xFFF7F9F6),
-                        borderRadius: BorderRadius.circular(14),
+                        borderRadius: BorderRadius.circular(rs.r(14)),
                         border: Border.all(color: borderColor),
                       ),
                       child: Column(
@@ -288,31 +314,32 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                               Expanded(
                                 child: Text(
                                   "${it['medicine_name']} (${it['generic_name']})",
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontWeight: FontWeight.w800,
-                                    fontSize: 14,
+                                    fontSize: rs.sp(14),
                                     color: textMain,
                                   ),
                                 ),
                               ),
+                              SizedBox(width: rs.w(6)),
                               Text(
                                 "${it['dosage'] ?? '500mg'}",
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontWeight: FontWeight.bold,
-                                  fontSize: 12,
+                                  fontSize: rs.sp(12),
                                   color: primaryGreen,
                                 ),
                               ),
                             ],
                           ),
-                          const SizedBox(height: 4),
+                          SizedBox(height: rs.h(4)),
                           Text(
                             "Sig: ${it['instructions'] ?? 'Take as directed'} • ${it['frequency'] ?? 'Daily'}",
-                            style: const TextStyle(fontSize: 12, color: textSub),
+                            style: TextStyle(fontSize: rs.sp(12), color: textSub),
                           ),
                           Text(
                             "Duration: ${it['duration_days'] ?? 3} days (Qty: ${it['quantity_dispensed'] ?? 10} pcs)",
-                            style: const TextStyle(fontSize: 11.5, color: textSub),
+                            style: TextStyle(fontSize: rs.sp(11.5), color: textSub),
                           ),
                         ],
                       ),
@@ -320,53 +347,88 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                   ),
 
                 if (rx['notes'] != null && rx['notes'].toString().isNotEmpty) ...[
-                  const SizedBox(height: 10),
+                  SizedBox(height: rs.h(10)),
                   Text(
                     "Doctor Dietary Notes: ${rx['notes']}",
-                    style: const TextStyle(
-                      fontSize: 12.5,
+                    style: TextStyle(
+                      fontSize: rs.sp(12.5),
                       fontStyle: FontStyle.italic,
                       color: textSub,
                     ),
                   ),
                 ],
 
-                const SizedBox(height: 20),
+                SizedBox(height: rs.h(20)),
 
-                // Embedded Verification QR Seal & Signature
+                // Verification QR Seal
                 Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(color: const Color(0xFFE2EBE1), borderRadius: BorderRadius.circular(18)),
+                  padding: EdgeInsets.all(rs.w(14)),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE2EBE1),
+                    borderRadius: BorderRadius.circular(rs.r(18)),
+                  ),
                   child: Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-                        child: QrImageView(data: verificationUrl, version: QrVersions.auto, size: 90),
+                        padding: EdgeInsets.all(rs.w(8)),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(rs.r(12)),
+                        ),
+                        child: QrImageView(
+                          data: verificationUrl,
+                          version: QrVersions.auto,
+                          size: qrSealSize,
+                        ),
                       ),
-                      const SizedBox(width: 14),
+                      SizedBox(width: rs.w(14)),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('R.A. 10173 DIGITAL SEAL', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, letterSpacing: 1.2, color: primaryGreen)),
-                            const SizedBox(height: 4),
-                            Text("Dr. ${rx['doctor_first_name']} ${rx['doctor_last_name']}", style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: textMain)),
-                            Text("PRC License: ${rx['doctor_license']}", style: const TextStyle(fontSize: 11, color: textSub)),
-                            Text("Issued: ${_formatDate(rx['issued_at'])}", style: const TextStyle(fontSize: 11, color: textSub)),
+                            Text(
+                              'R.A. 10173 DIGITAL SEAL',
+                              style: TextStyle(
+                                fontSize: rs.sp(9.5),
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 1.2,
+                                color: primaryGreen,
+                              ),
+                            ),
+                            SizedBox(height: rs.h(4)),
+                            Text(
+                              "Dr. ${rx['doctor_first_name']} ${rx['doctor_last_name']}",
+                              style: TextStyle(
+                                fontSize: rs.sp(13),
+                                fontWeight: FontWeight.bold,
+                                color: textMain,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              "PRC License: ${rx['doctor_license']}",
+                              style: TextStyle(fontSize: rs.sp(11), color: textSub),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              "Issued: ${_formatDate(rx['issued_at'])}",
+                              style: TextStyle(fontSize: rs.sp(11), color: textSub),
+                            ),
                           ],
                         ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 20),
+                SizedBox(height: rs.h(20)),
 
                 // ── Primary action: Download signed PDF ──────────
                 if (prescriptionId != null)
                   SizedBox(
                     width: double.infinity,
-                    height: 46,
+                    height: rs.h(46).clamp(42.0, 52.0),
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: primaryGreen,
@@ -382,53 +444,54 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                               ),
                       icon: _downloadingId == prescriptionId
                           ? const SizedBox(
-                              width: 16, height: 16,
-                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
                             )
                           : const Icon(Icons.download_rounded, size: 18),
                       label: Text(
                         _downloadingId == prescriptionId
                             ? 'Downloading…'
                             : 'Download Signed PDF',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: rs.sp(13.5),
+                        ),
                       ),
                     ),
                   ),
-                const SizedBox(height: 10),
+                SizedBox(height: rs.h(10)),
 
-                // Secondary actions row
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: primaryGreen,
-                          side: const BorderSide(color: primaryGreen),
-                          shape: const StadiumBorder(),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                        onPressed: () => launchUrl(Uri.parse(verificationUrl), mode: LaunchMode.externalApplication),
-                        icon: const Icon(Icons.open_in_browser, size: 16),
-                        label: const Text('Open Web Verify', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                // Single full-width Done button. The "Open Web Verify"
+                // button was removed because the patient already sees the
+                // full document in this modal, and the public /verify route
+                // deliberately hides the medicine list. External verifiers
+                // (pharmacies, deans) can still scan the QR on the printed
+                // PDF — that opens the public route directly.
+                SizedBox(
+                  width: double.infinity,
+                  height: rs.h(46).clamp(42.0, 52.0),
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: softSage,
+                      foregroundColor: primaryGreen,
+                      elevation: 0,
+                      shape: const StadiumBorder(),
+                    ),
+                    onPressed: () => Navigator.pop(ctx),
+                    child: Text(
+                      'Done',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: rs.sp(13.5),
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: softSage,
-                          foregroundColor: primaryGreen,
-                          elevation: 0,
-                          shape: const StadiumBorder(),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                        onPressed: () => Navigator.pop(ctx),
-                        child: const Text('Done', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-                const SizedBox(height: 12),
+                SizedBox(height: rs.h(12)),
               ],
             ),
           ),
@@ -437,11 +500,14 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     );
   }
 
-  // --- MODAL 2: FULL OFFICIAL MEDICAL CLEARANCE CERTIFICATE ---
+  // ── MODAL 2: CLEARANCE ─────────────────────────────────────
   void _showClearanceCertificateModal(Map<String, dynamic> c) {
+    final rs = Rs.of(context);
     final qrToken = c['qr_token'] ?? '';
     final verificationUrl = '${ApiConfig.baseUrl}/api/documents/verify/$qrToken';
     final clearanceId = c['clearance_id'] as int?;
+
+    final qrSealSize = rs.w(90).clamp(76.0, 110.0);
 
     showModalBottomSheet(
       context: context,
@@ -453,105 +519,203 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
           maxChildSize: 0.95,
           minChildSize: 0.5,
           builder: (_, scrollController) => Container(
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(rs.r(28))),
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+            padding: EdgeInsets.symmetric(
+              horizontal: rs.w(22),
+              vertical: rs.h(16),
+            ),
             child: ListView(
               controller: scrollController,
               children: [
                 Center(
                   child: Container(
-                    width: 44,
-                    height: 5,
-                    decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10)),
+                    width: rs.w(44),
+                    height: rs.h(5),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(rs.r(10)),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 18),
+                SizedBox(height: rs.h(18)),
 
-                // University Letterhead
-                const Center(
+                Center(
                   child: Column(
                     children: [
-                      Text('PANGASINAN STATE UNIVERSITY', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 2.0, color: Color(0xFF4D6053))),
-                      SizedBox(height: 2),
-                      Text('CAMPUS INFIRMARY MEDICAL SERVICES', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: primaryGreen)),
-                      Text('Lingayen Campus · Republic Act No. 10173 Official Medical Certificate', style: TextStyle(fontSize: 10.5, color: textSub)),
+                      Text(
+                        'PANGASINAN STATE UNIVERSITY',
+                        style: TextStyle(
+                          fontSize: rs.sp(11),
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 2.0,
+                          color: const Color(0xFF4D6053),
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      SizedBox(height: rs.h(2)),
+                      Text(
+                        'CAMPUS INFIRMARY MEDICAL SERVICES',
+                        style: TextStyle(
+                          fontSize: rs.sp(16),
+                          fontWeight: FontWeight.w900,
+                          color: primaryGreen,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      Text(
+                        'Lingayen Campus · Republic Act No. 10173 Official Medical Certificate',
+                        style: TextStyle(fontSize: rs.sp(10.5), color: textSub),
+                        textAlign: TextAlign.center,
+                      ),
                     ],
                   ),
                 ),
-                const Divider(color: primaryGreen, height: 28, thickness: 1.5),
+                Divider(color: primaryGreen, height: rs.h(28), thickness: 1.5),
 
-                const Center(
-                  child: Text('OFFICIAL MEDICAL CLEARANCE', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, letterSpacing: 1.2, color: textMain)),
+                Center(
+                  child: Text(
+                    'OFFICIAL MEDICAL CLEARANCE',
+                    style: TextStyle(
+                      fontSize: rs.sp(16),
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.2,
+                      color: textMain,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
                 ),
-                const SizedBox(height: 18),
+                SizedBox(height: rs.h(18)),
 
-                // Certificate Body
                 Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(color: const Color(0xFFF7F9F6), borderRadius: BorderRadius.circular(18), border: Border.all(color: borderColor)),
+                  padding: EdgeInsets.all(rs.w(16)),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF7F9F6),
+                    borderRadius: BorderRadius.circular(rs.r(18)),
+                    border: Border.all(color: borderColor),
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('TO WHOM IT MAY CONCERN:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: textMain)),
-                      const SizedBox(height: 8),
                       Text(
-                        "This certifies that ${c['patient_first_name'] ?? 'the student'} ${c['patient_last_name'] ?? ''} (${c['student_no'] ?? 'PSU Student'}), enrolled in ${c['course'] ?? 'PSU Lingayen'}, has undergone physical medical evaluation at the University Infirmary and is determined to be:",
-                        style: const TextStyle(fontSize: 13, color: textMain, height: 1.5),
-                      ),
-                      const SizedBox(height: 12),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(color: const Color(0xFFE2EBE1), borderRadius: BorderRadius.circular(12)),
-                        child: Text(
-                          "PURPOSE: ${c['purpose'] ?? 'General Medical Clearance'}\nSTATUS: PHYSICALLY FIT",
-                          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: primaryGreen, height: 1.4),
+                        'TO WHOM IT MAY CONCERN:',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: rs.sp(13),
+                          color: textMain,
                         ),
                       ),
-                      const SizedBox(height: 10),
-                      Text("Valid until: ${_formatDate(c['expires_at'])}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: textMain)),
+                      SizedBox(height: rs.h(8)),
+                      Text(
+                        "This certifies that ${c['patient_first_name'] ?? 'the student'} ${c['patient_last_name'] ?? ''} (${c['student_no'] ?? 'PSU Student'}), enrolled in ${c['course'] ?? 'PSU Lingayen'}, has undergone physical medical evaluation at the University Infirmary and is determined to be:",
+                        style: TextStyle(
+                          fontSize: rs.sp(13),
+                          color: textMain,
+                          height: 1.5,
+                        ),
+                      ),
+                      SizedBox(height: rs.h(12)),
+                      Container(
+                        width: double.infinity,
+                        padding: EdgeInsets.all(rs.w(12)),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE2EBE1),
+                          borderRadius: BorderRadius.circular(rs.r(12)),
+                        ),
+                        child: Text(
+                          "PURPOSE: ${c['purpose'] ?? 'General Medical Clearance'}\nSTATUS: PHYSICALLY FIT",
+                          style: TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: rs.sp(13),
+                            color: primaryGreen,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: rs.h(10)),
+                      Text(
+                        "Valid until: ${_formatDate(c['expires_at'])}",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: rs.sp(12.5),
+                          color: textMain,
+                        ),
+                      ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 20),
+                SizedBox(height: rs.h(20)),
 
-                // Verification Seal Box
                 Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(color: const Color(0xFFE2EBE1), borderRadius: BorderRadius.circular(18)),
+                  padding: EdgeInsets.all(rs.w(14)),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE2EBE1),
+                    borderRadius: BorderRadius.circular(rs.r(18)),
+                  ),
                   child: Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-                        child: QrImageView(data: verificationUrl, version: QrVersions.auto, size: 90),
+                        padding: EdgeInsets.all(rs.w(8)),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(rs.r(12)),
+                        ),
+                        child: QrImageView(
+                          data: verificationUrl,
+                          version: QrVersions.auto,
+                          size: qrSealSize,
+                        ),
                       ),
-                      const SizedBox(width: 14),
+                      SizedBox(width: rs.w(14)),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('R.A. 10173 DIGITAL SEAL', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, letterSpacing: 1.2, color: primaryGreen)),
-                            const SizedBox(height: 4),
-                            Text("Dr. ${c['doctor_first_name']} ${c['doctor_last_name']}", style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: textMain)),
-                            Text("PRC License: ${c['doctor_license']}", style: const TextStyle(fontSize: 11, color: textSub)),
-                            Text("Issued: ${_formatDate(c['issued_at'])}", style: const TextStyle(fontSize: 11, color: textSub)),
+                            Text(
+                              'R.A. 10173 DIGITAL SEAL',
+                              style: TextStyle(
+                                fontSize: rs.sp(9.5),
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 1.2,
+                                color: primaryGreen,
+                              ),
+                            ),
+                            SizedBox(height: rs.h(4)),
+                            Text(
+                              "Dr. ${c['doctor_first_name']} ${c['doctor_last_name']}",
+                              style: TextStyle(
+                                fontSize: rs.sp(13),
+                                fontWeight: FontWeight.bold,
+                                color: textMain,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              "PRC License: ${c['doctor_license']}",
+                              style: TextStyle(fontSize: rs.sp(11), color: textSub),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              "Issued: ${_formatDate(c['issued_at'])}",
+                              style: TextStyle(fontSize: rs.sp(11), color: textSub),
+                            ),
                           ],
                         ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 20),
+                SizedBox(height: rs.h(20)),
 
                 // ── Primary action: Download signed PDF ──────────
                 if (clearanceId != null)
                   SizedBox(
                     width: double.infinity,
-                    height: 46,
+                    height: rs.h(46).clamp(42.0, 52.0),
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: primaryGreen,
@@ -567,53 +731,50 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                               ),
                       icon: _downloadingId == clearanceId
                           ? const SizedBox(
-                              width: 16, height: 16,
-                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
                             )
                           : const Icon(Icons.download_rounded, size: 18),
                       label: Text(
                         _downloadingId == clearanceId
                             ? 'Downloading…'
                             : 'Download Signed PDF',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: rs.sp(13.5),
+                        ),
                       ),
                     ),
                   ),
-                const SizedBox(height: 10),
+                SizedBox(height: rs.h(10)),
 
-                // Secondary actions
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: primaryGreen,
-                          side: const BorderSide(color: primaryGreen),
-                          shape: const StadiumBorder(),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                        onPressed: () => launchUrl(Uri.parse(verificationUrl), mode: LaunchMode.externalApplication),
-                        icon: const Icon(Icons.open_in_browser, size: 16),
-                        label: const Text('Open Web Verify', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                // Single full-width Done button. See note in the prescription
+                // modal for why "Open Web Verify" was removed.
+                SizedBox(
+                  width: double.infinity,
+                  height: rs.h(46).clamp(42.0, 52.0),
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: softSage,
+                      foregroundColor: primaryGreen,
+                      elevation: 0,
+                      shape: const StadiumBorder(),
+                    ),
+                    onPressed: () => Navigator.pop(ctx),
+                    child: Text(
+                      'Done',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: rs.sp(13.5),
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: softSage,
-                          foregroundColor: primaryGreen,
-                          elevation: 0,
-                          shape: const StadiumBorder(),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                        onPressed: () => Navigator.pop(ctx),
-                        child: const Text('Done', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-                const SizedBox(height: 12),
+                SizedBox(height: rs.h(12)),
               ],
             ),
           ),
@@ -624,81 +785,94 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Header
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'YOUR RECORDS, ALL TOGETHER',
-                style: TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.8,
-                  color: textSub,
-                ),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Care you can keep.',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w800,
-                  color: textMain,
-                  letterSpacing: -0.5,
-                ),
-              ),
-              const SizedBox(height: 2),
-              const Text(
-                'Your prescriptions, clearances, and lab imaging.',
-                style: TextStyle(fontSize: 13.5, color: textSub),
-              ),
-              const SizedBox(height: 14),
+    final rs = Rs.of(context);
+    final maxContentWidth = rs.isTablet ? 640.0 : double.infinity;
 
-              // 3-Way Pill Switcher
-              Container(
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  color: softSage,
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: Row(
-                  children: [
-                    _buildSubTabButton(index: 0, title: 'Prescriptions'),
-                    _buildSubTabButton(index: 1, title: 'Clearances'),
-                    _buildSubTabButton(index: 2, title: 'Lab & Imaging'),
-                  ],
-                ),
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxContentWidth),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: rs.w(20),
+                vertical: rs.h(8),
               ),
-            ],
-          ),
-        ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'YOUR RECORDS, ALL TOGETHER',
+                    style: TextStyle(
+                      fontSize: rs.sp(10.5),
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.8,
+                      color: textSub,
+                    ),
+                  ),
+                  SizedBox(height: rs.h(4)),
+                  Text(
+                    'Care you can keep.',
+                    style: TextStyle(
+                      fontSize: rs.sp(28),
+                      fontWeight: FontWeight.w800,
+                      color: textMain,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                  SizedBox(height: rs.h(2)),
+                  Text(
+                    'Your prescriptions, clearances, and lab imaging.',
+                    style: TextStyle(fontSize: rs.sp(13.5), color: textSub),
+                  ),
+                  SizedBox(height: rs.h(14)),
 
-        Expanded(
-          child: _selectedSubTab == 0
-              ? _buildPrescriptionsList()
-              : _selectedSubTab == 1
-                  ? _buildClearancesList()
-                  : _buildDiagnosticsList(),
+                  Container(
+                    padding: EdgeInsets.all(rs.w(4).clamp(3.0, 5.0)),
+                    decoration: BoxDecoration(
+                      color: softSage,
+                      borderRadius: BorderRadius.circular(rs.r(24)),
+                    ),
+                    child: Row(
+                      children: [
+                        _buildSubTabButton(rs: rs, index: 0, title: 'Prescriptions'),
+                        _buildSubTabButton(rs: rs, index: 1, title: 'Clearances'),
+                        _buildSubTabButton(rs: rs, index: 2, title: 'Lab & Imaging'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            Expanded(
+              child: _selectedSubTab == 0
+                  ? _buildPrescriptionsList(rs)
+                  : _selectedSubTab == 1
+                      ? _buildClearancesList(rs)
+                      : _buildDiagnosticsList(rs),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 
-  Widget _buildSubTabButton({required int index, required String title}) {
+  Widget _buildSubTabButton({
+    required Rs rs,
+    required int index,
+    required String title,
+  }) {
     final isSelected = _selectedSubTab == index;
     return Expanded(
       child: GestureDetector(
         onTap: () => setState(() => _selectedSubTab = index),
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 9),
+          padding: EdgeInsets.symmetric(vertical: rs.h(9)),
           decoration: BoxDecoration(
             color: isSelected ? primaryGreen : Colors.transparent,
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(rs.r(20)),
           ),
           alignment: Alignment.center,
           child: Text(
@@ -706,7 +880,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 12,
+              fontSize: rs.sp(12),
               fontWeight: FontWeight.w700,
               color: isSelected ? Colors.white : primaryGreen,
             ),
@@ -716,8 +890,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     );
   }
 
-  // --- SUB-VIEW 0: PRESCRIPTIONS LIST ---
-  Widget _buildPrescriptionsList() {
+  Widget _buildPrescriptionsList(Rs rs) {
     if (_loadingPrescriptions) {
       return const Center(child: CircularProgressIndicator(color: primaryGreen));
     }
@@ -727,15 +900,23 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
         color: primaryGreen,
         onRefresh: _fetchPrescriptions,
         child: ListView(
-          padding: const EdgeInsets.all(24),
-          children: const [
-            SizedBox(height: 60),
-            Icon(Icons.medication_outlined, size: 54, color: Color(0xFFA4B0A6)),
-            SizedBox(height: 12),
+          padding: EdgeInsets.all(rs.w(24)),
+          children: [
+            SizedBox(height: rs.h(60)),
+            Icon(
+              Icons.medication_outlined,
+              size: rs.w(54).clamp(44.0, 60.0),
+              color: const Color(0xFFA4B0A6),
+            ),
+            SizedBox(height: rs.h(12)),
             Center(
               child: Text(
                 'No digital prescriptions on record.',
-                style: TextStyle(color: textSub, fontSize: 14, fontWeight: FontWeight.w600),
+                style: TextStyle(
+                  color: textSub,
+                  fontSize: rs.sp(14),
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ],
@@ -747,7 +928,10 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       color: primaryGreen,
       onRefresh: _fetchPrescriptions,
       child: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        padding: EdgeInsets.symmetric(
+          horizontal: rs.w(20),
+          vertical: rs.h(8),
+        ),
         children: [
           ..._prescriptions.map((rx) {
             final items = rx['items'] as List<dynamic>? ?? [];
@@ -760,11 +944,11 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                 : '';
 
             return Container(
-              margin: const EdgeInsets.only(bottom: 14),
-              padding: const EdgeInsets.all(18),
+              margin: EdgeInsets.only(bottom: rs.h(14)),
+              padding: EdgeInsets.all(rs.w(18)),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(22),
+                borderRadius: BorderRadius.circular(rs.r(22)),
                 border: Border.all(color: borderColor),
               ),
               child: Column(
@@ -774,29 +958,32 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(8),
+                        padding: EdgeInsets.all(rs.w(8)),
                         decoration: BoxDecoration(
                           color: const Color(0xFFEDEBF7),
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: BorderRadius.circular(rs.r(10)),
                         ),
-                        child: const Icon(
+                        child: Icon(
                           Icons.medication_liquid_outlined,
-                          size: 20,
-                          color: Color(0xFF5B4EA1),
+                          size: rs.w(20),
+                          color: const Color(0xFF5B4EA1),
                         ),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: rs.w(10),
+                          vertical: rs.h(4),
+                        ),
                         decoration: BoxDecoration(
                           color: status == 'active'
                               ? const Color(0xFFE5EDE4)
                               : const Color(0xFFE2EBE1),
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(rs.r(12)),
                         ),
                         child: Text(
                           status.toUpperCase(),
                           style: TextStyle(
-                            fontSize: 10.5,
+                            fontSize: rs.sp(10.5),
                             fontWeight: FontWeight.w700,
                             color: status == 'active'
                                 ? primaryGreen
@@ -806,70 +993,90 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 14),
+                  SizedBox(height: rs.h(14)),
 
                   Text(
                     medName,
-                    style: const TextStyle(
-                      fontSize: 18,
+                    style: TextStyle(
+                      fontSize: rs.sp(18),
                       fontWeight: FontWeight.w800,
                       color: textMain,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   if (medStrength.isNotEmpty)
                     Text(
                       medStrength,
-                      style: const TextStyle(fontSize: 12.5, color: textSub),
+                      style: TextStyle(fontSize: rs.sp(12.5), color: textSub),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  const SizedBox(height: 10),
+                  SizedBox(height: rs.h(10)),
 
                   Row(
                     children: [
-                      const Icon(Icons.person_outline, size: 15, color: textSub),
-                      const SizedBox(width: 6),
-                      Text(
-                        "Dr. ${rx['doctor_first_name']} ${rx['doctor_last_name']}",
-                        style: const TextStyle(fontSize: 12, color: textSub),
+                      Icon(Icons.person_outline, size: rs.w(15), color: textSub),
+                      SizedBox(width: rs.w(6)),
+                      Expanded(
+                        child: Text(
+                          "Dr. ${rx['doctor_first_name']} ${rx['doctor_last_name']}",
+                          style: TextStyle(fontSize: rs.sp(12), color: textSub),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 4),
+                  SizedBox(height: rs.h(4)),
                   Row(
                     children: [
-                      const Icon(Icons.event_outlined, size: 15, color: textSub),
-                      const SizedBox(width: 6),
-                      Text(
-                        "Issued ${_formatDate(rx['issued_at'])}",
-                        style: const TextStyle(fontSize: 12, color: textSub),
+                      Icon(Icons.event_outlined, size: rs.w(15), color: textSub),
+                      SizedBox(width: rs.w(6)),
+                      Expanded(
+                        child: Text(
+                          "Issued ${_formatDate(rx['issued_at'])}",
+                          style: TextStyle(fontSize: rs.sp(12), color: textSub),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 14),
+                  SizedBox(height: rs.h(14)),
                   const Divider(color: borderColor, height: 1),
-                  const SizedBox(height: 12),
+                  SizedBox(height: rs.h(12)),
 
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       GestureDetector(
                         onTap: () => _showPrescriptionDocumentModal(rx),
-                        child: const Row(
+                        child: Row(
                           children: [
                             Text(
                               'View document',
                               style: TextStyle(
                                 color: primaryGreen,
-                                fontSize: 13,
+                                fontSize: rs.sp(13),
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
-                            SizedBox(width: 4),
-                            Icon(Icons.arrow_forward_rounded, size: 15, color: primaryGreen),
+                            SizedBox(width: rs.w(4)),
+                            const Icon(
+                              Icons.arrow_forward_rounded,
+                              size: 15,
+                              color: primaryGreen,
+                            ),
                           ],
                         ),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.description_outlined, size: 20, color: textSub),
+                        icon: Icon(
+                          Icons.description_outlined,
+                          size: rs.w(20),
+                          color: textSub,
+                        ),
                         onPressed: () => _showPrescriptionDocumentModal(rx),
                       ),
                     ],
@@ -879,15 +1086,14 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
             );
           }),
 
-          _buildSampleDisclaimer(),
-          const SizedBox(height: 20),
+          _buildSampleDisclaimer(rs),
+          SizedBox(height: rs.h(20)),
         ],
       ),
     );
   }
 
-  // --- SUB-VIEW 1: CLEARANCES LIST ---
-  Widget _buildClearancesList() {
+  Widget _buildClearancesList(Rs rs) {
     if (_loadingClearances) {
       return const Center(child: CircularProgressIndicator(color: primaryGreen));
     }
@@ -897,15 +1103,23 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
         color: primaryGreen,
         onRefresh: _fetchClearances,
         child: ListView(
-          padding: const EdgeInsets.all(24),
-          children: const [
-            SizedBox(height: 60),
-            Icon(Icons.verified_user_outlined, size: 54, color: Color(0xFFA4B0A6)),
-            SizedBox(height: 12),
+          padding: EdgeInsets.all(rs.w(24)),
+          children: [
+            SizedBox(height: rs.h(60)),
+            Icon(
+              Icons.verified_user_outlined,
+              size: rs.w(54).clamp(44.0, 60.0),
+              color: const Color(0xFFA4B0A6),
+            ),
+            SizedBox(height: rs.h(12)),
             Center(
               child: Text(
                 'No medical clearances on record.',
-                style: TextStyle(color: textSub, fontSize: 14, fontWeight: FontWeight.w600),
+                style: TextStyle(
+                  color: textSub,
+                  fontSize: rs.sp(14),
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ],
@@ -917,7 +1131,10 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       color: primaryGreen,
       onRefresh: _fetchClearances,
       child: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        padding: EdgeInsets.symmetric(
+          horizontal: rs.w(20),
+          vertical: rs.h(8),
+        ),
         children: [
           ..._clearances.map((c) {
             final rawExpiry = c['expires_at'];
@@ -929,11 +1146,11 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
             }
 
             return Container(
-              margin: const EdgeInsets.only(bottom: 14),
-              padding: const EdgeInsets.all(18),
+              margin: EdgeInsets.only(bottom: rs.h(14)),
+              padding: EdgeInsets.all(rs.w(18)),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(22),
+                borderRadius: BorderRadius.circular(rs.r(22)),
                 border: Border.all(color: borderColor),
               ),
               child: Column(
@@ -943,29 +1160,32 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(8),
+                        padding: EdgeInsets.all(rs.w(8)),
                         decoration: BoxDecoration(
                           color: const Color(0xFFF7F1E6),
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: BorderRadius.circular(rs.r(10)),
                         ),
-                        child: const Icon(
+                        child: Icon(
                           Icons.description_outlined,
-                          size: 20,
-                          color: Color(0xFF8C6826),
+                          size: rs.w(20),
+                          color: const Color(0xFF8C6826),
                         ),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: rs.w(10),
+                          vertical: rs.h(4),
+                        ),
                         decoration: BoxDecoration(
                           color: isExpired
                               ? const Color(0xFFFDE8E8)
                               : const Color(0xFFE2EBE1),
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(rs.r(12)),
                         ),
                         child: Text(
                           isExpired ? 'EXPIRED' : 'APPROVED',
                           style: TextStyle(
-                            fontSize: 10.5,
+                            fontSize: rs.sp(10.5),
                             fontWeight: FontWeight.w700,
                             color: isExpired
                                 ? const Color(0xFF9B1C1C)
@@ -975,69 +1195,89 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 14),
+                  SizedBox(height: rs.h(14)),
 
                   Text(
                     c['purpose'] ?? 'Medical clearance',
-                    style: const TextStyle(
-                      fontSize: 18,
+                    style: TextStyle(
+                      fontSize: rs.sp(18),
                       fontWeight: FontWeight.w800,
                       color: textMain,
                     ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   Text(
                     "Valid until ${_formatDate(c['expires_at'])}",
-                    style: const TextStyle(fontSize: 12.5, color: textSub),
+                    style: TextStyle(fontSize: rs.sp(12.5), color: textSub),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 10),
+                  SizedBox(height: rs.h(10)),
 
                   Row(
                     children: [
-                      const Icon(Icons.person_outline, size: 15, color: textSub),
-                      const SizedBox(width: 6),
-                      Text(
-                        "Dr. ${c['doctor_first_name']} ${c['doctor_last_name']}",
-                        style: const TextStyle(fontSize: 12, color: textSub),
+                      Icon(Icons.person_outline, size: rs.w(15), color: textSub),
+                      SizedBox(width: rs.w(6)),
+                      Expanded(
+                        child: Text(
+                          "Dr. ${c['doctor_first_name']} ${c['doctor_last_name']}",
+                          style: TextStyle(fontSize: rs.sp(12), color: textSub),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 4),
+                  SizedBox(height: rs.h(4)),
                   Row(
                     children: [
-                      const Icon(Icons.event_outlined, size: 15, color: textSub),
-                      const SizedBox(width: 6),
-                      Text(
-                        "Issued ${_formatDate(c['issued_at'])}",
-                        style: const TextStyle(fontSize: 12, color: textSub),
+                      Icon(Icons.event_outlined, size: rs.w(15), color: textSub),
+                      SizedBox(width: rs.w(6)),
+                      Expanded(
+                        child: Text(
+                          "Issued ${_formatDate(c['issued_at'])}",
+                          style: TextStyle(fontSize: rs.sp(12), color: textSub),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 14),
+                  SizedBox(height: rs.h(14)),
                   const Divider(color: borderColor, height: 1),
-                  const SizedBox(height: 12),
+                  SizedBox(height: rs.h(12)),
 
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       GestureDetector(
                         onTap: () => _showClearanceCertificateModal(c),
-                        child: const Row(
+                        child: Row(
                           children: [
                             Text(
                               'View document',
                               style: TextStyle(
                                 color: primaryGreen,
-                                fontSize: 13,
+                                fontSize: rs.sp(13),
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
-                            SizedBox(width: 4),
-                            Icon(Icons.arrow_forward_rounded, size: 15, color: primaryGreen),
+                            SizedBox(width: rs.w(4)),
+                            const Icon(
+                              Icons.arrow_forward_rounded,
+                              size: 15,
+                              color: primaryGreen,
+                            ),
                           ],
                         ),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.description_outlined, size: 20, color: textSub),
+                        icon: Icon(
+                          Icons.description_outlined,
+                          size: rs.w(20),
+                          color: textSub,
+                        ),
                         onPressed: () => _showClearanceCertificateModal(c),
                       ),
                     ],
@@ -1047,15 +1287,14 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
             );
           }),
 
-          _buildSampleDisclaimer(),
-          const SizedBox(height: 20),
+          _buildSampleDisclaimer(rs),
+          SizedBox(height: rs.h(20)),
         ],
       ),
     );
   }
 
-  // --- SUB-VIEW 2: DIAGNOSTIC & LAB ATTACHMENTS LIST ---
-  Widget _buildDiagnosticsList() {
+  Widget _buildDiagnosticsList(Rs rs) {
     if (_loadingDiagnostics) {
       return const Center(child: CircularProgressIndicator(color: primaryGreen));
     }
@@ -1065,15 +1304,24 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
         color: primaryGreen,
         onRefresh: _fetchDiagnostics,
         child: ListView(
-          padding: const EdgeInsets.all(24),
-          children: const [
-            SizedBox(height: 60),
-            Icon(Icons.biotech_outlined, size: 54, color: Color(0xFFA4B0A6)),
-            SizedBox(height: 12),
+          padding: EdgeInsets.all(rs.w(24)),
+          children: [
+            SizedBox(height: rs.h(60)),
+            Icon(
+              Icons.biotech_outlined,
+              size: rs.w(54).clamp(44.0, 60.0),
+              color: const Color(0xFFA4B0A6),
+            ),
+            SizedBox(height: rs.h(12)),
             Center(
               child: Text(
                 'No diagnostic reports or lab results uploaded yet.',
-                style: TextStyle(color: textSub, fontSize: 14, fontWeight: FontWeight.w600),
+                style: TextStyle(
+                  color: textSub,
+                  fontSize: rs.sp(14),
+                  fontWeight: FontWeight.w600,
+                ),
+                textAlign: TextAlign.center,
               ),
             ),
           ],
@@ -1085,22 +1333,27 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       color: primaryGreen,
       onRefresh: _fetchDiagnostics,
       child: ListView.builder(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        padding: EdgeInsets.symmetric(
+          horizontal: rs.w(20),
+          vertical: rs.h(8),
+        ),
         itemCount: _diagnosticAttachments.length,
         itemBuilder: (context, index) {
           final doc = _diagnosticAttachments[index];
           final fileName = doc['file_name'] ?? 'Diagnostic File';
           final mime = doc['mime_type'] ?? '';
-          final isPdf = mime.contains('pdf') || fileName.toLowerCase().endsWith('.pdf');
+          final isPdf = mime.contains('pdf') ||
+              fileName.toLowerCase().endsWith('.pdf');
           final isImage = mime.contains('image');
-          final downloadUrl = '${ApiConfig.baseUrl}/api/documents/attachments/${doc['attachment_id']}/download';
+          final downloadUrl =
+              '${ApiConfig.baseUrl}/api/documents/attachments/${doc['attachment_id']}/download';
 
           return Container(
-            margin: const EdgeInsets.only(bottom: 14),
-            padding: const EdgeInsets.all(18),
+            margin: EdgeInsets.only(bottom: rs.h(14)),
+            padding: EdgeInsets.all(rs.w(18)),
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(22),
+              borderRadius: BorderRadius.circular(rs.r(22)),
               border: Border.all(color: borderColor),
             ),
             child: Column(
@@ -1110,10 +1363,12 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(8),
+                      padding: EdgeInsets.all(rs.w(8)),
                       decoration: BoxDecoration(
-                        color: isPdf ? const Color(0xFFFDE8E8) : const Color(0xFFE0F2FE),
-                        borderRadius: BorderRadius.circular(10),
+                        color: isPdf
+                            ? const Color(0xFFFDE8E8)
+                            : const Color(0xFFE0F2FE),
+                        borderRadius: BorderRadius.circular(rs.r(10)),
                       ),
                       child: Icon(
                         isPdf
@@ -1121,37 +1376,44 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                             : isImage
                                 ? Icons.image_outlined
                                 : Icons.description_outlined,
-                        size: 20,
-                        color: isPdf ? const Color(0xFF9B1C1C) : const Color(0xFF0284C7),
+                        size: rs.w(20),
+                        color: isPdf
+                            ? const Color(0xFF9B1C1C)
+                            : const Color(0xFF0284C7),
                       ),
                     ),
-                    Text(
-                      _formatDate(doc['created_at'] ?? doc['encounter_date']),
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: textSub,
-                        fontWeight: FontWeight.bold,
+                    Flexible(
+                      child: Text(
+                        _formatDate(doc['created_at'] ?? doc['encounter_date']),
+                        style: TextStyle(
+                          fontSize: rs.sp(12),
+                          color: textSub,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.end,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
+                SizedBox(height: rs.h(12)),
                 Text(
                   fileName,
-                  style: const TextStyle(
-                    fontSize: 16,
+                  style: TextStyle(
+                    fontSize: rs.sp(16),
                     fontWeight: FontWeight.w800,
                     color: textMain,
                   ),
                 ),
-                const SizedBox(height: 4),
+                SizedBox(height: rs.h(4)),
                 Text(
                   "Uploaded by Dr. ${doc['doctor_first_name']} ${doc['doctor_last_name']} (${doc['doctor_specialty'] ?? 'Campus Physician'})",
-                  style: const TextStyle(fontSize: 12, color: textSub),
+                  style: TextStyle(fontSize: rs.sp(12), color: textSub),
                 ),
-                const SizedBox(height: 14),
+                SizedBox(height: rs.h(14)),
                 const Divider(color: borderColor, height: 1),
-                const SizedBox(height: 12),
+                SizedBox(height: rs.h(12)),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -1160,10 +1422,12 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                         foregroundColor: primaryGreen,
                         side: const BorderSide(color: primaryGreen),
                         shape: const StadiumBorder(),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: rs.w(16),
+                          vertical: rs.h(8),
+                        ),
                       ),
                       onPressed: () async {
-                        // Read the stored JWT token
                         final token = await _storage.read(key: 'jwt_token');
                         final authenticatedUrl = '$downloadUrl?token=$token';
 
@@ -1173,15 +1437,18 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                         );
                       },
                       icon: const Icon(Icons.open_in_new, size: 14),
-                      label: const Text(
+                      label: Text(
                         'Open & View File',
-                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                          fontSize: rs.sp(12.5),
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                     Text(
                       "${((doc['file_size'] ?? 1024) / 1024).toStringAsFixed(0)} KB",
-                      style: const TextStyle(
-                        fontSize: 12,
+                      style: TextStyle(
+                        fontSize: rs.sp(12),
                         color: textSub,
                         fontWeight: FontWeight.w600,
                       ),
@@ -1196,22 +1463,30 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     );
   }
 
-  Widget _buildSampleDisclaimer() {
+  Widget _buildSampleDisclaimer(Rs rs) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(rs.w(16)),
       decoration: BoxDecoration(
         color: const Color(0xFFE2EBE1),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(rs.r(20)),
       ),
-      child: const Row(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.verified_outlined, size: 18, color: primaryGreen),
-          SizedBox(width: 10),
+          Icon(
+            Icons.verified_outlined,
+            size: rs.w(18),
+            color: primaryGreen,
+          ),
+          SizedBox(width: rs.w(10)),
           Expanded(
             child: Text(
               'These are official medical records protected under R.A. 10173. For official credentials or changes to your clinical records, visit the campus infirmary.',
-              style: TextStyle(fontSize: 12, color: Color(0xFF424943), height: 1.4),
+              style: TextStyle(
+                fontSize: rs.sp(12),
+                color: const Color(0xFF424943),
+                height: 1.4,
+              ),
             ),
           ),
         ],

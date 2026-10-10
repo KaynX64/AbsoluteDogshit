@@ -1219,7 +1219,8 @@ export default function documentRoutes(io) {
       const userId = req.user.user_id;
 
       const [rows] = await pool.query(
-        `SELECT a.attachment_id, a.emr_id, a.file_name, a.file_size, a.mime_type, a.created_at,
+        `SELECT a.attachment_id, a.emr_id, a.file_name, a.file_size, a.mime_type,
+                a.uploaded_at AS created_at,
                 e.encounter_date,
                 doc.first_name AS doctor_first_name, doc.last_name AS doctor_last_name,
                 COALESCE(sp.specialty, 'Infirmary Physician') AS doctor_specialty
@@ -1228,7 +1229,7 @@ export default function documentRoutes(io) {
          JOIN USERS doc ON e.doctor_user_id = doc.user_id
          LEFT JOIN STAFF_PROFILES sp ON doc.user_id = sp.user_id
          WHERE e.patient_user_id = ? AND e.deleted_at IS NULL
-         ORDER BY a.created_at DESC`,
+         ORDER BY a.uploaded_at DESC`,
         [userId]
       );
 

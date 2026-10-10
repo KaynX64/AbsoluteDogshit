@@ -35,6 +35,7 @@ DROP TABLE IF EXISTS `CONSENT_RECORDS`;
 DROP TABLE IF EXISTS `HEALTH_PROFILES`;
 DROP TABLE IF EXISTS `STAFF_PROFILES`;
 DROP TABLE IF EXISTS `FACULTY_PROFILES`;
+DROP TABLE IF EXISTS `NON_TEACHING_PROFILES`;
 DROP TABLE IF EXISTS `STUDENT_PROFILES`;
 DROP TABLE IF EXISTS `USER_ROLES`;
 DROP TABLE IF EXISTS `ROLES`;
@@ -94,7 +95,20 @@ CREATE TABLE `FACULTY_PROFILES` (
   CONSTRAINT `fk_fp_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- 6. STAFF_PROFILES
+-- 6. NON_TEACHING_PROFILES
+-- Non-teaching / support staff (maintenance, security, admin, custodial,
+-- library aides, canteen personnel, etc.). Patient-side users on the mobile
+-- app — identical to FACULTY in shape, but kept in a separate table so the
+-- two populations stay semantically distinct.
+CREATE TABLE `NON_TEACHING_PROFILES` (
+  `user_id` BIGINT PRIMARY KEY,
+  `employee_no` VARCHAR(50) NULL UNIQUE COMMENT 'Optional institutional staff ID',
+  `department` VARCHAR(100) NOT NULL,
+  `position` VARCHAR(100) NOT NULL,
+  CONSTRAINT `fk_ntp_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 7. STAFF_PROFILES (CLINICAL staff only — doctors, nurses, dentists, admins)
 CREATE TABLE `STAFF_PROFILES` (
   `user_id` BIGINT PRIMARY KEY,
   `license_no` VARCHAR(100) NULL,
@@ -103,7 +117,7 @@ CREATE TABLE `STAFF_PROFILES` (
   CONSTRAINT `fk_staff_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- 7. DEVICE_TOKENS (FCM push notification registration)
+-- 8. DEVICE_TOKENS (FCM push notification registration)
 CREATE TABLE `DEVICE_TOKENS` (
   `token_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `user_id` BIGINT NOT NULL,
@@ -119,7 +133,7 @@ CREATE TABLE `DEVICE_TOKENS` (
 -- MODULE 2: CLINICAL & ENCOUNTERS
 -- =============================================================================
 
--- 8. HEALTH_PROFILES
+-- 9. HEALTH_PROFILES
 CREATE TABLE `HEALTH_PROFILES` (
   `profile_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `user_id` BIGINT NOT NULL UNIQUE,
@@ -137,7 +151,7 @@ CREATE TABLE `HEALTH_PROFILES` (
   CONSTRAINT `fk_hp_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- 9. CONSENT_RECORDS (R.A. 10173 statutory consent tracking)
+-- 10. CONSENT_RECORDS (R.A. 10173 statutory consent tracking)
 CREATE TABLE `CONSENT_RECORDS` (
   `consent_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `user_id` BIGINT NOT NULL,
@@ -151,7 +165,7 @@ CREATE TABLE `CONSENT_RECORDS` (
   CONSTRAINT `fk_consent_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- 10. APPOINTMENTS (with version + deleted_at for sync eligibility)
+-- 11. APPOINTMENTS
 CREATE TABLE `APPOINTMENTS` (
   `appointment_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `patient_user_id` BIGINT NOT NULL,
@@ -172,7 +186,7 @@ CREATE TABLE `APPOINTMENTS` (
   CONSTRAINT `fk_app_doctor` FOREIGN KEY (`doctor_user_id`) REFERENCES `USERS` (`user_id`)
 ) ENGINE=InnoDB;
 
--- 11. QUEUE (live daily triage & walk-in)
+-- 12. QUEUE (live daily triage & walk-in)
 CREATE TABLE `QUEUE` (
   `queue_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `patient_user_id` BIGINT NOT NULL,
@@ -190,7 +204,7 @@ CREATE TABLE `QUEUE` (
   CONSTRAINT `fk_queue_app` FOREIGN KEY (`appointment_id`) REFERENCES `APPOINTMENTS` (`appointment_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
--- 12. EMR_RECORDS
+-- 13. EMR_RECORDS
 CREATE TABLE `EMR_RECORDS` (
   `emr_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `patient_user_id` BIGINT NOT NULL,
@@ -211,7 +225,7 @@ CREATE TABLE `EMR_RECORDS` (
   CONSTRAINT `fk_emr_appointment` FOREIGN KEY (`appointment_id`) REFERENCES `APPOINTMENTS` (`appointment_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
--- 13. EMR_ATTACHMENTS (diagnostic files stored in MinIO S3)
+-- 14. EMR_ATTACHMENTS (diagnostic files stored in MinIO S3)
 CREATE TABLE `EMR_ATTACHMENTS` (
   `attachment_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `emr_id` BIGINT NOT NULL,
@@ -227,7 +241,7 @@ CREATE TABLE `EMR_ATTACHMENTS` (
   CONSTRAINT `fk_attach_user` FOREIGN KEY (`uploaded_by`) REFERENCES `USERS` (`user_id`)
 ) ENGINE=InnoDB;
 
--- 13b. DENTAL_CHARTS (dentist-only odontogram, vault-encrypted)
+-- 15. DENTAL_CHARTS (dentist-only odontogram, vault-encrypted)
 CREATE TABLE `DENTAL_CHARTS` (
   `chart_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `emr_id` BIGINT NOT NULL,
@@ -242,7 +256,7 @@ CREATE TABLE `DENTAL_CHARTS` (
   CONSTRAINT `fk_dental_dentist` FOREIGN KEY (`dentist_user_id`) REFERENCES `USERS` (`user_id`)
 ) ENGINE=InnoDB;
 
--- 14. VITAL_SIGNS
+-- 16. VITAL_SIGNS
 CREATE TABLE `VITAL_SIGNS` (
   `vital_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `emr_id` BIGINT NOT NULL,
@@ -259,7 +273,7 @@ CREATE TABLE `VITAL_SIGNS` (
 -- MODULE 3: PHARMACY, DOCUMENT ISSUANCE & INVENTORY
 -- =============================================================================
 
--- 15. MEDICINES
+-- 17. MEDICINES
 CREATE TABLE `MEDICINES` (
   `medicine_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `name` VARCHAR(150) NOT NULL,
@@ -274,7 +288,7 @@ CREATE TABLE `MEDICINES` (
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
--- 16. MEDICINE_BATCHES
+-- 18. MEDICINE_BATCHES
 CREATE TABLE `MEDICINE_BATCHES` (
   `batch_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `medicine_id` BIGINT NOT NULL,
@@ -291,13 +305,7 @@ CREATE TABLE `MEDICINE_BATCHES` (
   CONSTRAINT `fk_batch_medicine` FOREIGN KEY (`medicine_id`) REFERENCES `MEDICINES` (`medicine_id`)
 ) ENGINE=InnoDB;
 
--- =============================================================================
--- 16b. DRUG_INTERACTIONS
--- Drug-drug interaction rules for prescription safety checking (Feature 9).
--- Each row records a known interaction between two medicines.
--- The CHECK constraint enforces medicine_id_a < medicine_id_b so every
--- pair is stored exactly once regardless of selection order.
--- =============================================================================
+-- 19. DRUG_INTERACTIONS
 CREATE TABLE `DRUG_INTERACTIONS` (
   `interaction_id`    BIGINT AUTO_INCREMENT PRIMARY KEY,
   `medicine_id_a`     BIGINT NOT NULL COMMENT 'First drug in the interaction pair (lower ID)',
@@ -311,21 +319,17 @@ CREATE TABLE `DRUG_INTERACTIONS` (
   `is_active`         BOOLEAN NOT NULL DEFAULT TRUE,
   `created_at`        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
-  -- Prevent duplicate pairs (either order)
   UNIQUE KEY `uq_interaction_pair` (`medicine_id_a`, `medicine_id_b`),
-
   INDEX `idx_interaction_a` (`medicine_id_a`),
   INDEX `idx_interaction_b` (`medicine_id_b`),
   INDEX `idx_interaction_severity` (`severity`),
-
   CONSTRAINT `fk_di_med_a` FOREIGN KEY (`medicine_id_a`) REFERENCES `MEDICINES` (`medicine_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_di_med_b` FOREIGN KEY (`medicine_id_b`) REFERENCES `MEDICINES` (`medicine_id`) ON DELETE CASCADE,
   CONSTRAINT `chk_no_self_interaction` CHECK (`medicine_id_a` != `medicine_id_b`),
   CONSTRAINT `chk_ordered_pair` CHECK (`medicine_id_a` < `medicine_id_b`)
 ) ENGINE=InnoDB;
 
--- 17. INVENTORY_LOGS
+-- 20. INVENTORY_LOGS
 CREATE TABLE `INVENTORY_LOGS` (
   `log_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `batch_id` BIGINT NOT NULL,
@@ -338,7 +342,7 @@ CREATE TABLE `INVENTORY_LOGS` (
   CONSTRAINT `fk_inv_user` FOREIGN KEY (`performed_by`) REFERENCES `USERS` (`user_id`)
 ) ENGINE=InnoDB;
 
--- 18. PRESCRIPTIONS (with signature_metadata, pdf_s3_key, version, deleted_at)
+-- 21. PRESCRIPTIONS
 CREATE TABLE `PRESCRIPTIONS` (
   `prescription_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `emr_id` BIGINT NOT NULL,
@@ -359,7 +363,7 @@ CREATE TABLE `PRESCRIPTIONS` (
   CONSTRAINT `fk_rx_doctor` FOREIGN KEY (`doctor_user_id`) REFERENCES `USERS` (`user_id`)
 ) ENGINE=InnoDB;
 
--- 19. PRESCRIPTION_ITEMS (with version + deleted_at for sync consistency)
+-- 22. PRESCRIPTION_ITEMS
 CREATE TABLE `PRESCRIPTION_ITEMS` (
   `item_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `prescription_id` BIGINT NOT NULL,
@@ -376,7 +380,7 @@ CREATE TABLE `PRESCRIPTION_ITEMS` (
   CONSTRAINT `fk_rx_item_medicine` FOREIGN KEY (`medicine_id`) REFERENCES `MEDICINES` (`medicine_id`)
 ) ENGINE=InnoDB;
 
--- 20. MEDICAL_CLEARANCES (with pdf_s3_key, version, deleted_at, revoked status)
+-- 23. MEDICAL_CLEARANCES
 CREATE TABLE `MEDICAL_CLEARANCES` (
   `clearance_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `user_id` BIGINT NOT NULL,
@@ -400,7 +404,7 @@ CREATE TABLE `MEDICAL_CLEARANCES` (
 -- MODULE 4: EMERGENCY RESPONSE & GEOLOCATION
 -- =============================================================================
 
--- 21. EMERGENCY_ALERTS
+-- 24. EMERGENCY_ALERTS
 CREATE TABLE `EMERGENCY_ALERTS` (
   `alert_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `user_id` BIGINT NOT NULL,
@@ -423,7 +427,7 @@ CREATE TABLE `EMERGENCY_ALERTS` (
 -- MODULE 5: SECURITY, COMPLIANCE (RA 10173) & OFFLINE SYNC
 -- =============================================================================
 
--- 22. AUDIT_LOGS (hash-chained; extended action enum for SIGN/REVOKE)
+-- 25. AUDIT_LOGS
 CREATE TABLE `AUDIT_LOGS` (
   `audit_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `user_id` BIGINT NULL DEFAULT NULL,
@@ -440,9 +444,7 @@ CREATE TABLE `AUDIT_LOGS` (
   CONSTRAINT `fk_al_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
--- 23. PHI_ACCESS_LOGS
--- patient_user_id is NULLABLE: bulk/system reads (e.g. offline sync bootstrap)
--- aren't tied to a single patient. FK still enforces "if named, they must exist."
+-- 26. PHI_ACCESS_LOGS
 CREATE TABLE `PHI_ACCESS_LOGS` (
   `access_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `user_id` BIGINT NOT NULL COMMENT 'Practitioner viewing record',
@@ -456,7 +458,7 @@ CREATE TABLE `PHI_ACCESS_LOGS` (
   CONSTRAINT `fk_phi_patient` FOREIGN KEY (`patient_user_id`) REFERENCES `USERS` (`user_id`)
 ) ENGINE=InnoDB;
 
--- 24. LOCAL_SYNC_LOGS
+-- 27. LOCAL_SYNC_LOGS
 CREATE TABLE `LOCAL_SYNC_LOGS` (
   `sync_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `client_mutation_id` VARCHAR(36) NOT NULL UNIQUE COMMENT 'UUID idempotency token',
@@ -476,188 +478,97 @@ CREATE TABLE `LOCAL_SYNC_LOGS` (
 ) ENGINE=InnoDB;
 
 -- =============================================================================
--- SEED DATA: ROLES & INITIAL ACCOUNTS
+-- SEED DATA: ROLES & ONE ACCOUNT PER ROLE
+-- =============================================================================
+-- The audit hash chain self-initializes on the first login.
+--
+-- Empty-by-design tables (populate through the desktop UI):
+--   • MEDICINES / MEDICINE_BATCHES          → Nurse → Inventory
+--   • DRUG_INTERACTIONS                     → Admin → Database Studio
+--   • EMR_RECORDS / PRESCRIPTIONS / etc.    → Clinical workflows
+--
+-- PATIENT-SIDE ROLES on the mobile app (all route to PatientPortalScreen):
+--   • STUDENT                    → STUDENT_PROFILES
+--   • FACULTY                    → FACULTY_PROFILES
+--   • NON_TEACHING               → NON_TEACHING_PROFILES
+--
+-- CLINICAL-STAFF ROLES on the desktop app:
+--   • DOCTOR / DENTIST / NURSE / ADMIN        → STAFF_PROFILES
+--   • EMERGENCY_RESPONDER                     → STAFF_PROFILES
 -- =============================================================================
 
+-- ROLES
 INSERT INTO `ROLES` (`role_id`, `code`, `name`) VALUES
-(1, 'STUDENT', 'Student Patient'),
-(2, 'FACULTY', 'Faculty / Employee Patient'),
-(3, 'NURSE', 'Infirmary Nurse / Triage Officer'),
-(4, 'DOCTOR', 'Campus Physician'),
-(5, 'DENTIST', 'Campus Dentist'),
+(1, 'STUDENT',             'Student Patient'),
+(2, 'FACULTY',             'Faculty / Employee Patient'),
+(3, 'NURSE',               'Infirmary Nurse / Triage Officer'),
+(4, 'DOCTOR',              'Campus Physician'),
+(5, 'DENTIST',             'Campus Dentist'),
 (6, 'EMERGENCY_RESPONDER', 'Campus Quick-Response Personnel'),
-(7, 'ADMIN', 'PSU IT System Administrator');
+(7, 'ADMIN',               'PSU IT System Administrator'),
+(8, 'NON_TEACHING',        'Non-Teaching / Support Staff');
 
--- Default password for all test accounts: 'Password123!'
+-- Default password for all seeded accounts: 'Password123!'
 SET @default_pw = '$2b$10$Y5.xe6H/ZbWi0K/RYcQE2uGPh9hdAn/vKWCit/EMDrpqigeOQ45n.';
 
--- SEED: USERS (1–6 core accounts + 7–12 additional students)
+-- USERS — one account per role for smoke-testing
 INSERT INTO `USERS` (`user_id`, `email`, `password_hash`, `first_name`, `last_name`, `phone`, `is_active`) VALUES
-(1,  'admin@psu.edu.ph',             @default_pw, 'Clark',         'Castro',     '09171234567', TRUE),
-(2,  'doctor@psu.edu.ph',            @default_pw, 'Juan',          'Mata',       '09181234568', TRUE),
-(3,  'nurse@psu.edu.ph',             @default_pw, 'Dimples',       'Arenas',     '09191234569', TRUE),
-(4,  'responder@psu.edu.ph',         @default_pw, 'Denver',        'Cerezo',     '09201234570', TRUE),
-(5,  'student@psu.edu.ph',           @default_pw, 'Daniella',      'Movida',     '09211234571', TRUE),
-(6,  'dentist@psu.edu.ph',           @default_pw, 'Carmela',       'Reyes',      '09221234572', TRUE),
-(7,  'maria.santos@psu.edu.ph',      @default_pw, 'Maria Carmela', 'Santos',     '09214441001', TRUE),
-(8,  'christian.reyes@psu.edu.ph',   @default_pw, 'Christian',     'Reyes',      '09214441002', TRUE),
-(9,  'bea.delacruz@psu.edu.ph',      @default_pw, 'Bea Bianca',    'Dela Cruz',  '09214441003', TRUE),
-(10, 'joshua.aquino@psu.edu.ph',     @default_pw, 'Joshua',        'Aquino',     '09214441004', TRUE),
-(11, 'althea.garcia@psu.edu.ph',     @default_pw, 'Althea Mae',    'Garcia',     '09214441005', TRUE),
-(12, 'kevin.villanueva@psu.edu.ph',  @default_pw, 'Kevin',         'Villanueva', '09214441006', TRUE);
+(1, 'admin@psu.edu.ph',         @default_pw, 'Clark',    'Castro',   '09171234567', TRUE),
+(2, 'doctor@psu.edu.ph',        @default_pw, 'Juan',     'Mata',     '09181234568', TRUE),
+(3, 'nurse@psu.edu.ph',         @default_pw, 'Dimples',  'Arenas',   '09191234569', TRUE),
+(4, 'responder@psu.edu.ph',     @default_pw, 'Denver',   'Cerezo',   '09201234570', TRUE),
+(5, 'student@psu.edu.ph',       @default_pw, 'Daniella', 'Movida',   '09211234571', TRUE),
+(6, 'dentist@psu.edu.ph',       @default_pw, 'Carmela',  'Reyes',    '09221234572', TRUE),
+(7, 'faculty@psu.edu.ph',       @default_pw, 'Ramon',    'Bautista', '09231234573', TRUE),
+(8, 'nonteaching@psu.edu.ph',   @default_pw, 'Ernesto',  'Domingo',  '09241234574', TRUE);
 
--- SEED: USER_ROLES
+-- USER_ROLES
 INSERT INTO `USER_ROLES` (`user_id`, `role_id`) VALUES
 (1, 7), -- Admin
 (2, 4), -- Doctor
 (3, 3), -- Nurse
 (4, 6), -- Emergency Responder
-(5, 1), -- Student (Daniella)
+(5, 1), -- Student
 (6, 5), -- Dentist
-(7, 1), -- Student
-(8, 1), -- Student
-(9, 1), -- Student
-(10, 1), -- Student
-(11, 1), -- Student
-(12, 1); -- Student
+(7, 2), -- Faculty
+(8, 8); -- Non-Teaching / Support Staff
 
--- SEED: ROLE-SPECIFIC PROFILES
+-- STUDENT_PROFILES
 INSERT INTO `STUDENT_PROFILES` (`user_id`, `student_no`, `course`, `year_level`) VALUES
-(5,  '22-LN-0123', 'BS Information Technology', 3),
-(7,  '22-LN-0201', 'BS Information Technology', 3),
-(8,  '22-LN-0202', 'BS Computer Science',        3),
-(9,  '23-LN-0310', 'BS Nursing',                 2),
-(10, '21-LN-0115', 'BS Business Administration', 4),
-(11, '23-LN-0342', 'BS Hospitality Management',  2),
-(12, '22-LN-0255', 'BS Education',               3);
+(5, '22-LN-0123', 'BS Information Technology', 3);
 
+-- FACULTY_PROFILES
+INSERT INTO `FACULTY_PROFILES` (`user_id`, `department`, `position`) VALUES
+(7, 'College of Computing Studies', 'Assistant Professor');
+
+-- NON_TEACHING_PROFILES
+INSERT INTO `NON_TEACHING_PROFILES` (`user_id`, `employee_no`, `department`, `position`) VALUES
+(8, 'PSU-NT-2024-0187', 'Campus Maintenance & Facilities', 'Utility Worker');
+
+-- STAFF_PROFILES (clinical only)
 INSERT INTO `STAFF_PROFILES` (`user_id`, `license_no`, `specialty`, `department`) VALUES
-(2, 'PRC-MD-098765', 'General Medicine',             'PSU Lingayen Clinic'),
-(3, 'PRC-RN-054321', 'Emergency & Triage Nursing',   'PSU Lingayen Clinic'),
+(2, 'PRC-MD-098765',  'General Medicine',           'PSU Lingayen Clinic'),
+(3, 'PRC-RN-054321',  'Emergency & Triage Nursing', 'PSU Lingayen Clinic'),
 (6, 'PRC-DDS-045678', 'Dentistry & Oral Health',     'PSU Lingayen Clinic');
 
--- SEED: HEALTH_PROFILES
+-- HEALTH_PROFILES — minimal for the demo patient-side accounts
 INSERT INTO `HEALTH_PROFILES`
 (`user_id`, `blood_type`, `allergies`, `chronic_conditions`,
  `emergency_contact_name`, `emergency_contact_phone`,
  `height`, `weight`, `immunization_history`)
 VALUES
-(5,  'O+',  'Penicillin', 'Mild Asthma', 'Maria Movida',      '09299876543', 162.50, 54.00, JSON_ARRAY('COVID-19 Booster')),
-(7,  'O+',  'None',       'None',        'Carmela Santos',    '09171110001', 160.00, 52.00, JSON_ARRAY('COVID-19 Booster')),
-(8,  'A+',  'Penicillin', 'Mild Asthma', 'Eduardo Reyes',     '09171110002', 172.00, 65.00, JSON_ARRAY('COVID-19 Booster', 'Hepatitis B')),
-(9,  'B+',  'None',       'None',        'Corazon Dela Cruz', '09171110003', 158.00, 49.00, JSON_ARRAY('COVID-19 Booster')),
-(10, 'AB+', 'Aspirin',    'None',        'Roberto Aquino',    '09171110004', 175.00, 70.00, JSON_ARRAY('COVID-19 Booster')),
-(11, 'O-',  'None',       'None',        'Luz Garcia',        '09171110005', 162.00, 54.00, JSON_ARRAY('COVID-19 Booster')),
-(12, 'B-',  'None',       'None',        'Danilo Villanueva', '09171110006', 168.00, 61.00, JSON_ARRAY('COVID-19 Booster'));
+(5, 'O+', 'Penicillin', 'Mild Asthma',  'Maria Movida',   '09299876543',
+ 162.50, 54.00, JSON_ARRAY()),
+(7, 'A+', 'None',       'Hypertension', 'Liza Bautista',  '09299876544',
+ 172.00, 78.00, JSON_ARRAY()),
+(8, 'B+', 'None',       'None',         'Josefa Domingo', '09299876545',
+ 168.00, 71.00, JSON_ARRAY());
 
--- SEED: CONSENT_RECORDS (R.A. 10173 mandatory consent for students)
+-- CONSENT_RECORDS — R.A. 10173 (required for patient-side mobile access)
 INSERT INTO `CONSENT_RECORDS` (`user_id`, `consent_type`, `is_granted`, `ip_address`) VALUES
-(5,  'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
-(7,  'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
-(8,  'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
-(9,  'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
-(10, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
-(11, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
-(12, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1');
-
--- SEED: AUDIT LOGS — Genesis block for the hash chain
-INSERT INTO `AUDIT_LOGS`
-(`user_id`, `action`, `table_affected`, `record_id`, `prev_hash`, `entry_hash`, `ip_address`)
-VALUES
-(1, 'CREATE', 'SYSTEM_INITIALIZATION', 1,
-'0000000000000000000000000000000000000000000000000000000000000000',
-SHA2('GENESIS_BLOCK_VALETUDO_HEALTHLINK', 256),
-'127.0.0.1');
-
--- SEED: MEDICINES (formulary master)
-INSERT INTO `MEDICINES` (`medicine_id`, `name`, `generic_name`, `form`, `strength`, `unit`, `reorder_level`) VALUES
-(1, 'Biogesic',         'Paracetamol',                                               'Tablet',  '500mg',          'pcs',    50),
-(2, 'Neozep Forte',     'Phenylephrine HCl + Chlorphenamine + Paracetamol',          'Tablet',  '25mg/2mg/500mg', 'pcs',    30),
-(3, 'Ventolin Inhaler', 'Salbutamol',                                                'Inhaler', '100mcg/dose',    'bottle',  5);
-
--- =============================================================================
--- SEED DRUG_INTERACTIONS (based on existing formulary medicines 1-3)
--- =============================================================================
-INSERT INTO `DRUG_INTERACTIONS`
-(`medicine_id_a`, `medicine_id_b`, `severity`, `interaction_type`,
- `description`, `recommendation`, `source`, `is_active`)
-VALUES
--- Biogesic (Paracetamol) + Neozep Forte (contains Paracetamol) → overdose risk
-(1, 2, 'severe', 'additive',
- 'Neozep Forte already contains Paracetamol 500mg. Co-prescribing with Biogesic (Paracetamol 500mg) risks paracetamol overdose exceeding the 4g/day maximum, potentially causing hepatotoxicity.',
- 'Do NOT co-prescribe. Choose either Biogesic OR Neozep Forte. If both are clinically needed, ensure total paracetamol does not exceed 4g/day across all sources.',
- 'Philippine National Drug Formulary / FDA Paracetamol Safety Advisory',
- TRUE),
-
--- Biogesic (Paracetamol) + Ventolin (Salbutamol) → generally safe
-(1, 3, 'mild', 'pharmacokinetic',
- 'No clinically significant interaction between Paracetamol and Salbutamol. Minor theoretical effect on hepatic metabolism at very high doses.',
- 'Generally safe to co-prescribe. Monitor if patient is on maximum doses of both.',
- 'BNF / Local Clinical Guidelines',
- TRUE),
-
--- Neozep Forte + Ventolin (Salbutamol) → cardiovascular caution
-(2, 3, 'moderate', 'pharmacodynamic',
- 'Chlorphenamine (in Neozep) may reduce the bronchodilator effect of Salbutamol. Phenylephrine may cause additive cardiovascular stimulation (tachycardia, hypertension) when combined with Salbutamol.',
- 'Use with caution. Monitor heart rate and blood pressure. Consider spacing doses by at least 2 hours. Avoid in patients with cardiovascular conditions.',
- 'BNF Drug Interactions / Philippine Pharmacopoeia',
- TRUE);
-
--- SEED: MEDICINE_BATCHES
-INSERT INTO `MEDICINE_BATCHES`
-(`batch_id`, `medicine_id`, `batch_no`, `manufacture_date`, `expiry_date`, `supplier`, `quantity_on_hand`)
-VALUES
-(1, 1, 'BATCH-PAR-2026A', '2026-01-10', '2028-01-10', 'Unilab Philippines', 200),
-(2, 2, 'BATCH-NZP-2026B', '2026-02-15', '2027-08-15', 'Unilab Philippines', 150),
-(3, 3, 'BATCH-SLB-2025X', '2025-06-01', '2027-06-01', 'GlaxoSmithKline',     15);
-
--- SEED: SAMPLE EMR, PRESCRIPTION, CLEARANCE (Feature 5 demo)
-INSERT INTO `EMR_RECORDS`
-(`emr_id`, `patient_user_id`, `doctor_user_id`, `appointment_id`,
- `chief_complaint`, `diagnosis`, `treatment_plan`, `notes`)
-VALUES
-(1, 5, 2, NULL,
-'Fever and mild respiratory congestion',
-'Upper Respiratory Tract Infection',
-'Hydration, rest, oral antipyretics and decongestants as needed.',
-'Re-evaluate in 3 days if fever persists.');
-
-INSERT INTO `PRESCRIPTIONS`
-(`prescription_id`, `emr_id`, `patient_user_id`, `doctor_user_id`, `status`, `notes`, `qr_token`, `signature_metadata`)
-VALUES
-(1, 1, 5, 2, 'active',
-'Take medication after meals. Complete the entire course of rest.',
-'VALETUDO-RX-2026-0001-A9F8C7',
-JSON_OBJECT(
-  'signer_user_id', 2,
-  'signer_role',  'DOCTOR',
-  'signed_at', '2026-01-15T08:30:00Z',
-  'document_sha256', 'a9f8c7d2e1b3f5c8d7e9a1b3c5d7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3'
-));
-
-INSERT INTO `PRESCRIPTION_ITEMS`
-(`item_id`, `prescription_id`, `medicine_id`, `dosage`, `frequency`, `route`,
- `duration_days`, `quantity_dispensed`, `instructions`)
-VALUES
-(1, 1, 1, '500mg',          'Every 4-6 hours PRN for fever', 'Oral', 5, 10, 'Take 1 tablet after meals when temperature reaches 37.8°C or above.'),
-(2, 1, 2, '25mg/2mg/500mg', '1 tablet every 8 hours',        'Oral', 3,  6, 'For nasal congestion. Drink plenty of warm fluids.');
-
-INSERT INTO `MEDICAL_CLEARANCES`
-(`clearance_id`, `user_id`, `purpose`, `status`, `issued_by`,
- `expires_at`, `qr_token`, `signature_metadata`)
-VALUES
-(1, 5, 'On-the-Job Training (OJT) Medical Clearance', 'approved', 2,
-DATE_ADD(CURRENT_DATE, INTERVAL 6 MONTH),
-'VALETUDO-CLR-2026-0001-E4D2B1',
-JSON_OBJECT(
-  'signer_user_id', 2,
-  'signer_role', 'DOCTOR',
-  'signer_name', 'Dr. Juan Mata',
-  'prc_license', 'PRC-MD-098765',
-  'algorithm', 'SHA-256',
-  'signed_at', '2026-01-15T08:35:00Z',
-  'document_sha256', '8f4e2c1a0b3d5e7f9a8b6c4d2e0f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f'
-));
+(5, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
+(7, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1'),
+(8, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1');
 
 -- =============================================================================
 -- END OF SCHEMA

@@ -13,6 +13,7 @@ import {
 } from './services/offlineSync';
 import { API_BASE_URL } from './config/api';
 import PasswordStrengthIndicator, { evaluatePassword } from './components/PasswordStrengthIndicator';
+import valetudoLogo from './assets/valetudo_logo.png';
 
 
 /* ── Inline SVG icons ──────────────────────────────────────────── */
@@ -212,9 +213,10 @@ function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, b
   return (
     <aside className="sb">
       <div className="sb-logo-block">
-        <div className="sb-logo-lg">+</div>
+        <div className="sb-logo-lg">
+          <img src={valetudoLogo} alt="Valetudo HealthLink" />
+        </div>
       </div>
-
       <nav className="sb-nav">
         {navItems.map((item) => {
           const isActive = activeItem === item.key;
@@ -359,8 +361,10 @@ function LoginScreen({ email, setEmail, password, setPassword, error, onSubmit }
       {/* LEFT — sage hero panel */}
       <div className="login-left">
         <div className="login-left-brand">
-          <div className="login-left-logo">+</div>
-          <div>
+          <div className="login-left-logo">
+            <img src={valetudoLogo} alt="Valetudo HealthLink" />
+          </div>
+          <div className="login-left-brand-text">
             <div className="login-left-brand-name">Valetudo</div>
             <div className="login-left-brand-sub">HealthLink</div>
           </div>

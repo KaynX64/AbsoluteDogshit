@@ -12,6 +12,7 @@ interface CreateUserModalProps {
 const ROLE_OPTIONS = [
   { code: 'STUDENT',             label: 'Student' },
   { code: 'FACULTY',             label: 'Faculty' },
+  { code: 'NON_TEACHING',        label: 'Non-Teaching / Support Staff' },
   { code: 'DOCTOR',              label: 'Doctor' },
   { code: 'DENTIST',             label: 'Dentist' },
   { code: 'NURSE',               label: 'Nurse' },
@@ -53,6 +54,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
   const [specialty, setSpecialty] = useState('');
   const [department, setDepartment] = useState('');
   const [position, setPosition] = useState('');
+  const [employeeNo, setEmployeeNo] = useState('');
 
   const [isSaving, setIsSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ text: string; isError: boolean } | null>(null);
@@ -75,6 +77,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
     setSpecialty('');
     setDepartment('');
     setPosition('');
+    setEmployeeNo('');
     setFeedback(null);
     setIsSaving(false);
   }, [isOpen]);
@@ -115,6 +118,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
           specialty: specialty.trim() || null,
           department: department.trim() || null,
           position: position.trim() || null,
+          employee_no: employeeNo.trim() || null,
         }),
       });
       const data = await res.json();
@@ -314,6 +318,26 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
               <div>
                 <label style={fieldLabel}>Position</label>
                 <input style={inputStyle} value={position} placeholder="Assistant Professor"
+                       onChange={(e) => setPosition(e.target.value)} />
+              </div>
+            </div>
+          )}
+
+          {roleCode === 'NON_TEACHING' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1fr', gap: 14 }}>
+              <div>
+                <label style={fieldLabel}>Employee number (optional)</label>
+                <input style={inputStyle} value={employeeNo} placeholder="PSU-NT-2024-0187"
+                       onChange={(e) => setEmployeeNo(e.target.value)} />
+              </div>
+              <div>
+                <label style={fieldLabel}>Department / office</label>
+                <input style={inputStyle} value={department} placeholder="Campus Maintenance & Facilities"
+                       onChange={(e) => setDepartment(e.target.value)} />
+              </div>
+              <div>
+                <label style={fieldLabel}>Position</label>
+                <input style={inputStyle} value={position} placeholder="Utility Worker"
                        onChange={(e) => setPosition(e.target.value)} />
               </div>
             </div>
