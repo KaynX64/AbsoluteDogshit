@@ -171,6 +171,23 @@ ipcMain.handle('offline-mark-synced', async (event, { client_mutation_id, server
   }
 });
 
+ipcMain.handle('offline-mark-failed', async (event, { client_mutation_id, sync_status, error_message }) => {
+  if (!sqliteDb) return { success: false };
+  try {
+    // Update the status to 'conflict' or 'error' so it's no longer fetched as 'pending'
+    const stmt = sqliteDb.prepare(`
+      UPDATE LOCAL_SYNC_LOGS 
+      SET sync_status = ?, error_message = ? 
+      WHERE client_mutation_id = ?
+    `);
+    stmt.run(sync_status || 'error', error_message || 'Failed', client_mutation_id);
+    return { success: true };
+  } catch (err) {
+    console.error('[SQLite Mark Failed Error]:', err);
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle('offline-cache-bootstrap', async (event, { patients, emrRecords }) => {
   if (!sqliteDb) return { success: false };
   try {

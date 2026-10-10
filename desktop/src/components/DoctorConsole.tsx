@@ -334,6 +334,24 @@ export default function DoctorConsole({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode]);
 
+  useEffect(() => {
+  const handleConflict = (e: Event) => {
+    const customEvent = e as CustomEvent;
+    const conflicts = customEvent.detail || [];
+    
+    if (conflicts.length > 0) {
+      // Show a prominent UI warning to the doctor
+      setFeedbackMsg({
+        text: `⚠️ Offline Sync Conflict: ${conflicts.length} record(s) were modified by someone else while you were offline, or failed to process. Please review the patient's current status manually.`,
+        type: 'error' // Assuming your feedbackMsg supports 'error' type styling
+      });
+    }
+  };
+
+  window.addEventListener('offline-sync-conflict', handleConflict);
+  return () => window.removeEventListener('offline-sync-conflict', handleConflict);
+}, []);
+
   const resetForm = () => {
     setChiefComplaint('');
     setDiagnosis('');

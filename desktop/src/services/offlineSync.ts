@@ -1,6 +1,6 @@
 // desktop/src/services/offlineSync.ts
 //
-// Offline mutation queue.
+// Offline mutation queue & bootstrap cache.
 //
 // Transport priority:
 //   1. Electron IPC → embedded SQLite (production desktop)
@@ -8,7 +8,6 @@
 //
 // The localStorage store is always kept as a mirror so the sidebar
 // badge can read the count synchronously without async churn.
-
 import { API_BASE_URL } from '../config/api';
 
 export interface OfflineMutation {
@@ -24,6 +23,7 @@ export interface OfflineMutation {
 }
 
 const STORAGE_KEY = 'valetudo_offline_mutations_queue';
+const SYNC_TIME_KEY = 'valetudo_last_sync_time';
 const DEVICE_ID = 'CLINIC-DESKTOP-ELECTRON';
 
 function hasBridge(): boolean {
@@ -150,34 +150,64 @@ export async function replayOfflineQueue(): Promise<{
 
     const data = await res.json();
     const results: any[] = Array.isArray(data.results) ? data.results : [];
+    
+    // Track conflicts to notify the UI
+    const conflicts: any[] = [];
 
-    // Mark each successfully-replayed mutation as synced in SQLite.
+    // Process each replayed mutation
     for (const r of results) {
       const ok = r.status === 'synced' || r.status === 'already_synced';
-      if (!ok) continue;
-      if (hasBridge()) {
-        try {
-          await (window as any).electronAPI.offlineMarkSynced({
-            client_mutation_id: r.client_mutation_id,
-            server_record_id: r.serverRecordId ?? null,
-          });
-        } catch {
-          /* non-fatal */
+      
+      if (ok) {
+        if (hasBridge()) {
+          try {
+            await (window as any).electronAPI.offlineMarkSynced({
+              client_mutation_id: r.client_mutation_id,
+              server_record_id: r.serverRecordId ?? null,
+            });
+          } catch {
+            /* non-fatal */
+          }
+        }
+      } else if (r.status === 'conflict' || r.status === 'error') {
+        conflicts.push(r);
+        
+        // Mark as failed in SQLite so it's excluded from future 'pending' fetches
+        // This prevents infinite retry loops for logically broken mutations
+        if (hasBridge()) {
+          try {
+            await (window as any).electronAPI.offlineMarkFailed({
+              client_mutation_id: r.client_mutation_id,
+              sync_status: r.status,
+              error_message: r.error || 'Sync failed or conflict detected',
+            });
+          } catch {
+            /* non-fatal */
+          }
         }
       }
     }
 
-    // For the localStorage fallback path, drop everything we just replayed.
+    // For the localStorage fallback path, drop everything we just processed
     if (!hasBridge()) {
       const stillFailing = queue.filter((m) => {
         const r = results.find((x) => x.client_mutation_id === m.client_mutation_id);
-        return r && r.status !== 'synced' && r.status !== 'already_synced';
+        return !r || (r.status !== 'synced' && r.status !== 'already_synced' && r.status !== 'conflict' && r.status !== 'error');
       });
       writeMirror(stillFailing);
     }
 
+    // Notify the UI about conflicts so the doctor can manually review them
+    if (conflicts.length > 0) {
+      console.warn('[OfflineSync] Conflicts detected:', conflicts);
+      window.dispatchEvent(
+        new CustomEvent('offline-sync-conflict', { detail: conflicts })
+      );
+    }
+
     window.dispatchEvent(new Event('offline-queue-changed'));
     const remaining = await refreshOfflineQueueFromBackend();
+    
     return { synced: data.syncedCount || 0, remaining };
   } catch (err) {
     console.warn('[offlineSync] Replay failed:', err);
@@ -188,21 +218,33 @@ export async function replayOfflineQueue(): Promise<{
 /* ── Bootstrap: preload patient + EMR cache after login ────────── */
 export async function bootstrapOfflineCache(): Promise<void> {
   const token = localStorage.getItem('valetudo_token');
-  if (!token) return;
-  if (!hasBridge()) return; // web preview: nothing to seed
+  if (!token || !hasBridge()) return; // web preview: nothing to seed
+
+  // Delta Sync: Retrieve the last known server time to only fetch changes
+  const lastSync = localStorage.getItem(SYNC_TIME_KEY);
+  const queryParams = lastSync ? `?lastSyncedAt=${encodeURIComponent(lastSync)}` : '';
 
   try {
-    const res = await fetch(`${API_BASE_URL}/api/sync/bootstrap`, {
+    const res = await fetch(`${API_BASE_URL}/api/sync/bootstrap${queryParams}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
+    
     if (!res.ok) return;
+    
     const data = await res.json();
+    
     await (window as any).electronAPI.offlineCacheBootstrap({
       patients: data.patients || [],
       emrRecords: data.emrRecords || [],
     });
+
+    // Save the server time for the next delta sync
+    if (data.serverTime) {
+      localStorage.setItem(SYNC_TIME_KEY, data.serverTime);
+    }
+
     console.log(
-      `📦 [Offline] Bootstrapped ${data.patients?.length || 0} patients, ${
+      `📦 [Offline] Delta synced ${data.patients?.length || 0} patients, ${
         data.emrRecords?.length || 0
       } EMR records into SQLite`
     );

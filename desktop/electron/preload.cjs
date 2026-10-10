@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   offlineQueueMutation: (mutation) => ipcRenderer.invoke('offline-queue-mutation', mutation),
   offlineGetPendingMutations: () => ipcRenderer.invoke('offline-get-pending-mutations'),
   offlineMarkSynced: (params) => ipcRenderer.invoke('offline-mark-synced', params),
+  offlineMarkFailed: (params) => ipcRenderer.invoke('offline-mark-failed', params),
   offlineCacheBootstrap: (data) => ipcRenderer.invoke('offline-cache-bootstrap', data),
   offlineGetEmrHistory: (patientUserId) => ipcRenderer.invoke('offline-get-emr-history', patientUserId),
   offlineSearchPatients: (query) => ipcRenderer.invoke('offline-search-patients', query),

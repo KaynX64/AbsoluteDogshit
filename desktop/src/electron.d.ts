@@ -13,6 +13,7 @@ declare global {
     offlineCacheBootstrap: (data: { patients?: any[]; emrRecords?: any[] }) => Promise<{ success: boolean }>;
     offlineGetEmrHistory: (patientUserId: number) => Promise<any[]>;
     offlineSearchPatients: (query: string) => Promise<any[]>;
+    offlineMarkFailed: (params: { client_mutation_id: string; sync_status?: string; error_message?: string }) => Promise<{ success: boolean }>;
 
         onUpdateStatus: (cb: (s: {
       state: 'checking' | 'available' | 'none' | 'downloading' | 'downloaded' | 'error';
