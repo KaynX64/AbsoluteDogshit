@@ -23,15 +23,16 @@ import 'change_password_screen.dart';
 
 /// Role-aware identity presentation for the mobile portal.
 ///
-/// The same screen is used by three patient-side populations (STUDENT,
-/// FACULTY, NON_TEACHING). Their profile columns differ, so a single
-/// hardcoded "Student · 22-LN-0123" line shows fabricated data for the
-/// other two. This helper reads the primary_role from the profile payload
-/// and produces the right three display strings for each.
+/// The mobile portal is currently reachable by any non-responder role
+/// (students, faculty, non-teaching staff, and clinical staff who land
+/// on it). Each population has different profile columns, so a single
+/// hardcoded display line shows fabricated data for most of them.
+/// This helper reads the primary_role and produces the right three
+/// display strings for whichever role is logged in.
 class _PatientIdentity {
-  final String roleWord;      // "Student" | "Faculty" | "Support Staff"
-  final String identifier;    // student_no | employee_no | '' (faculty)
-  final String affiliation;   // "BS Info Tech · Year 3" | "Dept · Position"
+  final String roleWord;      // "Student" | "Faculty" | "Doctor" | ...
+  final String identifier;    // student_no | faculty_no | employee_no | admin_no | license_no | ''
+  final String affiliation;   // "BS Info Tech · Year 3" | "Dept · Position" | ...
 
   const _PatientIdentity({
     required this.roleWord,
@@ -39,9 +40,11 @@ class _PatientIdentity {
     required this.affiliation,
   });
 
-  /// Joins non-empty parts with a separator. Was previously a local
-  /// closure inside the factory, which meant the `fullSubtitle` getter
-  /// couldn't see it (Dart closures don't leak out of their scope).
+  /// Joins non-empty parts with a separator.
+  ///
+  /// Static (not a closure inside the factory) so the getters below can
+  /// call it. Dart closures don't leak out of the scope they're declared
+  /// in, which is why putting this inside `fromProfile` broke the build.
   static String _joinNonEmpty(List<dynamic> parts, [String sep = ' · ']) {
     return parts
         .where((v) => v != null && v.toString().trim().isNotEmpty)
@@ -56,26 +59,63 @@ class _PatientIdentity {
     final u = profileData?['user'] ?? fallbackUser;
     final role = (u['primary_role'] ?? 'STUDENT').toString().toUpperCase();
 
+    String trimmed(dynamic v) => (v ?? '').toString().trim();
+
     switch (role) {
       case 'FACULTY':
         return _PatientIdentity(
           roleWord: 'Faculty',
-          identifier: '',
+          identifier: trimmed(u['faculty_no']),
           affiliation: _joinNonEmpty([u['department'], u['position']]),
         );
 
       case 'NON_TEACHING':
         return _PatientIdentity(
           roleWord: 'Support Staff',
-          identifier: (u['employee_no'] ?? '').toString().trim(),
+          identifier: trimmed(u['employee_no']),
           affiliation: _joinNonEmpty([u['department'], u['position']]),
+        );
+
+      case 'ADMIN':
+        return _PatientIdentity(
+          roleWord: 'Administrator',
+          identifier: trimmed(u['admin_no']),
+          affiliation: _joinNonEmpty([u['specialty'], u['department']]),
+        );
+
+      case 'DOCTOR':
+        return _PatientIdentity(
+          roleWord: 'Doctor',
+          identifier: trimmed(u['license_no']),
+          affiliation: _joinNonEmpty([u['specialty'], u['department']]),
+        );
+
+      case 'DENTIST':
+        return _PatientIdentity(
+          roleWord: 'Dentist',
+          identifier: trimmed(u['license_no']),
+          affiliation: _joinNonEmpty([u['specialty'], u['department']]),
+        );
+
+      case 'NURSE':
+        return _PatientIdentity(
+          roleWord: 'Nurse',
+          identifier: trimmed(u['license_no']),
+          affiliation: _joinNonEmpty([u['specialty'], u['department']]),
+        );
+
+      case 'EMERGENCY_RESPONDER':
+        return _PatientIdentity(
+          roleWord: 'Responder',
+          identifier: '',
+          affiliation: _joinNonEmpty([u['department']]),
         );
 
       case 'STUDENT':
       default:
         return _PatientIdentity(
           roleWord: 'Student',
-          identifier: (u['student_no'] ?? '').toString().trim(),
+          identifier: trimmed(u['student_no']),
           affiliation: _joinNonEmpty([
             u['course'],
             if (u['year_level'] != null) 'Year ${u['year_level']}',
@@ -84,12 +124,12 @@ class _PatientIdentity {
     }
   }
 
-  /// Compact form for the health pass: "Student · 22-LN-0123" or "Faculty".
+  /// Compact form for the health pass: "Student · 22-LN-0123" or
+  /// "Faculty · PSU-FAC-2024-0451" or just "Responder".
   String get roleWithIdentifier =>
       identifier.isEmpty ? roleWord : '$roleWord · $identifier';
 
-  /// Verbose form for the profile header, e.g.
-  /// "Student · 22-LN-0123 · BS Information Technology · Year 3".
+  /// Verbose form for the profile header.
   String get fullSubtitle => _joinNonEmpty([roleWord, identifier, affiliation]);
 }
 
