@@ -20,6 +20,7 @@ dist/
 build/
 desktop/dist/
 mobile/build/
+desktop/release
 
 # S-07: Never commit private TLS certificates to git
 server/certs/*.pem
@@ -29,3 +30,6 @@ server/certs/*.crt
 #googleFirebaseCredentials.json
 server/serviceAccountKey.json
 mobile/android/app/google-services.json
+
+#repomix
+repomix-output.xml

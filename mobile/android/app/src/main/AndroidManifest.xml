@@ -2,6 +2,7 @@
 
     <!-- Network & Communication -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 
     <!-- Geolocation for SOS Emergency Dispatch -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -42,11 +43,16 @@
             </intent-filter>
         </activity>
 
-        <!-- Foreground Service Worker to keep Socket.IO alive in the background -->
+        <!--
+            Foreground Service Worker to keep Socket.IO alive in the background.
+            stopWithTask="false" keeps the service running when the user swipes
+            the app away from the Android recents screen.
+        -->
         <service
             android:name="de.julianassmann.flutter_background.IsolateHolderService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false" />
 
         <meta-data
             android:name="flutterEmbedding"
@@ -57,6 +63,18 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+            <data android:scheme="tel" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="geo" />
         </intent>
     </queries>
 </manifest>

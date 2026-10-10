@@ -5,8 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http; // <-- FIXED: Added missing import
-import 'package:firebase_messaging/firebase_messaging.dart'; // <-- FIXED: Added missing import
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -15,6 +14,49 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_background/flutter_background.dart';
 import '../config/api_config.dart';
 import '../main.dart';
+
+// Top-level function executed on a background isolate to avoid UI thread jank
+Uint8List _generateWavBytesIsolate(int durationSeconds) {
+  const int sampleRate = 22050;
+  final int numSamples = durationSeconds * sampleRate;
+  final int dataSize = numSamples * 2;
+  final int fileSize = 36 + dataSize;
+  final ByteData byteData = ByteData(44 + dataSize);
+
+  // RIFF Header
+  byteData.setUint8(0, 0x52); byteData.setUint8(1, 0x49); byteData.setUint8(2, 0x46); byteData.setUint8(3, 0x46);
+  byteData.setUint32(4, fileSize, Endian.little);
+  byteData.setUint8(8, 0x57); byteData.setUint8(9, 0x41); byteData.setUint8(10, 0x56); byteData.setUint8(11, 0x45);
+
+  // fmt chunk
+  byteData.setUint8(12, 0x66); byteData.setUint8(13, 0x6D); byteData.setUint8(14, 0x74); byteData.setUint8(15, 0x20);
+  byteData.setUint32(16, 16, Endian.little);
+  byteData.setUint16(20, 1, Endian.little);
+  byteData.setUint16(22, 1, Endian.little);
+  byteData.setUint32(24, sampleRate, Endian.little);
+  byteData.setUint32(28, sampleRate * 2, Endian.little);
+  byteData.setUint16(32, 2, Endian.little);
+  byteData.setUint16(34, 16, Endian.little);
+
+  // data chunk
+  byteData.setUint8(36, 0x64); byteData.setUint8(37, 0x61); byteData.setUint8(38, 0x74); byteData.setUint8(39, 0x61);
+  byteData.setUint32(40, dataSize, Endian.little);
+
+  int offset = 44;
+  const double f1 = 853.0;
+  const double f2 = 960.0;
+  const double twoPi = 2.0 * math.pi;
+
+  for (int i = 0; i < numSamples; i++) {
+    final double t = i / sampleRate;
+    final double sampleValue = 0.5 * (math.sin(twoPi * f1 * t) + math.sin(twoPi * f2 * t));
+    final int sample16 = (sampleValue * 28000).toInt().clamp(-32768, 32767);
+    byteData.setInt16(offset, sample16, Endian.little);
+    offset += 2;
+  }
+
+  return byteData.buffer.asUint8List();
+}
 
 class EmergencyAlertService {
   static final EmergencyAlertService _instance = EmergencyAlertService._internal();
@@ -31,11 +73,12 @@ class EmergencyAlertService {
   Uint8List? _cachedWavBytes;
   bool _isInitialized = false;
   bool _isFcmListening = false;
+  StreamSubscription<String>? _tokenRefreshSub;
 
   bool _isResponderActive = false;
   int? _lastAlertIdProcessed;
 
-  // 1. Critical Channel for Responders (Plays custom emr_sound.ogg siren)
+  // 1. Critical Channel for Responders
   static const AndroidNotificationChannel _responderCriticalChannel = AndroidNotificationChannel(
     'emergency_sos_channel_v4',
     '🚨 Critical Emergency SOS',
@@ -47,7 +90,7 @@ class EmergencyAlertService {
     enableLights: true,
   );
 
-  // 2. Student / Victim Confirmation Channel (Plays DEFAULT phone notification chime)
+  // 2. Student Confirmation Channel
   static const AndroidNotificationChannel _studentConfirmChannel = AndroidNotificationChannel(
     'student_sos_confirmation_channel',
     'SOS Dispatch Confirmation',
@@ -57,11 +100,21 @@ class EmergencyAlertService {
     enableVibration: true,
   );
 
-  // 3. Queue Turn Channel (Plays DEFAULT phone notification chime)
+  // 3. Queue Turn Channel
   static const AndroidNotificationChannel _queueTurnChannel = AndroidNotificationChannel(
     'clinic_queue_channel',
     '🔔 Clinic Queue Turn',
     description: 'Alerts when your queue ticket is called for consultation',
+    importance: Importance.high,
+    playSound: true,
+    enableVibration: true,
+  );
+
+  // 4. Consultation Appointments Channel
+  static const AndroidNotificationChannel _appointmentChannel = AndroidNotificationChannel(
+    'appointment_channel',
+    '📅 Consultation Appointments',
+    description: 'Appointment booking confirmations and scheduled reminders',
     importance: Importance.high,
     playSound: true,
     enableVibration: true,
@@ -85,9 +138,15 @@ class EmergencyAlertService {
     await androidImplementation?.createNotificationChannel(_responderCriticalChannel);
     await androidImplementation?.createNotificationChannel(_studentConfirmChannel);
     await androidImplementation?.createNotificationChannel(_queueTurnChannel);
+    await androidImplementation?.createNotificationChannel(_appointmentChannel);
     await androidImplementation?.requestNotificationsPermission();
 
-    // 2. Configure audio player context
+    // 2. Pre-generate procedural WAV on background isolate so UI never stutters during alarm
+    compute(_generateWavBytesIsolate, 3).then((bytes) {
+      _cachedWavBytes = bytes;
+    }).catchError((_) {});
+
+    // 3. Configure audio player context
     try {
       await _audioPlayer.setAudioContext(
         AudioContext(
@@ -104,43 +163,34 @@ class EmergencyAlertService {
     await connectSocket();
   }
 
-// --- FIREBASE CLOUD MESSAGING (FCM) TOKEN REGISTRATION ---
+
+  // --- FIREBASE CLOUD MESSAGING (FCM) TOKEN REGISTRATION ---
   Future<void> syncFcmTokenWithBackend() async {
+      if (kIsWeb) return; // Skip FCM token registration on Web
     try {
       final messaging = FirebaseMessaging.instance;
       
-      // Request permission for heads-up alerts
       await messaging.requestPermission(
         alert: true,
         badge: true,
         sound: true,
       );
 
-      // Get the unique FCM token from Google Play Services
       String? token = await messaging.getToken();
-      debugPrint("🔔 [FCM Mobile] Retrieved Token: $token");
+
 
       if (token != null && token.isNotEmpty) {
-        final jwt = await _storage.read(key: 'jwt_token');
-        if (jwt != null) {
-          debugPrint("🔔 [FCM Mobile] Syncing token to ${ApiConfig.baseUrl}/api/profile/fcm-token...");
-          final res = await http.post(
-            Uri.parse('${ApiConfig.baseUrl}/api/profile/fcm-token'),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $jwt',
-            },
-            body: jsonEncode({'fcm_token': token, 'device_type': 'android'}),
-          );
-          debugPrint("🔥 [FCM Mobile] Server registration status: ${res.statusCode} - ${res.body}");
-        } else {
-          debugPrint("⚠️ [FCM Mobile] No JWT in storage; token will be synced on next login.");
-        }
-      } else {
-        debugPrint("⚠️ [FCM Mobile] FirebaseMessaging.getToken() returned null. Ensure Google Play Services are active.");
+        await _postTokenToServer(token);
       }
 
-      // Attach foreground listener once
+      // Handle automatic FCM token rotation
+      _tokenRefreshSub?.cancel();
+      _tokenRefreshSub = messaging.onTokenRefresh.listen((newToken) async {
+        if (newToken.isNotEmpty) {
+          await _postTokenToServer(newToken);
+        }
+      });
+
       if (!_isFcmListening) {
         _isFcmListening = true;
         FirebaseMessaging.onMessage.listen((RemoteMessage message) {
@@ -152,8 +202,8 @@ class EmergencyAlertService {
             }
           } else if (type == 'QUEUE_TURN') {
             showQueueTurnNotification(
-              ticketNo: message.data['ticketNo'] ?? 'Your Ticket',
-              doctorName: message.data['doctorName'] ?? 'Attending Doctor',
+              ticketNo: message.data['ticketNo'] ?? message.data['ticket_no'] ?? 'Your Ticket',
+              doctorName: message.data['doctorName'] ?? message.data['doctor_name'] ?? 'Attending Doctor',
             );
           } else {
             showAppointmentConfirmedNotification(
@@ -167,6 +217,25 @@ class EmergencyAlertService {
       debugPrint("❌ [FCM Mobile Token Error]: $e");
     }
   }
+
+  Future<void> _postTokenToServer(String token) async {
+    try {
+      final jwt = await _storage.read(key: 'jwt_token');
+      if (jwt != null) {
+        await ApiConfig.client.post(
+          Uri.parse('${ApiConfig.baseUrl}/api/profile/fcm-token'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $jwt',
+          },
+          body: jsonEncode({'fcm_token': token, 'device_type': 'android'}),
+        );
+      }
+    } catch (e) {
+      debugPrint("⚠️ [FCM Post Token Error]: $e");
+    }
+  }
+
   Future<void> _enableBackgroundService() async {
     try {
       const androidConfig = FlutterBackgroundAndroidConfig(
@@ -177,12 +246,18 @@ class EmergencyAlertService {
         enableWifiLock: true,
       );
 
-      bool hasPermissions = await FlutterBackground.hasPermissions;
-      if (!hasPermissions) {
-        await FlutterBackground.initialize(androidConfig: androidConfig);
+      // Always (re)initialize — the plugin's AndroidConfig lives in memory
+      // and is discarded every time the Flutter process is recreated (e.g.
+      // when the user swipes the app away from the Android recents screen
+      // and reopens it). The previous version only initialized when the
+      // notification permission was missing, which meant that on every
+      // subsequent launch enableBackgroundExecution() had no config to
+      // work with and the foreground service silently never started.
+      await FlutterBackground.initialize(androidConfig: androidConfig);
+
+      if (!FlutterBackground.isBackgroundExecutionEnabled) {
+        await FlutterBackground.enableBackgroundExecution();
       }
-      await FlutterBackground.enableBackgroundExecution();
-      debugPrint('🛡️ [Background Service] Active on-call foreground service enabled.');
     } catch (e) {
       debugPrint('⚠️ [Background Service Error]: $e');
     }
@@ -192,7 +267,6 @@ class EmergencyAlertService {
     try {
       if (FlutterBackground.isBackgroundExecutionEnabled) {
         await FlutterBackground.disableBackgroundExecution();
-        debugPrint('🛡️ [Background Service] Disabled on logout.');
       }
     } catch (_) {}
   }
@@ -220,27 +294,22 @@ class EmergencyAlertService {
       );
 
       _socket!.onConnect((_) {
-        debugPrint('✅ [Socket.IO Mobile] Connected to Gateway with token: ${token != null ? "VALID" : "ANON"}');
-        _socket!.emit('join:responders');
+        // Only join privileged responder room if user is actively in responder mode
+        if (_isResponderActive) {
+          _socket!.emit('join:responders');
+        }
       });
 
       _socket!.on('emergency:new_alert', (data) async {
-        debugPrint('🚨 [Socket.IO Mobile] SOS Alert Broadcast Received: $data');
         final alertMap = data is Map<String, dynamic> ? data : Map<String, dynamic>.from(data);
 
-        if (!_isResponderActive) {
-          debugPrint('🛡️ [Socket.IO Mobile] Ignored: Device not in responder mode.');
-          return;
-        }
+        if (!_isResponderActive) return;
 
         final userDataStr = await _storage.read(key: 'user_data');
         if (userDataStr != null) {
           try {
             final currentUser = jsonDecode(userDataStr);
-            if (currentUser['user_id'] == alertMap['userId']) {
-              debugPrint('🛡️ [Socket.IO Mobile] Ignored: Alert originated from this user.');
-              return;
-            }
+            if (currentUser['user_id'] == alertMap['userId']) return;
           } catch (_) {}
         }
 
@@ -271,7 +340,6 @@ class EmergencyAlertService {
     _disableBackgroundService();
   }
 
-  // --- STUDENT CONFIRMATION NOTIFICATION (Default Phone Chime) ---
   Future<void> showStudentSosSentNotification() async {
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'student_sos_confirmation_channel',
@@ -295,16 +363,16 @@ class EmergencyAlertService {
     );
   }
 
-  // --- APPOINTMENT CONFIRMATION NOTIFICATION (Default Phone Chime) ---
   Future<void> showAppointmentConfirmedNotification([String? title, String? body]) async {
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'appointment_channel',
-      'Consultation Appointments',
-      channelDescription: 'Appointment booking confirmations and reminders',
+      '📅 Consultation Appointments',
+      channelDescription: 'Appointment booking confirmations and scheduled reminders',
       importance: Importance.high,
       priority: Priority.high,
       ticker: 'Appointment Confirmed',
       playSound: true,
+      enableVibration: true,
     );
 
     const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
@@ -317,7 +385,6 @@ class EmergencyAlertService {
     );
   }
 
-  // --- CLINIC QUEUE TURN NOTIFICATION ---
   Future<void> showQueueTurnNotification({
     required String ticketNo,
     required String doctorName,
@@ -343,50 +410,6 @@ class EmergencyAlertService {
     );
   }
 
-  Uint8List _generateEasSirenWav({double durationSeconds = 3.0, int sampleRate = 22050}) {
-    if (_cachedWavBytes != null) return _cachedWavBytes!;
-
-    final int numSamples = (durationSeconds * sampleRate).toInt();
-    final int dataSize = numSamples * 2;
-    final int fileSize = 36 + dataSize;
-    final ByteData byteData = ByteData(44 + dataSize);
-
-    // RIFF Header
-    byteData.setUint8(0, 0x52); byteData.setUint8(1, 0x49); byteData.setUint8(2, 0x46); byteData.setUint8(3, 0x46);
-    byteData.setUint32(4, fileSize, Endian.little);
-    byteData.setUint8(8, 0x57); byteData.setUint8(9, 0x41); byteData.setUint8(10, 0x56); byteData.setUint8(11, 0x45);
-
-    // fmt chunk
-    byteData.setUint8(12, 0x66); byteData.setUint8(13, 0x6D); byteData.setUint8(14, 0x74); byteData.setUint8(15, 0x20);
-    byteData.setUint32(16, 16, Endian.little);
-    byteData.setUint16(20, 1, Endian.little);
-    byteData.setUint16(22, 1, Endian.little);
-    byteData.setUint32(24, sampleRate, Endian.little);
-    byteData.setUint32(28, sampleRate * 2, Endian.little);
-    byteData.setUint16(32, 2, Endian.little);
-    byteData.setUint16(34, 16, Endian.little);
-
-    // data chunk
-    byteData.setUint8(36, 0x64); byteData.setUint8(37, 0x61); byteData.setUint8(38, 0x74); byteData.setUint8(39, 0x61);
-    byteData.setUint32(40, dataSize, Endian.little);
-
-    int offset = 44;
-    const double f1 = 853.0;
-    const double f2 = 960.0;
-    const double twoPi = 2.0 * math.pi;
-
-    for (int i = 0; i < numSamples; i++) {
-      final double t = i / sampleRate;
-      final double sampleValue = 0.5 * (math.sin(twoPi * f1 * t) + math.sin(twoPi * f2 * t));
-      final int sample16 = (sampleValue * 28000).toInt().clamp(-32768, 32767);
-      byteData.setInt16(offset, sample16, Endian.little);
-      offset += 2;
-    }
-
-    _cachedWavBytes = byteData.buffer.asUint8List();
-    return _cachedWavBytes!;
-  }
-
   void playAlarmSound() async {
     if (_isAlarmPlaying) return;
     _isAlarmPlaying = true;
@@ -403,9 +426,9 @@ class EmergencyAlertService {
       try {
         await _audioPlayer.play(AssetSource('emr_sound.ogg'));
       } catch (assetErr) {
-        debugPrint('⚠️ AssetSource fallback to procedural WAV: $assetErr');
-        final wav = _generateEasSirenWav();
-        await _audioPlayer.play(BytesSource(wav, mimeType: 'audio/wav'));
+        // Fallback to pre-cached procedural WAV bytes if asset cannot be opened
+        _cachedWavBytes ??= await compute(_generateWavBytesIsolate, 3);
+        await _audioPlayer.play(BytesSource(_cachedWavBytes!, mimeType: 'audio/wav'));
       }
 
       _vibrationTimer?.cancel();
@@ -430,7 +453,6 @@ class EmergencyAlertService {
     } catch (_) {}
   }
 
-  // --- EMERGENCY DISPATCH BROADCAST (For Responders Only) ---
   Future<void> triggerEmergencyBroadcast(Map<String, dynamic> alertData) async {
     playAlarmSound();
 
