@@ -20,6 +20,16 @@ import { logPhiAccess } from '../utils/phiLogger.js';
 import { JWT_SECRET } from '../utils/secrets.js';
 import { redis, isRedisActive } from '../utils/redisClient.js';
 import { VERIFY_LIMIT } from '../config/limits.js';
+import {
+  SignerError,
+  assertValidSigner,
+  assertValidPatient,
+  assertEmrBelongsToPatient,
+  assertAppointmentInQueue,
+  resolveExpiryDate,
+  isQualifiedSigner,
+  formatIssuedBy,
+} from '../utils/signatory.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,7 +42,7 @@ export default function documentRoutes(io) {
   // =============================================================================
 
   router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST'), async (req, res) => {
-    const { emr_id, patient_user_id, items, notes } = req.body;
+    const { emr_id, patient_user_id, items, notes, appointment_id } = req.body;
     const doctorUserId = req.user.user_id;
 
     if (!patient_user_id || !Array.isArray(items) || items.length === 0) {
@@ -43,6 +53,18 @@ export default function documentRoutes(io) {
 
     try {
       await connection.beginTransaction();
+      
+      // ── Re-verify signer, patient and encounter against the database ─────────
+      const signer = await assertValidSigner(connection, doctorUserId);
+      await assertValidPatient(connection, patient_user_id, doctorUserId);
+      await assertAppointmentInQueue(connection, appointment_id, patient_user_id, doctorUserId);
+      const [[sg]] = await connection.query(
+        'SELECT signature_s3_key, signature_sha256 FROM STAFF_PROFILES WHERE user_id = ?',
+        [doctorUserId]
+      );
+      if (emr_id) {
+        await assertEmrBelongsToPatient(connection, emr_id, patient_user_id);
+      }
 
       // ── Aggregate requested quantities per medicine ─────────────────────────
       const requestedByMedicine = {};
@@ -183,8 +205,11 @@ export default function documentRoutes(io) {
 
       const signatureMetadata = {
         signer_user_id: doctorUserId,
-        signer_role: req.user.roles[0],
+        signer_role: signer.role,
+        signer_license_no: signer.license_no,
         signed_at: new Date().toISOString(),
+        signature_s3_key: sg?.signature_s3_key || null,
+        signature_sha256: sg?.signature_sha256 || null,
         algorithm: 'SHA-256',
         document_sha256: crypto
           .createHash('sha256')
@@ -339,12 +364,16 @@ export default function documentRoutes(io) {
         prescriptionId,
         emrId: targetEmrId,
         qrToken,
+        signer: signer.display,
         signatureMetadata,
         allocatedBatches: plannedDeductions,
         pdfAvailable: Boolean(pdfKey),
       });
     } catch (error) {
       await connection.rollback();
+      if (error instanceof SignerError) {
+        return res.status(error.status).json({ error: error.message, code: error.code });
+      }
       console.error('Prescription Issuance Error:', error);
       if (error.code === 'INSUFFICIENT_STOCK') {
         return res.status(409).json({
@@ -369,7 +398,7 @@ export default function documentRoutes(io) {
         `SELECT p.prescription_id, p.emr_id, p.issued_at, p.status, p.notes, p.qr_token,
                 p.signature_metadata, p.pdf_s3_key,
                 doc.first_name AS doctor_first_name, doc.last_name AS doctor_last_name,
-                COALESCE(sp.license_no, 'PRC-VERIFIED') AS doctor_license,
+                COALESCE(sp.license_no, 'Not on file') AS doctor_license,
                 COALESCE(sp.specialty, 'Infirmary Physician') AS doctor_specialty,
                 JSON_ARRAYAGG(
                   JSON_OBJECT(
@@ -415,6 +444,79 @@ export default function documentRoutes(io) {
     }
   });
 
+    // GET /api/documents/prescriptions/patient/:patientId
+  // Prescription history for one patient, limited to what the logged-in
+  // doctor/dentist issued themselves. The issuer is taken from the JWT, never
+  // from the request, so another clinician's prescriptions cannot be requested.
+  router.get(
+    '/prescriptions/patient/:patientId',
+    authenticateToken,
+    requireRoles('DOCTOR', 'DENTIST'),
+    async (req, res) => {
+      const patientId = Number(req.params.patientId);
+      if (!Number.isInteger(patientId) || patientId <= 0) {
+        return res.status(400).json({ error: 'A valid patient id is required.' });
+      }
+
+      try {
+        const [rows] = await pool.query(
+          `SELECT p.prescription_id, p.emr_id, p.issued_at, p.status, p.notes, p.pdf_s3_key,
+                  JSON_ARRAYAGG(
+                    JSON_OBJECT(
+                      'item_id', pi.item_id,
+                      'medicine_name', m.name,
+                      'generic_name', m.generic_name,
+                      'dosage', pi.dosage,
+                      'frequency', pi.frequency,
+                      'route', pi.route,
+                      'duration_days', pi.duration_days,
+                      'quantity_dispensed', pi.quantity_dispensed,
+                      'instructions', pi.instructions
+                    )
+                  ) AS items
+           FROM PRESCRIPTIONS p
+           LEFT JOIN PRESCRIPTION_ITEMS pi ON p.prescription_id = pi.prescription_id
+           LEFT JOIN MEDICINES m ON pi.medicine_id = m.medicine_id
+           WHERE p.patient_user_id = ?
+             AND p.doctor_user_id = ?
+             AND p.deleted_at IS NULL
+           GROUP BY p.prescription_id
+           ORDER BY p.issued_at DESC`,
+          [patientId, req.user.user_id]
+        );
+
+        const history = rows.map((rx) => {
+          const rawItems = typeof rx.items === 'string' ? JSON.parse(rx.items) : rx.items || [];
+          return {
+            prescription_id: rx.prescription_id,
+            emr_id: rx.emr_id,
+            issued_at: rx.issued_at,
+            status: rx.status,
+            notes: decrypt(rx.notes),
+            pdfAvailable: Boolean(rx.pdf_s3_key),
+            items: rawItems
+              .filter((it) => it && it.item_id !== null)
+              .map((it) => ({ ...it, instructions: decrypt(it.instructions) })),
+          };
+        });
+
+        logPhiAccess({
+          viewerUserId: req.user.user_id,
+          patientUserId: patientId,
+          table: 'PRESCRIPTIONS',
+          recordId: patientId,
+          purpose: 'Prescription history review (issuer only)',
+          ipAddress: req.ip,
+        });
+
+        res.json(history);
+      } catch (error) {
+        console.error('[Documents] Error fetching issuer prescription history:', error);
+        res.status(500).json({ error: 'Failed to retrieve prescription history.' });
+      }
+    }
+  );
+  
   // ── Cancel Prescription & Restore Stock ─────────────────────────────────────
   router.patch(
     '/prescriptions/:id/cancel',
@@ -463,12 +565,15 @@ export default function documentRoutes(io) {
         }
 
         const cancellationNote = `\n[CANCELLED ${new Date().toISOString()}] ${reason || 'Cancelled by practitioner'}`;
+        // notes is AES-encrypted at rest: decrypt, append, re-encrypt. A raw SQL
+        // CONCAT corrupts the ciphertext and makes the notes undecryptable.
+        const existingNotes = rx.notes ? decrypt(rx.notes) : '';
         await connection.query(
           `UPDATE PRESCRIPTIONS
            SET status = 'cancelled',
-               notes = CONCAT(COALESCE(notes, ''), ?)
+               notes = ?
            WHERE prescription_id = ?`,
-          [cancellationNote, prescriptionId]
+          [encrypt(existingNotes + cancellationNote), prescriptionId]
         );
 
         // ── Trace & restore deducted stock batches ───────────────────────────
@@ -564,12 +669,15 @@ export default function documentRoutes(io) {
   // 2. MEDICAL CLEARANCES
   // =============================================================================
 
-  router.post('/clearances', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE'), async (req, res) => {
-    const { user_id, purpose, expires_at, remarks } = req.body;
+  router.post('/clearances', authenticateToken, requireRoles('DOCTOR', 'DENTIST'), async (req, res) => {
+    const { user_id, purpose, expires_at, remarks, appointment_id } = req.body;
     const issuerId = req.user.user_id;
 
     if (!user_id || !purpose) {
       return res.status(400).json({ error: 'user_id and purpose are required.' });
+    }
+    if (!remarks || !String(remarks).trim()) {
+      return res.status(400).json({ error: 'Clinical remarks are required before a clearance can be signed.' });
     }
 
     const connection = await pool.getConnection();
@@ -577,19 +685,30 @@ export default function documentRoutes(io) {
     try {
       await connection.beginTransaction();
 
+      // Re-verify signer, recipient and expiry against the database
+      const signer = await assertValidSigner(connection, issuerId);
+      await assertValidPatient(connection, user_id, issuerId);
+      await assertAppointmentInQueue(connection, appointment_id, user_id, issuerId);
+      const expDate = resolveExpiryDate(expires_at);
+      const [[sg]] = await connection.query(
+        'SELECT signature_s3_key, signature_sha256 FROM STAFF_PROFILES WHERE user_id = ?',
+        [issuerId]
+      );
+
       const clearanceUuid = crypto.randomUUID();
       const token = `CLR.${clearanceUuid}.${Date.now()}`;
 
       const signatureMetadata = {
         signer_user_id: issuerId,
-        signer_role: req.user.roles[0],
+        signer_role: signer.role,
+        signer_license_no: signer.license_no,
         signed_at: new Date().toISOString(),
         algorithm: 'SHA-256',
         document_sha256: crypto.createHash('sha256').update(`${user_id}:${purpose}:${token}`).digest('hex'),
-        clinical_remarks: remarks || 'Physically fit to undergo university practicum requirements.',
+        clinical_remarks: String(remarks).trim(),
+        signature_s3_key: sg?.signature_s3_key || null,
+        signature_sha256: sg?.signature_sha256 || null,
       };
-
-      const expDate = expires_at || new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
       const [insertResult] = await connection.query(
         `INSERT INTO MEDICAL_CLEARANCES 
@@ -633,10 +752,14 @@ export default function documentRoutes(io) {
         message: 'Medical clearance issued successfully.',
         clearanceId,
         qrToken: token,
+        signer: signer.display,
         pdfAvailable: Boolean(pdfKey),
       });
     } catch (error) {
       await connection.rollback();
+      if (error instanceof SignerError) {
+        return res.status(error.status).json({ error: error.message, code: error.code });
+      }
       console.error('Clearance Issuance Error:', error);
       res.status(500).json({ error: 'Failed to issue medical clearance.' });
     } finally {
@@ -652,7 +775,7 @@ export default function documentRoutes(io) {
         `SELECT mc.clearance_id, mc.purpose, mc.status, mc.issued_at, mc.expires_at,
                 mc.qr_token, mc.signature_metadata, mc.pdf_s3_key,
                 doc.first_name AS doctor_first_name, doc.last_name AS doctor_last_name,
-                COALESCE(sp.license_no, 'PRC-VERIFIED') AS doctor_license,
+                COALESCE(sp.license_no, 'Not on file') AS doctor_license,
                 COALESCE(sp.specialty, 'Infirmary Physician') AS doctor_specialty
          FROM MEDICAL_CLEARANCES mc
          JOIN USERS doc ON mc.issued_by = doc.user_id
@@ -668,6 +791,66 @@ export default function documentRoutes(io) {
       res.status(500).json({ error: 'Failed to retrieve medical clearances.' });
     }
   });
+  
+  // GET /api/documents/clearances/patient/:patientId
+  // Clearances for one patient, limited to those issued by the logged-in
+  // doctor/dentist. The issuer comes from the JWT, never from the request.
+  router.get(
+    '/clearances/patient/:patientId',
+    authenticateToken,
+    requireRoles('DOCTOR', 'DENTIST'),
+    async (req, res) => {
+      const patientId = Number(req.params.patientId);
+      if (!Number.isInteger(patientId) || patientId <= 0) {
+        return res.status(400).json({ error: 'A valid patient id is required.' });
+      }
+
+      try {
+        const [rows] = await pool.query(
+          `SELECT clearance_id, purpose, status, issued_at, expires_at,
+                  signature_metadata, pdf_s3_key
+           FROM MEDICAL_CLEARANCES
+           WHERE user_id = ?
+             AND issued_by = ?
+             AND deleted_at IS NULL
+           ORDER BY issued_at DESC`,
+          [patientId, req.user.user_id]
+        );
+
+        const history = rows.map((row) => {
+          const meta =
+            typeof row.signature_metadata === 'string'
+              ? JSON.parse(row.signature_metadata)
+              : row.signature_metadata || {};
+          return {
+            clearance_id: row.clearance_id,
+            purpose: row.purpose,
+            status: row.status,
+            issued_at: row.issued_at,
+            expires_at: row.expires_at,
+            remarks: meta.clinical_remarks || null,
+            revoked_at: meta.revoked_at || null,
+            revocation_reason: meta.revocation_reason || null,
+            pdfAvailable: Boolean(row.pdf_s3_key),
+          };
+        });
+
+        logPhiAccess({
+          viewerUserId: req.user.user_id,
+          patientUserId: patientId,
+          table: 'MEDICAL_CLEARANCES',
+          recordId: patientId,
+          purpose: 'Clearance history review (issuer only)',
+          ipAddress: req.ip,
+        });
+
+        res.json(history);
+      } catch (error) {
+        console.error('[Documents] Error fetching issuer clearance history:', error);
+        res.status(500).json({ error: 'Failed to retrieve clearance history.' });
+      }
+    }
+  );
 
   router.patch(
     '/clearances/:id/revoke',
@@ -883,8 +1066,8 @@ export default function documentRoutes(io) {
         const c = clearances[0];
         const isExpired = new Date(c.expires_at) < new Date();
         const isRevoked = c.status === 'revoked';
-        const isValid = !isExpired && !isRevoked && c.status === 'approved';
         const metadata = parseMetadata(c.signature_metadata);
+        const isValid = !isExpired && !isRevoked && c.status === 'approved' && isQualifiedSigner(metadata.signer_role);
 
         if (acceptsHtml) {
           const verifyHtml = getVerifyHtmlPath();
@@ -902,7 +1085,7 @@ export default function documentRoutes(io) {
           patient: maskPatientName(c.patient_first_name, c.patient_last_name),
           studentNo: 'N/A',     // placeholder so existing verify.html does not break
           course: 'N/A',        // placeholder so existing verify.html does not break
-          issuedBy: `Dr. ${c.doc_first_name} ${c.doc_last_name} (${c.doc_license || 'PRC Verified'})`,
+          issuedBy: formatIssuedBy(c.doc_first_name, c.doc_last_name, c.doc_license, metadata.signer_role),
           issuedAt: c.issued_at,
           expiresAt: c.expires_at,
           metadata: pickPublicSignature(metadata),
@@ -942,7 +1125,7 @@ export default function documentRoutes(io) {
           patient: maskPatientName(p.patient_first_name, p.patient_last_name),
           studentNo: 'N/A',   // placeholder so existing verify.html does not break
           course: 'N/A',      // placeholder so existing verify.html does not break
-          issuedBy: `Dr. ${p.doc_first_name} ${p.doc_last_name} (${p.doc_license || 'PRC Verified'})`,
+          issuedBy: formatIssuedBy(p.doc_first_name, p.doc_last_name, p.doc_license, parseMetadata(p.signature_metadata).signer_role),
           issuedAt: p.issued_at,
           notes: null,
           items: [],
@@ -1036,7 +1219,7 @@ export default function documentRoutes(io) {
           const metadata = parseMetadata(c.signature_metadata);
           const isExpired = new Date(c.expires_at) < new Date();
           const isRevoked = c.status === 'revoked';
-          const isValid = !isExpired && !isRevoked && c.status === 'approved';
+          const isValid = !isExpired && !isRevoked && c.status === 'approved' && isQualifiedSigner(metadata.signer_role);
 
           logPhiAccess({
             viewerUserId: req.user.user_id,
@@ -1057,7 +1240,7 @@ export default function documentRoutes(io) {
             patient: `${c.patient_first_name} ${c.patient_last_name}`,
             studentNo: c.student_no || 'N/A',
             course: c.course || 'N/A',
-            issuedBy: `Dr. ${c.doc_first_name} ${c.doc_last_name} (${c.doc_license || 'PRC Verified'})`,
+            issuedBy: formatIssuedBy(c.doc_first_name, c.doc_last_name, c.doc_license, metadata.signer_role),
             issuedAt: c.issued_at,
             expiresAt: c.expires_at,
             metadata,
@@ -1111,7 +1294,7 @@ export default function documentRoutes(io) {
             patient: `${p.patient_first_name} ${p.patient_last_name}`,
             studentNo: p.student_no || 'N/A',
             course: p.course || 'N/A',
-            issuedBy: `Dr. ${p.doc_first_name} ${p.doc_last_name} (${p.doc_license || 'PRC Verified'})`,
+            issuedBy: formatIssuedBy(p.doc_first_name, p.doc_last_name, p.doc_license, parseMetadata(p.signature_metadata).signer_role),
             issuedAt: p.issued_at,
             notes: decrypt(p.notes),
             items: items.map((it) => ({ ...it, instructions: decrypt(it.instructions) })),
@@ -1317,9 +1500,11 @@ export default function documentRoutes(io) {
 
       const roles = req.user.roles || [];
       const isOwner = Number(req.user.user_id) === Number(rx.patient_user_id);
-      const isStaff = roles.some((r) => ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'].includes(r));
+      const isIssuer = Number(req.user.user_id) === Number(rx.doctor_user_id);
+      const isAdmin = roles.includes('ADMIN');
 
-      if (!isOwner && !isStaff) {
+      // Only the patient, the doctor/dentist who issued it, or an admin.
+      if (!isOwner && !isIssuer && !isAdmin) {
         return res.status(403).json({ error: 'Not authorized to access this document.' });
       }
 
@@ -1362,7 +1547,7 @@ export default function documentRoutes(io) {
 
     try {
       const [rows] = await pool.query(
-        `SELECT clearance_id, user_id, pdf_s3_key, status
+        `SELECT clearance_id, user_id, issued_by, pdf_s3_key, status
          FROM MEDICAL_CLEARANCES
          WHERE clearance_id = ? AND deleted_at IS NULL`,
         [clearanceId]
@@ -1373,9 +1558,11 @@ export default function documentRoutes(io) {
 
       const roles = req.user.roles || [];
       const isOwner = Number(req.user.user_id) === Number(clr.user_id);
-      const isStaff = roles.some((r) => ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'].includes(r));
+      const isIssuer = Number(req.user.user_id) === Number(clr.issued_by);
+      const isAdmin = roles.includes('ADMIN');
 
-      if (!isOwner && !isStaff) {
+      // Only the patient, the doctor/dentist who issued it, or an admin.
+      if (!isOwner && !isIssuer && !isAdmin) {
         return res.status(403).json({ error: 'Not authorized to access this document.' });
       }
 

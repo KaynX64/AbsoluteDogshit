@@ -21,6 +21,7 @@ interface MedicineMaster {
 
 interface PrescriptionGeneratorProps {
   patientUserId: number;
+  appointmentId?: number;
   verifiedPatient: {
     first_name: string;
     last_name: string;
@@ -209,7 +210,7 @@ function FormularySelect({
 
 export default function PrescriptionGenerator({
   patientUserId,
-  verifiedPatient,
+  appointmentId,
   initialNotes,
   isArchived = false,
   onPrescriptionIssued,
@@ -370,6 +371,7 @@ export default function PrescriptionGenerator({
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           patient_user_id: patientUserId,
+          appointment_id: appointmentId,
           notes: doctorNotes,
           items: [
             {
@@ -407,79 +409,6 @@ export default function PrescriptionGenerator({
         onPrescriptionIssued({ prescriptionId, qrToken: realQrToken, emrId });
       }
 
-      const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(realQrToken)}`;
-      const htmlContent = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <title>Prescription #${prescriptionId}</title>
-            <style>
-              body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 40px; color: #1e293b; max-width: 800px; margin: 0 auto; }
-              .header { text-align: center; border-bottom: 2px solid #0f766e; padding-bottom: 12px; }
-              .header h1 { margin: 0; color: #0f766e; font-size: 20px; }
-              .header p { margin: 4px 0 0 0; font-size: 13px; color: #64748b; }
-              .patient-box { margin-top: 20px; padding: 14px; background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 6px; font-size: 13px; line-height: 1.6; }
-              .rx-symbol { font-size: 42px; font-weight: 900; color: #0f766e; margin: 16px 0 8px 0; }
-              .med-item { margin-bottom: 14px; padding: 12px; background: #f8fafc; border-left: 4px solid #0f766e; border-radius: 4px; }
-              .med-name { font-size: 15px; font-weight: bold; color: #0f172a; }
-              .med-instructions { font-style: italic; color: #334155; margin-top: 4px; font-size: 13px; }
-              .verification-panel { margin-top: 30px; display: flex; align-items: center; gap: 20px; border: 1px dashed #cbd5e1; padding: 16px; border-radius: 6px; }
-              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; font-size: 12px; }
-              .sig-line { border-top: 1px solid #000; width: 220px; text-align: center; font-weight: bold; padding-top: 4px; }
-            </style>
-          </head>
-          <body>
-            <div class="header">
-              <h1>PANGASINAN STATE UNIVERSITY INFIRMARY</h1>
-              <p>Lingayen Campus Medical Services • Republic Act No. 10173 Verified E-Prescription</p>
-            </div>
-            <div class="patient-box">
-              <b>Patient:</b> ${verifiedPatient.first_name} ${verifiedPatient.last_name} &nbsp;|&nbsp;
-              <b>Student No:</b> ${verifiedPatient.student_no || 'N/A'}<br/>
-              <b>Course:</b> ${verifiedPatient.course || 'N/A'} &nbsp;|&nbsp;
-              <b>Allergies:</b> <span style="color:red; font-weight:bold;">${verifiedPatient.allergies || 'None recorded'}</span>
-            </div>
-            <div class="rx-symbol">℞</div>
-            <div class="med-item">
-              <div class="med-name">${rxMedName} - ${rxDosage}</div>
-              <div class="med-instructions">Sig: ${rxInstructions} • ${rxFrequency}</div>
-              <div style="margin-top: 4px; font-size: 12px;">Duration: <b>${rxDurationDays} days</b> &nbsp;|&nbsp; Quantity Dispensed: <b>${rxQuantity} pcs</b></div>
-            </div>
-            ${doctorNotes ? `<p style="font-size: 13px; color: #475569;"><b>Physician Notes:</b> ${doctorNotes}</p>` : ''}
-            <div class="verification-panel">
-              <img src="${qrImageUrl}" width="110" height="110" alt="Rx QR Verification" />
-              <div>
-                <b style="color: #0f766e;">Digital Prescription Verification</b>
-                <p style="margin: 4px 0; font-size: 11px; color: #64748b;">
-                  Scan using Valetudo mobile scanner or infirmary terminal to confirm valid issuance.
-                </p>
-                <code style="font-size: 10px; background: #eee; padding: 2px 6px; border-radius: 4px;">${realQrToken}</code>
-              </div>
-            </div>
-            <div class="footer">
-              <div>
-                <p>Issued: ${new Date().toLocaleString()}</p>
-                <p>Prescription #${prescriptionId}</p>
-              </div>
-              <div class="sig-line">
-                Attending Campus Physician<br/>
-                <small>PRC License Verified E-Signature</small>
-              </div>
-            </div>
-          </body>
-        </html>
-      `;
-      if (window.electronAPI?.printDocument) {
-        await window.electronAPI.printDocument({ htmlContent });
-      } else {
-        const printWin = window.open('', '_blank');
-        if (printWin) {
-          printWin.document.write(htmlContent);
-          printWin.document.close();
-          printWin.focus();
-          printWin.print();
-        }
-      }
     } catch (err: any) {
       if (onPrescriptionError) {
         onPrescriptionError('❌ Error issuing prescription: ' + err.message);

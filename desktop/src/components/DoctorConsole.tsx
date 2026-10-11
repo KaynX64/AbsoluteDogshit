@@ -6,6 +6,7 @@ import AnalyticsDashboard from './AnalyticsDashboard';
 import { queueOfflineMutation } from '../services/offlineSync';
 import { T, btnPrimary, btnGhost, inputStyle } from '../theme';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
+import SignatureEnrollment from './SignatureEnrollment';
 
 /* ── ODONTOGRAM TYPES (declared before use) ─────────────────── */
 export type ToothCondition =
@@ -159,6 +160,7 @@ export default function DoctorConsole({
 }: DoctorConsoleProps = {}) {
   const [internalView] = useState<DoctorViewMode>('active');
   const viewMode = controlledView ?? internalView;
+  const [showSignature, setShowSignature] = useState(false);
 
   /* Safe dentist detection: prop first, then JWT fallback */
   const isDentist = currentRole
@@ -242,6 +244,20 @@ export default function DoctorConsole({
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [patientHistory, setPatientHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  
+  /* ── Prescription history modal (issuer-only) ──────────────── */
+  const [showRxHistoryModal, setShowRxHistoryModal] = useState(false);
+  const [rxHistory, setRxHistory] = useState<any[]>([]);
+  const [loadingRxHistory, setLoadingRxHistory] = useState(false);
+  const [rxHistoryPatientName, setRxHistoryPatientName] = useState('');
+  const [rxHistoryError, setRxHistoryError] = useState<string | null>(null);
+
+  /* ── Clearance history modal (issuer-only) ─────────────────── */
+  const [showClrHistoryModal, setShowClrHistoryModal] = useState(false);
+  const [clrHistory, setClrHistory] = useState<any[]>([]);
+  const [loadingClrHistory, setLoadingClrHistory] = useState(false);
+  const [clrHistoryPatientName, setClrHistoryPatientName] = useState('');
+  const [clrHistoryError, setClrHistoryError] = useState<string | null>(null);
 
   /* ── Archive (patient directory) state ────────────────────── */
   const [patientSearchQuery, setPatientSearchQuery] = useState('');
@@ -528,7 +544,7 @@ export default function DoctorConsole({
 
   const handleFinishConsultation = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedApp) return;
+    if (!selectedApp || isBookingMode) return;
     if (!diagnosis.trim()) {
       setFeedbackMsg({
         text: '⚠️ Please enter a clinical diagnosis before finalizing.',
@@ -626,6 +642,16 @@ export default function DoctorConsole({
         type: 'success',
       });
     } catch (err: any) {
+      /* Only a real network failure (fetch TypeError) is queued offline.
+         Server rejections must be shown, not silently queued. */
+      if (!(err instanceof TypeError)) {
+        setFeedbackMsg({
+          text: err.message || 'Failed to complete encounter.',
+          type: 'error',
+        });
+        return;
+      }
+      
       queueOfflineMutation({
         table_name: 'EMR_RECORDS',
         record_uuid: crypto.randomUUID(),
@@ -677,6 +703,63 @@ const handleViewPatientHistory = async () => {
       console.error('History fetch error:', err);
     } finally {
       setLoadingHistory(false);
+    }
+  };
+
+  /* ═══════════════════════════════════════════════════════════ */
+  /* PRESCRIPTION HISTORY (issuer-only)                          */
+  /* ═══════════════════════════════════════════════════════════ */
+
+  const openPrescriptionHistory = async (patientId: number, patientName: string) => {
+    setRxHistoryPatientName(patientName);
+    setRxHistory([]);
+    setRxHistoryError(null);
+    setShowRxHistoryModal(true);
+    setLoadingRxHistory(true);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/documents/prescriptions/patient/${patientId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !Array.isArray(data)) {
+        throw new Error((data && data.error) || `HTTP ${res.status}`);
+      }
+      setRxHistory(data);
+    } catch (err: any) {
+      setRxHistoryError(
+        '❌ Could not load prescription history: ' + (err?.message || 'Network error')
+      );
+    } finally {
+      setLoadingRxHistory(false);
+    }
+  };
+
+  
+  const openClearanceHistory = async (patientId: number, patientName: string) => {
+    setClrHistoryPatientName(patientName);
+    setClrHistory([]);
+    setClrHistoryError(null);
+    setShowClrHistoryModal(true);
+    setLoadingClrHistory(true);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/documents/clearances/patient/${patientId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !Array.isArray(data)) {
+        throw new Error((data && data.error) || `HTTP ${res.status}`);
+      }
+      setClrHistory(data);
+    } catch (err: any) {
+      setClrHistoryError(
+        '❌ Could not load clearance history: ' + (err?.message || 'Network error')
+      );
+    } finally {
+      setLoadingClrHistory(false);
     }
   };
 
@@ -759,7 +842,7 @@ const loadPatientTimeline = async (patient: any) => {
   /* ═══════════════════════════════════════════════════════════ */
 
   const openImmunizationModal = async () => {
-    if (!selectedApp) return;
+    if (!selectedApp || isBookingMode) return;
     setShowImmunizationModal(true);
     setPatientImmunizations([]);
     setNewImmunizations([]);
@@ -858,7 +941,10 @@ const loadPatientTimeline = async (patient: any) => {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ immunizations: mergedList }),
+          body: JSON.stringify({
+            immunizations: mergedList,
+            appointment_id: selectedApp.appointment_id,
+          }),
         }
       );
       const data = await res.json();
@@ -883,7 +969,8 @@ const loadPatientTimeline = async (patient: any) => {
 
   const handleDownloadPdf = async (
     kind: 'prescriptions' | 'clearances',
-    id: number
+    id: number,
+    onError?: (message: string) => void
   ) => {
     const token = localStorage.getItem('valetudo_token');
     try {
@@ -893,10 +980,9 @@ const loadPatientTimeline = async (patient: any) => {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        setFeedbackMsg({
-          text: '❌ PDF download failed: ' + (err.error || `HTTP ${res.status}`),
-          type: 'error',
-        });
+        const message = '❌ PDF download failed: ' + (err.error || `HTTP ${res.status}`);
+        if (onError) onError(message);
+        else setFeedbackMsg({ text: message, type: 'error' });
         return;
       }
 
@@ -915,10 +1001,41 @@ const loadPatientTimeline = async (patient: any) => {
 
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (err: any) {
-      setFeedbackMsg({
-        text: '❌ Network error fetching PDF: ' + err.message,
-        type: 'error',
+      const message = '❌ Network error fetching PDF: ' + err.message;
+      if (onError) onError(message);
+      else setFeedbackMsg({ text: message, type: 'error' });
+    }
+  };
+
+  
+  /* Opens the server-generated PDF (same file as "Download PDF") in the preview window */
+  const openIssuedPdf = async (
+    kind: 'prescriptions' | 'clearances',
+    id: number
+  ): Promise<boolean> => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/documents/${kind}/${id}/pdf`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const blob = new Blob([await res.blob()], { type: 'application/pdf' });
+      const objectUrl = URL.createObjectURL(blob);
+      const fileName =
+        kind === 'prescriptions' ? `prescription-${id}.pdf` : `clearance-${id}.pdf`;
+      setPreviewModal((prev) => {
+        if (prev?.url) URL.revokeObjectURL(prev.url);
+        return { url: objectUrl, fileName, mimeType: 'application/pdf' };
+      });
+      return true;
+    } catch (err: any) {
+      alert(
+        `Issued successfully, but the PDF could not be opened (${err.message}). Use the Download PDF button.`
+      );
+      return false;
     }
   };
 
@@ -927,7 +1044,7 @@ const loadPatientTimeline = async (patient: any) => {
   /* ═══════════════════════════════════════════════════════════ */
 
   const handlePrintClearance = async () => {
-    if (!selectedApp) return;
+    if (!selectedApp || isBookingMode) return;
     setIsIssuingClearance(true);
     const token = localStorage.getItem('valetudo_token');
     try {
@@ -939,6 +1056,7 @@ const loadPatientTimeline = async (patient: any) => {
         },
         body: JSON.stringify({
           user_id: selectedApp.patient_id,
+          appointment_id: selectedApp.appointment_id,
           purpose: clearancePurpose,
           remarks: clearanceRemarks,
           expires_at: clearanceExpiryDate,
@@ -947,84 +1065,8 @@ const loadPatientTimeline = async (patient: any) => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to issue medical clearance.');
 
-      const realQrToken = data.qrToken;
       const clearanceId = data.clearanceId;
-      const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
-        realQrToken
-      )}`;
-
-      const htmlContent = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <title>Medical Clearance #${clearanceId}</title>
-            <style>
-              body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 40px; color: #1e293b; max-width: 800px; margin: 0 auto; }
-              .header { text-align: center; border-bottom: 2px solid #0f766e; padding-bottom: 12px; }
-              .header h1 { margin: 0; color: #0f766e; font-size: 20px; }
-              .title { text-align: center; margin: 26px 0 16px; font-size: 18px; font-weight: bold; text-decoration: underline; }
-              .patient-box { margin: 16px 0; padding: 14px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; line-height: 1.6; }
-              .body-text { font-size: 14px; line-height: 1.8; margin-top: 18px; }
-              .verification-panel { margin-top: 26px; display: flex; align-items: center; gap: 20px; border: 1px solid #99f6e4; background: #f0fdfa; padding: 16px; border-radius: 6px; }
-              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; font-size: 12px; }
-              .sig-line { border-top: 1px solid #000; width: 220px; text-align: center; font-weight: bold; padding-top: 4px; }
-            </style>
-          </head>
-          <body>
-            <div class="header">
-              <h1>PANGASINAN STATE UNIVERSITY INFIRMARY</h1>
-              <p>Lingayen Campus Medical Services • Republic Act No. 10173 Verified E-Clearance</p>
-            </div>
-            <div class="title">OFFICIAL MEDICAL CLEARANCE CERTIFICATE</div>
-            <div class="patient-box">
-              <b>Student Name:</b> ${selectedApp.first_name} ${selectedApp.last_name} &nbsp;|&nbsp; <b>ID No:</b> ${selectedApp.student_no || 'N/A'}<br/>
-              <b>Course / Department:</b> ${selectedApp.course || 'PSU Student'}<br/>
-              <b>Vital Signs:</b> Height: ${height || selectedApp.height || '162'} cm &nbsp;|&nbsp; Weight: ${weight || selectedApp.weight || '54'} kg &nbsp;|&nbsp; Blood Type: ${selectedApp.blood_type || 'O+'}
-            </div>
-            <p class="body-text">
-              To Whom It May Concern:<br/><br/>
-              This certifies that the student named above has undergone clinical evaluation at the PSU Lingayen Campus Infirmary on <b>${new Date().toLocaleDateString()}</b> and is determined to be:
-              <br/><br/>
-              <b>Purpose:</b> ${clearancePurpose}<br/>
-              <b>Valid Until:</b> <span style="color: #0f766e; font-weight: bold;">${new Date(clearanceExpiryDate).toLocaleDateString()}</span><br/>
-              <b>Clinical Assessment / Remarks:</b> ${clearanceRemarks}
-            </p>
-            <div class="verification-panel">
-              <img src="${qrImageUrl}" width="110" height="110" alt="Clearance QR Verification" />
-              <div>
-                <b style="color: #0f766e;">Republic Act No. 10173 Cryptographic Seal</b>
-                <p style="margin: 4px 0; font-size: 11px; color: #64748b;">
-                  Verifiable by university deans, athletic screening committees, or host training establishments.
-                </p>
-                <code style="font-size: 10px; background: #fff; padding: 2px 6px; border: 1px solid #cbd5e1; border-radius: 4px;">${realQrToken}</code>
-              </div>
-            </div>
-            <div class="footer">
-              <div>
-                <p>Issued Date: ${new Date().toLocaleDateString()}</p>
-                <p>Expiration Date: ${new Date(clearanceExpiryDate).toLocaleDateString()}</p>
-                <p>Clearance Ref: CLR-${clearanceId}</p>
-              </div>
-              <div class="sig-line">
-                Attending Campus Physician<br/>
-                <small>PRC License Verified E-Signature</small>
-              </div>
-            </div>
-          </body>
-        </html>
-      `;
-
-      if (window.electronAPI?.printDocument) {
-        await window.electronAPI.printDocument({ htmlContent });
-      } else {
-        const printWin = window.open('', '_blank');
-        if (printWin) {
-          printWin.document.write(htmlContent);
-          printWin.document.close();
-          printWin.focus();
-          printWin.print();
-        }
-      }
+      await openIssuedPdf('clearances', clearanceId);
 
       setFeedbackMsg({
         text: `✅ Clearance #${clearanceId} (Expires: ${clearanceExpiryDate}) issued!`,
@@ -1050,6 +1092,11 @@ const loadPatientTimeline = async (patient: any) => {
     viewMode === 'history' ||
     selectedApp?.status === 'completed' ||
     selectedApp?.status === 'cancelled';
+
+      /* Bookings (not yet triaged) are VIEW-ONLY. Documents and encounters
+     may only be created from the QUEUE. */
+  const isBookingMode =
+    viewMode === 'scheduled' || selectedApp?.status === 'scheduled';
 
   const isDentalVisit =
     isDentist &&
@@ -1085,21 +1132,38 @@ const loadPatientTimeline = async (patient: any) => {
     <div style={{ width: '100%' }}>
       {/* ── Page header ─────────────────────────────────────── */}
       {viewMode !== 'analytics' && (
-        <div style={{ marginBottom: 20 }}>
-          <h1
-            style={{
-              fontSize: 28,
-              fontWeight: 800,
-              letterSpacing: -0.6,
-              color: T.text,
-              margin: 0,
-            }}
+        <div
+          style={{
+            marginBottom: 20,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            gap: 16,
+          }}
+        >
+          <div>
+            <h1
+              style={{
+                fontSize: 28,
+                fontWeight: 800,
+                letterSpacing: -0.6,
+                color: T.text,
+                margin: 0,
+              }}
+            >
+              {headerTitle[viewMode]}
+            </h1>
+            <p style={{ fontSize: 13.5, color: T.textSub, margin: '6px 0 0' }}>
+              {headerSub[viewMode]}
+            </p>
+          </div>
+          <button
+            type="button"
+            style={btnGhost}
+            onClick={() => setShowSignature(true)}
           >
-            {headerTitle[viewMode]}
-          </h1>
-          <p style={{ fontSize: 13.5, color: T.textSub, margin: '6px 0 0' }}>
-            {headerSub[viewMode]}
-          </p>
+            ✍ My signature
+          </button>
         </div>
       )}
 
@@ -1402,6 +1466,43 @@ const loadPatientTimeline = async (patient: any) => {
                         {selectedDirectoryPatient.allergies}
                       </span>
                     </p>
+                                        <button
+                      type="button"
+                      onClick={() =>
+                        openPrescriptionHistory(
+                          selectedDirectoryPatient.user_id,
+                          `${selectedDirectoryPatient.first_name} ${selectedDirectoryPatient.last_name}`
+                        )
+                      }
+                      style={{
+                        ...btnGhost,
+                        marginTop: 10,
+                        color: T.primary,
+                        borderColor: T.primaryTint,
+                      }}
+                      title="Prescriptions you issued to this patient"
+                    >
+                      💊 My prescriptions
+                    </button>
+                                        <button
+                      type="button"
+                      onClick={() =>
+                        openClearanceHistory(
+                          selectedDirectoryPatient.user_id,
+                          `${selectedDirectoryPatient.first_name} ${selectedDirectoryPatient.last_name}`
+                        )
+                      }
+                      style={{
+                        ...btnGhost,
+                        marginTop: 10,
+                        marginLeft: 8,
+                        color: T.primary,
+                        borderColor: T.primaryTint,
+                      }}
+                      title="Clearances you issued to this patient"
+                    >
+                      📋 My clearances
+                    </button>
                   </div>
 
                   <div
@@ -1725,21 +1826,60 @@ const loadPatientTimeline = async (patient: any) => {
                 >
                   📜 Past EMR history
                 </button>
-
+                
                 <button
                   type="button"
-                  onClick={openImmunizationModal}
+                  onClick={() =>
+                    openPrescriptionHistory(
+                      selectedApp.patient_id,
+                      `${selectedApp.first_name} ${selectedApp.last_name}`
+                    )
+                  }
                   style={{
                     ...btnGhost,
                     color: T.primary,
                     borderColor: T.primaryTint,
                   }}
-                  title="View and append immunization records"
+                  title="Prescriptions you issued to this patient"
                 >
-                  💉 Immunizations
+                  💊 My prescriptions
                 </button>
 
-                {isDentist && (
+                
+                <button
+                  type="button"
+                  onClick={() =>
+                    openClearanceHistory(
+                      selectedApp.patient_id,
+                      `${selectedApp.first_name} ${selectedApp.last_name}`
+                    )
+                  }
+                  style={{
+                    ...btnGhost,
+                    color: T.primary,
+                    borderColor: T.primaryTint,
+                  }}
+                  title="Clearances you issued to this patient"
+                >
+                  📋 My clearances
+                </button>
+
+                {!isBookingMode && (
+                  <button
+                    type="button"
+                    onClick={openImmunizationModal}
+                    style={{
+                      ...btnGhost,
+                      color: T.primary,
+                      borderColor: T.primaryTint,
+                    }}
+                    title="View and append immunization records"
+                  >
+                    💉 Immunizations
+                  </button>
+                )}
+
+                {isDentist && !isBookingMode && (
                   <button
                     type="button"
                     onClick={() => setForceShowDentalChart((prev) => !prev)}
@@ -1893,7 +2033,7 @@ const loadPatientTimeline = async (patient: any) => {
           )}
 
           {/* ── INTERACTIVE ODONTOGRAM ───────────────────────── */}
-          {selectedApp && isDentalVisit && (
+          {selectedApp && isDentalVisit && !isBookingMode && (
             <div
               style={{
                 background: T.surface,
@@ -2176,7 +2316,26 @@ const loadPatientTimeline = async (patient: any) => {
             </div>
           )}
 
-          {/* Two-column workspace */}
+          {/* Two-column workspace — QUEUE ONLY (bookings are view-only) */}
+          {isBookingMode ? (
+            <div
+              style={{
+                padding: '18px 22px',
+                background: T.warningSoft,
+                border: `1px solid ${T.border}`,
+                borderLeft: `5px solid ${T.warning}`,
+                borderRadius: T.radius.lg,
+                color: T.text,
+                fontSize: 13.5,
+                lineHeight: 1.6,
+              }}
+            >
+              <strong>🔒 View-only booking.</strong> Prescriptions, clearances and
+              encounter records can only be created from the{' '}
+              <strong>Consultation queue</strong> after the nurse has triaged the
+              patient.
+            </div>
+          ) : (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.15fr', gap: 20 }}>
             {/* LEFT: Document issuance */}
             <section
@@ -2304,6 +2463,7 @@ const loadPatientTimeline = async (patient: any) => {
                 <PrescriptionGenerator
                   key={selectedApp?.appointment_id}
                   patientUserId={selectedApp?.patient_id || 5}
+                  appointmentId={selectedApp?.appointment_id}
                   verifiedPatient={{
                     first_name: selectedApp?.first_name || 'Daniella',
                     last_name: selectedApp?.last_name || 'Movida',
@@ -2320,6 +2480,7 @@ const loadPatientTimeline = async (patient: any) => {
                       pdfKind: 'prescriptions',
                       pdfId: info.prescriptionId,
                     });
+                    void openIssuedPdf('prescriptions', info.prescriptionId);
                   }}
                   onPrescriptionError={(message) => {
                     setFeedbackMsg({ text: message, type: 'error' });
@@ -2814,9 +2975,399 @@ const loadPatientTimeline = async (patient: any) => {
               </form>
             </section>
           </div>
+          )}
         </>
       )}
 
+            {/* ── Prescription history modal (issuer-only) ─────────── */}
+      {showRxHistoryModal && (
+        <div className="modal-backdrop" onClick={() => setShowRxHistoryModal(false)}>
+          <div
+            className="modal-card"
+            style={{ maxWidth: 780 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                borderBottom: `1px solid ${T.border}`,
+                paddingBottom: 14,
+                marginBottom: 18,
+              }}
+            >
+              <div>
+                <h3
+                  style={{
+                    margin: 0,
+                    color: T.primary,
+                    fontSize: 17,
+                    fontWeight: 800,
+                  }}
+                >
+                  💊 Prescriptions you issued: {rxHistoryPatientName}
+                </h3>
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: T.textSub }}>
+                  Only prescriptions issued by you to this patient are shown.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRxHistoryModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: 20,
+                  cursor: 'pointer',
+                  color: T.textSub,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {rxHistoryError && (
+              <div
+                style={{
+                  background: T.dangerSoft,
+                  color: T.danger,
+                  border: `1px solid ${T.dangerBorder}`,
+                  borderRadius: T.radius.md,
+                  padding: '10px 14px',
+                  fontSize: 13,
+                  marginBottom: 14,
+                }}
+              >
+                {rxHistoryError}
+              </div>
+            )}
+
+            {loadingRxHistory ? (
+              <div
+                style={{
+                  padding: '40px 20px',
+                  textAlign: 'center',
+                  color: T.textSub,
+                }}
+              >
+                Loading prescriptions…
+              </div>
+            ) : rxHistory.length === 0 && !rxHistoryError ? (
+              <div
+                style={{
+                  padding: '40px 20px',
+                  textAlign: 'center',
+                  color: T.textMuted,
+                }}
+              >
+                You have not issued any prescriptions to this patient.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {rxHistory.map((rx) => {
+                  const tone =
+                    rx.status === 'active'
+                      ? { bg: T.successSoft, fg: T.success, bd: T.successBorder }
+                      : rx.status === 'cancelled'
+                      ? { bg: T.dangerSoft, fg: T.danger, bd: T.dangerBorder }
+                      : { bg: T.warningSoft, fg: T.warning, bd: T.warningBorder };
+                  return (
+                    <div
+                      key={rx.prescription_id}
+                      style={{
+                        border: `1px solid ${T.border}`,
+                        borderRadius: T.radius.md,
+                        padding: 16,
+                        background: T.sage50,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: 10,
+                        }}
+                      >
+                        <b style={{ color: T.primary, fontSize: 13.5 }}>
+                          {new Date(rx.issued_at).toLocaleString()}{' '}
+                          <span style={{ color: T.textSub, fontWeight: 600 }}>
+                            · Rx #{rx.prescription_id}
+                          </span>
+                        </b>
+                        <span
+                          style={{
+                            background: tone.bg,
+                            color: tone.fg,
+                            border: `1px solid ${tone.bd}`,
+                            borderRadius: 999,
+                            padding: '2px 10px',
+                            fontSize: 11,
+                            fontWeight: 800,
+                            textTransform: 'uppercase',
+                            letterSpacing: 0.6,
+                          }}
+                        >
+                          {rx.status}
+                        </span>
+                      </div>
+
+                      {rx.items.map((it: any) => (
+                        <div
+                          key={it.item_id}
+                          style={{
+                            fontSize: 13,
+                            marginBottom: 8,
+                            paddingBottom: 8,
+                            borderBottom: `1px dashed ${T.border}`,
+                          }}
+                        >
+                          <b>{it.medicine_name}</b>
+                          {it.generic_name ? ` (${it.generic_name})` : ''}
+                          <div style={{ color: T.textSub, marginTop: 2 }}>
+                            {it.dosage} · {it.frequency} · {it.route} · {it.duration_days}{' '}
+                            day(s) · qty {it.quantity_dispensed}
+                          </div>
+                          {it.instructions && (
+                            <div style={{ color: T.textSub, marginTop: 2 }}>
+                              <b>Instructions:</b> {it.instructions}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+
+                      {rx.notes && (
+                        <div
+                          style={{
+                            fontSize: 13,
+                            color: T.textSub,
+                            whiteSpace: 'pre-wrap',
+                            marginBottom: 10,
+                          }}
+                        >
+                          <b>Notes:</b> {rx.notes}
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleDownloadPdf(
+                            'prescriptions',
+                            rx.prescription_id,
+                            setRxHistoryError
+                          )
+                        }
+                        style={{
+                          ...btnGhost,
+                          color: T.info,
+                          borderColor: T.infoBorder,
+                        }}
+                      >
+                        📄 Download PDF
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      
+            {/* ── Clearance history modal (issuer-only) ────────────── */}
+      {showClrHistoryModal && (
+        <div className="modal-backdrop" onClick={() => setShowClrHistoryModal(false)}>
+          <div
+            className="modal-card"
+            style={{ maxWidth: 780 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                borderBottom: `1px solid ${T.border}`,
+                paddingBottom: 14,
+                marginBottom: 18,
+              }}
+            >
+              <div>
+                <h3
+                  style={{
+                    margin: 0,
+                    color: T.primary,
+                    fontSize: 17,
+                    fontWeight: 800,
+                  }}
+                >
+                  📋 Clearances you issued: {clrHistoryPatientName}
+                </h3>
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: T.textSub }}>
+                  Only clearances issued by you to this patient are shown.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowClrHistoryModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: 20,
+                  cursor: 'pointer',
+                  color: T.textSub,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {clrHistoryError && (
+              <div
+                style={{
+                  background: T.dangerSoft,
+                  color: T.danger,
+                  border: `1px solid ${T.dangerBorder}`,
+                  borderRadius: T.radius.md,
+                  padding: '10px 14px',
+                  fontSize: 13,
+                  marginBottom: 14,
+                }}
+              >
+                {clrHistoryError}
+              </div>
+            )}
+
+            {loadingClrHistory ? (
+              <div
+                style={{
+                  padding: '40px 20px',
+                  textAlign: 'center',
+                  color: T.textSub,
+                }}
+              >
+                Loading clearances…
+              </div>
+            ) : clrHistory.length === 0 && !clrHistoryError ? (
+              <div
+                style={{
+                  padding: '40px 20px',
+                  textAlign: 'center',
+                  color: T.textMuted,
+                }}
+              >
+                You have not issued any clearances to this patient.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {clrHistory.map((c) => {
+                  const isPastExpiry =
+                    c.expires_at &&
+                    new Date(c.expires_at).getTime() < new Date().setHours(0, 0, 0, 0);
+                  const shownStatus =
+                    c.status === 'approved' && isPastExpiry ? 'expired' : c.status;
+                  const tone =
+                    shownStatus === 'approved'
+                      ? { bg: T.successSoft, fg: T.success, bd: T.successBorder }
+                      : shownStatus === 'revoked' || shownStatus === 'rejected'
+                      ? { bg: T.dangerSoft, fg: T.danger, bd: T.dangerBorder }
+                      : { bg: T.warningSoft, fg: T.warning, bd: T.warningBorder };
+                  return (
+                    <div
+                      key={c.clearance_id}
+                      style={{
+                        border: `1px solid ${T.border}`,
+                        borderRadius: T.radius.md,
+                        padding: 16,
+                        background: T.sage50,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: 10,
+                        }}
+                      >
+                        <b style={{ color: T.primary, fontSize: 13.5 }}>
+                          {new Date(c.issued_at).toLocaleString()}{' '}
+                          <span style={{ color: T.textSub, fontWeight: 600 }}>
+                            · Clearance #{c.clearance_id}
+                          </span>
+                        </b>
+                        <span
+                          style={{
+                            background: tone.bg,
+                            color: tone.fg,
+                            border: `1px solid ${tone.bd}`,
+                            borderRadius: 999,
+                            padding: '2px 10px',
+                            fontSize: 11,
+                            fontWeight: 800,
+                            textTransform: 'uppercase',
+                            letterSpacing: 0.6,
+                          }}
+                        >
+                          {shownStatus}
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: 13, marginBottom: 6 }}>
+                        <b>{c.purpose}</b>
+                      </div>
+                      <div style={{ fontSize: 13, color: T.textSub, marginBottom: 6 }}>
+                        <b>Valid until:</b> {new Date(c.expires_at).toLocaleDateString()}
+                      </div>
+
+                      {c.remarks && (
+                        <div
+                          style={{
+                            fontSize: 13,
+                            color: T.textSub,
+                            whiteSpace: 'pre-wrap',
+                            marginBottom: 6,
+                          }}
+                        >
+                          <b>Remarks:</b> {c.remarks}
+                        </div>
+                      )}
+
+                      {c.status === 'revoked' && (
+                        <div style={{ fontSize: 13, color: T.danger, marginBottom: 6 }}>
+                          <b>Revoked</b>
+                          {c.revoked_at
+                            ? ` on ${new Date(c.revoked_at).toLocaleDateString()}`
+                            : ''}
+                          {c.revocation_reason ? `: ${c.revocation_reason}` : ''}
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleDownloadPdf('clearances', c.clearance_id, setClrHistoryError)
+                        }
+                        style={{
+                          ...btnGhost,
+                          marginTop: 6,
+                          color: T.info,
+                          borderColor: T.infoBorder,
+                        }}
+                      >
+                        📄 Download PDF
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      
       {/* ── EMR History modal ───────────────────────────────── */}
       {showHistoryModal && (
         <div className="modal-backdrop" onClick={() => setShowHistoryModal(false)}>
@@ -3552,6 +4103,35 @@ const loadPatientTimeline = async (patient: any) => {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+      
+      {/* ── My signature (enroll / renew) ───────────────────── */}
+      {showSignature && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15,30,23,0.45)',
+            display: 'grid',
+            placeItems: 'center',
+            zIndex: 1000,
+            padding: 16,
+            overflow: 'auto',
+          }}
+        >
+          <div style={{ width: '100%', maxWidth: 640 }}>
+            <div style={{ textAlign: 'right', marginBottom: 8 }}>
+              <button
+                type="button"
+                style={btnGhost}
+                onClick={() => setShowSignature(false)}
+              >
+                ✕ Close
+              </button>
+            </div>
+            <SignatureEnrollment />
           </div>
         </div>
       )}

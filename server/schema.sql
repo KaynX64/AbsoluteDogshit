@@ -119,6 +119,9 @@ CREATE TABLE `STAFF_PROFILES` (
   `license_no` VARCHAR(100) NULL,
   `specialty` VARCHAR(100) NULL,
   `department` VARCHAR(100) NOT NULL DEFAULT 'University Infirmary',
+  `signature_s3_key` VARCHAR(500) NULL,
+  `signature_sha256` CHAR(64) NULL,
+  `signature_updated_at` TIMESTAMP NULL DEFAULT NULL,
   CONSTRAINT `fk_staff_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 

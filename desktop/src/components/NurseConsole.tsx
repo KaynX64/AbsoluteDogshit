@@ -17,6 +17,22 @@ interface QueueItem {
   is_emergency?: number;
 }
 
+interface SosAlert {
+  alert_id: number;
+  first_name: string;
+  last_name: string;
+  phone?: string;
+  studentNo?: string;
+  course?: string;
+  blood_type?: string;
+  allergies?: string;
+  notes?: string;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+  status: string;
+  created_at: string;
+}
+
 interface ExpectedItem {
   appointment_id: number;
   patient_id: number;
@@ -70,6 +86,8 @@ export default function NurseConsole({
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [loadingQueue, setLoadingQueue] = useState(false);
   const [activeSosCount, setActiveSosCount] = useState<number>(0);
+  const [sosAlerts, setSosAlerts] = useState<SosAlert[]>([]);
+  const [sosBusyId, setSosBusyId] = useState<number | null>(null);
   const [noShowCount, setNoShowCount] = useState<number>(0);
 
   /* ── Expected arrivals state ─────────────────────────────── */
@@ -138,9 +156,50 @@ export default function NurseConsole({
       });
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data)) setActiveSosCount(data.length);
+        if (Array.isArray(data)) {
+          setSosAlerts(data);
+          setActiveSosCount(data.length);
+        }
       }
     } catch (_) {}
+  };
+
+
+  const updateSosStatus = async (
+    alertId: number,
+    status: 'acknowledged' | 'dispatched' | 'resolved' | 'false_alarm'
+  ) => {
+    if (
+      (status === 'resolved' || status === 'false_alarm') &&
+      !window.confirm(
+        status === 'resolved'
+          ? 'Mark this SOS as resolved and close it?'
+          : 'Mark this SOS as a false alarm and close it?'
+      )
+    ) {
+      return;
+    }
+    setSosBusyId(alertId);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/emergency/${alertId}/status`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        window.alert(err.error || 'Failed to update SOS alert.');
+      }
+    } catch (_) {
+      window.alert('Network error while updating the SOS alert.');
+    } finally {
+      setSosBusyId(null);
+      fetchActiveSosCount();
+    }
   };
 
   const fetchNoShowCount = async () => {
@@ -833,6 +892,177 @@ export default function NurseConsole({
         gap: 22,
       }}
     >
+    {/* ── ACTIVE SOS ALERTS (separate from the triage queue) ───── */}
+      {sosAlerts.length > 0 && (
+        <section
+          style={{
+            background: C.dangerSoft,
+            border: `1.5px solid ${C.dangerBorder}`,
+            borderRadius: 22,
+            padding: 22,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 14,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 24 }}>🚨</span>
+            <div>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: C.danger }}>
+                Active SOS alerts
+              </h3>
+              <p style={{ margin: '2px 0 0', fontSize: 12.5, color: C.textSub }}>
+                {sosAlerts.length} open · handled separately from the triage queue
+              </p>
+            </div>
+          </div>
+
+          {sosAlerts.map((a) => {
+            const busy = sosBusyId === a.alert_id;
+            const btn = (bg: string, fg: string, bd: string) =>
+              ({
+                padding: '8px 14px',
+                borderRadius: 999,
+                background: bg,
+                color: fg,
+                border: `1px solid ${bd}`,
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: busy ? 'not-allowed' : 'pointer',
+                opacity: busy ? 0.6 : 1,
+                fontFamily: 'inherit',
+              } as const);
+            const statusText =
+              a.status === 'triggered'
+                ? 'NEW'
+                : a.status === 'acknowledged'
+                ? 'ACKNOWLEDGED'
+                : 'DISPATCHED';
+            return (
+              <div
+                key={a.alert_id}
+                style={{
+                  background: C.surface,
+                  border: `1px solid ${C.dangerBorder}`,
+                  borderRadius: 16,
+                  padding: '14px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 10,
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <div style={{ fontSize: 15, fontWeight: 800, color: C.text }}>
+                    {a.first_name} {a.last_name}
+                    <span
+                      style={{
+                        marginLeft: 8,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: C.textSub,
+                      }}
+                    >
+                      {a.studentNo || ''} {a.course ? `· ${a.course}` : ''}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 11.5, color: C.textMuted }}>
+                      {new Date(a.created_at).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                    <span
+                      style={{
+                        padding: '3px 10px',
+                        borderRadius: 999,
+                        background: '#DC2626',
+                        color: '#FFFFFF',
+                        fontSize: 10,
+                        fontWeight: 800,
+                        letterSpacing: 0.3,
+                      }}
+                    >
+                      {statusText}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: 12.5, color: C.textSub, lineHeight: 1.6 }}>
+                  🩸 Blood: <strong>{a.blood_type || 'Unknown'}</strong> · ⚠️ Allergies:{' '}
+                  <strong>{a.allergies || 'None'}</strong>
+                  {a.phone ? <> · 📞 {a.phone}</> : null}
+                </div>
+                {a.notes && (
+                  <div style={{ fontSize: 12.5, color: C.text }}>📍 {a.notes}</div>
+                )}
+
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+                  {a.status === 'triggered' && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => updateSosStatus(a.alert_id, 'acknowledged')}
+                      style={btn('#DC2626', '#FFFFFF', '#DC2626')}
+                    >
+                      Acknowledge
+                    </button>
+                  )}
+                  {a.status !== 'dispatched' && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => updateSosStatus(a.alert_id, 'dispatched')}
+                      style={btn(C.surface, C.danger, C.dangerBorder)}
+                    >
+                      Mark dispatched
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => updateSosStatus(a.alert_id, 'resolved')}
+                    style={btn(C.primary, '#FFFFFF', C.primary)}
+                  >
+                    ✓ Resolved
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => updateSosStatus(a.alert_id, 'false_alarm')}
+                    style={btn(C.surface, C.textSub, C.border)}
+                  >
+                    False alarm
+                  </button>
+                  {a.latitude != null && a.longitude != null && (
+                    <a
+                      href={`https://www.google.com/maps?q=${a.latitude},${a.longitude}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        ...btn(C.surface, C.primary, C.border),
+                        textDecoration: 'none',
+                        display: 'inline-block',
+                      }}
+                    >
+                      🗺 Open map
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </section>
+      )}
+
       <div
         style={{
           display: 'grid',
@@ -874,30 +1104,27 @@ export default function NurseConsole({
                   width: 42,
                   height: 42,
                   borderRadius: 14,
-                  background: activeSosCount > 0 ? C.dangerSoft : C.primaryTint,
+                  background: C.primaryTint,
                   display: 'grid',
                   placeItems: 'center',
                   flexShrink: 0,
                 }}
               >
-                {activeSosCount > 0 ? (
-                  <span style={{ fontSize: 20 }}>🚨</span>
-                ) : (
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke={C.primary}
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    style={{ width: 20, height: 20 }}
-                  >
-                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                    <circle cx="9" cy="7" r="4" />
-                    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                  </svg>
-                )}
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke={C.primary}
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ width: 20, height: 20 }}
+                >
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
+
               </div>
               <div>
                 <h3
@@ -912,7 +1139,7 @@ export default function NurseConsole({
                   Live triage queue
                 </h3>
                 <p style={{ margin: '2px 0 0', fontSize: 12.5, color: C.textSub }}>
-                  {waitingCount} waiting today {activeSosCount > 0 ? `· 🚨 ${activeSosCount} active SOS` : ''}
+                  {waitingCount} waiting today
                 </p>
               </div>
             </div>

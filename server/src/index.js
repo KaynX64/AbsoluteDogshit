@@ -28,6 +28,7 @@ import syncRoutes from './routes/sync.js';
 import { startReminderScheduler } from './utils/reminderWorker.js';
 import { JWT_SECRET } from './utils/secrets.js';
 import interactionsRoutes from './routes/interactions.js';
+import signatureRoutes from './routes/signature.js';
 
 
 // Utilities (MinIO S3 & Redis)
@@ -140,6 +141,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/interactions', interactionsRoutes);
+app.use('/api/signature', signatureRoutes);
 
 // ── Lightweight liveness probe for the desktop ping monitor ──────
 // Intentionally unauthenticated and DB-free so it measures pure

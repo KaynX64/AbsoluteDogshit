@@ -20,6 +20,7 @@ import {
 } from '../config/appointmentRules.js';
 import { BOOKING_LIMIT } from '../config/limits.js';
 import { validateDentalChart } from '../utils/dentalValidator.js';
+import { SignerError, assertAppointmentInQueue } from '../utils/signatory.js';
 
 // Odontogram helpers
 function stripLegacyOdontogram(text) {
@@ -705,41 +706,27 @@ export default function appointmentRoutes(io) {
         return res.json(cachedQueue);
       }
 
-      // Feature 4: Left join sa active emergency alerts para umakyat sa top-priority (is_emergency = 1)
+      // Regular triage queue only. SOS alerts are NOT queue tickets: they are
+      // served by GET /api/emergency/active and shown in their own panel.
       const [rows] = await pool.query(
         `SELECT q.queue_id,
-                CASE 
-                  WHEN ea.alert_id IS NOT NULL AND ea.status IN ('triggered', 'acknowledged', 'dispatched')
-                  THEN '🚨 SOS'
-                  ELSE CONCAT('Q-', LPAD(q.queue_number, 2, '0'))
-                END AS ticket_no,
+                CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS ticket_no,
                 u.first_name, u.last_name,
                 COALESCE(sp.student_no, st.license_no, 'PSU Member') AS student_no,
-                CASE 
-                  WHEN ea.alert_id IS NOT NULL AND ea.status IN ('triggered', 'acknowledged', 'dispatched')
-                  THEN '🚨 CRITICAL EMERGENCY SOS'
-                  ELSE COALESCE(a.appointment_type, 'General Walk-in')
-                END AS visit_type,
+                COALESCE(a.appointment_type, 'General Walk-in') AS visit_type,
                 q.status,
                 DATE_FORMAT(q.checked_in_at, '%h:%i %p') AS arrival_time,
                 q.queue_number,
-                CASE 
-                  WHEN ea.alert_id IS NOT NULL AND ea.status IN ('triggered', 'acknowledged', 'dispatched') 
-                  THEN 1 
-                  ELSE 0 
-                END AS is_emergency
+                0 AS is_emergency
          FROM QUEUE q
          JOIN USERS u ON q.patient_user_id = u.user_id
          LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
          LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
          LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
          LEFT JOIN APPOINTMENTS a ON q.appointment_id = a.appointment_id
-         LEFT JOIN EMERGENCY_ALERTS ea ON ea.user_id = q.patient_user_id
-              AND ea.status IN ('triggered', 'acknowledged', 'dispatched')
-              AND DATE(ea.created_at) = CURDATE()
          WHERE q.queue_date = CURDATE()
            AND q.status IN ('waiting', 'in-consultation')
-         ORDER BY is_emergency DESC, q.status = 'in-consultation' DESC, q.queue_number ASC`
+         ORDER BY q.status = 'in-consultation' DESC, q.queue_number ASC`
       );
 
       await setCache('queue:today', rows, 30);
@@ -1353,6 +1340,10 @@ export default function appointmentRoutes(io) {
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
+      
+      // Encounters may only be finalized for a patient in the QUEUE
+      // (checked_in / serving) who is assigned to this clinician.
+      await assertAppointmentInQueue(connection, appointmentId, patient_user_id, doctorUserId);
 
       const [emrResult] = await connection.query(
         `INSERT INTO EMR_RECORDS (patient_user_id, doctor_user_id, appointment_id, chief_complaint, diagnosis, treatment_plan, notes)
@@ -1474,6 +1465,9 @@ export default function appointmentRoutes(io) {
       });
     } catch (error) {
       await connection.rollback();
+            if (error instanceof SignerError) {
+        return res.status(error.status).json({ error: error.message, code: error.code });
+      }
       console.error('[Complete Encounter Error]:', error);
       res.status(500).json({ error: error.message || 'Failed to complete encounter.' });
     } finally {

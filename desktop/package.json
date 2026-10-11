@@ -14,6 +14,7 @@
     "jsqr": "^1.4.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "signature_pad": "^5.1.4",
     "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
@@ -44,15 +45,18 @@
       "target": "nsis",
       "signAndEditExecutable": false
     },
-      "nsis": {
-  "oneClick": true,
-  "perMachine": false,
-  "deleteAppDataOnUninstall": false,
-  "artifactName": "ValetudoHealthLink-Setup-${version}.${ext}"
-},
-"publish": [
-  { "provider": "generic", "url": "http://localhost:8080/" }
-],
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "ValetudoHealthLink-Setup-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "http://localhost:8080/"
+      }
+    ],
     "asar": true
   }
 }

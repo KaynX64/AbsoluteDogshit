@@ -6,6 +6,7 @@
 
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
+import { formatSignatory } from './signatory.js';
 
 // ─── Brand palette (mirrors the desktop theme) ────────────────────────────
 const BRAND_GREEN = '#1F4A34';
@@ -168,8 +169,10 @@ export async function renderPrescriptionPDF(rx) {
       ? `⚠ ${patient.allergies}`
       : 'None reported'
   );
-  drawInfoRow(doc, 'Attending Physician:', `Dr. ${doctor.first_name} ${doctor.last_name}`);
-  drawInfoRow(doc, 'PRC License:',         doctor.license_no || 'PRC Verified');
+  const signer = formatSignatory(doctor);
+  drawInfoRow(doc, 'Prescribed By:', signer.name);
+  drawInfoRow(doc, 'Designation:',   signer.designation);
+  drawInfoRow(doc, 'PRC License:',   signer.license_no);
   drawInfoRow(doc, 'Issued:',              new Date(issued_at).toLocaleString('en-PH'));
 
   // Rx glyph — ASCII-safe "Rx" because U+211E ("℞") is not part of the
@@ -312,8 +315,32 @@ export async function renderPrescriptionPDF(rx) {
   doc.y = panelY + 140;
 
   // Signature line
-  doc.moveDown(2);
+  doc.moveDown(doctor.signature_png ? 4 : 2);
   const sigY = doc.y;
+  if (doctor.signature_png) {
+    try {
+      doc.image(doctor.signature_png, doc.page.width - 250, sigY - 48, {
+        fit: [180, 46],
+        align: 'center',
+        valign: 'bottom',
+      });
+    } catch (e) {
+      console.warn('⚠️ [PDF] Signature image skipped:', e.message);
+    }
+  }
+  
+  if (doctor.signature_png) {
+    try {
+      doc.image(doctor.signature_png, doc.page.width - 250, sigY - 48, {
+        fit: [180, 46],
+        align: 'center',
+        valign: 'bottom',
+      });
+    } catch (e) {
+      console.warn('⚠️ [PDF] Signature image skipped:', e.message);
+    }
+  }
+
   doc
     .moveTo(doc.page.width - 260, sigY)
     .lineTo(doc.page.width - 60, sigY)
@@ -324,17 +351,12 @@ export async function renderPrescriptionPDF(rx) {
     .font('Helvetica-Bold')
     .fontSize(9.5)
     .fillColor(TEXT_DARK)
-    .text(
-      `Dr. ${doctor.first_name} ${doctor.last_name}`,
-      doc.page.width - 260,
-      sigY + 4,
-      { width: 200, align: 'center' }
-    );
+    .text(signer.name, doc.page.width - 260, sigY + 4, { width: 200, align: 'center' });
   doc
     .font('Helvetica')
     .fontSize(8)
-    .fillColor(TEXT_SUB)
-    .text('PRC Verified E-Signature', doc.page.width - 260, doc.y, {
+    .fillColor(signer.qualified ? TEXT_SUB : DANGER)
+    .text(signer.caption, doc.page.width - 260, doc.y, {
       width: 200,
       align: 'center',
     });
@@ -420,8 +442,10 @@ export async function renderClearancePDF(clearance) {
 
   doc.y = bannerY + 70;
 
-  drawInfoRow(doc, 'Issued By:',   `Dr. ${doctor.first_name} ${doctor.last_name}`);
-  drawInfoRow(doc, 'PRC License:', doctor.license_no || 'PRC Verified');
+  const signer = formatSignatory(doctor);
+  drawInfoRow(doc, 'Issued By:',   signer.name);
+  drawInfoRow(doc, 'Designation:', signer.designation);
+  drawInfoRow(doc, 'PRC License:', signer.license_no);
   drawInfoRow(doc, 'Date Issued:', new Date(issued_at).toLocaleDateString('en-PH'));
   drawInfoRow(doc, 'Valid Until:', new Date(expires_at).toLocaleDateString('en-PH'));
 
@@ -470,8 +494,20 @@ export async function renderClearancePDF(clearance) {
   doc.y = panelY + 140;
 
   // Signature line
-  doc.moveDown(2);
+  doc.moveDown(doctor.signature_png ? 4 : 2);
   const sigY = doc.y;
+  if (doctor.signature_png) {
+    try {
+      doc.image(doctor.signature_png, doc.page.width - 250, sigY - 48, {
+        fit: [180, 46],
+        align: 'center',
+        valign: 'bottom',
+      });
+    } catch (e) {
+      console.warn('⚠️ [PDF] Signature image skipped:', e.message);
+    }
+  }
+
   doc
     .moveTo(doc.page.width - 260, sigY)
     .lineTo(doc.page.width - 60, sigY)
@@ -482,17 +518,12 @@ export async function renderClearancePDF(clearance) {
     .font('Helvetica-Bold')
     .fontSize(9.5)
     .fillColor(TEXT_DARK)
-    .text(
-      `Dr. ${doctor.first_name} ${doctor.last_name}`,
-      doc.page.width - 260,
-      sigY + 4,
-      { width: 200, align: 'center' }
-    );
+    .text(signer.name, doc.page.width - 260, sigY + 4, { width: 200, align: 'center' });
   doc
     .font('Helvetica')
     .fontSize(8)
-    .fillColor(TEXT_SUB)
-    .text('PRC Verified E-Signature', doc.page.width - 260, doc.y, {
+    .fillColor(signer.qualified ? TEXT_SUB : DANGER)
+    .text(signer.caption, doc.page.width - 260, doc.y, {
       width: 200,
       align: 'center',
     });

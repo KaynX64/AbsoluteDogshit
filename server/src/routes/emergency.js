@@ -119,35 +119,6 @@ export default function emergencyRouter(io) {
 
         alertId = insertResult.insertId;
 
-        // Feature 4 & 7: Auto-insert prioritized emergency ticket into daily triage QUEUE
-        const [existingQueue] = await connection.query(
-          `SELECT queue_id FROM QUEUE 
-           WHERE patient_user_id = ? AND queue_date = CURDATE() AND status IN ('waiting', 'in-consultation') 
-           LIMIT 1`,
-          [userId]
-        );
-
-        if (existingQueue.length > 0) {
-          // Elevate existing waiting ticket to immediate priority consultation
-          await connection.query(
-            `UPDATE QUEUE SET status = 'in-consultation', served_at = CURRENT_TIMESTAMP 
-             WHERE queue_id = ?`,
-            [existingQueue[0].queue_id]
-          );
-        } else {
-          // Generate next queue ticket number and insert as prioritized in-consultation ticket
-          const [numRows] = await connection.query(
-            'SELECT COALESCE(MAX(queue_number), 0) + 1 AS next_num FROM QUEUE WHERE queue_date = CURDATE()'
-          );
-          const nextNum = numRows[0].next_num;
-
-          await connection.query(
-            `INSERT INTO QUEUE (patient_user_id, appointment_id, queue_date, counter_id, queue_number, status, checked_in_at, served_at)
-             VALUES (?, NULL, CURDATE(), 1, ?, 'in-consultation', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-            [userId, nextNum]
-          );
-        }
-
         // R.A. 10173 Audit Logging
         await logAudit(connection, {
           userId,
@@ -160,8 +131,6 @@ export default function emergencyRouter(io) {
             longitude: lng,
             formattedAddress,
             notes: enrichedNotes,
-            queued_to_triage: true,
-            triage_escalation: 'QUEUE_PRIORITY_ESCALATED',
           },
           ipAddress: req.ip,
         });
@@ -240,11 +209,10 @@ export default function emergencyRouter(io) {
       if (io) {
         io.to('responders').emit('emergency:new_alert', alertPayload);
         io.emit('emergency:new_alert', alertPayload);
-        io.emit('queue:updated'); // Instantly refreshes Nurse live triage queue
       }
 
       res.status(201).json({
-        message: 'Emergency alert dispatched to PSU Clinic and prioritized in Live Queue.',
+        message: 'Emergency alert dispatched to PSU Clinic responders.',
         alertId,
         formattedAddress,
       });
@@ -328,23 +296,6 @@ export default function emergencyRouter(io) {
            WHERE alert_id = ?`,
           params
         );
-
-        // If resolving or closing out an SOS, mark its queue ticket as done or cancelled
-        if (status === 'resolved' || status === 'false_alarm') {
-          const queueFinalStatus = status === 'resolved' ? 'done' : 'cancelled';
-          const [alertRows] = await connection.query(
-            'SELECT user_id FROM EMERGENCY_ALERTS WHERE alert_id = ?',
-            [alertId]
-          );
-          if (alertRows.length > 0) {
-            await connection.query(
-              `UPDATE QUEUE 
-               SET status = ?, served_at = CURRENT_TIMESTAMP 
-               WHERE patient_user_id = ? AND queue_date = CURDATE() AND status IN ('in-consultation', 'waiting')`,
-              [queueFinalStatus, alertRows[0].user_id]
-            );
-          }
-        }
 
         await connection.commit();
         await invalidateCache('queue:*');

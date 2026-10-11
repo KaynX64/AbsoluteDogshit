@@ -112,6 +112,16 @@ router.patch('/users/:id/role', async (req, res) => {
     const [roleRows] = await connection.query('SELECT role_id FROM ROLES WHERE code = ?', [role_code]);
     if (roleRows.length === 0) throw new Error('Invalid role code specified.');
     const newRoleId = roleRows[0].role_id;
+    
+    if (['DOCTOR', 'DENTIST'].includes(role_code)) {
+      const [lic] = await connection.query(
+        'SELECT license_no FROM STAFF_PROFILES WHERE user_id = ?',
+        [targetUserId]
+      );
+      if (lic.length === 0 || !String(lic[0].license_no || '').trim()) {
+        throw new Error('Add a PRC license number (Edit User) before assigning the DOCTOR or DENTIST role.');
+      }
+    }
 
     await connection.query('DELETE FROM USER_ROLES WHERE user_id = ?', [targetUserId]);
     await connection.query('INSERT INTO USER_ROLES (user_id, role_id) VALUES (?, ?)', [targetUserId, newRoleId]);
@@ -211,6 +221,9 @@ router.put('/users/:id', async (req, res) => {
         [targetUserId, student_no.trim(), course ? course.trim() : 'General', Number(year_level) || 1]
       );
     } else if (['DOCTOR', 'DENTIST', 'NURSE', 'EMERGENCY_RESPONDER', 'ADMIN'].includes(role_code)) {
+            if (['DOCTOR', 'DENTIST', 'NURSE'].includes(role_code) && !(license_no && String(license_no).trim())) {
+        throw new Error('A PRC license number is required for DOCTOR, DENTIST and NURSE accounts.');
+      }
       // admin_no is only meaningful for the ADMIN role. For clinical staff
       // it stays NULL so the column stays semantically clean.
       const adminNoValue =
@@ -427,6 +440,9 @@ router.post('/users', async (req, res) => {
         ]
       );
     } else if (['DOCTOR', 'DENTIST', 'NURSE', 'EMERGENCY_RESPONDER', 'ADMIN'].includes(role_code)) {
+            if (['DOCTOR', 'DENTIST', 'NURSE'].includes(role_code) && !(license_no && String(license_no).trim())) {
+        throw new Error('A PRC license number is required for DOCTOR, DENTIST and NURSE accounts.');
+      }
       // admin_no is only meaningful for ADMIN. Clinical staff leave it NULL.
       const adminNoValue =
         role_code === 'ADMIN' && admin_no ? String(admin_no).trim() : null;
