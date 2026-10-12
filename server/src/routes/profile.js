@@ -7,6 +7,7 @@ import { encrypt, decrypt } from '../utils/cryptoVault.js';
 import { requirePrivacyConsent } from '../middleware/consent.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
+import { SignerError, assertAppointmentInQueue } from '../utils/signatory.js';
 
 const router = express.Router();
 
@@ -15,21 +16,30 @@ router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
   try {
     const userId = req.user.user_id;
 
-    // Join identity with role tables (Student, Staff, Faculty, Admin)
+    // Join identity with role tables (Student, Staff, Faculty, Non-Teaching, Admin)
     const [userRows] = await pool.query(
       `SELECT u.user_id, u.email, u.first_name, u.last_name, u.phone,
               COALESCE(r.code, 'STUDENT') AS primary_role,
               COALESCE(r.name, 'Student Patient') AS role_name,
               sp.student_no, sp.course, sp.year_level,
-              st.license_no, st.specialty,
-              COALESCE(st.department, fp.department, sp.course, 'PSU Lingayen Campus') AS department,
-              fp.position
+              fp.faculty_no,
+              ntp.employee_no,
+              st.admin_no, st.license_no, st.specialty,
+              COALESCE(
+                st.department,
+                fp.department,
+                ntp.department,
+                sp.course,
+                'PSU Lingayen Campus'
+              ) AS department,
+              COALESCE(fp.position, ntp.position) AS position
        FROM USERS u
        LEFT JOIN USER_ROLES ur ON u.user_id = ur.user_id
        LEFT JOIN ROLES r ON ur.role_id = r.role_id
        LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
        LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
        LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
+       LEFT JOIN NON_TEACHING_PROFILES ntp ON u.user_id = ntp.user_id
        WHERE u.user_id = ? AND u.deleted_at IS NULL
        LIMIT 1`,
       [userId]
@@ -115,7 +125,7 @@ router.put(
   requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'),
   async (req, res) => {
     const patientId = Number(req.params.patientId);
-    const { immunizations } = req.body;
+    const { immunizations, appointment_id } = req.body;
 
     if (!Array.isArray(immunizations)) {
       return res.status(400).json({ error: 'immunizations must be an array of strings.' });
@@ -124,6 +134,17 @@ router.put(
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
+      
+      // Doctors/dentists may only record immunizations for a patient in their
+      // QUEUE. Nurses and admins are exempt.
+      const roles = req.user.roles || [];
+      const isPractitionerOnly =
+        (roles.includes('DOCTOR') || roles.includes('DENTIST')) &&
+        !roles.includes('ADMIN') &&
+        !roles.includes('NURSE');
+      if (isPractitionerOnly) {
+        await assertAppointmentInQueue(connection, appointment_id, patientId, req.user.user_id);
+      }
 
       const [hpRows] = await connection.query(
         'SELECT profile_id FROM HEALTH_PROFILES WHERE user_id = ? FOR UPDATE',
@@ -161,6 +182,9 @@ router.put(
       res.json({ message: 'Immunization records updated successfully.', immunizations });
     } catch (error) {
       await connection.rollback();
+            if (error instanceof SignerError) {
+        return res.status(error.status).json({ error: error.message, code: error.code });
+      }
       console.error('[Immunizations Update Error]:', error);
       res.status(500).json({ error: 'Failed to save immunization records.' });
     } finally {
@@ -282,81 +306,6 @@ router.post('/fcm-token', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Failed to save device token.' });
   }
 });
-// ── PUT /api/profile/patient/:userId/immunizations ────────────────────────────
-// Allows authorized Clinical Staff (Doctor, Dentist, Nurse, Admin) to update a patient's vaccines
-router.put('/patient/:userId/immunizations', authenticateToken, async (req, res) => {
-  const targetUserId = Number(req.params.userId);
-  const userRoles = req.user.roles || [];
-  const isAuthorized = userRoles.some((r) => ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'].includes(r));
-
-  if (!isAuthorized) {
-    return res.status(403).json({ error: 'Access Denied: Only clinical staff and administrators can update vaccination history.' });
-  }
-
-  const { immunizations } = req.body;
-  if (!Array.isArray(immunizations)) {
-    return res.status(400).json({ error: 'immunizations must be an array of vaccine names.' });
-  }
-
-  // Sanitize: unique, non-empty trimmed strings
-  const cleanedList = Array.from(new Set(immunizations.map((v) => String(v).trim()).filter(Boolean)));
-  const jsonPayload = JSON.stringify(cleanedList);
-
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-
-    const [existing] = await connection.query(
-      'SELECT profile_id FROM HEALTH_PROFILES WHERE user_id = ? FOR UPDATE',
-      [targetUserId]
-    );
-
-    let profileId;
-    if (existing.length > 0) {
-      profileId = existing[0].profile_id;
-      await connection.query(
-        `UPDATE HEALTH_PROFILES 
-         SET immunization_history = ?, updated_at = CURRENT_TIMESTAMP, version = version + 1
-         WHERE user_id = ?`,
-        [jsonPayload, targetUserId]
-      );
-    } else {
-      const [insertRes] = await connection.query(
-        `INSERT INTO HEALTH_PROFILES (user_id, immunization_history)
-         VALUES (?, ?)`,
-        [targetUserId, jsonPayload]
-      );
-      profileId = insertRes.insertId;
-    }
-
-    await logAudit(connection, {
-      userId: req.user.user_id,
-      action: 'UPDATE',
-      table: 'HEALTH_PROFILES',
-      recordId: profileId,
-      oldValue: null,
-      newValue: {
-        operation: 'IMMUNIZATION_HISTORY_UPDATE',
-        target_user_id: targetUserId,
-        count: cleanedList.length,
-        vaccines: cleanedList,
-      },
-      ipAddress: req.ip,
-    });
-
-    await connection.commit();
-    res.json({
-      message: 'Vaccination history updated successfully.',
-      immunizations: cleanedList,
-    });
-  } catch (error) {
-    await connection.rollback();
-    console.error('[Immunization Update Error]:', error);
-    res.status(500).json({ error: 'Failed to update vaccination history.' });
-  } finally {
-    connection.release();
-  }
-});
 
 // ── GET /api/profile/patient/:userId/immunizations ────────────────────────────
 router.get('/patient/:userId/immunizations', authenticateToken, async (req, res) => {
@@ -380,4 +329,5 @@ router.get('/patient/:userId/immunizations', authenticateToken, async (req, res)
     res.status(500).json({ error: 'Failed to fetch immunization history.' });
   }
 });
+
 export default router;

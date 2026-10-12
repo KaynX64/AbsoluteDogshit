@@ -12,6 +12,7 @@ interface CreateUserModalProps {
 const ROLE_OPTIONS = [
   { code: 'STUDENT',             label: 'Student' },
   { code: 'FACULTY',             label: 'Faculty' },
+  { code: 'NON_TEACHING',        label: 'Non-Teaching / Support Staff' },
   { code: 'DOCTOR',              label: 'Doctor' },
   { code: 'DENTIST',             label: 'Dentist' },
   { code: 'NURSE',               label: 'Nurse' },
@@ -49,7 +50,10 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
   const [studentNo, setStudentNo] = useState('');
   const [course, setCourse] = useState('');
   const [yearLevel, setYearLevel] = useState('1');
+  const [facultyNo, setFacultyNo] = useState('');
+  const [employeeNo, setEmployeeNo] = useState('');
   const [licenseNo, setLicenseNo] = useState('');
+  const [adminNo, setAdminNo] = useState('');
   const [specialty, setSpecialty] = useState('');
   const [department, setDepartment] = useState('');
   const [position, setPosition] = useState('');
@@ -71,7 +75,10 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
     setStudentNo('');
     setCourse('');
     setYearLevel('1');
+    setFacultyNo('');
+    setEmployeeNo('');
     setLicenseNo('');
+    setAdminNo('');
     setSpecialty('');
     setDepartment('');
     setPosition('');
@@ -93,6 +100,10 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
       setFeedback({ text: 'Student number is required for student accounts.', isError: true });
       return;
     }
+    if (roleCode === 'FACULTY' && !facultyNo.trim()) {
+      setFeedback({ text: 'Faculty number is required for faculty accounts.', isError: true });
+      return;
+    }
 
     setIsSaving(true);
     const token = localStorage.getItem('valetudo_token');
@@ -111,7 +122,10 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
           student_no: studentNo.trim() || null,
           course: course.trim() || null,
           year_level: Number(yearLevel) || 1,
+          faculty_no: facultyNo.trim() || null,
+          employee_no: employeeNo.trim() || null,
           license_no: licenseNo.trim() || null,
+          admin_no: adminNo.trim() || null,
           specialty: specialty.trim() || null,
           department: department.trim() || null,
           position: position.trim() || null,
@@ -141,6 +155,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
   };
 
   const showStaffFields = ['DOCTOR', 'DENTIST', 'NURSE', 'EMERGENCY_RESPONDER', 'ADMIN'].includes(roleCode);
+  const isAdminRole = roleCode === 'ADMIN';
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -284,7 +299,47 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
             </div>
           )}
 
-          {showStaffFields && (
+          {roleCode === 'FACULTY' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1fr', gap: 14 }}>
+              <div>
+                <label style={fieldLabel}>Faculty number</label>
+                <input style={inputStyle} value={facultyNo} placeholder="PSU-FAC-2024-0451"
+                       onChange={(e) => setFacultyNo(e.target.value)} required />
+              </div>
+              <div>
+                <label style={fieldLabel}>Department</label>
+                <input style={inputStyle} value={department} placeholder="College of Computing Studies"
+                       onChange={(e) => setDepartment(e.target.value)} />
+              </div>
+              <div>
+                <label style={fieldLabel}>Position</label>
+                <input style={inputStyle} value={position} placeholder="Assistant Professor"
+                       onChange={(e) => setPosition(e.target.value)} />
+              </div>
+            </div>
+          )}
+
+          {roleCode === 'NON_TEACHING' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1fr', gap: 14 }}>
+              <div>
+                <label style={fieldLabel}>Employee number (optional)</label>
+                <input style={inputStyle} value={employeeNo} placeholder="PSU-NT-2024-0187"
+                       onChange={(e) => setEmployeeNo(e.target.value)} />
+              </div>
+              <div>
+                <label style={fieldLabel}>Department / office</label>
+                <input style={inputStyle} value={department} placeholder="Campus Maintenance & Facilities"
+                       onChange={(e) => setDepartment(e.target.value)} />
+              </div>
+              <div>
+                <label style={fieldLabel}>Position</label>
+                <input style={inputStyle} value={position} placeholder="Utility Worker"
+                       onChange={(e) => setPosition(e.target.value)} />
+              </div>
+            </div>
+          )}
+
+          {showStaffFields && !isAdminRole && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
               <div>
                 <label style={fieldLabel}>PRC / staff ID</label>
@@ -304,17 +359,22 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
             </div>
           )}
 
-          {roleCode === 'FACULTY' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          {isAdminRole && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
               <div>
-                <label style={fieldLabel}>Department</label>
-                <input style={inputStyle} value={department} placeholder="College of Computing Studies"
-                       onChange={(e) => setDepartment(e.target.value)} />
+                <label style={fieldLabel}>Admin number</label>
+                <input style={inputStyle} value={adminNo} placeholder="PSU-ADM-2024-0001"
+                       onChange={(e) => setAdminNo(e.target.value)} />
               </div>
               <div>
-                <label style={fieldLabel}>Position</label>
-                <input style={inputStyle} value={position} placeholder="Assistant Professor"
-                       onChange={(e) => setPosition(e.target.value)} />
+                <label style={fieldLabel}>Specialty / scope</label>
+                <input style={inputStyle} value={specialty} placeholder="System Administration"
+                       onChange={(e) => setSpecialty(e.target.value)} />
+              </div>
+              <div>
+                <label style={fieldLabel}>Department / unit</label>
+                <input style={inputStyle} value={department} placeholder="PSU Lingayen Clinic"
+                       onChange={(e) => setDepartment(e.target.value)} />
               </div>
             </div>
           )}

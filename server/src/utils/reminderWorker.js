@@ -2,13 +2,15 @@
 import { pool } from '../db.js';
 import { sendAppointmentEmail } from './mailer.js';
 import { logAudit } from './auditLogger.js';
+import { sendPushToUser } from './fcmNotifier.js';
+import { NOSHOW_LIMIT } from '../config/limits.js';
 
 export function startReminderScheduler(io) {
   // Check every 15 minutes
   setInterval(async () => {
     try {
-      const [upcoming] = await pool.query(
-        `SELECT a.appointment_id, a.date_time, a.appointment_type,
+const [upcoming] = await pool.query(
+        `SELECT a.appointment_id, a.patient_user_id, a.date_time, a.appointment_type,
                 u.email as patient_email, u.first_name as patient_first_name, u.last_name as patient_last_name,
                 doc.first_name as doc_first_name, doc.last_name as doc_last_name,
                 COALESCE(sp.specialty, 'Physician') as doc_specialty
@@ -21,7 +23,7 @@ export function startReminderScheduler(io) {
            AND a.date_time BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 24 HOUR)`
       );
 
-      for (const app of upcoming) {
+for (const app of upcoming) {
         // 1. Send Email Reminder
         await sendAppointmentEmail({
           toEmail: app.patient_email,
@@ -32,6 +34,17 @@ export function startReminderScheduler(io) {
           purpose: app.appointment_type,
           type: 'reminder',
         });
+
+        // 2b. Dispatch mobile FCM background push notification to the patient's device
+        await sendPushToUser(app.patient_user_id, {
+          title: '⏰ Consultation Reminder',
+          body: `Upcoming consultation with Dr. ${app.doc_last_name} (${app.doc_specialty}) scheduled for ${app.date_time}.`,
+          data: {
+            type: 'APPOINTMENT_REMINDER',
+            appointment_id: String(app.appointment_id),
+            date_time: String(app.date_time),
+          },
+        }).catch((err) => console.error('[FCM Reminder Push Error]:', err.message));
 
         // 2. Broadcast push/socket reminder if client is connected
         if (io) {
@@ -56,11 +69,10 @@ export function startReminderScheduler(io) {
       const [expired] = await pool.query(
         `SELECT appointment_id FROM APPOINTMENTS
          WHERE status = 'scheduled'
-           AND date_time < DATE_SUB(NOW(), INTERVAL 20 MINUTE)
+           AND date_time < DATE_SUB(NOW(), INTERVAL ${NOSHOW_LIMIT.graceMinutes} MINUTE)
            AND date_time > DATE_SUB(NOW(), INTERVAL 24 HOUR)
            AND deleted_at IS NULL`
       );
-
       if (expired.length === 0) return;
 
       const ids = expired.map((r) => r.appointment_id);

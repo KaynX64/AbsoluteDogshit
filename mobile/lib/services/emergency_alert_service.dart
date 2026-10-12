@@ -246,11 +246,18 @@ class EmergencyAlertService {
         enableWifiLock: true,
       );
 
-      bool hasPermissions = await FlutterBackground.hasPermissions;
-      if (!hasPermissions) {
-        await FlutterBackground.initialize(androidConfig: androidConfig);
+      // Always (re)initialize — the plugin's AndroidConfig lives in memory
+      // and is discarded every time the Flutter process is recreated (e.g.
+      // when the user swipes the app away from the Android recents screen
+      // and reopens it). The previous version only initialized when the
+      // notification permission was missing, which meant that on every
+      // subsequent launch enableBackgroundExecution() had no config to
+      // work with and the foreground service silently never started.
+      await FlutterBackground.initialize(androidConfig: androidConfig);
+
+      if (!FlutterBackground.isBackgroundExecutionEnabled) {
+        await FlutterBackground.enableBackgroundExecution();
       }
-      await FlutterBackground.enableBackgroundExecution();
     } catch (e) {
       debugPrint('⚠️ [Background Service Error]: $e');
     }

@@ -4,6 +4,7 @@ import NurseConsole from './components/NurseConsole';
 import DoctorConsole from './components/DoctorConsole';
 import AdminConsole from './components/AdminConsole';
 import ResponderConsole from './components/ResponderConsole';
+import { useBookingBadge } from './hooks/useBookingBadge';
 import {
   getOfflineQueue,
   replayOfflineQueue,
@@ -11,6 +12,9 @@ import {
   refreshOfflineQueueFromBackend,
 } from './services/offlineSync';
 import { API_BASE_URL } from './config/api';
+import PasswordStrengthIndicator, { evaluatePassword } from './components/PasswordStrengthIndicator';
+import valetudoLogo from './assets/valetudo_logo.png';
+
 
 /* ── Inline SVG icons ──────────────────────────────────────────── */
 const I = {
@@ -141,9 +145,10 @@ interface SidebarProps {
   onChangePassword: () => void;
   activeItem?: string;
   onItemClick?: (key: string) => void;
+  badgeCounts?: Record<string, number>;
 }
 
-function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick }: SidebarProps) {
+function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, badgeCounts }: SidebarProps) {
   const navByRole: Record<string, { key: string; label: string; icon: React.ReactNode }[]> = {
     ADMIN: [
       { key: 'users',     label: 'Users',      icon: <I.Users /> },
@@ -208,9 +213,10 @@ function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick }:
   return (
     <aside className="sb">
       <div className="sb-logo-block">
-        <div className="sb-logo-lg">+</div>
+        <div className="sb-logo-lg">
+          <img src={valetudoLogo} alt="Valetudo HealthLink" />
+        </div>
       </div>
-
       <nav className="sb-nav">
         {navItems.map((item) => {
           const isActive = activeItem === item.key;
@@ -223,6 +229,11 @@ function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick }:
               style={{ cursor: onItemClick ? 'pointer' : 'default' }}
             >
               {item.icon}
+              {(badgeCounts?.[item.key] ?? 0) > 0 && (
+                <span key={badgeCounts![item.key]} className="sb-badge">
+                  {badgeCounts![item.key] > 99 ? '99+' : badgeCounts![item.key]}
+                </span>
+              )}
               <span>{item.label}</span>
             </button>
           );
@@ -350,8 +361,10 @@ function LoginScreen({ email, setEmail, password, setPassword, error, onSubmit }
       {/* LEFT — sage hero panel */}
       <div className="login-left">
         <div className="login-left-brand">
-          <div className="login-left-logo">+</div>
-          <div>
+          <div className="login-left-logo">
+            <img src={valetudoLogo} alt="Valetudo HealthLink" />
+          </div>
+          <div className="login-left-brand-text">
             <div className="login-left-brand-name">Valetudo</div>
             <div className="login-left-brand-sub">HealthLink</div>
           </div>
@@ -476,6 +489,9 @@ function LoginScreen({ email, setEmail, password, setPassword, error, onSubmit }
 /* APP ROOT                                                           */
 /* ================================================================= */
 export default function App() {
+  const [updateStatus, setUpdateStatus] = useState<{ state: string; version?: string; percent?: number } | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [user, setUser] = useState<any>(null);
@@ -502,10 +518,37 @@ export default function App() {
   const [passwordMsg, setPasswordMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const [isSubmittingPassword, setIsSubmittingPassword] = useState(false);
 
+  // ── Session Logout & Token Invalidation ───────────────────────
+  const handleSignOut = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    if (token) {
+      try {
+        await fetch(`${API_BASE_URL}/api/auth/logout`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } catch (_) {}
+    }
+    localStorage.removeItem('valetudo_token');
+    localStorage.removeItem('token');
+
+    // Purge cached credentials and role state from React memory
+    setPassword('');
+    setEmail('');
+    setActiveRoleView('');
+    setUser(null);
+  };
+
   const isResponder =
     activeRoleView === 'EMERGENCY_RESPONDER' ||
     (user?.roles?.length === 1 && user.roles[0] === 'EMERGENCY_RESPONDER');
   useSessionTimeout(Boolean(user) && !isResponder, 480);
+
+  const bookingBadge = useBookingBadge(activeRoleView, Boolean(user));
+  const badgeKey =
+    activeRoleView === 'NURSE' ? 'expected'
+    : (activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST') ? 'scheduled'
+    : null;
 
   useEffect(() => {
     const updateOnline = () => setIsOnline(true);
@@ -545,7 +588,7 @@ export default function App() {
 
         const isAuthorizedStaff = userRoles.some((r) => staffRoles.includes(r));
         if (!isAuthorizedStaff) {
-          setError('⛔ Access Denied: Student accounts are restricted to the Valetudo Mobile App.');
+          setError('Access Denied: Unauthorized Access');
           return;
         }
 
@@ -579,49 +622,69 @@ export default function App() {
     }
   };
 
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPasswordMsg(null);
+const handleChangePassword = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setPasswordMsg(null);
 
-    if (newPassword !== confirmPassword) {
-      setPasswordMsg({ text: 'New passwords do not match.', isError: true });
-      return;
+  // ── Strong-password policy check (mirrors the server) ─────────
+  const evaluation = evaluatePassword(newPassword);
+  if (!evaluation.isAcceptable) {
+    setPasswordMsg({
+      text:
+        evaluation.score < 2
+          ? 'Password is too weak. Please reach at least "Medium" strength before continuing.'
+          : 'Password is missing one or more required elements. Check the requirements list.',
+      isError: true,
+    });
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    setPasswordMsg({ text: 'New passwords do not match.', isError: true });
+    return;
+  }
+
+  setIsSubmittingPassword(true);
+  const token = localStorage.getItem('valetudo_token');
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/auth/change-password`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+
+    const data = await res.json();
+    if (res.ok) {
+      setPasswordMsg({ text: '✅ ' + data.message, isError: false });
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setTimeout(() => {
+        setShowPasswordModal(false);
+        setPasswordMsg(null);
+      }, 1500);
+    } else {
+      // Server may reject with a detailed issues array — surface it
+      const detailed =
+        Array.isArray(data.issues) && data.issues.length > 0
+          ? data.issues.join(' ')
+          : data.error || 'Failed to update password.';
+      setPasswordMsg({ text: '❌ ' + detailed, isError: true });
     }
-    if (newPassword.length < 8) {
-      setPasswordMsg({ text: 'New password must be at least 8 characters long.', isError: true });
-      return;
-    }
+  } catch (err: any) {
+    setPasswordMsg({ text: '❌ Network error: ' + err.message, isError: true });
+  } finally {
+    setIsSubmittingPassword(false);
+  }
+};
 
-    setIsSubmittingPassword(true);
-    const token = localStorage.getItem('valetudo_token');
+  useEffect(() => {
+  const api = window.electronAPI;
+  if (!api?.onUpdateStatus) return;
+  return api.onUpdateStatus((s) => setUpdateStatus(s));
 
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/auth/change-password`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ currentPassword, newPassword }),
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        setPasswordMsg({ text: '✅ ' + data.message, isError: false });
-        setCurrentPassword('');
-        setNewPassword('');
-        setConfirmPassword('');
-        setTimeout(() => {
-          setShowPasswordModal(false);
-          setPasswordMsg(null);
-        }, 1500);
-      } else {
-        setPasswordMsg({ text: '❌ ' + (data.error || 'Failed to update password.'), isError: true });
-      }
-    } catch (err: any) {
-      setPasswordMsg({ text: '❌ Network error: ' + err.message, isError: true });
-    } finally {
-      setIsSubmittingPassword(false);
-    }
-  };
-
+}, []);
   if (!user) {
     return (
       <LoginScreen
@@ -639,7 +702,8 @@ export default function App() {
     <div className="app-shell">
       <Sidebar
         role={activeRoleView}
-        onSignOut={() => setUser(null)}
+        badgeCounts={badgeKey ? { [badgeKey]: bookingBadge } : undefined}
+        onSignOut={handleSignOut}
         onChangePassword={() => { setShowPasswordModal(true); setPasswordMsg(null); }}
         activeItem={
           activeRoleView === 'ADMIN' ? adminTab
@@ -671,6 +735,46 @@ export default function App() {
           onChangeRoleView={setActiveRoleView}
         />
 
+        {updateStatus && !updateDismissed &&
+  (updateStatus.state === 'downloading' || updateStatus.state === 'downloaded') && (
+  <div
+    style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+      padding: '10px 20px', background: 'var(--sage-100)', color: 'var(--text)',
+      fontSize: 13, fontWeight: 600, fontFamily: 'var(--font)',
+    }}
+  >
+    <span>
+      {updateStatus.state === 'downloading'
+        ? `⬇️ Downloading update… ${updateStatus.percent ?? 0}%`
+        : `✅ Update ${updateStatus.version ?? ''} is ready to install.`}
+    </span>
+
+    {updateStatus.state === 'downloaded' && (
+      <span style={{ display: 'flex', gap: 8 }}>
+        <button
+          type="button"
+          onClick={() => setUpdateDismissed(true)}
+          style={{ padding: '6px 14px', borderRadius: 'var(--r-pill)', border: 'none', cursor: 'pointer', fontWeight: 700, fontFamily: 'var(--font)', background: '#fff', color: 'var(--text)' }}
+        >
+          Later
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            if (offlineQueueCount > 0 &&
+                !window.confirm(`${offlineQueueCount} offline changes are still queued. Restart anyway? They stay saved locally and sync after restart.`)) return;
+            window.electronAPI?.installUpdate();
+          }}
+          style={{ padding: '6px 14px', borderRadius: 'var(--r-pill)', border: 'none', cursor: 'pointer', fontWeight: 700, fontFamily: 'var(--font)', background: 'var(--primary)', color: '#fff' }}
+        >
+          Restart now
+        </button>
+      </span>
+    )}
+  </div>
+)}
+
         <main className="app-content">
           {activeRoleView === 'NURSE' && (
             <NurseConsole
@@ -694,7 +798,7 @@ export default function App() {
 
       {showPasswordModal && (
         <div className="modal-backdrop" onClick={() => setShowPasswordModal(false)}>
-          <div className="modal-card" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
               <h3 style={{ margin: 0, color: 'var(--primary)', fontSize: 17, fontWeight: 800 }}>
                 🔑 Update account password
@@ -717,15 +821,17 @@ export default function App() {
                 style={{ marginBottom: 14 }}
               />
 
-              <label className="field-label">New password (min 8 chars)</label>
+              <label className="field-label">New password</label>
               <input
                 type="password"
                 className="field-input"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 required
-                style={{ marginBottom: 14 }}
+                style={{ marginBottom: 4 }}
               />
+              <PasswordStrengthIndicator password={newPassword} />
+              <div style={{ marginBottom: 14 }} />
 
               <label className="field-label">Confirm new password</label>
               <input
@@ -771,24 +877,29 @@ export default function App() {
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={isSubmittingPassword}
-                  style={{
-                    flex: 1,
-                    padding: 12,
-                    borderRadius: 'var(--r-pill)',
-                    background: 'var(--primary)',
-                    color: '#fff',
-                    border: 'none',
-                    cursor: isSubmittingPassword ? 'not-allowed' : 'pointer',
-                    fontWeight: 700,
-                    fontFamily: 'var(--font)',
-                    opacity: isSubmittingPassword ? 0.6 : 1,
-                  }}
-                >
-                  {isSubmittingPassword ? 'Updating…' : 'Save password'}
-                </button>
+              <button
+                type="submit"
+                disabled={isSubmittingPassword || !evaluatePassword(newPassword).isAcceptable}
+                style={{
+                  flex: 1,
+                  padding: 12,
+                  borderRadius: 'var(--r-pill)',
+                  background: 'var(--primary)',
+                  color: '#fff',
+                  border: 'none',
+                  cursor:
+                    isSubmittingPassword || !evaluatePassword(newPassword).isAcceptable
+                      ? 'not-allowed'
+                      : 'pointer',
+                  fontWeight: 700,
+                  fontFamily: 'var(--font)',
+                  opacity:
+                    isSubmittingPassword || !evaluatePassword(newPassword).isAcceptable ? 0.55 : 1,
+                  transition: 'opacity 120ms ease',
+                }}
+              >
+                {isSubmittingPassword ? 'Updating…' : 'Save password'}
+              </button>
               </div>
             </form>
           </div>

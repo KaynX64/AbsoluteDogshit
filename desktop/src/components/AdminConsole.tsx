@@ -4,6 +4,7 @@ import AnalyticsDashboard from './AnalyticsDashboard';
 import CreateUserModal from './CreateUserModal';
 import { T, rolePill, inputStyle, btnPrimary, btnGhost } from '../theme';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
+import ServerPingMonitor from './ServerPingMonitor';
 
 /* ── Icons (inline, no dependency) ─────────────────────────────── */
 const I = {
@@ -33,12 +34,10 @@ interface AdminConsoleProps {
 
 export default function AdminConsole({
   activeTab: controlledTab,
-  onTabChange,
 }: AdminConsoleProps = {}) {
   /* Controlled ⇄ uncontrolled: fall back to internal state when no parent props are passed. */
-  const [internalTab, setInternalTab] = useState<AdminTab>('users');
+  const [internalTab] = useState<AdminTab>('users');
   const activeTab = controlledTab ?? internalTab;
-  const setActiveTab = onTabChange ?? setInternalTab;
 
   const [auditSubTab, setAuditSubTab] = useState<'mutations' | 'phi'>('phi');
 
@@ -171,6 +170,23 @@ export default function AdminConsole({
     fetchTelemetry();
   }, []);
 
+  // Refetch contextual data whenever the parent (sidebar) switches the active tab
+  useEffect(() => {
+    if (activeTab === 'audit') {
+      fetchPhiLogs();
+      fetchMutationLogs();
+    }
+    if (activeTab === 'telemetry') {
+      fetchRetention();
+      fetchTelemetry();
+    }
+    if (activeTab === 'db') {
+      fetchDbTables();
+      fetchTableData('USERS', 1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
   /* ── Derived lists (unchanged) ───────────────────────────────── */
   const processedUsers = usersList
     .filter((u) => {
@@ -238,7 +254,10 @@ export default function AdminConsole({
       student_no: u.student_no || '',
       course: u.course || '',
       year_level: u.year_level || 1,
+      faculty_no: u.faculty_no || '',
+      employee_no: u.employee_no || '',
       license_no: u.license_no || '',
+      admin_no: u.admin_no || '',
       specialty: u.specialty || '',
       department: u.department || '',
       position: u.position || '',
@@ -280,9 +299,9 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
     setModalFeedback(null);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/users/${editingUser.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          const res = await fetch(`${API_BASE_URL}/api/admin/users/${editingUser.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           first_name: editingUser.first_name,
           last_name: editingUser.last_name,
@@ -293,7 +312,10 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           student_no: editingUser.student_no,
           course: editingUser.course,
           year_level: editingUser.year_level,
+          faculty_no: editingUser.faculty_no,
+          employee_no: editingUser.employee_no,
           license_no: editingUser.license_no,
+          admin_no: editingUser.admin_no,
           specialty: editingUser.specialty,
           department: editingUser.department,
           position: editingUser.position,
@@ -475,50 +497,6 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
         </p>
       </div>
 
-      {/* ── Inner tab bar (matches Figma's segmented tabs) ─────── */}
-      <div style={{
-        display: 'flex', gap: 6, flexWrap: 'wrap',
-        padding: 4, background: T.sage100, borderRadius: T.radius.pill,
-        marginBottom: 22, width: 'fit-content',
-      }}>
-        {([
-          { id: 'users',     label: 'Users & roles',     icon: <I.Users /> },
-          { id: 'audit',     label: 'Privacy & audit',   icon: <I.Shield /> },
-          { id: 'telemetry', label: 'System health',     icon: <I.Activity /> },
-          { id: 'analytics', label: 'Health analytics',  icon: <I.Chart /> },
-          { id: 'db',        label: 'Database Studio',   icon: <I.Database /> },
-        ] as const).map((tab) => {
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => {
-                setActiveTab(tab.id);
-                if (tab.id === 'audit') { fetchPhiLogs(); fetchMutationLogs(); }
-                if (tab.id === 'telemetry') { fetchRetention(); fetchTelemetry(); }
-                if (tab.id === 'db') { fetchDbTables(); fetchTableData('USERS', 1); }
-              }}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 8,
-                padding: '9px 18px',
-                borderRadius: T.radius.pill,
-                border: 'none',
-                background: isActive ? T.surface : 'transparent',
-                color: isActive ? T.primary : T.textSub,
-                fontSize: 13, fontWeight: 700,
-                cursor: 'pointer',
-                fontFamily: T.font,
-                boxShadow: isActive ? T.shadow.xs : 'none',
-                transition: 'all 120ms ease',
-              }}
-            >
-              <span style={{ width: 16, height: 16, display: 'grid', placeItems: 'center' }}>{tab.icon}</span>
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
-
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: USERS                                                 */}
       {/* ═══════════════════════════════════════════════════════════ */}
@@ -595,6 +573,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
               { code: 'NURSE', label: 'Nurse' },
               { code: 'STUDENT', label: 'Student' },
               { code: 'FACULTY', label: 'Faculty' },
+              { code: 'NON_TEACHING', label: 'Non-Teaching' },
               { code: 'EMERGENCY_RESPONDER', label: 'Responder' },
               { code: 'ADMIN', label: 'Admin' },
             ].map((r) => {
@@ -1129,6 +1108,9 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
             ))}
           </div>
 
+          {/* Live server ping monitor */}
+          <ServerPingMonitor />
+
           {/* Retention governance panel */}
           <div style={{
             background: T.surface,
@@ -1482,7 +1464,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                             )}
                             {tableSchema.map((col) => {
                               const val = row[col.columnName];
-                              const isEncrypted = typeof val === 'string' && val.startsWith('enc:v1:');
+                              const isEncrypted = typeof val === 'string' && /^enc:v[12]:/.test(val);
                               return (
                                 <td key={col.columnName} style={{
                                   padding: '8px 12px',
@@ -1764,10 +1746,11 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                         onChange={(e) => setEditingUser({ ...editingUser, role: e.target.value })}
                       >
                         <option value="STUDENT">STUDENT</option>
+                        <option value="FACULTY">FACULTY</option>
+                        <option value="NON_TEACHING">NON_TEACHING</option>
                         <option value="DOCTOR">DOCTOR</option>
                         <option value="DENTIST">DENTIST</option>
                         <option value="NURSE">NURSE</option>
-                        <option value="FACULTY">FACULTY</option>
                         <option value="EMERGENCY_RESPONDER">EMERGENCY_RESPONDER</option>
                         <option value="ADMIN">ADMIN</option>
                       </select>
@@ -1818,7 +1801,8 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     </div>
                   )}
 
-                  {['DOCTOR', 'DENTIST', 'NURSE', 'EMERGENCY_RESPONDER', 'ADMIN'].includes(editingUser.role) && (
+                  {/* Clinical staff — doctors, dentists, nurses, responders */}
+                  {['DOCTOR', 'DENTIST', 'NURSE', 'EMERGENCY_RESPONDER'].includes(editingUser.role) && (
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 20 }}>
                       <div>
                         <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
@@ -1844,8 +1828,51 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     </div>
                   )}
 
+                  {/* ADMIN — admin number replaces PRC license */}
+                  {editingUser.role === 'ADMIN' && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 20 }}>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
+                          Admin number
+                        </label>
+                        <input
+                          style={inputStyle}
+                          value={editingUser.admin_no || ''}
+                          placeholder="PSU-ADM-2024-0001"
+                          onChange={(e) => setEditingUser({ ...editingUser, admin_no: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
+                          Specialty / scope
+                        </label>
+                        <input style={inputStyle} value={editingUser.specialty || ''}
+                               placeholder="System Administration"
+                               onChange={(e) => setEditingUser({ ...editingUser, specialty: e.target.value })} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
+                          Department / unit
+                        </label>
+                        <input style={inputStyle} value={editingUser.department || ''}
+                               onChange={(e) => setEditingUser({ ...editingUser, department: e.target.value })} />
+                      </div>
+                    </div>
+                  )}
+
                   {editingUser.role === 'FACULTY' && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1fr', gap: 14, marginBottom: 20 }}>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
+                          Faculty number
+                        </label>
+                        <input
+                          style={inputStyle}
+                          value={editingUser.faculty_no || ''}
+                          placeholder="PSU-FAC-2024-0451"
+                          onChange={(e) => setEditingUser({ ...editingUser, faculty_no: e.target.value })}
+                        />
+                      </div>
                       <div>
                         <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
                           Department
@@ -1858,6 +1885,35 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                           Position
                         </label>
                         <input style={inputStyle} value={editingUser.position || ''}
+                               onChange={(e) => setEditingUser({ ...editingUser, position: e.target.value })} />
+                      </div>
+                    </div>
+                  )}
+
+                  {editingUser.role === 'NON_TEACHING' && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1fr', gap: 14, marginBottom: 20 }}>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
+                          Employee no. (optional)
+                        </label>
+                        <input style={inputStyle} value={editingUser.employee_no || ''}
+                               placeholder="PSU-NT-2024-0187"
+                               onChange={(e) => setEditingUser({ ...editingUser, employee_no: e.target.value })} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
+                          Department / office
+                        </label>
+                        <input style={inputStyle} value={editingUser.department || ''}
+                               placeholder="Campus Maintenance & Facilities"
+                               onChange={(e) => setEditingUser({ ...editingUser, department: e.target.value })} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
+                          Position
+                        </label>
+                        <input style={inputStyle} value={editingUser.position || ''}
+                               placeholder="Utility Worker"
                                onChange={(e) => setEditingUser({ ...editingUser, position: e.target.value })} />
                       </div>
                     </div>

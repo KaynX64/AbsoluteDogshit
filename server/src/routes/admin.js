@@ -4,6 +4,21 @@ import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { logAudit } from '../utils/auditLogger.js';
+import { logPhiAccess } from '../utils/phiLogger.js';
+import {
+  isReadOnlyTable,
+  readOnlyMessage,
+  phiPatientSource,
+  fail,
+  normalizeValue,
+  maskRowForDisplay,
+  auditSafe,
+  assertKnownColumns,
+  assertPrimaryKey,
+  protectValues,
+  planDelete,
+  shouldBumpVersion,
+} from '../utils/dbStudioGuard.js';
 import { isRedisActive } from '../utils/redisClient.js';
 import bcrypt from 'bcryptjs';
 
@@ -26,15 +41,23 @@ router.get('/users', async (req, res) => {
               CASE WHEN u.is_active = TRUE THEN 'Active' ELSE 'Suspended' END as status,
               u.created_at,
               sp.student_no, sp.course, sp.year_level,
-              st.license_no, st.specialty,
-              COALESCE(st.department, fp.department, 'PSU Lingayen') as department,
-              fp.position
+              fp.faculty_no,
+              ntp.employee_no,
+              st.admin_no, st.license_no, st.specialty,
+              COALESCE(
+                st.department,
+                fp.department,
+                ntp.department,
+                'PSU Lingayen'
+              ) as department,
+              COALESCE(fp.position, ntp.position) AS position
        FROM USERS u
        LEFT JOIN USER_ROLES ur ON u.user_id = ur.user_id
        LEFT JOIN ROLES r ON ur.role_id = r.role_id
        LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
        LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
        LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
+       LEFT JOIN NON_TEACHING_PROFILES ntp ON u.user_id = ntp.user_id
        WHERE u.deleted_at IS NULL
        ORDER BY u.user_id ASC`
     );
@@ -89,6 +112,16 @@ router.patch('/users/:id/role', async (req, res) => {
     const [roleRows] = await connection.query('SELECT role_id FROM ROLES WHERE code = ?', [role_code]);
     if (roleRows.length === 0) throw new Error('Invalid role code specified.');
     const newRoleId = roleRows[0].role_id;
+    
+    if (['DOCTOR', 'DENTIST'].includes(role_code)) {
+      const [lic] = await connection.query(
+        'SELECT license_no FROM STAFF_PROFILES WHERE user_id = ?',
+        [targetUserId]
+      );
+      if (lic.length === 0 || !String(lic[0].license_no || '').trim()) {
+        throw new Error('Add a PRC license number (Edit User) before assigning the DOCTOR or DENTIST role.');
+      }
+    }
 
     await connection.query('DELETE FROM USER_ROLES WHERE user_id = ?', [targetUserId]);
     await connection.query('INSERT INTO USER_ROLES (user_id, role_id) VALUES (?, ?)', [targetUserId, newRoleId]);
@@ -126,7 +159,10 @@ router.put('/users/:id', async (req, res) => {
     student_no,
     course,
     year_level,
+    faculty_no,
+    employee_no,
     license_no,
+    admin_no,
     specialty,
     department,
     position,
@@ -185,23 +221,62 @@ router.put('/users/:id', async (req, res) => {
         [targetUserId, student_no.trim(), course ? course.trim() : 'General', Number(year_level) || 1]
       );
     } else if (['DOCTOR', 'DENTIST', 'NURSE', 'EMERGENCY_RESPONDER', 'ADMIN'].includes(role_code)) {
+            if (['DOCTOR', 'DENTIST', 'NURSE'].includes(role_code) && !(license_no && String(license_no).trim())) {
+        throw new Error('A PRC license number is required for DOCTOR, DENTIST and NURSE accounts.');
+      }
+      // admin_no is only meaningful for the ADMIN role. For clinical staff
+      // it stays NULL so the column stays semantically clean.
+      const adminNoValue =
+        role_code === 'ADMIN' && admin_no ? admin_no.trim() : null;
+
       await connection.query(
-        `INSERT INTO STAFF_PROFILES (user_id, license_no, specialty, department)
-         VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE license_no = VALUES(license_no), specialty = VALUES(specialty), department = VALUES(department)`,
+        `INSERT INTO STAFF_PROFILES (user_id, admin_no, license_no, specialty, department)
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           admin_no   = VALUES(admin_no),
+           license_no = VALUES(license_no),
+           specialty  = VALUES(specialty),
+           department = VALUES(department)`,
         [
           targetUserId,
+          adminNoValue,
           license_no ? license_no.trim() : null,
           specialty ? specialty.trim() : null,
           department ? department.trim() : 'University Infirmary',
         ]
       );
     } else if (role_code === 'FACULTY') {
+      if (!faculty_no || !String(faculty_no).trim()) {
+        throw new Error('Faculty number is required for FACULTY accounts.');
+      }
       await connection.query(
-        `INSERT INTO FACULTY_PROFILES (user_id, department, position)
-         VALUES (?, ?, ?)
-         ON DUPLICATE KEY UPDATE department = VALUES(department), position = VALUES(position)`,
-        [targetUserId, department ? department.trim() : 'Academic Affairs', position ? position.trim() : 'Faculty Member']
+        `INSERT INTO FACULTY_PROFILES (user_id, faculty_no, department, position)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           faculty_no = VALUES(faculty_no),
+           department = VALUES(department),
+           position   = VALUES(position)`,
+        [
+          targetUserId,
+          String(faculty_no).trim(),
+          department ? department.trim() : 'Academic Affairs',
+          position ? position.trim() : 'Faculty Member',
+        ]
+      );
+    } else if (role_code === 'NON_TEACHING') {
+      await connection.query(
+        `INSERT INTO NON_TEACHING_PROFILES (user_id, employee_no, department, position)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           employee_no = VALUES(employee_no),
+           department = VALUES(department),
+           position = VALUES(position)`,
+        [
+          targetUserId,
+          employee_no ? employee_no.trim() : null,
+          department ? department.trim() : 'General Services',
+          position ? position.trim() : 'Support Staff',
+        ]
       );
     }
 
@@ -251,7 +326,6 @@ router.post('/users/:id/reset-password', async (req, res) => {
     const newHash = await bcrypt.hash(newPassword, 10);
     await connection.query('UPDATE USERS SET password_hash = ? WHERE user_id = ?', [newHash, targetUserId]);
 
-    // Append password reset event to immutable audit log
     await logAudit(connection, {
       userId: req.user.user_id,
       action: 'UPDATE',
@@ -286,7 +360,10 @@ router.post('/users', async (req, res) => {
     student_no,
     course,
     year_level,
+    faculty_no,
+    employee_no,
     license_no,
+    admin_no,
     specialty,
     department,
     position,
@@ -363,24 +440,47 @@ router.post('/users', async (req, res) => {
         ]
       );
     } else if (['DOCTOR', 'DENTIST', 'NURSE', 'EMERGENCY_RESPONDER', 'ADMIN'].includes(role_code)) {
+            if (['DOCTOR', 'DENTIST', 'NURSE'].includes(role_code) && !(license_no && String(license_no).trim())) {
+        throw new Error('A PRC license number is required for DOCTOR, DENTIST and NURSE accounts.');
+      }
+      // admin_no is only meaningful for ADMIN. Clinical staff leave it NULL.
+      const adminNoValue =
+        role_code === 'ADMIN' && admin_no ? String(admin_no).trim() : null;
+
       await connection.query(
-        `INSERT INTO STAFF_PROFILES (user_id, license_no, specialty, department)
-         VALUES (?, ?, ?, ?)`,
+        `INSERT INTO STAFF_PROFILES (user_id, admin_no, license_no, specialty, department)
+         VALUES (?, ?, ?, ?, ?)`,
         [
           newUserId,
+          adminNoValue,
           license_no ? String(license_no).trim() : null,
           specialty ? String(specialty).trim() : null,
           department ? String(department).trim() : 'University Infirmary',
         ]
       );
     } else if (role_code === 'FACULTY') {
+      if (!faculty_no || !String(faculty_no).trim()) {
+        throw new Error('Faculty number is required for FACULTY accounts.');
+      }
       await connection.query(
-        `INSERT INTO FACULTY_PROFILES (user_id, department, position)
-         VALUES (?, ?, ?)`,
+        `INSERT INTO FACULTY_PROFILES (user_id, faculty_no, department, position)
+         VALUES (?, ?, ?, ?)`,
         [
           newUserId,
+          String(faculty_no).trim(),
           department ? String(department).trim() : 'Academic Affairs',
           position ? String(position).trim() : 'Faculty Member',
+        ]
+      );
+    } else if (role_code === 'NON_TEACHING') {
+      await connection.query(
+        `INSERT INTO NON_TEACHING_PROFILES (user_id, employee_no, department, position)
+         VALUES (?, ?, ?, ?)`,
+        [
+          newUserId,
+          employee_no ? String(employee_no).trim() : null,
+          department ? String(department).trim() : 'General Services',
+          position ? String(position).trim() : 'Support Staff',
         ]
       );
     }
@@ -442,7 +542,7 @@ router.get('/audit-logs', async (req, res) => {
   }
 });
 
-// 5. GET /api/admin/telemetry - Health Status (Single Clean Route)
+// 5. GET /api/admin/telemetry - Health Status
 router.get('/telemetry', async (req, res) => {
   try {
     const [dbTest] = await pool.query('SELECT 1 as isAlive');
@@ -475,7 +575,6 @@ router.get('/telemetry', async (req, res) => {
 // DATABASE STUDIO: LIVE DB EXPLORER & EDITOR
 // =============================================================================
 
-// Helper: Fetch valid tables in current database to prevent SQL injection
 async function getWhitelistedTables() {
   const [rows] = await pool.query(
     `SELECT TABLE_NAME as tableName, TABLE_ROWS as estimatedRows
@@ -486,7 +585,70 @@ async function getWhitelistedTables() {
   return rows;
 }
 
-// 1. GET /api/admin/db/tables - List all tables and estimated row counts
+async function getTableColumns(connection, tableName) {
+  const [cols] = await connection.query(
+    `SELECT COLUMN_NAME AS name, COLUMN_KEY AS columnKey
+     FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+    [tableName]
+  );
+  if (cols.length === 0) throw fail('Table does not exist.', 404);
+  return {
+    names: new Set(cols.map((c) => c.name)),
+    pk: cols.filter((c) => c.columnKey === 'PRI').map((c) => c.name),
+  };
+}
+
+async function resolvePhiTargets(table, rows, pkCols) {
+  const src = phiPatientSource(table);
+  if (!src || rows.length === 0) return [];
+  const recordIdOf = (row) => (pkCols.length ? row[pkCols[0]] : 0) ?? 0;
+
+  const byPatient = new Map();
+  if (!src.via) {
+    for (const row of rows) {
+      const patientId = row[src.col];
+      if (patientId !== null && patientId !== undefined && !byPatient.has(patientId)) {
+        byPatient.set(patientId, recordIdOf(row));
+      }
+    }
+  } else {
+    const parentKeys = [...new Set(rows.map((r) => r[src.col]).filter((v) => v !== null && v !== undefined))];
+    if (parentKeys.length === 0) return [];
+    const [parents] = await pool.query(
+      `SELECT ?? AS k, ?? AS patient FROM ?? WHERE ?? IN (?)`,
+      [src.via.key, src.via.patient, src.via.table, src.via.key, parentKeys]
+    );
+    const patientOfParent = new Map(parents.map((p) => [p.k, p.patient]));
+    for (const row of rows) {
+      const patientId = patientOfParent.get(row[src.col]);
+      if (patientId !== null && patientId !== undefined && !byPatient.has(patientId)) {
+        byPatient.set(patientId, recordIdOf(row));
+      }
+    }
+  }
+  return [...byPatient].map(([patientUserId, recordId]) => ({ patientUserId, recordId }));
+}
+
+async function logDbStudioRead(req, table, rows, pkCols) {
+  try {
+    const targets = await resolvePhiTargets(table, rows, pkCols);
+    for (const t of targets) {
+      await logPhiAccess({
+        viewerUserId: req.user.user_id,
+        patientUserId: t.patientUserId,
+        table,
+        recordId: t.recordId,
+        purpose: 'Admin DB Studio table browse',
+        ipAddress: req.ip,
+      });
+    }
+  } catch (err) {
+    console.error('[DB Studio PHI Read Log Error]:', err.message);
+  }
+}
+
+// 1. GET /api/admin/db/tables
 router.get('/db/tables', async (req, res) => {
   try {
     const tables = await getWhitelistedTables();
@@ -497,7 +659,7 @@ router.get('/db/tables', async (req, res) => {
   }
 });
 
-// 2. GET /api/admin/db/tables/:table - Get schema & paginated rows
+// 2. GET /api/admin/db/tables/:table
 router.get('/db/tables/:table', async (req, res) => {
   const tableName = req.params.table;
   const page = Math.max(Number(req.query.page) || 1, 1);
@@ -509,7 +671,6 @@ router.get('/db/tables/:table', async (req, res) => {
     const isValid = tables.some((t) => t.tableName === tableName);
     if (!isValid) return res.status(404).json({ error: 'Table not found in database schema.' });
 
-    // 1. Fetch column metadata
     const [columns] = await pool.query(
       `SELECT COLUMN_NAME as columnName, DATA_TYPE as dataType, IS_NULLABLE as isNullable,
               COLUMN_KEY as columnKey, EXTRA as extra
@@ -519,12 +680,14 @@ router.get('/db/tables/:table', async (req, res) => {
       [tableName]
     );
 
-    // 2. Fetch total row count
     const [countResult] = await pool.query(`SELECT COUNT(*) as total FROM ??`, [tableName]);
     const totalRows = countResult[0]?.total || 0;
 
-    // 3. Fetch paginated records
-    const [rows] = await pool.query(`SELECT * FROM ?? LIMIT ? OFFSET ?`, [tableName, limit, offset]);
+    const [rawRows] = await pool.query(`SELECT * FROM ?? LIMIT ? OFFSET ?`, [tableName, limit, offset]);
+    const rows = rawRows.map((r) => maskRowForDisplay(tableName, r));
+
+    const pkCols = columns.filter((c) => c.columnKey === 'PRI').map((c) => c.columnName);
+    void logDbStudioRead(req, tableName, rawRows, pkCols);
 
     res.json({
       tableName,
@@ -534,7 +697,7 @@ router.get('/db/tables/:table', async (req, res) => {
       limit,
       totalPages: Math.ceil(totalRows / limit) || 1,
       rows,
-      isReadOnly: ['AUDIT_LOGS', 'PHI_ACCESS_LOGS'].includes(tableName),
+      isReadOnly: isReadOnlyTable(tableName),
     });
   } catch (error) {
     console.error('[DB Studio] Table query error:', error);
@@ -542,25 +705,34 @@ router.get('/db/tables/:table', async (req, res) => {
   }
 });
 
-// 3. POST /api/admin/db/tables/:table/rows - Insert new row
+// 3. POST /api/admin/db/tables/:table/rows
 router.post('/db/tables/:table/rows', async (req, res) => {
   const tableName = req.params.table;
   const rowData = req.body;
 
-  if (['AUDIT_LOGS', 'PHI_ACCESS_LOGS'].includes(tableName)) {
-    return res.status(403).json({ error: 'Statutory compliance violation: Audit logs are append-only.' });
+  if (isReadOnlyTable(tableName)) {
+    return res.status(403).json({ error: readOnlyMessage(tableName) });
+  }
+
+  if (!rowData || typeof rowData !== 'object' || Array.isArray(rowData) || Object.keys(rowData).length === 0) {
+    return res.status(400).json({ error: 'A non-empty row object is required.' });
   }
 
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
 
-    const tables = await getWhitelistedTables();
-    if (!tables.some((t) => t.tableName === tableName)) {
-      throw new Error('Table does not exist.');
-    }
+    const { names } = await getTableColumns(connection, tableName);
+    assertKnownColumns(Object.keys(rowData), names);
 
-    const [insertResult] = await connection.query(`INSERT INTO ?? SET ?`, [tableName, rowData]);
+    const safeData = protectValues(tableName, rowData);
+
+    const [insertResult] = await connection.query(`INSERT INTO ?? SET ?`, [tableName, safeData]);
+
+    const loggedData = {};
+    for (const [col, val] of Object.entries(safeData)) {
+      loggedData[col] = auditSafe(tableName, col, val);
+    }
 
     await logAudit(connection, {
       userId: req.user.user_id,
@@ -568,7 +740,7 @@ router.post('/db/tables/:table/rows', async (req, res) => {
       table: tableName,
       recordId: insertResult.insertId || 0,
       oldValue: null,
-      newValue: { operation: 'ADMIN_DB_STUDIO_INSERT', insertedData: rowData },
+      newValue: { operation: 'ADMIN_DB_STUDIO_INSERT', insertedData: loggedData },
       ipAddress: req.ip,
     });
 
@@ -577,48 +749,86 @@ router.post('/db/tables/:table/rows', async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('[DB Studio Insert Error]:', error);
-    res.status(400).json({ error: error.message || 'Failed to insert row.' });
+    res.status(error.status || 400).json({ error: error.message || 'Failed to insert row.' });
   } finally {
     connection.release();
   }
 });
 
-// 4. PUT /api/admin/db/tables/:table/rows - Update an existing row
+// 4. PUT /api/admin/db/tables/:table/rows
 router.put('/db/tables/:table/rows', async (req, res) => {
   const tableName = req.params.table;
   const { primaryKey, updates } = req.body;
 
-  if (['AUDIT_LOGS', 'PHI_ACCESS_LOGS'].includes(tableName)) {
-    return res.status(403).json({ error: 'Statutory compliance violation: Audit logs are immutable.' });
+  if (isReadOnlyTable(tableName)) {
+    return res.status(403).json({ error: readOnlyMessage(tableName) });
   }
 
-  if (!primaryKey || typeof primaryKey !== 'object' || Object.keys(primaryKey).length === 0) {
+  if (!primaryKey || typeof primaryKey !== 'object' || Array.isArray(primaryKey) || Object.keys(primaryKey).length === 0) {
     return res.status(400).json({ error: 'Primary key specification is required to update a row.' });
+  }
+
+  if (!updates || typeof updates !== 'object' || Array.isArray(updates)) {
+    return res.status(400).json({ error: 'An updates object is required.' });
   }
 
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
 
-    const tables = await getWhitelistedTables();
-    if (!tables.some((t) => t.tableName === tableName)) throw new Error('Table does not exist.');
+    const { names, pk } = await getTableColumns(connection, tableName);
+    assertPrimaryKey(primaryKey, pk);
+    assertKnownColumns(Object.keys(updates), names);
+    if (Object.keys(updates).some((c) => pk.includes(c))) {
+      throw fail('Primary key columns cannot be changed.');
+    }
 
-    // Build WHERE clause based on composite or single PK
-    const pkClauses = Object.keys(primaryKey).map((col) => `\`${col}\` = ?`).join(' AND ');
-    const pkValues = Object.values(primaryKey);
+    const pkClauses = pk.map(() => '?? = ?').join(' AND ');
+    const pkParams = pk.flatMap((c) => [c, primaryKey[c]]);
 
-    const [result] = await connection.query(
-      `UPDATE ?? SET ? WHERE ${pkClauses}`,
-      [tableName, updates, ...pkValues]
+    const [existing] = await connection.query(
+      `SELECT * FROM ?? WHERE ${pkClauses} FOR UPDATE`,
+      [tableName, ...pkParams]
     );
+    if (existing.length === 0) throw fail('Record not found.', 404);
+    const oldRow = existing[0];
+
+    const changedInput = {};
+    for (const [col, val] of Object.entries(updates)) {
+      if (normalizeValue(val) !== normalizeValue(oldRow[col])) changedInput[col] = val;
+    }
+
+    const writeData = protectValues(tableName, changedInput);
+    if (Object.keys(writeData).length === 0) {
+      await connection.rollback();
+      return res.json({ message: 'No changes detected.', affectedRows: 0 });
+    }
+
+    const bumpVersion = shouldBumpVersion(names, writeData);
+    const [result] = bumpVersion
+      ? await connection.query(`UPDATE ?? SET ?, ?? = ?? + 1 WHERE ${pkClauses}`, [
+          tableName, writeData, 'version', 'version', ...pkParams,
+        ])
+      : await connection.query(`UPDATE ?? SET ? WHERE ${pkClauses}`, [tableName, writeData, ...pkParams]);
+
+    const oldLogged = {};
+    const newLogged = {};
+    for (const col of Object.keys(writeData)) {
+      oldLogged[col] = auditSafe(tableName, col, oldRow[col]);
+      newLogged[col] = auditSafe(tableName, col, writeData[col]);
+    }
+    if (bumpVersion) {
+      oldLogged.version = normalizeValue(oldRow.version);
+      newLogged.version = String((Number(oldRow.version) || 0) + 1);
+    }
 
     await logAudit(connection, {
       userId: req.user.user_id,
       action: 'UPDATE',
       table: tableName,
       recordId: Object.values(primaryKey)[0] || 0,
-      oldValue: null,
-      newValue: { operation: 'ADMIN_DB_STUDIO_UPDATE', primaryKey, updates },
+      oldValue: { primaryKey, fields: oldLogged },
+      newValue: { operation: 'ADMIN_DB_STUDIO_UPDATE', primaryKey, fields: newLogged },
       ipAddress: req.ip,
     });
 
@@ -627,22 +837,22 @@ router.put('/db/tables/:table/rows', async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('[DB Studio Update Error]:', error);
-    res.status(400).json({ error: error.message || 'Failed to update row.' });
+    res.status(error.status || 400).json({ error: error.message || 'Failed to update row.' });
   } finally {
     connection.release();
   }
 });
 
-// 5. DELETE /api/admin/db/tables/:table/rows - Delete a row
+// 5. DELETE /api/admin/db/tables/:table/rows
 router.delete('/db/tables/:table/rows', async (req, res) => {
   const tableName = req.params.table;
   const { primaryKey } = req.body;
 
-  if (['AUDIT_LOGS', 'PHI_ACCESS_LOGS'].includes(tableName)) {
-    return res.status(403).json({ error: 'Statutory compliance violation: Audit logs cannot be deleted.' });
+  if (isReadOnlyTable(tableName)) {
+    return res.status(403).json({ error: readOnlyMessage(tableName) });
   }
 
-  if (!primaryKey || typeof primaryKey !== 'object') {
+  if (!primaryKey || typeof primaryKey !== 'object' || Array.isArray(primaryKey) || Object.keys(primaryKey).length === 0) {
     return res.status(400).json({ error: 'Primary key specification is required to delete a row.' });
   }
 
@@ -650,27 +860,61 @@ router.delete('/db/tables/:table/rows', async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const pkClauses = Object.keys(primaryKey).map((col) => `\`${col}\` = ?`).join(' AND ');
-    const pkValues = Object.values(primaryKey);
+    const { names, pk } = await getTableColumns(connection, tableName);
+    assertPrimaryKey(primaryKey, pk);
 
-    const [result] = await connection.query(`DELETE FROM ?? WHERE ${pkClauses}`, [tableName, ...pkValues]);
+    const pkClauses = pk.map(() => '?? = ?').join(' AND ');
+    const pkParams = pk.flatMap((c) => [c, primaryKey[c]]);
+    const mode = planDelete(names);
+
+    const [existing] = await connection.query(
+      `SELECT * FROM ?? WHERE ${pkClauses} FOR UPDATE`,
+      [tableName, ...pkParams]
+    );
+    if (existing.length === 0) throw fail('Record not found.', 404);
+
+    if (mode === 'soft' && existing[0].deleted_at !== null && existing[0].deleted_at !== undefined) {
+      throw fail('Record is already deleted.', 409);
+    }
+
+    const snapshot = {};
+    for (const [col, val] of Object.entries(existing[0])) {
+      snapshot[col] = auditSafe(tableName, col, val);
+    }
+
+    let result;
+    if (mode === 'soft') {
+      const setVersion = names.has('version') ? ', version = version + 1' : '';
+      [result] = await connection.query(
+        `UPDATE ?? SET deleted_at = NOW()${setVersion} WHERE ${pkClauses}`,
+        [tableName, ...pkParams]
+      );
+    } else {
+      [result] = await connection.query(`DELETE FROM ?? WHERE ${pkClauses}`, [tableName, ...pkParams]);
+    }
 
     await logAudit(connection, {
       userId: req.user.user_id,
       action: 'DELETE',
       table: tableName,
       recordId: Object.values(primaryKey)[0] || 0,
-      oldValue: primaryKey,
-      newValue: { operation: 'ADMIN_DB_STUDIO_DELETE' },
+      oldValue: { primaryKey, row: snapshot },
+      newValue: { operation: mode === 'soft' ? 'ADMIN_DB_STUDIO_SOFT_DELETE' : 'ADMIN_DB_STUDIO_DELETE' },
       ipAddress: req.ip,
     });
 
     await connection.commit();
-    res.json({ message: `Record deleted from ${tableName}.`, affectedRows: result.affectedRows });
+    res.json({
+      message: mode === 'soft'
+        ? `Record in ${tableName} archived (soft-deleted).`
+        : `Record deleted from ${tableName}.`,
+      softDeleted: mode === 'soft',
+      affectedRows: result.affectedRows,
+    });
   } catch (error) {
     await connection.rollback();
     console.error('[DB Studio Delete Error]:', error);
-    res.status(400).json({ error: error.message || 'Failed to delete row.' });
+    res.status(error.status || 400).json({ error: error.message || 'Failed to delete row.' });
   } finally {
     connection.release();
   }

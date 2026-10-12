@@ -4,7 +4,6 @@ import QrIntakeScanner from './QrIntakeScanner';
 import InventoryManager from './InventoryManager';
 import { io } from 'socket.io-client';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
-import { T } from '../theme';
 
 interface QueueItem {
   queue_id: number;
@@ -15,6 +14,23 @@ interface QueueItem {
   visit_type: string;
   status: string;
   arrival_time: string;
+  is_emergency?: number;
+}
+
+interface SosAlert {
+  alert_id: number;
+  first_name: string;
+  last_name: string;
+  phone?: string;
+  studentNo?: string;
+  course?: string;
+  blood_type?: string;
+  allergies?: string;
+  notes?: string;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+  status: string;
+  created_at: string;
 }
 
 interface ExpectedItem {
@@ -23,6 +39,7 @@ interface ExpectedItem {
   doctor_user_id: number;
   date_time: string;
   time_slot: string;
+  date_str: string;
   appointment_type: string;
   status: string;
   notes: string;
@@ -68,6 +85,10 @@ export default function NurseConsole({
 
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [loadingQueue, setLoadingQueue] = useState(false);
+  const [activeSosCount, setActiveSosCount] = useState<number>(0);
+  const [sosAlerts, setSosAlerts] = useState<SosAlert[]>([]);
+  const [sosBusyId, setSosBusyId] = useState<number | null>(null);
+  const [noShowCount, setNoShowCount] = useState<number>(0);
 
   /* ── Expected arrivals state ─────────────────────────────── */
   const [expected, setExpected] = useState<ExpectedItem[]>([]);
@@ -127,6 +148,73 @@ export default function NurseConsole({
     }
   };
 
+  const fetchActiveSosCount = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/emergency/active`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setSosAlerts(data);
+          setActiveSosCount(data.length);
+        }
+      }
+    } catch (_) {}
+  };
+
+
+  const updateSosStatus = async (
+    alertId: number,
+    status: 'acknowledged' | 'dispatched' | 'resolved' | 'false_alarm'
+  ) => {
+    if (
+      (status === 'resolved' || status === 'false_alarm') &&
+      !window.confirm(
+        status === 'resolved'
+          ? 'Mark this SOS as resolved and close it?'
+          : 'Mark this SOS as a false alarm and close it?'
+      )
+    ) {
+      return;
+    }
+    setSosBusyId(alertId);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/emergency/${alertId}/status`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        window.alert(err.error || 'Failed to update SOS alert.');
+      }
+    } catch (_) {
+      window.alert('Network error while updating the SOS alert.');
+    } finally {
+      setSosBusyId(null);
+      fetchActiveSosCount();
+    }
+  };
+
+  const fetchNoShowCount = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/appointments/no-shows-today`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setNoShowCount(Number(data.count) || 0);
+      }
+    } catch (_) {}
+  };
+
   const fetchExpected = async () => {
     setLoadingExpected(true);
     setExpectedFeedback(null);
@@ -148,12 +236,37 @@ export default function NurseConsole({
 
   useEffect(() => {
     fetchLiveQueue();
+    fetchActiveSosCount();
+    fetchNoShowCount();
+
     const token = localStorage.getItem('valetudo_token');
     const socket = io(SOCKET_URL, {
       auth: { token },
       transports: ['websocket', 'polling'],
     });
-    socket.on('queue:updated', () => fetchLiveQueue());
+
+    socket.on('queue:updated', () => {
+      fetchLiveQueue();
+      fetchActiveSosCount();
+      fetchNoShowCount();
+    });
+
+    socket.on('emergency:new_alert', () => {
+      fetchLiveQueue();
+      fetchActiveSosCount();
+    });
+
+    socket.on('emergency:status_change', () => {
+      fetchLiveQueue();
+      fetchActiveSosCount();
+    });
+
+    // The reminder worker flips appointments to 'no_show' every 60s and
+    // emits appointment:status_changed. Keep the tile live as that happens.
+    socket.on('appointment:status_changed', (evt: { status?: string }) => {
+      if (evt?.status === 'no_show') fetchNoShowCount();
+    });
+
     socket.on('appointment:booked', (newBooking: any) => {
       if (window.electronAPI?.showNotification) {
         window.electronAPI.showNotification({
@@ -163,9 +276,11 @@ export default function NurseConsole({
       }
       if (viewMode === 'expected') fetchExpected();
     });
+
     socket.on('appointment:status_changed', () => {
       if (viewMode === 'expected') fetchExpected();
     });
+
     return () => {
       socket.disconnect();
     };
@@ -197,7 +312,6 @@ export default function NurseConsole({
     }
   };
 
-  /* ── Open confirm modal + pre-check for an existing ticket ── */
   const openCheckInConfirm = async (item: ExpectedItem) => {
     setConfirmCheckIn(item);
     setConfirmTicketCheck({ loading: true, hasTicket: false, ticket: null });
@@ -223,7 +337,6 @@ export default function NurseConsole({
     }
   };
 
-  /* ── Fires only after modal confirmation ─────────────────── */
   const executeCheckInExpected = async (item: ExpectedItem) => {
     setCheckingInId(item.appointment_id);
     setExpectedFeedback(null);
@@ -238,10 +351,8 @@ export default function NurseConsole({
 
       const data = await res.json();
 
-      // Race-condition path: another nurse checked them in first
       if (res.status === 409) {
         setExpectedFeedback({ text: '⚠️ ' + data.error, ok: false });
-        // Refresh the modal so it shows the "already in queue" state
         await openCheckInConfirm(item);
         fetchLiveQueue();
         return;
@@ -264,12 +375,10 @@ export default function NurseConsole({
     }
   };
 
-  /* ── Inventory view ──────────────────────────────────────── */
   if (viewMode === 'inventory') {
     return <InventoryManager />;
   }
 
-  /* ── Expected arrivals view ──────────────────────────────── */
   if (viewMode === 'expected') {
     return (
       <div
@@ -290,7 +399,6 @@ export default function NurseConsole({
             boxShadow: '0 1px 2px rgba(15,30,23,0.03), 0 4px 16px rgba(15,30,23,0.04)',
           }}
         >
-          {/* Header */}
           <div
             style={{
               display: 'flex',
@@ -378,7 +486,6 @@ export default function NurseConsole({
             </button>
           </div>
 
-          {/* Feedback banner */}
           {expectedFeedback && (
             <div
               style={{
@@ -396,7 +503,6 @@ export default function NurseConsole({
             </div>
           )}
 
-          {/* Body */}
           {loadingExpected ? (
             <div
               style={{
@@ -447,7 +553,6 @@ export default function NurseConsole({
                       border: `1px solid ${C.borderSoft}`,
                     }}
                   >
-                    {/* Time column */}
                     <div>
                       <div
                         style={{
@@ -470,11 +575,10 @@ export default function NurseConsole({
                           letterSpacing: 0.6,
                         }}
                       >
-                        Scheduled
+                           {item.date_str || 'Scheduled'}
                       </div>
                     </div>
 
-                    {/* Patient info */}
                     <div style={{ minWidth: 0 }}>
                       <div
                         style={{
@@ -526,7 +630,6 @@ export default function NurseConsole({
                       </div>
                     </div>
 
-                    {/* Check-in button — opens confirmation modal with pre-check */}
                     <button
                       type="button"
                       onClick={() => openCheckInConfirm(item)}
@@ -554,7 +657,6 @@ export default function NurseConsole({
             </div>
           )}
 
-          {/* Walk-in hint */}
           <div
             style={{
               marginTop: 20,
@@ -572,9 +674,7 @@ export default function NurseConsole({
           </div>
         </section>
 
-        {/* ═══════════════════════════════════════════════════════════ */}
-        {/* CONFIRM CHECK-IN MODAL                                     */}
-        {/* ═══════════════════════════════════════════════════════════ */}
+        {/* Modal */}
         {confirmCheckIn && (
           <div
             className="modal-backdrop"
@@ -587,7 +687,6 @@ export default function NurseConsole({
               style={{ maxWidth: 480 }}
               onClick={(e) => e.stopPropagation()}
             >
-              {/* ── STATE 1: loading pre-check ─────────────────── */}
               {confirmTicketCheck.loading ? (
                 <div style={{ padding: '40px 20px', textAlign: 'center' }}>
                   <div
@@ -604,22 +703,11 @@ export default function NurseConsole({
                   <div style={{ fontSize: 13.5, fontWeight: 700, color: C.text }}>
                     Checking patient's queue status…
                   </div>
-                  <div style={{ fontSize: 12, color: C.textSub, marginTop: 4 }}>
-                    Confirming they aren't already checked in.
-                  </div>
                   <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
                 </div>
               ) : confirmTicketCheck.hasTicket ? (
-                /* ── STATE 2: already in queue ──────────────── */
                 <>
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: 12,
-                      marginBottom: 18,
-                    }}
-                  >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 18 }}>
                     <div
                       style={{
                         width: 40,
@@ -636,15 +724,7 @@ export default function NurseConsole({
                       ⚠️
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <h3
-                        style={{
-                          margin: 0,
-                          fontSize: 17,
-                          fontWeight: 800,
-                          color: C.text,
-                          letterSpacing: '-0.3px',
-                        }}
-                      >
+                      <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: C.text }}>
                         Patient already checked in
                       </h3>
                       <p style={{ margin: '4px 0 0', fontSize: 12.5, color: C.textSub }}>
@@ -653,7 +733,6 @@ export default function NurseConsole({
                     </div>
                   </div>
 
-                  {/* Existing ticket details */}
                   <div
                     style={{
                       padding: '16px 18px',
@@ -663,119 +742,27 @@ export default function NurseConsole({
                       marginBottom: 18,
                     }}
                   >
-                    <div
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: '1fr 1fr',
-                        gap: 14,
-                      }}
-                    >
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                       <div>
-                        <div
-                          style={{
-                            fontSize: 10.5,
-                            fontWeight: 800,
-                            letterSpacing: 1,
-                            color: C.warning,
-                            textTransform: 'uppercase',
-                            marginBottom: 4,
-                          }}
-                        >
+                        <div style={{ fontSize: 10.5, fontWeight: 800, color: C.warning, textTransform: 'uppercase' }}>
                           Queue ticket
                         </div>
-                        <div
-                          style={{
-                            fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
-                            fontSize: 22,
-                            fontWeight: 800,
-                            color: C.warning,
-                          }}
-                        >
+                        <div style={{ fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', fontSize: 22, fontWeight: 800, color: C.warning }}>
                           {confirmTicketCheck.ticket?.ticket_no || '—'}
                         </div>
                       </div>
                       <div>
-                        <div
-                          style={{
-                            fontSize: 10.5,
-                            fontWeight: 800,
-                            letterSpacing: 1,
-                            color: C.warning,
-                            textTransform: 'uppercase',
-                            marginBottom: 4,
-                          }}
-                        >
+                        <div style={{ fontSize: 10.5, fontWeight: 800, color: C.warning, textTransform: 'uppercase' }}>
                           Status
                         </div>
-                        <div
-                          style={{
-                            fontSize: 14,
-                            fontWeight: 800,
-                            color: C.warning,
-                            textTransform: 'capitalize',
-                          }}
-                        >
+                        <div style={{ fontSize: 14, fontWeight: 800, color: C.warning, textTransform: 'capitalize' }}>
                           {confirmTicketCheck.ticket?.status?.replace('-', ' ') || '—'}
-                        </div>
-                      </div>
-                      <div>
-                        <div
-                          style={{
-                            fontSize: 10.5,
-                            fontWeight: 800,
-                            letterSpacing: 1,
-                            color: C.warning,
-                            textTransform: 'uppercase',
-                            marginBottom: 4,
-                          }}
-                        >
-                          Arrived
-                        </div>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
-                          {confirmTicketCheck.ticket?.arrival_time || '—'}
-                        </div>
-                      </div>
-                      <div>
-                        <div
-                          style={{
-                            fontSize: 10.5,
-                            fontWeight: 800,
-                            letterSpacing: 1,
-                            color: C.warning,
-                            textTransform: 'uppercase',
-                            marginBottom: 4,
-                          }}
-                        >
-                          Visit type
-                        </div>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
-                          {confirmTicketCheck.ticket?.visit_type || '—'}
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  <p
-                    style={{
-                      margin: '0 0 18px',
-                      fontSize: 12.5,
-                      color: C.textSub,
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    No duplicate ticket was created. The patient is already waiting or being seen in
-                    the triage queue — nothing else to do here.
-                  </p>
-
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: 10,
-                      justifyContent: 'flex-end',
-                      paddingTop: 16,
-                      borderTop: `1px solid ${C.border}`,
-                    }}
-                  >
+                  <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 16, borderTop: `1px solid ${C.border}` }}>
                     <button
                       type="button"
                       onClick={() => setConfirmCheckIn(null)}
@@ -789,7 +776,6 @@ export default function NurseConsole({
                         fontWeight: 700,
                         cursor: 'pointer',
                         fontFamily: 'inherit',
-                        boxShadow: '0 4px 12px rgba(31,74,52,0.16)',
                       }}
                     >
                       Got it
@@ -797,16 +783,8 @@ export default function NurseConsole({
                   </div>
                 </>
               ) : (
-                /* ── STATE 3: normal confirm ────────────────── */
                 <>
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: 12,
-                      marginBottom: 18,
-                    }}
-                  >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 18 }}>
                     <div
                       style={{
                         width: 40,
@@ -822,15 +800,7 @@ export default function NurseConsole({
                       ✓
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <h3
-                        style={{
-                          margin: 0,
-                          fontSize: 17,
-                          fontWeight: 800,
-                          color: C.text,
-                          letterSpacing: '-0.3px',
-                        }}
-                      >
+                      <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: C.text }}>
                         Confirm patient check-in
                       </h3>
                       <p style={{ margin: '4px 0 0', fontSize: 12.5, color: C.textSub }}>
@@ -839,7 +809,6 @@ export default function NurseConsole({
                     </div>
                   </div>
 
-                  {/* Patient details card */}
                   <div
                     style={{
                       padding: '14px 16px',
@@ -849,85 +818,25 @@ export default function NurseConsole({
                       marginBottom: 18,
                     }}
                   >
-                    <div
-                      style={{
-                        fontSize: 15,
-                        fontWeight: 800,
-                        color: C.text,
-                        marginBottom: 10,
-                      }}
-                    >
+                    <div style={{ fontSize: 15, fontWeight: 800, color: C.text, marginBottom: 10 }}>
                       {confirmCheckIn.first_name} {confirmCheckIn.last_name}
                     </div>
-
-                    <div
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: '1fr 1fr',
-                        gap: 10,
-                        fontSize: 12.5,
-                        color: C.textSub,
-                      }}
-                    >
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 12.5, color: C.textSub }}>
                       <div>
-                        <b style={{ color: C.textMuted, fontSize: 10.5, letterSpacing: 0.8, textTransform: 'uppercase' }}>Student ID</b>
-                        <div style={{ fontWeight: 700, color: C.text, marginTop: 2 }}>
-                          {confirmCheckIn.student_no}
-                        </div>
+                        <b style={{ color: C.textMuted, fontSize: 10.5, textTransform: 'uppercase' }}>Student ID</b>
+                        <div style={{ fontWeight: 700, color: C.text, marginTop: 2 }}>{confirmCheckIn.student_no}</div>
                       </div>
                       <div>
-                        <b style={{ color: C.textMuted, fontSize: 10.5, letterSpacing: 0.8, textTransform: 'uppercase' }}>Scheduled time</b>
-                        <div style={{ fontWeight: 700, color: C.primary, marginTop: 2 }}>
-                          {confirmCheckIn.time_slot}
-                        </div>
-                      </div>
-                      <div>
-                        <b style={{ color: C.textMuted, fontSize: 10.5, letterSpacing: 0.8, textTransform: 'uppercase' }}>Purpose</b>
-                        <div style={{ fontWeight: 600, color: C.text, marginTop: 2 }}>
-                          {confirmCheckIn.appointment_type}
-                        </div>
-                      </div>
-                      <div>
-                        <b style={{ color: C.textMuted, fontSize: 10.5, letterSpacing: 0.8, textTransform: 'uppercase' }}>Attending physician</b>
-                        <div style={{ fontWeight: 600, color: C.text, marginTop: 2 }}>
-                          Dr. {confirmCheckIn.doctor_first_name} {confirmCheckIn.doctor_last_name}
-                        </div>
+                        <b style={{ color: C.textMuted, fontSize: 10.5, textTransform: 'uppercase' }}>Scheduled time</b>
+                        <div style={{ fontWeight: 700, color: C.primary, marginTop: 2 }}>{confirmCheckIn.time_slot}</div>
                       </div>
                     </div>
-
-                    {confirmCheckIn.allergies &&
-                      confirmCheckIn.allergies !== 'None' &&
-                      confirmCheckIn.allergies !== 'None reported' &&
-                      confirmCheckIn.allergies !== 'None listed' && (
-                        <div
-                          style={{
-                            marginTop: 12,
-                            padding: '8px 12px',
-                            background: C.dangerSoft,
-                            borderRadius: 10,
-                            fontSize: 12,
-                            fontWeight: 700,
-                            color: C.danger,
-                          }}
-                        >
-                          ⚠️ Known allergy: {confirmCheckIn.allergies}
-                        </div>
-                      )}
                   </div>
 
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: 10,
-                      justifyContent: 'flex-end',
-                      paddingTop: 16,
-                      borderTop: `1px solid ${C.border}`,
-                    }}
-                  >
+                  <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 16, borderTop: `1px solid ${C.border}` }}>
                     <button
                       type="button"
                       onClick={() => setConfirmCheckIn(null)}
-                      disabled={checkingInId !== null}
                       style={{
                         padding: '11px 22px',
                         borderRadius: 999,
@@ -936,9 +845,8 @@ export default function NurseConsole({
                         border: 'none',
                         fontSize: 13,
                         fontWeight: 700,
-                        cursor: checkingInId !== null ? 'not-allowed' : 'pointer',
+                        cursor: 'pointer',
                         fontFamily: 'inherit',
-                        opacity: checkingInId !== null ? 0.5 : 1,
                       }}
                     >
                       Cancel
@@ -946,19 +854,16 @@ export default function NurseConsole({
                     <button
                       type="button"
                       onClick={() => executeCheckInExpected(confirmCheckIn)}
-                      disabled={checkingInId !== null}
                       style={{
                         padding: '11px 22px',
                         borderRadius: 999,
-                        background: checkingInId !== null ? C.sage400 : C.primary,
+                        background: C.primary,
                         color: '#FFFFFF',
                         border: 'none',
                         fontSize: 13,
                         fontWeight: 700,
-                        cursor: checkingInId !== null ? 'not-allowed' : 'pointer',
+                        cursor: 'pointer',
                         fontFamily: 'inherit',
-                        boxShadow: '0 4px 12px rgba(31,74,52,0.16)',
-                        transition: 'background 120ms ease',
                       }}
                     >
                       {checkingInId !== null ? 'Checking in…' : '✓ Confirm check-in'}
@@ -987,7 +892,177 @@ export default function NurseConsole({
         gap: 22,
       }}
     >
-      {/* Two-column grid */}
+    {/* ── ACTIVE SOS ALERTS (separate from the triage queue) ───── */}
+      {sosAlerts.length > 0 && (
+        <section
+          style={{
+            background: C.dangerSoft,
+            border: `1.5px solid ${C.dangerBorder}`,
+            borderRadius: 22,
+            padding: 22,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 14,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 24 }}>🚨</span>
+            <div>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: C.danger }}>
+                Active SOS alerts
+              </h3>
+              <p style={{ margin: '2px 0 0', fontSize: 12.5, color: C.textSub }}>
+                {sosAlerts.length} open · handled separately from the triage queue
+              </p>
+            </div>
+          </div>
+
+          {sosAlerts.map((a) => {
+            const busy = sosBusyId === a.alert_id;
+            const btn = (bg: string, fg: string, bd: string) =>
+              ({
+                padding: '8px 14px',
+                borderRadius: 999,
+                background: bg,
+                color: fg,
+                border: `1px solid ${bd}`,
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: busy ? 'not-allowed' : 'pointer',
+                opacity: busy ? 0.6 : 1,
+                fontFamily: 'inherit',
+              } as const);
+            const statusText =
+              a.status === 'triggered'
+                ? 'NEW'
+                : a.status === 'acknowledged'
+                ? 'ACKNOWLEDGED'
+                : 'DISPATCHED';
+            return (
+              <div
+                key={a.alert_id}
+                style={{
+                  background: C.surface,
+                  border: `1px solid ${C.dangerBorder}`,
+                  borderRadius: 16,
+                  padding: '14px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 10,
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <div style={{ fontSize: 15, fontWeight: 800, color: C.text }}>
+                    {a.first_name} {a.last_name}
+                    <span
+                      style={{
+                        marginLeft: 8,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: C.textSub,
+                      }}
+                    >
+                      {a.studentNo || ''} {a.course ? `· ${a.course}` : ''}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 11.5, color: C.textMuted }}>
+                      {new Date(a.created_at).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                    <span
+                      style={{
+                        padding: '3px 10px',
+                        borderRadius: 999,
+                        background: '#DC2626',
+                        color: '#FFFFFF',
+                        fontSize: 10,
+                        fontWeight: 800,
+                        letterSpacing: 0.3,
+                      }}
+                    >
+                      {statusText}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: 12.5, color: C.textSub, lineHeight: 1.6 }}>
+                  🩸 Blood: <strong>{a.blood_type || 'Unknown'}</strong> · ⚠️ Allergies:{' '}
+                  <strong>{a.allergies || 'None'}</strong>
+                  {a.phone ? <> · 📞 {a.phone}</> : null}
+                </div>
+                {a.notes && (
+                  <div style={{ fontSize: 12.5, color: C.text }}>📍 {a.notes}</div>
+                )}
+
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+                  {a.status === 'triggered' && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => updateSosStatus(a.alert_id, 'acknowledged')}
+                      style={btn('#DC2626', '#FFFFFF', '#DC2626')}
+                    >
+                      Acknowledge
+                    </button>
+                  )}
+                  {a.status !== 'dispatched' && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => updateSosStatus(a.alert_id, 'dispatched')}
+                      style={btn(C.surface, C.danger, C.dangerBorder)}
+                    >
+                      Mark dispatched
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => updateSosStatus(a.alert_id, 'resolved')}
+                    style={btn(C.primary, '#FFFFFF', C.primary)}
+                  >
+                    ✓ Resolved
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => updateSosStatus(a.alert_id, 'false_alarm')}
+                    style={btn(C.surface, C.textSub, C.border)}
+                  >
+                    False alarm
+                  </button>
+                  {a.latitude != null && a.longitude != null && (
+                    <a
+                      href={`https://www.google.com/maps?q=${a.latitude},${a.longitude}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        ...btn(C.surface, C.primary, C.border),
+                        textDecoration: 'none',
+                        display: 'inline-block',
+                      }}
+                    >
+                      🗺 Open map
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </section>
+      )}
+
       <div
         style={{
           display: 'grid',
@@ -1003,7 +1078,7 @@ export default function NurseConsole({
           }}
         />
 
-        {/* Queue card */}
+        {/* Live Queue Card with Emergency Prioritization */}
         <section
           style={{
             background: C.surface,
@@ -1049,6 +1124,7 @@ export default function NurseConsole({
                   <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
                   <path d="M16 3.13a4 4 0 0 1 0 7.75" />
                 </svg>
+
               </div>
               <div>
                 <h3
@@ -1070,7 +1146,10 @@ export default function NurseConsole({
 
             <button
               type="button"
-              onClick={fetchLiveQueue}
+              onClick={() => {
+                fetchLiveQueue();
+                fetchActiveSosCount();
+              }}
               title="Refresh queue"
               style={{
                 width: 36,
@@ -1144,6 +1223,8 @@ export default function NurseConsole({
             ) : (
               queue.map((q) => {
                 const isServing = q.status === 'in-consultation';
+                const isEmergency = q.is_emergency === 1 || q.ticket_no.includes('SOS') || q.visit_type?.includes('EMERGENCY');
+
                 return (
                   <div
                     key={q.queue_id}
@@ -1154,22 +1235,35 @@ export default function NurseConsole({
                       alignItems: 'center',
                       padding: '14px 16px',
                       borderRadius: 18,
-                      background: isServing ? C.primaryTint : C.sage50,
-                      border: `1px solid ${isServing ? C.sage300 : 'transparent'}`,
-                      transition: 'background 120ms ease',
+                      background: isEmergency
+                        ? C.dangerSoft
+                        : isServing
+                        ? C.primaryTint
+                        : C.sage50,
+                      border: isEmergency
+                        ? `1.5px solid ${C.dangerBorder}`
+                        : isServing
+                        ? `1px solid ${C.sage300}`
+                        : '1px solid transparent',
+                      transition: 'all 120ms ease',
+                      boxShadow: isEmergency ? '0 2px 8px rgba(220, 38, 38, 0.12)' : 'none',
                     }}
                   >
+                    {/* Ticket Badge */}
                     <div
                       style={{
                         fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
                         fontSize: 12.5,
                         fontWeight: 800,
-                        color: C.primary,
+                        color: isEmergency ? C.danger : C.primary,
                         background: C.surface,
                         padding: '5px 10px',
                         borderRadius: 10,
-                        border: `1px solid ${C.borderSoft}`,
+                        border: isEmergency ? `1.5px solid ${C.dangerBorder}` : `1px solid ${C.borderSoft}`,
                         letterSpacing: 0.2,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
                       }}
                     >
                       {q.ticket_no}
@@ -1180,13 +1274,31 @@ export default function NurseConsole({
                         style={{
                           fontSize: 14,
                           fontWeight: 700,
-                          color: C.text,
+                          color: isEmergency ? C.danger : C.text,
                           marginBottom: 3,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
                         }}
                       >
                         {q.first_name} {q.last_name}
+                        {isEmergency && (
+                          <span
+                            style={{
+                              fontSize: 9.5,
+                              fontWeight: 900,
+                              background: '#DC2626',
+                              color: '#FFFFFF',
+                              padding: '1px 6px',
+                              borderRadius: 4,
+                              letterSpacing: 0.4,
+                            }}
+                          >
+                            TOP PRIORITY
+                          </span>
+                        )}
                       </div>
-                      <div style={{ fontSize: 11.5, color: C.textSub }}>
+                      <div style={{ fontSize: 11.5, color: isEmergency ? C.danger : C.textSub, fontWeight: isEmergency ? 600 : 400 }}>
                         {q.visit_type}
                         {q.student_no && (
                           <>
@@ -1194,7 +1306,7 @@ export default function NurseConsole({
                             <span
                               style={{
                                 fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
-                                color: C.textMuted,
+                                color: isEmergency ? C.danger : C.textMuted,
                               }}
                             >
                               {q.student_no}
@@ -1204,24 +1316,23 @@ export default function NurseConsole({
                       </div>
                     </div>
 
-                    {/* Status pill — Waiting / Called */}
+                    {/* Status pill */}
                     <span
                       style={{
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: 6,
-                        padding: isServing ? '5px 12px' : '4px 11px',
+                        padding: isEmergency ? '5px 12px' : isServing ? '5px 12px' : '4px 11px',
                         borderRadius: 999,
                         fontSize: 10.5,
                         fontWeight: 800,
                         letterSpacing: 0.6,
                         textTransform: 'uppercase',
                         whiteSpace: 'nowrap',
-                        background: isServing ? C.primary : C.sage200,
-                        color: isServing ? '#FFFFFF' : C.textSub,
-                        border: `1px solid ${isServing ? C.primary : C.sage300}`,
-                        boxShadow: isServing ? '0 3px 10px rgba(31,74,52,0.22)' : 'none',
-                        transition: 'all 160ms ease',
+                        background: isEmergency ? '#DC2626' : isServing ? C.primary : C.sage200,
+                        color: '#FFFFFF',
+                        border: 'none',
+                        boxShadow: isServing || isEmergency ? '0 3px 10px rgba(31,74,52,0.22)' : 'none',
                       }}
                     >
                       <span
@@ -1229,18 +1340,19 @@ export default function NurseConsole({
                           width: 6,
                           height: 6,
                           borderRadius: '50%',
-                          background: isServing ? '#A7F3D0' : C.warning,
+                          background: '#FFFFFF',
                           flexShrink: 0,
                         }}
                       />
-                      {isServing ? 'Called' : 'Waiting'}
+                      {isEmergency && !isServing ? 'SOS Alert' : isServing ? 'Called' : 'Waiting'}
                     </span>
 
                     <div
                       style={{
                         fontSize: 11.5,
-                        color: C.textMuted,
+                        color: isEmergency ? C.danger : C.textMuted,
                         whiteSpace: 'nowrap',
+                        fontWeight: isEmergency ? 700 : 400,
                       }}
                     >
                       {q.arrival_time}
@@ -1277,19 +1389,31 @@ export default function NurseConsole({
         </section>
       </div>
 
-      {/* Stat row */}
+      {/* Stat row with Dynamic Open SOS count */}
+      {/* Stat row with Dynamic Open SOS count + No-shows today */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
+          gridTemplateColumns: 'repeat(5, 1fr)',
           gap: 14,
         }}
       >
         {[
-          { label: 'Seen today', value: '27', bg: '#DDEBD8' },
-          { label: 'Avg. wait', value: '6 min', bg: '#DDE7EE' },
-          { label: 'Low stock lots', value: '1', bg: '#EDE5D6' },
-          { label: 'Open SOS alerts', value: '0', bg: '#E6E1EF' },
+          { label: 'Seen today', value: '27', bg: '#DDEBD8', color: C.text },
+          { label: 'Avg. wait', value: '6 min', bg: '#DDE7EE', color: C.text },
+          { label: 'Low stock lots', value: '1', bg: '#EDE5D6', color: C.text },
+          {
+            label: 'No-shows today',
+            value: String(noShowCount),
+            bg: noShowCount > 0 ? '#FEF3C7' : '#E6E1EF',
+            color: noShowCount > 0 ? '#8C6826' : C.text,
+          },
+          {
+            label: 'Open SOS alerts',
+            value: String(activeSosCount),
+            bg: activeSosCount > 0 ? '#FDE8E8' : '#E6E1EF',
+            color: activeSosCount > 0 ? '#DC2626' : C.text,
+          },
         ].map((card) => (
           <div
             key={card.label}
@@ -1306,7 +1430,7 @@ export default function NurseConsole({
               style={{
                 fontSize: 11.5,
                 fontWeight: 600,
-                color: C.textSub,
+                color: card.color === '#DC2626' ? '#991B1B' : C.textSub,
                 letterSpacing: 0.1,
               }}
             >
@@ -1316,8 +1440,8 @@ export default function NurseConsole({
               style={{
                 fontSize: 28,
                 fontWeight: 800,
-                color: C.text,
-                letterSpacing: '-0.6px',
+                color: card.color,
+                letterSpacing: -0.6,
                 lineHeight: 1,
               }}
             >

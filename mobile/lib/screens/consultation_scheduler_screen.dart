@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import '../config/api_config.dart';
+import '../utils/responsive.dart';
 import '../services/emergency_alert_service.dart';
 
 class ConsultationSchedulerScreen extends StatefulWidget {
@@ -54,6 +55,12 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
 
   List<DateTime> _upcomingWeekdays = [];
 
+  // Computed once per MediaQuery change — the scroll-offset math
+  // (_onDateScroll, _pickDate animateTo) MUST use the same value the
+  // ListView.builder uses for itemExtent, otherwise the month label
+  // desyncs from the visible date. See didChangeDependencies().
+  double _dateItemExtent = 72.0;
+
   List<dynamic> _slots = [];
   bool _loadingSlots = false;
   String? _selectedSlotTime;
@@ -88,9 +95,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   static const disabledSlotBg = Color(0xFFEDF2EC);
   static const disabledSlotText = Color(0xFFA3B0A4);
 
-  // Hoisted constants to avoid per-frame Color allocation.
   static const _selectedDoctorBg = Color(0xFFE2EBE1);
-  static const _selectedAvatarBg = Color(0x26284E3A); // primaryGreen @ 15%
+  static const _selectedAvatarBg = Color(0x26284E3A);
   static const _infoCardBg = Color(0xFFE2EBE1);
   static const _dividerSoft = Color(0xFFC7D6C6);
   static const _hintColor = Color(0xFF94A396);
@@ -109,6 +115,17 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     _fetchDoctors();
     _fetchMyAppointments();
     _initSlotSocket();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // MediaQuery is only safe to read here (not in initState). On rotation,
+    // split-screen resize, or font-scale change this fires again and the
+    // extent is recomputed — the scroll math picks up the new value on the
+    // next listener tick.
+    final rs = Rs.of(context);
+    _dateItemExtent = rs.w(72).clamp(60.0, 88.0);
   }
 
   @override
@@ -155,8 +172,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
 
   void _onDateScroll() {
     if (!_dateScrollController.hasClients || _upcomingWeekdays.isEmpty) return;
-    const itemExtent = 72.0;
-    final index = ((_dateScrollController.offset + 36) / itemExtent)
+    final extent = _dateItemExtent;
+    final index = ((_dateScrollController.offset + extent / 2) / extent)
         .floor()
         .clamp(0, _upcomingWeekdays.length - 1);
 
@@ -182,7 +199,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     }
 
     _upcomingWeekdays = list;
-    if (_selectedDate.weekday == DateTime.saturday || _selectedDate.weekday == DateTime.sunday) {
+    if (_selectedDate.weekday == DateTime.saturday ||
+        _selectedDate.weekday == DateTime.sunday) {
       _selectedDate = list.first;
     }
     _monthNotifier.value = "${_months[_selectedDate.month - 1]} ${_selectedDate.year}";
@@ -206,77 +224,85 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     }
   }
 
-  // ── AM/PM split helpers ─────────────────────────────────────────
-
   bool _isMorning(String time24) {
     final hour = int.tryParse(time24.split(':').first) ?? 0;
     return hour < 12;
   }
 
-  /// Compact range like "8:00 – 11:45 AM" — period suffix shown only once.
   String _formatSlotRange(List<dynamic> group) {
     if (group.isEmpty) return '';
     final first = _formatSlotDisplay(group.first['time']);
     final last = _formatSlotDisplay(group.last['time']);
 
-    final firstPeriod = first.split(' ').last; // "AM" or "PM"
+    final firstPeriod = first.split(' ').last;
     final lastPeriod = last.split(' ').last;
 
     if (firstPeriod == lastPeriod) {
-      // Both on the same side of noon — drop the leading suffix.
       final firstTime = first.substring(0, first.length - firstPeriod.length - 1);
       return '$firstTime – $last';
     }
     return '$first – $last';
   }
 
-  /// Soft section header: sage icon chip · label · hairline · range.
   Widget _buildSlotGroupHeader({
+    required Rs rs,
     required IconData icon,
     required String label,
     required String range,
   }) {
+    final chipSize = rs.w(26).clamp(22.0, 30.0);
     return Row(
       children: [
         Container(
-          width: 26,
-          height: 26,
+          width: chipSize,
+          height: chipSize,
           decoration: BoxDecoration(
             color: softSage,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(rs.r(8)),
           ),
           alignment: Alignment.center,
-          child: Icon(icon, size: 14, color: primaryGreen),
+          child: Icon(icon, size: rs.w(14), color: primaryGreen),
         ),
-        const SizedBox(width: 10),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w800,
-            color: textMain,
-            letterSpacing: -0.2,
+        SizedBox(width: rs.w(10)),
+        Flexible(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: rs.sp(13.5),
+              fontWeight: FontWeight.w800,
+              color: textMain,
+              letterSpacing: -0.2,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ),
-        const SizedBox(width: 12),
+        SizedBox(width: rs.w(12)),
         Expanded(
           child: Container(height: 1, color: borderColor),
         ),
-        const SizedBox(width: 12),
-        Text(
-          range,
-          style: const TextStyle(
-            fontSize: 11.5,
-            fontWeight: FontWeight.w600,
-            color: textSub,
-            letterSpacing: 0.1,
+        SizedBox(width: rs.w(12)),
+        // On a compact screen the range pushes the label off — hide it
+        // and let the AM/PM block carry the meaning.
+        if (!rs.isCompact)
+          Flexible(
+            child: Text(
+              range,
+              style: TextStyle(
+                fontSize: rs.sp(11.5),
+                fontWeight: FontWeight.w600,
+                color: textSub,
+                letterSpacing: 0.1,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.end,
+            ),
           ),
-        ),
       ],
     );
   }
 
-  /// Whisper-light divider between AM and PM — a small sage dot between rules.
   Widget _buildSectionBreak() {
     return Row(
       children: [
@@ -307,12 +333,15 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     );
   }
 
-  /// The slot pills themselves — grouped AM or PM block.
-  Widget _buildSlotWrap(List<dynamic> group) {
+  Widget _buildSlotWrap(Rs rs, List<dynamic> group) {
+    // 3 columns on phones, 4 on slightly larger phones, 5 on tablets.
+    // The gap and slot ratio scale with the Rs factor so the visual
+    // rhythm stays consistent.
+    final crossAxisCount = rs.pick<int>(compact: 3, phone: 3, tablet: 5);
+    final gap = rs.w(10).clamp(8.0, 14.0);
+
     return LayoutBuilder(
       builder: (context, constraints) {
-        const crossAxisCount = 3;
-        const gap = 10.0;
         final slotWidth =
             (constraints.maxWidth - (crossAxisCount - 1) * gap) / crossAxisCount;
         final slotHeight = slotWidth / 2.25;
@@ -342,7 +371,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                         : isDisabled
                             ? disabledSlotBg
                             : Colors.white,
-                    borderRadius: BorderRadius.circular(22),
+                    borderRadius: BorderRadius.circular(rs.r(22)),
                     border: Border.all(
                       color: isSelected
                           ? primaryGreen
@@ -356,7 +385,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                   child: Text(
                     displayTime,
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: rs.sp(13),
                       fontWeight: isSelected || !isDisabled
                           ? FontWeight.w700
                           : FontWeight.w600,
@@ -376,13 +405,12 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     );
   }
 
-  // ── End AM/PM split helpers ─────────────────────────────────────
-
   void _updatePurposesForSelectedDoctor(int doctorId) {
     final doc = _doctors.firstWhere((d) => d['user_id'] == doctorId, orElse: () => null);
     if (doc != null) {
       final isDentist = doc['role_code'] == 'DENTIST' ||
-          (doc['specialty'] != null && doc['specialty'].toString().toLowerCase().contains('dent'));
+          (doc['specialty'] != null &&
+              doc['specialty'].toString().toLowerCase().contains('dent'));
 
       setState(() {
         if (isDentist) {
@@ -436,7 +464,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
 
     try {
       final res = await ApiConfig.client.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/appointments/slots?doctorId=$_selectedDoctorId&date=$formattedDate'),
+        Uri.parse(
+            '${ApiConfig.baseUrl}/api/appointments/slots?doctorId=$_selectedDoctorId&date=$formattedDate'),
         headers: {'Authorization': 'Bearer $token'},
       );
       if (res.statusCode == 200) {
@@ -512,24 +541,48 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
         );
 
         if (mounted) {
+          final rs = Rs.of(context);
           showDialog(
             context: context,
             builder: (ctx) => AlertDialog(
               backgroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              icon: const Icon(Icons.check_circle_outline, color: primaryGreen, size: 48),
-              title: const Text('Consultation Scheduled', style: TextStyle(fontWeight: FontWeight.w800, color: primaryGreen)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(rs.r(20)),
+              ),
+              icon: const Icon(Icons.check_circle_outline,
+                  color: primaryGreen, size: 48),
+              title: Text(
+                'Consultation Scheduled',
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: primaryGreen,
+                  fontSize: rs.sp(17),
+                ),
+              ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Scheduled for: $scheduledDateTime', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
-                  const SizedBox(height: 6),
-                  Text('Purpose: $_selectedPurpose', style: const TextStyle(fontSize: 13, color: textSub)),
-                  const SizedBox(height: 12),
-                  const Text(
+                  Text(
+                    'Scheduled for: $scheduledDateTime',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: rs.sp(13.5),
+                    ),
+                  ),
+                  SizedBox(height: rs.h(6)),
+                  Text(
+                    'Purpose: $_selectedPurpose',
+                    style: TextStyle(fontSize: rs.sp(13), color: textSub),
+                  ),
+                  SizedBox(height: rs.h(12)),
+                  Text(
                     'Reminders:\n• Arrive 10 minutes prior to your time block.\n• Present your QR Health Pass at reception for touchless check-in.',
-                    style: TextStyle(fontSize: 12, color: textSub, height: 1.4),
+                    style: TextStyle(
+                      fontSize: rs.sp(12),
+                      color: textSub,
+                      height: 1.4,
+                    ),
                   ),
                 ],
               ),
@@ -561,34 +614,57 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   }
 
   Future<void> _cancelAppointment(int appointmentId) async {
+    final rs = Rs.of(context);
     final reasonController = TextEditingController();
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Cancel Consultation', style: TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF7A2E26))),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(rs.r(20)),
+        ),
+        title: Text(
+          'Cancel Consultation',
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            color: const Color(0xFF7A2E26),
+            fontSize: rs.sp(16),
+          ),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Are you sure you want to cancel this scheduled appointment?', style: TextStyle(fontSize: 13, color: textSub)),
-            const SizedBox(height: 12),
+            Text(
+              'Are you sure you want to cancel this scheduled appointment?',
+              style: TextStyle(fontSize: rs.sp(13), color: textSub),
+            ),
+            SizedBox(height: rs.h(12)),
             TextField(
               controller: reasonController,
               decoration: InputDecoration(
                 hintText: 'Reason for cancellation',
                 filled: true,
                 fillColor: const Color(0xFFF7F9F6),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: borderColor)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(rs.r(14)),
+                  borderSide: const BorderSide(color: borderColor),
+                ),
               ),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep', style: TextStyle(color: textSub))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep', style: TextStyle(color: textSub)),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF7A2E26), foregroundColor: Colors.white, shape: const StadiumBorder()),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF7A2E26),
+              foregroundColor: Colors.white,
+              shape: const StadiumBorder(),
+            ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Confirm Cancel'),
           ),
@@ -667,7 +743,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
         final targetIndex = _upcomingWeekdays.indexWhere((d) => _isSameDay(d, picked));
         if (targetIndex != -1 && _dateScrollController.hasClients) {
           _dateScrollController.animateTo(
-            targetIndex * 72.0,
+            targetIndex * _dateItemExtent,
             duration: const Duration(milliseconds: 320),
             curve: Curves.easeOutCubic,
           );
@@ -704,49 +780,65 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildHeader(),
-        const SizedBox(height: 4),
-        Expanded(
-          child: _activeSubTab == 0 ? _buildBookingTab() : _buildHistoryTab(),
+    final rs = Rs.of(context);
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: rs.isTablet ? 720.0 : double.infinity,
         ),
-      ],
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildHeader(rs),
+            SizedBox(height: rs.h(4)),
+            Expanded(
+              child: _activeSubTab == 0 ? _buildBookingTab(rs) : _buildHistoryTab(rs),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(Rs rs) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
+      padding: EdgeInsets.symmetric(
+        horizontal: rs.w(20),
+        vertical: rs.h(8),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'A MOMENT FOR YOUR HEALTH',
             style: TextStyle(
-              fontSize: 10.5,
+              fontSize: rs.sp(10.5),
               fontWeight: FontWeight.w700,
               letterSpacing: 1.8,
               color: textSub,
             ),
           ),
-          const SizedBox(height: 4),
-          const Text(
+          SizedBox(height: rs.h(4)),
+          Text(
             "Let's plan your care.",
-            style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: textMain, letterSpacing: -0.5),
+            style: TextStyle(
+              fontSize: rs.sp(28),
+              fontWeight: FontWeight.w800,
+              color: textMain,
+              letterSpacing: -0.5,
+            ),
           ),
-          const SizedBox(height: 2),
-          const Text(
+          SizedBox(height: rs.h(2)),
+          Text(
             "Find a time that works for you. We'll take care of the rest.",
-            style: TextStyle(fontSize: 13.5, color: textSub),
+            style: TextStyle(fontSize: rs.sp(13.5), color: textSub),
           ),
-          const SizedBox(height: 14),
+          SizedBox(height: rs.h(14)),
           Container(
-            padding: const EdgeInsets.all(4),
+            padding: EdgeInsets.all(rs.w(4).clamp(3.0, 5.0)),
             decoration: BoxDecoration(
               color: softSage,
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(rs.r(24)),
             ),
             child: Row(
               children: [
@@ -755,16 +847,16 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                     onTap: () => setState(() => _activeSubTab = 0),
                     behavior: HitTestBehavior.opaque,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 9),
+                      padding: EdgeInsets.symmetric(vertical: rs.h(9)),
                       decoration: BoxDecoration(
                         color: _activeSubTab == 0 ? primaryGreen : Colors.transparent,
-                        borderRadius: BorderRadius.circular(20),
+                        borderRadius: BorderRadius.circular(rs.r(20)),
                       ),
                       alignment: Alignment.center,
                       child: Text(
                         'Book a consultation',
                         style: TextStyle(
-                          fontSize: 13,
+                          fontSize: rs.sp(13),
                           fontWeight: FontWeight.w700,
                           color: _activeSubTab == 0 ? Colors.white : primaryGreen,
                         ),
@@ -777,16 +869,16 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                     onTap: () => setState(() => _activeSubTab = 1),
                     behavior: HitTestBehavior.opaque,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 9),
+                      padding: EdgeInsets.symmetric(vertical: rs.h(9)),
                       decoration: BoxDecoration(
                         color: _activeSubTab == 1 ? primaryGreen : Colors.transparent,
-                        borderRadius: BorderRadius.circular(20),
+                        borderRadius: BorderRadius.circular(rs.r(20)),
                       ),
                       alignment: Alignment.center,
                       child: Text(
                         'My appointments',
                         style: TextStyle(
-                          fontSize: 13,
+                          fontSize: rs.sp(13),
                           fontWeight: FontWeight.w700,
                           color: _activeSubTab == 1 ? Colors.white : primaryGreen,
                         ),
@@ -802,7 +894,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     );
   }
 
-  Widget _buildBookingTab() {
+  Widget _buildBookingTab(Rs rs) {
     if (_loadingDoctors) {
       return const Center(child: CircularProgressIndicator(color: primaryGreen));
     }
@@ -811,60 +903,75 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
       color: primaryGreen,
       onRefresh: _fetchAvailableSlots,
       child: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-        // ignore: deprecated_member_use
+        padding: EdgeInsets.symmetric(
+          horizontal: rs.w(20),
+          vertical: rs.h(8),
+        ),
         cacheExtent: 300,
         addAutomaticKeepAlives: false,
         addRepaintBoundaries: true,
         addSemanticIndexes: false,
         children: [
-          _buildSectionHeader('1', 'Your care team'),
-          const SizedBox(height: 8),
-          RepaintBoundary(child: _buildDoctorList()),
-          const SizedBox(height: 18),
-          _buildSectionHeader('2', 'What brings you in?'),
-          const SizedBox(height: 8),
-          RepaintBoundary(child: _buildPurposeChips()),
-          const SizedBox(height: 22),
-          _buildSectionHeader('3', 'A day that works for you'),
-          const SizedBox(height: 12),
-          _buildDateHeader(),
-          const SizedBox(height: 14),
-          RepaintBoundary(child: _buildDateCarousel()),
-          const SizedBox(height: 8),
-          const Text(
+          _buildSectionHeader(rs, '1', 'Your care team'),
+          SizedBox(height: rs.h(8)),
+          RepaintBoundary(child: _buildDoctorList(rs)),
+          SizedBox(height: rs.h(18)),
+          _buildSectionHeader(rs, '2', 'What brings you in?'),
+          SizedBox(height: rs.h(8)),
+          RepaintBoundary(child: _buildPurposeChips(rs)),
+          SizedBox(height: rs.h(22)),
+          _buildSectionHeader(rs, '3', 'A day that works for you'),
+          SizedBox(height: rs.h(12)),
+          _buildDateHeader(rs),
+          SizedBox(height: rs.h(14)),
+          RepaintBoundary(child: _buildDateCarousel(rs)),
+          SizedBox(height: rs.h(8)),
+          Text(
             'Consultations are available Monday–Friday.',
-            style: TextStyle(fontSize: 12.5, color: textSub),
+            style: TextStyle(fontSize: rs.sp(12.5), color: textSub),
           ),
-          const SizedBox(height: 24),
-          _buildSectionHeader('4', 'Choose your time'),
-          const SizedBox(height: 12),
-          RepaintBoundary(child: _buildSlotGrid()),
-          const SizedBox(height: 22),
-          const Text(
+          SizedBox(height: rs.h(24)),
+          _buildSectionHeader(rs, '4', 'Choose your time'),
+          SizedBox(height: rs.h(12)),
+          RepaintBoundary(child: _buildSlotGrid(rs)),
+          SizedBox(height: rs.h(22)),
+          Text(
             'Anything we should know? (optional)',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: textMain),
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: rs.sp(13),
+              color: textMain,
+            ),
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: rs.h(8)),
           TextField(
             controller: _notesController,
             maxLines: 3,
-            style: const TextStyle(fontSize: 13),
+            style: TextStyle(fontSize: rs.sp(13)),
             decoration: InputDecoration(
               hintText: 'Tell your care team a little about your visit…',
-              hintStyle: const TextStyle(color: _hintColor, fontSize: 13),
+              hintStyle: TextStyle(color: _hintColor, fontSize: rs.sp(13)),
               filled: true,
               fillColor: Colors.white,
-              contentPadding: const EdgeInsets.all(14),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: const BorderSide(color: borderColor)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: const BorderSide(color: borderColor)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: const BorderSide(color: primaryGreen)),
+              contentPadding: EdgeInsets.all(rs.w(14)),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(rs.r(18)),
+                borderSide: const BorderSide(color: borderColor),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(rs.r(18)),
+                borderSide: const BorderSide(color: borderColor),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(rs.r(18)),
+                borderSide: const BorderSide(color: primaryGreen),
+              ),
             ),
           ),
-          const SizedBox(height: 20),
+          SizedBox(height: rs.h(20)),
           SizedBox(
             width: double.infinity,
-            height: 52,
+            height: rs.h(52).clamp(46.0, 58.0),
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: primaryGreen,
@@ -874,26 +981,40 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
               ),
               onPressed: _isSubmitting ? null : _submitBooking,
               child: _isSubmitting
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Row(
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Text('Confirm appointment', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                        SizedBox(width: 8),
-                        Icon(Icons.arrow_forward_rounded, size: 18),
+                        Text(
+                          'Confirm appointment',
+                          style: TextStyle(
+                            fontSize: rs.sp(15),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        SizedBox(width: rs.w(8)),
+                        const Icon(Icons.arrow_forward_rounded, size: 18),
                       ],
                     ),
             ),
           ),
-          const SizedBox(height: 24),
-          RepaintBoundary(child: _buildInfoCard()),
-          const SizedBox(height: 24),
+          SizedBox(height: rs.h(24)),
+          RepaintBoundary(child: _buildInfoCard(rs)),
+          SizedBox(height: rs.h(24)),
         ],
       ),
     );
   }
 
-  Widget _buildDoctorList() {
+  Widget _buildDoctorList(Rs rs) {
+    final avatarSize = rs.w(38).clamp(34.0, 44.0);
     final items = <Widget>[];
     for (final doc in _doctors) {
       final isSelected = _selectedDoctorId == doc['user_id'];
@@ -908,18 +1029,24 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
           },
           behavior: HitTestBehavior.opaque,
           child: Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            margin: EdgeInsets.only(bottom: rs.h(8)),
+            padding: EdgeInsets.symmetric(
+              horizontal: rs.w(14),
+              vertical: rs.h(12),
+            ),
             decoration: BoxDecoration(
               color: isSelected ? _selectedDoctorBg : Colors.white,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: isSelected ? primaryGreen : borderColor, width: isSelected ? 1.5 : 1),
+              borderRadius: BorderRadius.circular(rs.r(18)),
+              border: Border.all(
+                color: isSelected ? primaryGreen : borderColor,
+                width: isSelected ? 1.5 : 1,
+              ),
             ),
             child: Row(
               children: [
                 Container(
-                  width: 38,
-                  height: 38,
+                  width: avatarSize,
+                  height: avatarSize,
                   decoration: BoxDecoration(
                     color: isSelected ? _selectedAvatarBg : softSage,
                     shape: BoxShape.circle,
@@ -927,21 +1054,33 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                   alignment: Alignment.center,
                   child: Text(
                     initials,
-                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: primaryGreen),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: rs.sp(13),
+                      color: primaryGreen,
+                    ),
                   ),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: rs.w(12)),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         "Dr. ${doc['first_name']} ${doc['last_name']}",
-                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: textMain),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: rs.sp(14),
+                          color: textMain,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                       Text(
                         doc['specialty'] ?? 'General & family medicine',
-                        style: const TextStyle(fontSize: 12, color: textSub),
+                        style: TextStyle(fontSize: rs.sp(12), color: textSub),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
@@ -956,26 +1095,31 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     return Column(children: items);
   }
 
-  Widget _buildPurposeChips() {
+  Widget _buildPurposeChips(Rs rs) {
     return Wrap(
-      spacing: 8,
-      runSpacing: 8,
+      spacing: rs.w(8),
+      runSpacing: rs.h(8),
       children: _currentPurposes.map((purpose) {
         final isSelected = _selectedPurpose == purpose;
         return GestureDetector(
           onTap: () => setState(() => _selectedPurpose = purpose),
           behavior: HitTestBehavior.opaque,
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: EdgeInsets.symmetric(
+              horizontal: rs.w(16),
+              vertical: rs.h(10),
+            ),
             decoration: BoxDecoration(
               color: isSelected ? primaryGreen : Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: isSelected ? primaryGreen : borderColor),
+              borderRadius: BorderRadius.circular(rs.r(20)),
+              border: Border.all(
+                color: isSelected ? primaryGreen : borderColor,
+              ),
             ),
             child: Text(
               purpose,
               style: TextStyle(
-                fontSize: 12.5,
+                fontSize: rs.sp(12.5),
                 fontWeight: FontWeight.w600,
                 color: isSelected ? Colors.white : textMain,
               ),
@@ -986,25 +1130,33 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     );
   }
 
-  Widget _buildDateHeader() {
+  Widget _buildDateHeader(Rs rs) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        const Text(
-          'Choose a date',
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w800,
-            color: textMain,
-            letterSpacing: -0.3,
+        Flexible(
+          child: Text(
+            'Choose a date',
+            style: TextStyle(
+              fontSize: rs.sp(20),
+              fontWeight: FontWeight.w800,
+              color: textMain,
+              letterSpacing: -0.3,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ),
+        SizedBox(width: rs.w(8)),
         InkWell(
           onTap: _pickDate,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(rs.r(8)),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            padding: EdgeInsets.symmetric(
+              horizontal: rs.w(4),
+              vertical: rs.h(2),
+            ),
             child: Row(
               children: [
                 ValueListenableBuilder<String>(
@@ -1014,15 +1166,15 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                     child: Text(
                       month,
                       key: ValueKey<String>(month),
-                      style: const TextStyle(
-                        fontSize: 15.5,
+                      style: TextStyle(
+                        fontSize: rs.sp(15.5),
                         fontWeight: FontWeight.w700,
                         color: primaryGreen,
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(width: 4),
+                SizedBox(width: rs.w(4)),
                 const Icon(Icons.arrow_drop_down, color: primaryGreen, size: 20),
               ],
             ),
@@ -1032,15 +1184,22 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     );
   }
 
-  Widget _buildDateCarousel() {
+  Widget _buildDateCarousel(Rs rs) {
+    // The item extent is stored on the State so the scroll listener, the
+    // animateTo call in _pickDate, and this builder all agree on the same
+    // value — otherwise the month label desyncs from the visible date.
+    final extent = _dateItemExtent;
+    final carouselHeight = extent * 1.28;
+
+    const weekdayAbbr = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+
     return SizedBox(
-      height: 92,
+      height: carouselHeight,
       child: ListView.builder(
         controller: _dateScrollController,
         scrollDirection: Axis.horizontal,
-        itemExtent: 72.0,
+        itemExtent: extent,
         itemCount: _upcomingWeekdays.length,
-        // ignore: deprecated_member_use
         cacheExtent: 200,
         addAutomaticKeepAlives: false,
         addRepaintBoundaries: true,
@@ -1048,26 +1207,28 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
           final date = _upcomingWeekdays[index];
           final isSelected = _isSameDay(date, _selectedDate);
 
-          const weekdayAbbr = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
           final dayName = weekdayAbbr[date.weekday - 1];
-
-          final isMonthStart = index == 0 || date.month != _upcomingWeekdays[index - 1].month;
+          final isMonthStart =
+              index == 0 || date.month != _upcomingWeekdays[index - 1].month;
           final monthBadge = _monthsAbbr[date.month - 1];
 
           return GestureDetector(
             onTap: () {
               setState(() => _selectedDate = date);
-              _monthNotifier.value = "${_months[date.month - 1]} ${date.year}";
+              _monthNotifier.value =
+                  "${_months[date.month - 1]} ${date.year}";
               _fetchAvailableSlots();
             },
             behavior: HitTestBehavior.opaque,
             child: Padding(
-              padding: EdgeInsets.only(right: index == _upcomingWeekdays.length - 1 ? 0 : 10),
+              padding: EdgeInsets.only(
+                right: index == _upcomingWeekdays.length - 1 ? 0 : rs.w(10),
+              ),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
                 decoration: BoxDecoration(
                   color: isSelected ? primaryGreen : Colors.white,
-                  borderRadius: BorderRadius.circular(22),
+                  borderRadius: BorderRadius.circular(rs.r(22)),
                   border: Border.all(
                     color: isSelected ? primaryGreen : borderColor,
                     width: 1.2,
@@ -1087,16 +1248,21 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                   children: [
                     if (isMonthStart)
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                        margin: const EdgeInsets.only(bottom: 2),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: rs.w(5),
+                          vertical: rs.h(1),
+                        ),
+                        margin: EdgeInsets.only(bottom: rs.h(2)),
                         decoration: BoxDecoration(
-                          color: isSelected ? Colors.white.withValues(alpha: 0.25) : softSage,
-                          borderRadius: BorderRadius.circular(6),
+                          color: isSelected
+                              ? Colors.white.withValues(alpha: 0.25)
+                              : softSage,
+                          borderRadius: BorderRadius.circular(rs.r(6)),
                         ),
                         child: Text(
                           monthBadge,
                           style: TextStyle(
-                            fontSize: 9,
+                            fontSize: rs.sp(9),
                             fontWeight: FontWeight.w800,
                             letterSpacing: 0.6,
                             color: isSelected ? Colors.white : primaryGreen,
@@ -1107,17 +1273,19 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                       Text(
                         dayName,
                         style: TextStyle(
-                          fontSize: 11,
+                          fontSize: rs.sp(11),
                           fontWeight: FontWeight.w700,
                           letterSpacing: 0.5,
-                          color: isSelected ? Colors.white.withValues(alpha: 0.85) : _monthTagColor,
+                          color: isSelected
+                              ? Colors.white.withValues(alpha: 0.85)
+                              : _monthTagColor,
                         ),
                       ),
-                    const SizedBox(height: 4),
+                    SizedBox(height: rs.h(4)),
                     Text(
                       '${date.day}',
                       style: TextStyle(
-                        fontSize: 22,
+                        fontSize: rs.sp(22),
                         fontWeight: FontWeight.w800,
                         color: isSelected ? Colors.white : textMain,
                       ),
@@ -1132,11 +1300,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     );
   }
 
-  // ── Slot grid: AM/PM split with graceful section headers ────────
-  //
-  // Uses a Wrap instead of a nested GridView so the slot area never enters
-  // the gesture arena and never fights the outer ListView for scroll.
-  Widget _buildSlotGrid() {
+  Widget _buildSlotGrid(Rs rs) {
     if (_loadingSlots) {
       return const Center(
         child: Padding(
@@ -1147,19 +1311,20 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     }
     if (_slots.isEmpty) {
       return Container(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(rs.w(16)),
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(rs.r(16)),
           border: Border.all(color: borderColor),
         ),
-        child: const Text('No slots available on this date.',
-            style: TextStyle(color: textSub, fontSize: 13)),
+        child: Text(
+          'No slots available on this date.',
+          style: TextStyle(color: textSub, fontSize: rs.sp(13)),
+        ),
       );
     }
 
-    // Partition into morning / afternoon while preserving server order.
     final amSlots = _slots.where((s) => _isMorning(s['time'] as String)).toList();
     final pmSlots = _slots.where((s) => !_isMorning(s['time'] as String)).toList();
 
@@ -1168,70 +1333,93 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
       children: [
         if (amSlots.isNotEmpty) ...[
           _buildSlotGroupHeader(
+            rs: rs,
             icon: Icons.wb_sunny_outlined,
             label: 'Morning',
             range: _formatSlotRange(amSlots),
           ),
-          const SizedBox(height: 12),
-          _buildSlotWrap(amSlots),
+          SizedBox(height: rs.h(12)),
+          _buildSlotWrap(rs, amSlots),
         ],
         if (amSlots.isNotEmpty && pmSlots.isNotEmpty) ...[
-          const SizedBox(height: 22),
+          SizedBox(height: rs.h(22)),
           _buildSectionBreak(),
-          const SizedBox(height: 22),
+          SizedBox(height: rs.h(22)),
         ],
         if (pmSlots.isNotEmpty) ...[
           _buildSlotGroupHeader(
+            rs: rs,
             icon: Icons.wb_twilight,
             label: 'Afternoon',
             range: _formatSlotRange(pmSlots),
           ),
-          const SizedBox(height: 12),
-          _buildSlotWrap(pmSlots),
+          SizedBox(height: rs.h(12)),
+          _buildSlotWrap(rs, pmSlots),
         ],
       ],
     );
   }
 
-  Widget _buildInfoCard() {
+  Widget _buildInfoCard(Rs rs) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: EdgeInsets.all(rs.w(18)),
       decoration: BoxDecoration(
         color: _infoCardBg,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(rs.r(22)),
       ),
-      child: const Column(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.healing_outlined, size: 18, color: primaryGreen),
-              SizedBox(width: 8),
-              Text('A smoother visit.', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Color(0xFF191C1A))),
+              Icon(Icons.healing_outlined, size: rs.w(18), color: primaryGreen),
+              SizedBox(width: rs.w(8)),
+              Text(
+                'A smoother visit.',
+                style: TextStyle(
+                  fontSize: rs.sp(15),
+                  fontWeight: FontWeight.w800,
+                  color: const Color(0xFF191C1A),
+                ),
+              ),
             ],
           ),
-          SizedBox(height: 12),
-          _CheckItem('Bring your university ID and health pass.'),
-          _CheckItem('Arrive 10 minutes before your appointment.'),
-          _CheckItem('Keep a list of any medications you take.'),
-          Divider(color: _dividerSoft, height: 24),
+          SizedBox(height: rs.h(12)),
+          _CheckItem(rs: rs, text: 'Bring your university ID and health pass.'),
+          _CheckItem(rs: rs, text: 'Arrive 10 minutes before your appointment.'),
+          _CheckItem(rs: rs, text: 'Keep a list of any medications you take.'),
+          Divider(color: _dividerSoft, height: rs.h(24)),
           Row(
             children: [
-              Icon(Icons.location_on_outlined, size: 15, color: textSub),
-              SizedBox(width: 6),
-              Text('PSU Lingayen Campus Infirmary', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textMain)),
+              Icon(Icons.location_on_outlined, size: rs.w(15), color: textSub),
+              SizedBox(width: rs.w(6)),
+              Flexible(
+                child: Text(
+                  'PSU Lingayen Campus Infirmary',
+                  style: TextStyle(
+                    fontSize: rs.sp(12),
+                    fontWeight: FontWeight.bold,
+                    color: textMain,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
             ],
           ),
           Padding(
-            padding: EdgeInsets.only(left: 21, top: 2),
-            child: Text('Monday–Friday · 8 AM–5 PM', style: TextStyle(fontSize: 11.5, color: textSub)),
+            padding: EdgeInsets.only(left: rs.w(21), top: rs.h(2)),
+            child: Text(
+              'Monday–Friday · 8 AM–5 PM',
+              style: TextStyle(fontSize: rs.sp(11.5), color: textSub),
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildHistoryTab() {
+  Widget _buildHistoryTab(Rs rs) {
     if (_loadingHistory) {
       return const Center(child: CircularProgressIndicator(color: primaryGreen));
     }
@@ -1241,12 +1429,25 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
         color: primaryGreen,
         onRefresh: _fetchMyAppointments,
         child: ListView(
-          padding: const EdgeInsets.all(24),
-          children: const [
-            SizedBox(height: 60),
-            Icon(Icons.calendar_month_outlined, size: 54, color: Color(0xFFA4B0A6)),
-            SizedBox(height: 12),
-            Center(child: Text('No appointments booked yet.', style: TextStyle(color: textSub, fontSize: 14, fontWeight: FontWeight.w600))),
+          padding: EdgeInsets.all(rs.w(24)),
+          children: [
+            SizedBox(height: rs.h(60)),
+            Icon(
+              Icons.calendar_month_outlined,
+              size: rs.w(54).clamp(44.0, 60.0),
+              color: const Color(0xFFA4B0A6),
+            ),
+            SizedBox(height: rs.h(12)),
+            Center(
+              child: Text(
+                'No appointments booked yet.',
+                style: TextStyle(
+                  color: textSub,
+                  fontSize: rs.sp(14),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
           ],
         ),
       );
@@ -1256,7 +1457,10 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
       color: primaryGreen,
       onRefresh: _fetchMyAppointments,
       child: ListView.builder(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        padding: EdgeInsets.symmetric(
+          horizontal: rs.w(20),
+          vertical: rs.h(8),
+        ),
         itemCount: _myAppointments.length,
         addAutomaticKeepAlives: false,
         addRepaintBoundaries: true,
@@ -1270,11 +1474,11 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
 
           return RepaintBoundary(
             child: Container(
-              margin: const EdgeInsets.only(bottom: 14),
-              padding: const EdgeInsets.all(18),
+              margin: EdgeInsets.only(bottom: rs.h(14)),
+              padding: EdgeInsets.all(rs.w(18)),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(22),
+                borderRadius: BorderRadius.circular(rs.r(22)),
                 border: Border.all(color: borderColor),
               ),
               child: Column(
@@ -1284,34 +1488,48 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(color: softSage, borderRadius: BorderRadius.circular(8)),
-                        child: const Icon(Icons.calendar_today_outlined, size: 16, color: primaryGreen),
+                        padding: EdgeInsets.all(rs.w(6)),
+                        decoration: BoxDecoration(
+                          color: softSage,
+                          borderRadius: BorderRadius.circular(rs.r(8)),
+                        ),
+                        child: Icon(
+                          Icons.calendar_today_outlined,
+                          size: rs.w(16),
+                          color: primaryGreen,
+                        ),
                       ),
-                      const SizedBox(width: 10),
+                      SizedBox(width: rs.w(10)),
                       Expanded(
                         child: Text(
                           item['appointment_type'] ?? 'General consultation',
-                          style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: textMain),
+                          style: TextStyle(
+                            fontSize: rs.sp(14.5),
+                            fontWeight: FontWeight.w800,
+                            color: textMain,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      SizedBox(width: rs.w(8)),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: rs.w(10),
+                          vertical: rs.h(4),
+                        ),
                         decoration: BoxDecoration(
                           color: isConfirmed
                               ? const Color(0xFFE5EDE4)
                               : isCompleted
                                   ? const Color(0xFFE2EBE1)
                                   : const Color(0xFFFDE8E8),
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(rs.r(12)),
                         ),
                         child: Text(
                           status == 'scheduled' ? 'Confirmed' : status.toUpperCase(),
                           style: TextStyle(
-                            fontSize: 10.5,
+                            fontSize: rs.sp(10.5),
                             fontWeight: FontWeight.w700,
                             color: isConfirmed
                                 ? primaryGreen
@@ -1323,53 +1541,78 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
+                  SizedBox(height: rs.h(10)),
                   Text(
                     "Dr. ${item['doctor_first_name']} ${item['doctor_last_name']}",
-                    style: const TextStyle(fontSize: 13, color: textSub, fontWeight: FontWeight.w500),
+                    style: TextStyle(
+                      fontSize: rs.sp(13),
+                      color: textSub,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 6),
+                  SizedBox(height: rs.h(6)),
                   Row(
                     children: [
-                      const Icon(Icons.event_outlined, size: 15, color: textSub),
-                      const SizedBox(width: 6),
+                      Icon(Icons.event_outlined, size: rs.w(15), color: textSub),
+                      SizedBox(width: rs.w(6)),
                       Expanded(
                         child: Text(
-                          _formatDateTime(item['formatted_date_time'] ?? item['date_time']),
-                          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: textMain),
+                          _formatDateTime(
+                              item['formatted_date_time'] ?? item['date_time']),
+                          style: TextStyle(
+                            fontSize: rs.sp(12.5),
+                            fontWeight: FontWeight.w700,
+                            color: textMain,
+                          ),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 4),
-                  const Row(
+                  SizedBox(height: rs.h(4)),
+                  Row(
                     children: [
-                      Icon(Icons.location_on_outlined, size: 15, color: textSub),
-                      SizedBox(width: 6),
-                      Text('Medical Clinic · Room 1', style: TextStyle(fontSize: 12, color: textSub)),
+                      Icon(Icons.location_on_outlined, size: rs.w(15), color: textSub),
+                      SizedBox(width: rs.w(6)),
+                      Expanded(
+                        child: Text(
+                          'Medical Clinic · Room 1',
+                          style: TextStyle(fontSize: rs.sp(12), color: textSub),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                     ],
                   ),
                   if (item['notes'] != null && item['notes'].toString().isNotEmpty) ...[
-                    const SizedBox(height: 10),
+                    SizedBox(height: rs.h(10)),
                     Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(color: const Color(0xFFF7F9F6), borderRadius: BorderRadius.circular(12)),
+                      padding: EdgeInsets.all(rs.w(10)),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF7F9F6),
+                        borderRadius: BorderRadius.circular(rs.r(12)),
+                      ),
                       child: Text(
                         item['notes'],
-                        style: const TextStyle(fontSize: 12, color: textSub),
+                        style: TextStyle(fontSize: rs.sp(12), color: textSub),
                       ),
                     ),
                   ],
                   if (status == 'scheduled') ...[
-                    const SizedBox(height: 12),
+                    SizedBox(height: rs.h(12)),
                     GestureDetector(
                       onTap: () => _cancelAppointment(item['appointment_id']),
                       behavior: HitTestBehavior.opaque,
-                      child: const Text(
+                      child: Text(
                         'Cancel appointment',
-                        style: TextStyle(color: Color(0xFF7A2E26), fontSize: 13, fontWeight: FontWeight.w700),
+                        style: TextStyle(
+                          color: const Color(0xFF7A2E26),
+                          fontSize: rs.sp(13),
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ],
@@ -1382,37 +1625,68 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     );
   }
 
-  Widget _buildSectionHeader(String number, String title) {
+  Widget _buildSectionHeader(Rs rs, String number, String title) {
+    final badgeSize = rs.w(22).clamp(20.0, 26.0);
     return Row(
       children: [
         Container(
-          width: 22,
-          height: 22,
-          decoration: const BoxDecoration(color: softSage, shape: BoxShape.circle),
+          width: badgeSize,
+          height: badgeSize,
+          decoration: const BoxDecoration(
+            color: softSage,
+            shape: BoxShape.circle,
+          ),
           alignment: Alignment.center,
-          child: Text(number, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: primaryGreen)),
+          child: Text(
+            number,
+            style: TextStyle(
+              fontSize: rs.sp(11),
+              fontWeight: FontWeight.w800,
+              color: primaryGreen,
+            ),
+          ),
         ),
-        const SizedBox(width: 8),
-        Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: textMain)),
+        SizedBox(width: rs.w(8)),
+        Flexible(
+          child: Text(
+            title,
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: rs.sp(14.5),
+              color: textMain,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
       ],
     );
   }
 }
 
 class _CheckItem extends StatelessWidget {
+  final Rs rs;
   final String text;
-  const _CheckItem(this.text);
+  const _CheckItem({required this.rs, required this.text});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6.0),
+      padding: EdgeInsets.only(bottom: rs.h(6)),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Icon(Icons.check, size: 16, color: Color(0xFF284E3A)),
-          const SizedBox(width: 8),
-          Expanded(child: Text(text, style: const TextStyle(fontSize: 12.5, color: Color(0xFF424943)))),
+          SizedBox(width: rs.w(8)),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: rs.sp(12.5),
+                color: const Color(0xFF424943),
+              ),
+            ),
+          ),
         ],
       ),
     );

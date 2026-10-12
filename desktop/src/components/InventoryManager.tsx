@@ -1,7 +1,8 @@
 // desktop/src/components/InventoryManager.tsx
 import React, { useState, useEffect, useRef } from 'react';
+import { io } from 'socket.io-client';
 import { T, btnPrimary, btnGhost, inputStyle } from '../theme';
-import { API_BASE_URL } from '../config/api';
+import { API_BASE_URL, SOCKET_URL } from '../config/api';
 
 interface MedicineMaster {
   medicine_id: number;
@@ -11,6 +12,7 @@ interface MedicineMaster {
   strength: string;
   unit?: string;
   reorder_level?: number;
+  available_stock?: number;
 }
 
 type InvTab = 'catalog' | 'stockin' | 'adjust' | 'alerts' | 'logs' | 'addmed';
@@ -25,8 +27,6 @@ interface ConfirmDialogState {
 
 export default function InventoryManager() {
   const [activeTab, setActiveTab] = useState<InvTab>('catalog');
-
-  /* ── In-App Modal Dialog (Prevents Electron Focus Freeze) ─ */
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
 
   /* ── Catalog & Deduction ─────────────────────────────────── */
@@ -131,7 +131,93 @@ export default function InventoryManager() {
     fetchBatches();
     fetchMedicines();
     fetchReorderAndAlerts();
+
+    // ── Real-Time WebSocket Synchronization ─────────────────
+    const token = localStorage.getItem('valetudo_token');
+    const socket = io(SOCKET_URL, {
+      auth: { token },
+      transports: ['websocket', 'polling'],
+    });
+
+    socket.on('inventory:updated', () => {
+      fetchBatches();
+      fetchMedicines();
+      fetchReorderAndAlerts();
+      fetchLogs();
+      setStatusMessage('🔄 Inventory synchronized with latest clinical dispensations.');
+    });
+
+    return () => {
+      socket.disconnect();
+    };
   }, []);
+
+  // ── USB HID Hardware Barcode Scanner Listener ──────────────
+  const processScannedCode = (code: string, isHardwareHID = false) => {
+    const trimmed = code.trim();
+    if (!trimmed) return;
+
+    const match = batches.find((b) =>
+      b.batch_no.toLowerCase() === trimmed.toLowerCase() ||
+      b.batch_id.toString() === trimmed ||
+      (b.name && b.name.toLowerCase() === trimmed.toLowerCase())
+    );
+
+    if (match) {
+      setBatchId(match.batch_id.toString());
+      setAdjustBatchId(match.batch_id);
+      setStatusMessage(
+        `🎯 ${isHardwareHID ? 'USB HID Scanner' : 'Barcode search'}: Selected ${match.name} (Lot ${match.batch_no}) · ${match.quantity_on_hand} ${match.unit || 'pcs'} on hand`
+      );
+      setBarcodeQuery('');
+    } else {
+      setStatusMessage(`⚠️ Barcode / Lot "${trimmed}" not found in active clinic inventory.`);
+    }
+  };
+
+  useEffect(() => {
+    let buffer = '';
+    let lastKeyTime = 0;
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isInputFocused = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+
+      const now = Date.now();
+      const timeDiff = now - lastKeyTime;
+      lastKeyTime = now;
+
+      if (e.key === 'Enter') {
+        if (buffer.length >= 2 && (!isInputFocused || target === barcodeInputRef.current)) {
+          const scanned = buffer.trim();
+          buffer = '';
+          if (scanned) {
+            e.preventDefault();
+            processScannedCode(scanned, true);
+          }
+        } else {
+          buffer = '';
+        }
+        return;
+      }
+
+      if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        if (timeDiff > 60) {
+          buffer = e.key;
+        } else {
+          buffer += e.key;
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [batches]);
+
+  const handleBarcodeSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    processScannedCode(barcodeQuery, false);
+  };
 
   const filteredLogs = inventoryLogs.filter((l) => {
     const matchesType = logTypeFilter === 'all'
@@ -147,23 +233,6 @@ export default function InventoryManager() {
       || (l.reason && l.reason.toLowerCase().includes(query));
     return matchesType && matchesSearch;
   });
-
-  /* ── Handlers ────────────────────────────────────────────── */
-  const handleBarcodeSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!barcodeQuery.trim()) return;
-    const match = batches.find((b) =>
-      b.batch_no.toLowerCase() === barcodeQuery.trim().toLowerCase() || b.batch_id.toString() === barcodeQuery.trim()
-    );
-    if (match) {
-      setBatchId(match.batch_id.toString());
-      setAdjustBatchId(match.batch_id);
-      setStatusMessage(`🎯 Barcode scanned: selected ${match.name} (Batch ${match.batch_no})`);
-      setBarcodeQuery('');
-    } else {
-      setStatusMessage(`⚠️ Barcode "${barcodeQuery}" not found in active inventory.`);
-    }
-  };
 
   const handleDeductStock = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -226,7 +295,6 @@ export default function InventoryManager() {
     }
   };
 
-  /* ── Adjust Stock with In-App Modal Confirmation ────────── */
   const executeAdjustStock = async () => {
     setStatusMessage('Processing inventory adjustment...');
     const token = localStorage.getItem('valetudo_token');
@@ -275,7 +343,6 @@ export default function InventoryManager() {
     });
   };
 
-  /* ── Create Medicine with Duplicate Check & In-App Modal ── */
   const executeCreateMedicine = async () => {
     setStatusMessage('Registering new formulary medicine...');
     const token = localStorage.getItem('valetudo_token');
@@ -334,7 +401,6 @@ export default function InventoryManager() {
     }
   };
 
-  /* ── Delete Medicine with In-App Modal ──────────────────── */
   const handleDeleteMedicine = (medicineId: number, medName: string) => {
     setConfirmDialog({
       title: '🗑️ Delete Formulary Entry',
@@ -371,7 +437,6 @@ export default function InventoryManager() {
     return { label: 'Good', bg: T.successSoft, color: T.success };
   };
 
-  /* ── RENDER ──────────────────────────────────────────────── */
   const tabs: { id: InvTab; label: string }[] = [
     { id: 'catalog', label: 'Catalog & dispense' },
     { id: 'stockin', label: 'Stock-in' },
@@ -394,17 +459,15 @@ export default function InventoryManager() {
       padding: 22,
       boxShadow: T.shadow.xs,
     }}>
-      {/* Header */}
       <div style={{ marginBottom: 18 }}>
         <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: T.primary }}>
           💊 Medicine & first-aid inventory
         </h3>
         <p style={{ margin: '4px 0 0', fontSize: 12.5, color: T.textSub }}>
-          FEFO lot traceability, expiration safeguards & stock monitoring
+          FEFO lot traceability, USB HID scanner integration & real-time automated dispensation sync
         </p>
       </div>
 
-      {/* Pill tab bar */}
       <div style={{
         display: 'flex', gap: 6, flexWrap: 'wrap',
         padding: 4, background: T.sage100,
@@ -442,9 +505,9 @@ export default function InventoryManager() {
         <div style={{
           padding: '12px 16px', marginBottom: 16,
           borderRadius: T.radius.md, fontSize: 13, fontWeight: 600,
-          background: statusMessage.includes('✅') ? T.successSoft : T.dangerSoft,
-          color: statusMessage.includes('✅') ? T.success : T.danger,
-          border: `1px solid ${statusMessage.includes('✅') ? T.successBorder : T.dangerBorder}`,
+          background: statusMessage.includes('✅') || statusMessage.includes('🎯') ? T.successSoft : T.dangerSoft,
+          color: statusMessage.includes('✅') || statusMessage.includes('🎯') ? T.success : T.danger,
+          border: `1px solid ${statusMessage.includes('✅') || statusMessage.includes('🎯') ? T.successBorder : T.dangerBorder}`,
         }}>
           {statusMessage}
         </div>
@@ -453,7 +516,6 @@ export default function InventoryManager() {
       {/* ── CATALOG & DISPENSE ──────────────────────────── */}
       {activeTab === 'catalog' && (
         <div>
-          {/* Barcode scanner */}
           <form onSubmit={handleBarcodeSubmit} style={{
             display: 'flex', gap: 10, marginBottom: 20, alignItems: 'center',
             background: T.sage50, padding: 12,
@@ -463,7 +525,7 @@ export default function InventoryManager() {
             <input
               ref={barcodeInputRef}
               type="text"
-              placeholder="Scan barcode / batch no. with USB scanner, or type and press Enter"
+              placeholder="USB Barcode / QR Scanner active (scan directly or type lot/batch and hit Enter)"
               value={barcodeQuery}
               onChange={(e) => setBarcodeQuery(e.target.value)}
               style={{ ...inputStyle, flex: 1 }}
@@ -474,17 +536,16 @@ export default function InventoryManager() {
           </form>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 20 }}>
-            {/* FEFO batch table */}
             <div>
               <div style={{
                 display: 'flex', justifyContent: 'space-between',
                 alignItems: 'center', marginBottom: 12,
               }}>
                 <span style={{ fontSize: 13, fontWeight: 800, color: T.text }}>
-                  First-expiry-first-out batches
+                  First-expiry-first-out batches (FEFO)
                 </span>
                 <small style={{ color: T.textMuted, fontSize: 11.5 }}>
-                  Select a row to deduct
+                  Select a row to dispense manually
                 </small>
               </div>
 
@@ -574,7 +635,6 @@ export default function InventoryManager() {
               </div>
             </div>
 
-            {/* Deduction panel */}
             <div style={{
               background: T.sage50,
               padding: 18,
@@ -595,7 +655,7 @@ export default function InventoryManager() {
                     style={{ ...inputStyle, background: T.surface, color: batchId ? T.text : T.textMuted }}
                     value={batchId ? `Batch #${batchId}` : ''}
                     readOnly
-                    placeholder="None selected"
+                    placeholder="Scan lot or click row"
                   />
                 </div>
                 <div style={{ marginBottom: 14 }}>
@@ -925,7 +985,6 @@ export default function InventoryManager() {
             </button>
           </div>
 
-          {/* Filter bar */}
           <div style={{
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
             gap: 12, marginBottom: 16, flexWrap: 'wrap',
@@ -1001,7 +1060,7 @@ export default function InventoryManager() {
                 </thead>
                 <tbody>
                   {filteredLogs.map((l) => {
-                    const isInbound = l.transaction_type === 'receive';
+                    const isInbound = l.transaction_type === 'receive' || l.transaction_type === 'return';
                     const isDispense = l.transaction_type === 'dispense';
                     return (
                       <tr key={l.log_id}>
@@ -1048,10 +1107,9 @@ export default function InventoryManager() {
         </div>
       )}
 
-      {/* ── FORMULARY MASTER & CATALOG MANAGER ───────────── */}
+      {/* ── FORMULARY MASTER ────────────────────────────── */}
       {activeTab === 'addmed' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.6fr', gap: 24, alignItems: 'start' }}>
-          {/* Form */}
           <div style={{ background: T.sage50, padding: 20, borderRadius: T.radius.md, border: `1px solid ${T.borderSoft}` }}>
             <h4 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 800, color: T.primary }}>
               ➕ Register new drug
@@ -1133,7 +1191,6 @@ export default function InventoryManager() {
             </form>
           </div>
 
-          {/* Catalog list with delete options */}
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div>
@@ -1141,7 +1198,7 @@ export default function InventoryManager() {
                   📋 Registered formulary drugs ({medicines.length})
                 </h4>
                 <p style={{ margin: '2px 0 0', fontSize: 11.5, color: T.textSub }}>
-                  Delete duplicate or retired definitions below.
+                  Real-time stock computed across active unexpired batches.
                 </p>
               </div>
               <input
@@ -1165,6 +1222,7 @@ export default function InventoryManager() {
                   <tr>
                     <th>Brand & generic name</th>
                     <th>Form & strength</th>
+                    <th style={{ textAlign: 'right' }}>Stock on hand</th>
                     <th style={{ width: 80, textAlign: 'center' }}>Action</th>
                   </tr>
                 </thead>
@@ -1184,6 +1242,13 @@ export default function InventoryManager() {
                         </td>
                         <td style={{ color: T.textSub }}>
                           {m.strength} · {m.form}
+                        </td>
+                        <td style={{
+                          textAlign: 'right',
+                          fontWeight: 800,
+                          color: (m.available_stock ?? 0) <= 0 ? T.danger : T.primary,
+                        }}>
+                          {m.available_stock ?? 0} {m.unit || 'pcs'}
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           <button
@@ -1214,7 +1279,7 @@ export default function InventoryManager() {
         </div>
       )}
 
-      {/* ── IN-APP CONFIRMATION MODAL ────────────────────── */}
+      {/* ── CONFIRMATION MODAL ──────────────────────────── */}
       {confirmDialog && (
         <div className="modal-backdrop" onClick={() => setConfirmDialog(null)}>
           <div className="modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>

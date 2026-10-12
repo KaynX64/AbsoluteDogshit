@@ -2,6 +2,7 @@
 const { app, BrowserWindow, ipcMain, Notification, Menu, shell, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { autoUpdater } = require('electron-updater');
 
 // ── Unified backend configuration ───────────────────────────────────
 const appConfig = require('../app-config.json');
@@ -170,6 +171,23 @@ ipcMain.handle('offline-mark-synced', async (event, { client_mutation_id, server
   }
 });
 
+ipcMain.handle('offline-mark-failed', async (event, { client_mutation_id, sync_status, error_message }) => {
+  if (!sqliteDb) return { success: false };
+  try {
+    // Update the status to 'conflict' or 'error' so it's no longer fetched as 'pending'
+    const stmt = sqliteDb.prepare(`
+      UPDATE LOCAL_SYNC_LOGS 
+      SET sync_status = ?, error_message = ? 
+      WHERE client_mutation_id = ?
+    `);
+    stmt.run(sync_status || 'error', error_message || 'Failed', client_mutation_id);
+    return { success: true };
+  } catch (err) {
+    console.error('[SQLite Mark Failed Error]:', err);
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle('offline-cache-bootstrap', async (event, { patients, emrRecords }) => {
   if (!sqliteDb) return { success: false };
   try {
@@ -253,6 +271,31 @@ ipcMain.handle('offline-search-patients', async (event, query) => {
   }
 });
 
+function setupAutoUpdater(win) {
+  if (!app.isPackaged) return; // updater only runs in installed builds
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  const send = (payload) => {
+    if (!win.isDestroyed()) win.webContents.send('update-status', payload);
+  };
+
+  autoUpdater.on('checking-for-update', () => send({ state: 'checking' }));
+  autoUpdater.on('update-available', (i) => send({ state: 'available', version: i.version }));
+  autoUpdater.on('update-not-available', () => send({ state: 'none' }));
+  autoUpdater.on('download-progress', (p) => send({ state: 'downloading', percent: Math.round(p.percent) }));
+  autoUpdater.on('update-downloaded', (i) => send({ state: 'downloaded', version: i.version }));
+  autoUpdater.on('error', (e) => send({ state: 'error', message: String((e && e.message) || e) }));
+
+  const check = () => autoUpdater.checkForUpdates().catch(() => {});
+  check();
+  setInterval(check, 4 * 60 * 60 * 1000); // re-check every 4 hours
+}
+
+ipcMain.handle('install-update', () => { autoUpdater.quitAndInstall(true, true); });
+ipcMain.handle('get-app-version', () => app.getVersion());
+
 function createWindow() {
   const isDev = !app.isPackaged;
 
@@ -297,6 +340,7 @@ function createWindow() {
     win.setTitle('Valetudo HealthLink - PSU Lingayen Infirmary');
     win.show();
     win.focus();
+    setupAutoUpdater(win);
   });
 
   win.webContents.on('before-input-event', (event, input) => {
@@ -370,21 +414,24 @@ ipcMain.handle('show-notification', (event, { title, body }) => {
   return { success: false, error: 'Notifications not supported' };
 });
 
-// 3. ALLOW SELF-SIGNED CERTS
+// 3. ALLOW SELF-SIGNED CERTS (RESTRICTED TO LOCAL DEVELOPMENT ONLY)
 app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
-  if (
-    url.startsWith(API_BASE_URL) ||
-    url.startsWith(API_WS_URL) ||
-    url.startsWith(VITE_URL) ||
-    url.startsWith(VITE_WS_URL) ||
-    url.startsWith('https://localhost:5173') ||
-    url.startsWith('https://127.0.0.1:5173')
-  ) {
-    event.preventDefault();
-    callback(true);
-  } else {
-    callback(false);
+  // Security Enforcement: Enforce strict TLS validation in packaged production builds
+  if (!app.isPackaged) {
+    if (
+      url.startsWith(API_BASE_URL) ||
+      url.startsWith(API_WS_URL) ||
+      url.startsWith(VITE_URL) ||
+      url.startsWith(VITE_WS_URL) ||
+      url.startsWith('https://localhost:5173') ||
+      url.startsWith('https://127.0.0.1:5173')
+    ) {
+      event.preventDefault();
+      callback(true);
+      return;
+    }
   }
+  callback(false);
 });
 
 app.whenReady().then(createWindow);

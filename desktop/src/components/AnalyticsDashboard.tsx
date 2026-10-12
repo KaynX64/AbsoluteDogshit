@@ -1,6 +1,6 @@
 // desktop/src/components/AnalyticsDashboard.tsx
 import { useEffect, useState } from 'react';
-import { T, btnGhost, btnPrimary } from '../theme';
+import { btnGhost, btnPrimary } from '../theme';
 import { API_BASE_URL } from '../config/api';
 
 interface TimePoint {
@@ -519,10 +519,10 @@ export default function AnalyticsDashboard() {
 
   useEffect(() => { fetchAnalytics(); }, []);
 
-  const handleDownloadExcelCSV = async () => {
+  const handleDownloadExcelXLSX = async () => {
     const token = localStorage.getItem('valetudo_token') || localStorage.getItem('token');
     try {
-      const res = await fetch(`${API_BASE_URL}/api/analytics/export/csv`, {
+      const res = await fetch(`${API_BASE_URL}/api/analytics/export/xlsx`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Export failed');
@@ -530,7 +530,7 @@ export default function AnalyticsDashboard() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `PSU_Health_Analytics_Report_${Date.now()}.csv`;
+      a.download = `PSU_Health_Analytics_Report_${Date.now()}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -539,7 +539,66 @@ export default function AnalyticsDashboard() {
     }
   };
 
-  const handlePrintPDFReport = () => window.print();
+  const handleDownloadPdfReport = async () => {
+    const token = localStorage.getItem('valetudo_token') || localStorage.getItem('token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/analytics/export/pdf`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `PSU_Health_Analytics_Report_${Date.now()}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err: any) {
+      alert('Report export failed: ' + err.message);
+    }
+  };
+
+  const handleDownloadExcelXlsx = async () => {
+    const token = localStorage.getItem('valetudo_token') || localStorage.getItem('token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/analytics/export/excel`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Excel export failed');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `PSU_Health_Analytics_${Date.now()}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err: any) {
+      alert('Excel export failed: ' + err.message);
+    }
+  };
+
+  const handleDownloadServerPdf = async () => {
+    const token = localStorage.getItem('valetudo_token') || localStorage.getItem('token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/analytics/export/pdf`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Server PDF generation failed');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `PSU_Health_Analytics_Report_${Date.now()}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => window.URL.revokeObjectURL(url), 1000); 
+    } catch (err: any) {
+      alert('PDF generation failed: ' + err.message);
+    }
+  };
 
   if (loading) {
     return (
@@ -670,18 +729,30 @@ export default function AnalyticsDashboard() {
           </button>
           <button
             type="button"
-            onClick={handleDownloadExcelCSV}
+            onClick={handleDownloadExcelXlsx}
             style={{
               ...btnGhost,
-              background: '#D6E3F0',
-              color: '#1F4462',
+              background: '#D7E8D2',
+              color: '#264D36',
               border: 'none',
+              fontWeight: 700,
             }}
           >
-            📊 Export CSV
+            📗 Export Excel (.xlsx)
           </button>
-          <button type="button" onClick={handlePrintPDFReport} style={btnPrimary}>
-            🖨️ Export PDF
+          <button
+            type="button"
+            onClick={handleDownloadServerPdf}
+            style={btnPrimary}
+          >
+            📑 Official PDF Report
+          </button>
+          <button
+            type="button"
+            onClick={() => window.print()}
+            style={btnGhost}
+          >
+            🖨️ Print View
           </button>
         </div>
       </div>

@@ -9,8 +9,9 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
-import { loginUser, authenticateToken, changePassword, loginRateLimit } from './auth.js';
+import { loginUser, authenticateToken, changePassword, loginRateLimit, logoutUser } from './auth.js';
 import { logActiveLimits } from './config/limits.js';
+
 
 
 // Route imports
@@ -26,11 +27,14 @@ import analyticsRoutes from './routes/analytics.js';
 import syncRoutes from './routes/sync.js';
 import { startReminderScheduler } from './utils/reminderWorker.js';
 import { JWT_SECRET } from './utils/secrets.js';
+import interactionsRoutes from './routes/interactions.js';
+import signatureRoutes from './routes/signature.js';
 
 
 // Utilities (MinIO S3 & Redis)
 import { ensureBucketExists } from './utils/s3Vault.js';
 import { initRedis } from './utils/redisClient.js';
+import { runAutoMigrations } from './db.js';
 
 dotenv.config();
 
@@ -123,6 +127,7 @@ io.on('connection', (socket) => {
 // API ROUTES
 // =============================================================================
 app.post('/api/auth/login', loginRateLimit, loginUser);
+app.post('/api/auth/logout', authenticateToken, logoutUser);  
 app.put('/api/auth/change-password', authenticateToken, changePassword);
 
 app.use('/api/privacy', privacyRouter);
@@ -130,14 +135,20 @@ app.use('/api/profile', profileRoutes);
 app.use('/api/health-pass', healthPassRoutes);
 app.use('/api/appointments', appointmentRoutes(io));
 app.use('/api/emergency', emergencyRouter(io));
-app.use('/api/inventory', inventoryRoutes);
-app.use('/api/documents', documentRoutes);
+app.use('/api/inventory', inventoryRoutes(io));
+app.use('/api/documents', documentRoutes(io));
 app.use('/api/admin', adminRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/sync', syncRoutes);
+app.use('/api/interactions', interactionsRoutes);
+app.use('/api/signature', signatureRoutes);
 
-app.get('/api/users/me', authenticateToken, (req, res) => {
-  res.json({ message: 'Authenticated', user: req.user });
+// ── Lightweight liveness probe for the desktop ping monitor ──────
+// Intentionally unauthenticated and DB-free so it measures pure
+// network + server-loop latency, not MySQL query time.
+app.get('/api/ping', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ ok: true, t: Date.now() });
 });
 
 // =============================================================================
@@ -149,6 +160,7 @@ server.listen(PORT, async () => {
   console.log(`✅ Valetudo HealthLink API & WebSockets running on ${isHttps ? 'HTTPS/WSS' : 'HTTP/WS'} port ${PORT}`);
   await initRedis().catch(() => {});
   await ensureBucketExists().catch(() => {});
+  await runAutoMigrations().catch(() => {});
   logActiveLimits();
   startReminderScheduler(io);
 });

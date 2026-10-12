@@ -6,8 +6,10 @@ import { logAudit } from './utils/auditLogger.js';
 import { JWT_SECRET } from './utils/secrets.js';
 import { redis, isRedisActive } from './utils/redisClient.js';
 import { LOGIN_LIMIT } from './config/limits.js';
+import crypto from 'crypto';
+import { evaluatePasswordStrength } from './utils/passwordPolicy.js';
 
-// S-09: Pre-computed dummy hash to prevent user-enumeration timing attacks
+// S-09: Pre-computed dummy hash to prevent user-enumeration timing attacks.
 // bcrypt.compare against this hash takes the same ~100ms as a real check,
 // so an attacker cannot measure response latency to detect registered emails.
 const DUMMY_HASH = bcrypt.hashSync('timing-equalizer-valetudo-2026', 10);
@@ -128,9 +130,9 @@ export async function loginUser(req, res) {
 
     // 2. Fetch user's assigned roles
     const [roles] = await pool.query(
-      `SELECT r.code, r.name 
-       FROM ROLES r 
-       INNER JOIN USER_ROLES ur ON r.role_id = ur.role_id 
+      `SELECT r.code, r.name
+       FROM ROLES r
+       INNER JOIN USER_ROLES ur ON r.role_id = ur.role_id
        WHERE ur.user_id = ?`,
       [user.user_id]
     );
@@ -144,12 +146,14 @@ export async function loginUser(req, res) {
       });
     }
 
-    // 3. Issue JWT Token (Valid 24 hours)
+    // 3. Issue JWT Token (Valid 24 hours) with unique JTI for Redis revocation tracking
+    const jti = crypto.randomUUID();
     const token = jwt.sign(
       {
         user_id: user.user_id,
         email: user.email,
         roles: roleCodes,
+        jti,
       },
       JWT_SECRET,
       { expiresIn: '24h' }
@@ -205,9 +209,29 @@ export function authenticateToken(req, res, next) {
     return res.status(401).json({ error: 'Access token required.' });
   }
 
-  jwt.verify(token, JWT_SECRET, (err, user) => {
+  jwt.verify(token, JWT_SECRET, async (err, user) => {
     if (err) return res.status(403).json({ error: 'Token expired or invalid.' });
+
+    // Check Redis revocation blocklist
+    if (isRedisActive()) {
+      try {
+        const blacklistKey = user.jti
+          ? `token:blacklist:${user.jti}`
+          : `token:blacklist:${token}`;
+        const isRevoked = await redis.get(blacklistKey);
+        if (isRevoked) {
+          return res.status(401).json({
+            error: 'TOKEN_REVOKED',
+            message: 'Session has been invalidated. Please log in again.',
+          });
+        }
+      } catch (redisErr) {
+        console.error('[Token Revocation Check Warning]:', redisErr.message);
+      }
+    }
+
     req.user = user;
+    req.token = token;
     next();
   });
 }
@@ -223,13 +247,15 @@ export async function changePassword(req, res) {
     return res.status(400).json({ error: 'Current password and new password are required.' });
   }
 
-  if (newPassword.length < 8) {
-    return res.status(400).json({ error: 'New password must be at least 8 characters long.' });
-  }
-
   try {
+    // Pull identity context so the policy can reject passwords containing
+    // the user's own email handle, first name, last name, or student number.
     const [users] = await pool.query(
-      'SELECT password_hash FROM USERS WHERE user_id = ? AND deleted_at IS NULL',
+      `SELECT u.password_hash, u.email, u.first_name, u.last_name,
+              sp.student_no
+       FROM USERS u
+       LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
+       WHERE u.user_id = ? AND u.deleted_at IS NULL`,
       [userId]
     );
 
@@ -239,14 +265,59 @@ export async function changePassword(req, res) {
 
     const user = users[0];
 
+    // ── Server-side password policy enforcement ──────────────────────
+    const strength = evaluatePasswordStrength(newPassword, {
+      email: user.email,
+      firstName: user.first_name,
+      lastName: user.last_name,
+      studentNo: user.student_no,
+    });
+
+    if (!strength.isValid) {
+      return res.status(400).json({
+        error: 'Password does not meet security requirements.',
+        code: 'WEAK_PASSWORD',
+        score: strength.score,
+        label: strength.label,
+        issues: strength.issues,
+        requirements: [
+          'At least 8 characters long',
+          'Contains an uppercase and lowercase letter',
+          'Contains a number',
+          'Contains a symbol (!@#$%^&*…)',
+          'Does not contain your name, email, or ID number',
+        ],
+      });
+    }
+
+    // ── Verify current password ─────────────────────────────────────
     const isMatch = await bcrypt.compare(currentPassword, user.password_hash);
 
     if (!isMatch) {
       return res.status(400).json({ error: 'Incorrect current password.' });
     }
 
+    // Prevent trivial rotation (new == old)
+    if (await bcrypt.compare(newPassword, user.password_hash)) {
+      return res.status(400).json({
+        error: 'New password must be different from your current password.',
+      });
+    }
+
     const newHash = await bcrypt.hash(newPassword, 10);
     await pool.query('UPDATE USERS SET password_hash = ? WHERE user_id = ?', [newHash, userId]);
+
+    // Invalidate current JWT in Redis so caller is forced to re-authenticate with new credentials
+    if (req.user && isRedisActive()) {
+      const now = Math.floor(Date.now() / 1000);
+      const remainingSeconds = req.user.exp ? Math.max(req.user.exp - now, 60) : 86400;
+      const blacklistKey = req.user.jti
+        ? `token:blacklist:${req.user.jti}`
+        : `token:blacklist:${req.token}`;
+      await redis
+        .set(blacklistKey, 'revoked_password_change', 'EX', remainingSeconds)
+        .catch(() => {});
+    }
 
     const connection = await pool.getConnection();
     try {
@@ -256,7 +327,11 @@ export async function changePassword(req, res) {
         table: 'USERS',
         recordId: userId,
         oldValue: null,
-        newValue: { event: 'PASSWORD_CHANGED_BY_USER' },
+        newValue: {
+          event: 'PASSWORD_CHANGED_BY_USER',
+          strength_label: strength.label,
+          strength_score: strength.score,
+        },
         ipAddress: req.ip,
       });
     } finally {
@@ -267,5 +342,48 @@ export async function changePassword(req, res) {
   } catch (error) {
     console.error('[Change Password Error]:', error);
     res.status(500).json({ error: 'Failed to update password.' });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// LOGOUT & SESSION TERMINATION
+// ─────────────────────────────────────────────────────────────────────────
+export async function logoutUser(req, res) {
+  try {
+    const user = req.user;
+    const token = req.token;
+
+    // Invalidate token in Redis until its natural expiration
+    if (user && isRedisActive()) {
+      const now = Math.floor(Date.now() / 1000);
+      const remainingSeconds = user.exp ? Math.max(user.exp - now, 60) : 86400;
+      const blacklistKey = user.jti
+        ? `token:blacklist:${user.jti}`
+        : `token:blacklist:${token}`;
+      await redis.set(blacklistKey, 'revoked_logout', 'EX', remainingSeconds);
+    }
+
+    // Record session termination to R.A. 10173 Audit Ledger
+    const connection = await pool.getConnection();
+    try {
+      await logAudit(connection, {
+        userId: user?.user_id || null,
+        action: 'UPDATE',
+        table: 'AUTH_SESSIONS',
+        recordId: user?.user_id || null,
+        oldValue: null,
+        newValue: { event: 'USER_LOGOUT_SESSION_TERMINATED', email: user?.email },
+        ipAddress: req.ip,
+      });
+    } catch (auditErr) {
+      console.error('[Logout Audit Warning]:', auditErr.message);
+    } finally {
+      connection.release();
+    }
+
+    res.json({ message: 'Session terminated and token invalidated successfully.' });
+  } catch (error) {
+    console.error('[Logout Error]:', error);
+    res.status(500).json({ error: 'Failed to process session logout.' });
   }
 }

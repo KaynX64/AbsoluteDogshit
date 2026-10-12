@@ -43,11 +43,16 @@
             </intent-filter>
         </activity>
 
-        <!-- Foreground Service Worker to keep Socket.IO alive in the background -->
+        <!--
+            Foreground Service Worker to keep Socket.IO alive in the background.
+            stopWithTask="false" keeps the service running when the user swipes
+            the app away from the Android recents screen.
+        -->
         <service
             android:name="de.julianassmann.flutter_background.IsolateHolderService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false" />
 
         <meta-data
             android:name="flutterEmbedding"
