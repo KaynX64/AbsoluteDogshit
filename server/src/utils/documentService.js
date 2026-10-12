@@ -55,12 +55,16 @@ export async function generateAndStorePrescriptionPDF(prescriptionId) {
            : p.signature_metadata || {};
 
     // 2. Fetch line items
+    //    LEFT JOIN + COALESCE so outside (non-formulary) drugs — which have a
+    //    NULL medicine_id and a free-text outside_name — still render on the PDF.
     const [items] = await pool.query(
       `SELECT pi.dosage, pi.frequency, pi.route, pi.duration_days,
               pi.quantity_dispensed, pi.instructions,
-              m.name AS medicine_name, m.generic_name
+              COALESCE(m.name, pi.outside_name) AS medicine_name,
+              m.generic_name,
+              (pi.medicine_id IS NULL) AS is_outside
        FROM PRESCRIPTION_ITEMS pi
-       JOIN MEDICINES m ON pi.medicine_id = m.medicine_id
+       LEFT JOIN MEDICINES m ON pi.medicine_id = m.medicine_id
        WHERE pi.prescription_id = ?`,
       [prescriptionId]
     );

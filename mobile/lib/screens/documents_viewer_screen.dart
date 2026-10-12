@@ -277,7 +277,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                 SizedBox(height: rs.h(10)),
 
                 Text(
-                  'PRESCRIBED FORMULARY MEDICATION:',
+                  items.any((it) => it['is_outside'] == true)
+                      ? 'PRESCRIBED MEDICATION (INCLUDES OUTSIDE-PHARMACY ITEMS):'
+                      : 'PRESCRIBED FORMULARY MEDICATION:',
                   style: TextStyle(
                     fontSize: rs.sp(11),
                     fontWeight: FontWeight.w800,
@@ -313,7 +315,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                             children: [
                               Expanded(
                                 child: Text(
-                                  "${it['medicine_name']} (${it['generic_name']})",
+                                  it['is_outside'] == true
+                                      ? "${it['medicine_name'] ?? 'Prescribed medication'}"
+                                      : "${it['medicine_name']} (${it['generic_name']})",
                                   style: TextStyle(
                                     fontWeight: FontWeight.w800,
                                     fontSize: rs.sp(14),
@@ -341,6 +345,18 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                             "Duration: ${it['duration_days'] ?? 3} days (Qty: ${it['quantity_dispensed'] ?? 10} pcs)",
                             style: TextStyle(fontSize: rs.sp(11.5), color: textSub),
                           ),
+                          if (it['is_outside'] == true)
+                            Padding(
+                              padding: EdgeInsets.only(top: rs.h(4)),
+                              child: Text(
+                                '🛒 Outside pharmacy purchase — not dispensed by the infirmary',
+                                style: TextStyle(
+                                  fontSize: rs.sp(11),
+                                  fontWeight: FontWeight.w700,
+                                  color: const Color(0xFF8C6826),
+                                ),
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -938,9 +954,12 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
             final status = (rx['status'] ?? 'active').toString().toLowerCase();
 
             final firstMed = items.isNotEmpty ? items[0] : null;
+            final isFirstOutside = firstMed?['is_outside'] == true;
             final medName = firstMed?['medicine_name'] ?? 'Prescribed medication';
             final medStrength = firstMed != null
-                ? "${firstMed['generic_name']} · ${firstMed['dosage'] ?? '500 mg'}"
+                ? (isFirstOutside
+                    ? "OUTSIDE Rx · ${firstMed['dosage'] ?? '—'} · buy at an external pharmacy"
+                    : "${firstMed['generic_name']} · ${firstMed['dosage'] ?? '500 mg'}")
                 : '';
 
             return Container(

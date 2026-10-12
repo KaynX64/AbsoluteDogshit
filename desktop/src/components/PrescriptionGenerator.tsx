@@ -8,7 +8,6 @@ import {
   type InteractionCheckResult,
 } from '../services/interactionService';
 
-
 interface MedicineMaster {
   medicine_id: number;
   name: string;
@@ -33,6 +32,64 @@ interface PrescriptionGeneratorProps {
   isArchived?: boolean;
   onPrescriptionIssued?: (info: { prescriptionId: number; qrToken: string; emrId: number }) => void;
   onPrescriptionError?: (message: string) => void;
+}
+
+/* ── Hoisted Form Field Wrapper (Must stay outside to preserve focus) ── */
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label
+        style={{
+          display: 'block',
+          fontSize: 11.5,
+          fontWeight: 700,
+          color: T.textSub,
+          marginBottom: 6,
+        }}
+      >
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+/* ── Hoisted Segmented Control Pill ────────────────────────────────── */
+function ModePill({
+  active,
+  disabled,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        flex: 1,
+        padding: '9px 12px',
+        border: `1px solid ${active ? T.primary : 'transparent'}`,
+        borderRadius: T.radius.pill,
+        background: active ? T.surface : 'transparent',
+        color: active ? T.primary : T.textSub,
+        fontWeight: active ? 800 : 600,
+        fontSize: 12,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        fontFamily: T.font,
+        boxShadow: active ? T.shadow.xs : 'none',
+        transition: 'all 120ms ease',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {children}
+    </button>
+  );
 }
 
 /* ── Custom themed dropdown showing live stock levels ─────────── */
@@ -231,6 +288,10 @@ export default function PrescriptionGenerator({
   );
   const [isSaving, setIsSaving] = useState(false);
 
+  /* ── Outside-drug mode state ──────────────────────────────────── */
+  const [rxMode, setRxMode] = useState<'formulary' | 'outside'>('formulary');
+  const [outsideName, setOutsideName] = useState('');
+
   const [stockError, setStockError] = useState<{
     medicine: string;
     available: number;
@@ -252,10 +313,6 @@ export default function PrescriptionGenerator({
     }
   }, [initialNotes, isArchived]);
 
-  /* ── Formulary fetch with bounded retry (self-heals after a
-       server restart / nodemon reload instead of sticking at
-       "Loading formulary…" forever). Hoisted so the successful
-       prescription handler can refresh live stock levels. ────── */
   const hasInitializedRef = useRef(false);
 
   const fetchCatalog = async (attempt = 0) => {
@@ -293,7 +350,7 @@ export default function PrescriptionGenerator({
   useEffect(() => {
     let cancelled = false;
     const runCheck = async () => {
-      if (!selectedMedicineId) {
+      if (!selectedMedicineId || rxMode !== 'formulary') {
         if (!cancelled) setInteractionResult(null);
         return;
       }
@@ -307,7 +364,7 @@ export default function PrescriptionGenerator({
     return () => {
       cancelled = true;
     };
-  }, [selectedMedicineId]);
+  }, [selectedMedicineId, rxMode]);
 
   const handleSelectMedicine = (medId: number) => {
     setSelectedMedicineId(medId);
@@ -315,6 +372,15 @@ export default function PrescriptionGenerator({
     if (chosen) {
       setRxMedName(`${chosen.name} (${chosen.generic_name})`);
       setRxDosage(chosen.strength);
+    }
+  };
+
+  const handleSwitchMode = (mode: 'formulary' | 'outside') => {
+    if (isArchived) return;
+    setRxMode(mode);
+    if (mode === 'outside') {
+      setInteractionResult(null);
+      setStockError(null);
     }
   };
 
@@ -326,7 +392,69 @@ export default function PrescriptionGenerator({
       return;
     }
 
-    // ── Client-side Stock Safeguard ──────────────────────────────
+    if (rxMode === 'outside') {
+      const trimmedName = outsideName.trim();
+      if (!trimmedName) {
+        if (onPrescriptionError) {
+          onPrescriptionError('❌ Please enter the name of the outside drug before issuing.');
+        }
+        return;
+      }
+      const outsideQty = Number(rxQuantity);
+      if (!Number.isFinite(outsideQty) || outsideQty < 1) {
+        if (onPrescriptionError) {
+          onPrescriptionError('❌ Quantity to purchase must be at least 1.');
+        }
+        return;
+      }
+
+      setIsSaving(true);
+      const token = localStorage.getItem('valetudo_token');
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/documents/prescriptions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            patient_user_id: patientUserId,
+            appointment_id: appointmentId,
+            notes: doctorNotes,
+            items: [
+              {
+                medicine_id: null,
+                outside_drug_name: trimmedName,
+                dosage: rxDosage || 'As per packaging',
+                frequency: rxFrequency || 'As needed',
+                route: 'Oral',
+                duration_days: Number(rxDurationDays) || 3,
+                quantity_dispensed: outsideQty,
+                instructions: rxInstructions,
+              },
+            ],
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || 'Failed to issue outside prescription.');
+        }
+        if (onPrescriptionIssued) {
+          onPrescriptionIssued({
+            prescriptionId: data.prescriptionId,
+            qrToken: data.qrToken,
+            emrId: data.emrId,
+          });
+        }
+      } catch (err: any) {
+        if (onPrescriptionError) {
+          onPrescriptionError('❌ Error issuing outside prescription: ' + err.message);
+        } else {
+          console.error('[Prescription Generator - Outside]', err);
+        }
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     if (selectedMed && selectedMed.available_stock !== undefined) {
       if (selectedMed.available_stock <= 0) {
         if (onPrescriptionError) {
@@ -347,7 +475,6 @@ export default function PrescriptionGenerator({
     setIsSaving(true);
     const token = localStorage.getItem('valetudo_token');
 
-    /* ── Pre-flight interaction check (blocks contraindicated combos) ── */
     try {
       const preCheck = await checkDrugInteractions([selectedMedicineId]);
       if (preCheck?.blocking) {
@@ -394,7 +521,7 @@ export default function PrescriptionGenerator({
             available: Number(data.available ?? 0),
             requested: Number(data.requested ?? rxQuantity ?? 0),
           });
-          return; // `finally` below still clears isSaving
+          return;
         }
         throw new Error(data.error || 'Failed to issue prescription.');
       }
@@ -402,7 +529,6 @@ export default function PrescriptionGenerator({
       const prescriptionId = data.prescriptionId;
       const emrId = data.emrId;
 
-      // Refresh stock numbers so the dropdown reflects the deduction
       await fetchCatalog();
 
       if (onPrescriptionIssued) {
@@ -420,44 +546,86 @@ export default function PrescriptionGenerator({
     }
   };
 
-  const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
-    <div>
-      <label
-        style={{
-          display: 'block',
-          fontSize: 11.5,
-          fontWeight: 700,
-          color: T.textSub,
-          marginBottom: 6,
-        }}
-      >
-        {label}
-      </label>
-      {children}
-    </div>
-  );
-
   const isOutOfStock =
+    rxMode === 'formulary' &&
     selectedMed &&
     selectedMed.available_stock !== undefined &&
     selectedMed.available_stock <= 0;
   const isOverStock =
+    rxMode === 'formulary' &&
     selectedMed &&
     selectedMed.available_stock !== undefined &&
     selectedMed.available_stock > 0 &&
     Number(rxQuantity) > selectedMed.available_stock;
-  const isBlocked = interactionResult?.blocking ?? false;
+  const isBlocked = rxMode === 'formulary' && (interactionResult?.blocking ?? false);
+  const isOutsideNameMissing = rxMode === 'outside' && !outsideName.trim();
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <Field label="Medicine (formulary)">
-        <FormularySelect
-          medicines={medicines}
-          value={selectedMedicineId}
-          onChange={handleSelectMedicine}
+      {/* ── Medication source: infirmary formulary vs outside pharmacy ── */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 6,
+          padding: 4,
+          background: T.sage100,
+          border: `1px solid ${T.border}`,
+          borderRadius: T.radius.pill,
+        }}
+      >
+        <ModePill
+          active={rxMode === 'formulary'}
           disabled={isArchived}
-        />
-      </Field>
+          onClick={() => handleSwitchMode('formulary')}
+        >
+          🏥 Infirmary formulary
+        </ModePill>
+        <ModePill
+          active={rxMode === 'outside'}
+          disabled={isArchived}
+          onClick={() => handleSwitchMode('outside')}
+        >
+          🛒 Outside pharmacy drug
+        </ModePill>
+      </div>
+
+      {rxMode === 'formulary' ? (
+        <Field label="Medicine (formulary)">
+          <FormularySelect
+            medicines={medicines}
+            value={selectedMedicineId}
+            onChange={handleSelectMedicine}
+            disabled={isArchived}
+          />
+        </Field>
+      ) : (
+        <Field label="Outside drug name (brand or generic)">
+          <input
+            style={{
+              ...inputStyle,
+              borderColor: isOutsideNameMissing ? T.danger : undefined,
+            }}
+            disabled={isArchived}
+            placeholder="e.g. Cetirizine 10mg or any non-formulary medicine"
+            value={outsideName}
+            onChange={(e) => setOutsideName(e.target.value)}
+            maxLength={200}
+          />
+          <div
+            style={{
+              fontSize: 10.5,
+              fontWeight: 600,
+              marginTop: 4,
+              color: isOutsideNameMissing ? T.danger : T.textSub,
+              lineHeight: 1.5,
+            }}
+          >
+            {isOutsideNameMissing
+              ? '⚠️ Drug name is required for outside prescriptions.'
+              : '🛒 Not stocked by the infirmary — the patient purchases this at an external pharmacy. No inventory is deducted.'}
+          </div>
+        </Field>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field label="Dosage">
@@ -468,19 +636,22 @@ export default function PrescriptionGenerator({
             onChange={(e) => setRxDosage(e.target.value)}
           />
         </Field>
-        <Field label="Quantity to dispense">
+        <Field label={rxMode === 'outside' ? 'Quantity to purchase' : 'Quantity to dispense'}>
           <input
             type="number"
             min="1"
             style={{
               ...inputStyle,
-              borderColor: isOutOfStock || isOverStock ? T.danger : undefined,
+              borderColor:
+                rxMode === 'formulary' && (isOutOfStock || isOverStock)
+                  ? T.danger
+                  : undefined,
             }}
             disabled={isArchived}
             value={rxQuantity}
             onChange={(e) => setRxQuantity(e.target.value)}
           />
-          {selectedMed && selectedMed.available_stock !== undefined && (
+          {rxMode === 'formulary' && selectedMed && selectedMed.available_stock !== undefined && (
             <div
               style={{
                 fontSize: 10.5,
@@ -539,8 +710,8 @@ export default function PrescriptionGenerator({
         />
       </Field>
 
-      {/* ── Drug-interaction feedback ─────────────────────────── */}
-      {checkingInteractions && (
+      {/* ── Drug-interaction feedback (formulary mode only) ─────────── */}
+      {rxMode === 'formulary' && checkingInteractions && (
         <div
           style={{
             padding: '10px 14px',
@@ -554,7 +725,7 @@ export default function PrescriptionGenerator({
           🔍 Checking for drug interactions…
         </div>
       )}
-      {interactionResult?.hasInteractions && (
+      {rxMode === 'formulary' && interactionResult?.hasInteractions && (
         <InteractionWarning
           interactions={interactionResult.interactions}
           blocking={interactionResult.blocking}
@@ -571,24 +742,31 @@ export default function PrescriptionGenerator({
           isArchived ||
           isBlocked ||
           Boolean(isOutOfStock) ||
-          Boolean(isOverStock)
+          Boolean(isOverStock) ||
+          isOutsideNameMissing
         }
         style={{
           ...btnPrimary,
           width: '100%',
           padding: 13,
           opacity:
-            isSaving || isArchived || isBlocked || isOutOfStock || isOverStock
+            isSaving || isArchived || isBlocked || isOutOfStock || isOverStock || isOutsideNameMissing
               ? 0.5
               : 1,
           cursor:
-            isSaving || isArchived || isBlocked || isOutOfStock || isOverStock
+            isSaving || isArchived || isBlocked || isOutOfStock || isOverStock || isOutsideNameMissing
               ? 'not-allowed'
               : 'pointer',
         }}
       >
         {isArchived
           ? '🔒 Prescription issued & archived'
+          : rxMode === 'outside'
+          ? isOutsideNameMissing
+            ? '🛒 Enter the outside drug name to issue'
+            : isSaving
+            ? 'Signing outside prescription…'
+            : '🛒 Issue outside prescription & print'
           : isOutOfStock
           ? '❌ Cannot issue: Formulary Out of Stock'
           : isOverStock
@@ -600,7 +778,7 @@ export default function PrescriptionGenerator({
           : '🖨️ Issue, deduct inventory & print prescription'}
       </button>
 
-      {/* ── Elegant stock-shortfall modal ─────────────────────────── */}
+      {/* ── Stock-shortfall modal ─────────────────────────── */}
       {stockError && (
         <div className="modal-backdrop" onClick={() => setStockError(null)}>
           <style>{`@keyframes rxStockIn { from { opacity: 0; transform: translateY(14px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }`}</style>
@@ -615,7 +793,6 @@ export default function PrescriptionGenerator({
               animation: 'rxStockIn 220ms cubic-bezier(0.34, 1.3, 0.64, 1)',
             }}
           >
-            {/* Accent header */}
             <div
               style={{
                 padding: '26px 28px 20px',
@@ -650,7 +827,6 @@ export default function PrescriptionGenerator({
               </p>
             </div>
 
-            {/* Available / Requested / Shortfall stat trio */}
             <div
               style={{
                 display: 'grid',
@@ -700,7 +876,6 @@ export default function PrescriptionGenerator({
               reduce the quantity below.
             </p>
 
-            {/* Actions */}
             <div
               style={{
                 display: 'flex',

@@ -49,6 +49,30 @@ export default function documentRoutes(io) {
       return res.status(400).json({ error: 'patient_user_id and at least one medication item are required.' });
     }
 
+    // ── Classify line items: formulary vs outside (non-formulary) drugs ──────
+    // An item is an OUTSIDE drug when it carries no medicine_id. Outside items
+    // are purchased by the patient at an external pharmacy: no FEFO deduction,
+    // no stock checks, no formulary interaction lookups. They are still signed,
+    // QR-tokened and audited exactly like formulary items.
+    const formularyItems = [];
+    const outsideItems = [];
+    for (const item of items) {
+      if (item.medicine_id === null || item.medicine_id === undefined || item.medicine_id === '') {
+        const outsideName = String(item.outside_drug_name || item.outside_name || '').trim();
+        if (!outsideName) {
+          return res.status(400).json({
+            error: 'Outside (non-formulary) items require an outside_drug_name.',
+          });
+        }
+        if (outsideName.length > 200) {
+          return res.status(400).json({ error: 'Outside drug name must be 200 characters or fewer.' });
+        }
+        outsideItems.push({ ...item, outside_drug_name: outsideName });
+      } else {
+        formularyItems.push(item);
+      }
+    }
+
     const connection = await pool.getConnection();
 
     try {
@@ -66,22 +90,32 @@ export default function documentRoutes(io) {
         await assertEmrBelongsToPatient(connection, emr_id, patient_user_id);
       }
 
-      // ── Aggregate requested quantities per medicine ─────────────────────────
+      // ── Aggregate requested quantities per medicine (formulary items only) ─
       const requestedByMedicine = {};
-      for (const item of items) {
-        const medId = Number(item.medicine_id || 1);
+      for (const item of formularyItems) {
+        const medId = Number(item.medicine_id);
         const qty = parseInt(item.quantity_dispensed, 10) || parseInt(item.quantity, 10) || 1;
         if (isNaN(qty) || qty <= 0) {
           throw new Error(`Quantity dispensed for all prescribed items must be a positive integer.`);
         }
         requestedByMedicine[medId] = (requestedByMedicine[medId] || 0) + qty;
       }
+      for (const item of outsideItems) {
+        // Advisory quantity for an external-pharmacy purchase (not deducted).
+        const qty = parseInt(item.quantity_dispensed, 10) || parseInt(item.quantity, 10) || 1;
+        if (isNaN(qty) || qty <= 0) {
+          throw new Error(`Quantity for outside drug "${item.outside_drug_name}" must be a positive integer.`);
+        }
+      }
 
-      // ── DRUG INTERACTION CHECK (read-only; blocks contraindicated combos) ───
+      // ── DRUG INTERACTION CHECK (read-only; blocks contraindicated combos) ────
       // Runs before any writes so a blocked pair cannot leave orphan records.
+      // Only formulary items participate — outside drugs are not in the
+      // MEDICINES / DRUG_INTERACTIONS reference tables, so they cannot be
+      // resolved by the checker.
       let severeInteractions = [];
       {
-        const allMedicineIds = items.map((it) => Number(it.medicine_id)).filter(Boolean);
+        const allMedicineIds = formularyItems.map((it) => Number(it.medicine_id)).filter(Boolean);
         if (allMedicineIds.length >= 2) {
           const { checkInteractions } = await import('../utils/interactionChecker.js');
           const foundInteractions = await checkInteractions(connection, allMedicineIds);
@@ -188,7 +222,12 @@ export default function documentRoutes(io) {
             doctorUserId,
             encrypt(notes ? `Chief Complaint: ${notes}` : 'Prescription Request / Medical Evaluation'),
             encrypt('Clinical Medication Order'),
-            encrypt(`Prescribed ${items.length} medication item(s)`),
+            encrypt(
+              `Prescribed ${items.length} medication item(s)` +
+                (outsideItems.length > 0
+                  ? ` (includes ${outsideItems.length} outside-pharmacy item(s) not dispensed by the infirmary)`
+                  : '')
+            ),
             encrypt('Issued via Digital Prescription System'),
           ]
         );
@@ -216,6 +255,7 @@ export default function documentRoutes(io) {
           .update(`${patient_user_id}:${rxUuid}:${targetEmrId}:${items.length}`)
           .digest('hex'),
         items_count: items.length,
+        outside_items: outsideItems.map((o) => o.outside_drug_name),
         allocated_batches: plannedDeductions.map((d) => ({
           medicine_id: d.medicine_id,
           medicine_name: d.medicine_name,
@@ -245,20 +285,39 @@ export default function documentRoutes(io) {
       const prescriptionId = headerResult.insertId;
 
       // ── Persist prescription line items ─────────────────────────────────────
-      for (const item of items) {
+      for (const item of formularyItems) {
         await connection.query(
           `INSERT INTO PRESCRIPTION_ITEMS 
            (prescription_id, medicine_id, dosage, frequency, route, duration_days, quantity_dispensed, instructions)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             prescriptionId,
-            item.medicine_id || 1,
+            item.medicine_id,
             item.dosage || '500mg',
             item.frequency || 'Every 6 hours',
             item.route || 'Oral',
             item.duration_days || 3,
             item.quantity_dispensed || 10,
             encrypt(item.instructions || 'Take after meals'),
+          ]
+        );
+      }
+      for (const item of outsideItems) {
+        // Outside drug: medicine_id stays NULL; the free-text name is stored in
+        // outside_name. No inventory rows are touched for these items.
+        await connection.query(
+          `INSERT INTO PRESCRIPTION_ITEMS 
+           (prescription_id, medicine_id, outside_name, dosage, frequency, route, duration_days, quantity_dispensed, instructions)
+           VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            prescriptionId,
+            item.outside_drug_name,
+            item.dosage || 'As per packaging',
+            item.frequency || 'As needed',
+            item.route || 'Oral',
+            item.duration_days || 3,
+            item.quantity_dispensed || 1,
+            encrypt(item.instructions || 'Purchase from an external pharmacy and take as directed'),
           ]
         );
       }
@@ -331,6 +390,7 @@ export default function documentRoutes(io) {
           emr_id: targetEmrId,
           qr_token: qrToken,
           items_count: items.length,
+          outside_items_count: outsideItems.length,
           allocated_batches_count: plannedDeductions.length,
         },
         ipAddress: req.ip,
@@ -360,13 +420,17 @@ export default function documentRoutes(io) {
       const pdfKey = await generateAndStorePrescriptionPDF(prescriptionId);
 
       res.status(201).json({
-        message: 'Prescription issued, stock automatically deducted under FEFO, and signed.',
+        message:
+          outsideItems.length > 0
+            ? 'Outside prescription issued and signed. No infirmary stock was deducted for outside-pharmacy item(s).'
+            : 'Prescription issued, stock automatically deducted under FEFO, and signed.',
         prescriptionId,
         emrId: targetEmrId,
         qrToken,
         signer: signer.display,
         signatureMetadata,
         allocatedBatches: plannedDeductions,
+        outsideItemsCount: outsideItems.length,
         pdfAvailable: Boolean(pdfKey),
       });
     } catch (error) {
@@ -403,8 +467,9 @@ export default function documentRoutes(io) {
                 JSON_ARRAYAGG(
                   JSON_OBJECT(
                     'item_id', pi.item_id,
-                    'medicine_name', m.name,
+                    'medicine_name', COALESCE(m.name, pi.outside_name),
                     'generic_name', m.generic_name,
+                    'is_outside', pi.medicine_id IS NULL,
                     'dosage', pi.dosage,
                     'frequency', pi.frequency,
                     'route', pi.route,
@@ -464,8 +529,9 @@ export default function documentRoutes(io) {
                   JSON_ARRAYAGG(
                     JSON_OBJECT(
                       'item_id', pi.item_id,
-                      'medicine_name', m.name,
+                      'medicine_name', COALESCE(m.name, pi.outside_name),
                       'generic_name', m.generic_name,
+                      'is_outside', pi.medicine_id IS NULL,
                       'dosage', pi.dosage,
                       'frequency', pi.frequency,
                       'route', pi.route,
@@ -1271,9 +1337,11 @@ export default function documentRoutes(io) {
           const [items] = await pool.query(
             `SELECT pi.dosage, pi.frequency, pi.route, pi.duration_days,
                     pi.quantity_dispensed, pi.instructions,
-                    m.name AS medicine_name, m.generic_name
+                    COALESCE(m.name, pi.outside_name) AS medicine_name,
+                    m.generic_name,
+                    (pi.medicine_id IS NULL) AS is_outside
              FROM PRESCRIPTION_ITEMS pi
-             JOIN MEDICINES m ON pi.medicine_id = m.medicine_id
+             LEFT JOIN MEDICINES m ON pi.medicine_id = m.medicine_id
              WHERE pi.prescription_id = ?`,
             [p.prescription_id]
           );

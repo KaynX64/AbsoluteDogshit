@@ -375,7 +375,8 @@ CREATE TABLE `PRESCRIPTIONS` (
 CREATE TABLE `PRESCRIPTION_ITEMS` (
   `item_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `prescription_id` BIGINT NOT NULL,
-  `medicine_id` BIGINT NOT NULL,
+  `medicine_id` BIGINT NULL COMMENT 'NULL for outside (non-formulary) drugs purchased at an external pharmacy',
+  `outside_name` VARCHAR(200) NULL COMMENT 'Free-text drug name for outside (non-formulary) items',
   `dosage` VARCHAR(100) NOT NULL,
   `frequency` VARCHAR(100) NOT NULL,
   `route` VARCHAR(50) NOT NULL DEFAULT 'Oral',

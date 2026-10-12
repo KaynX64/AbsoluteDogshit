@@ -188,7 +188,21 @@ export async function renderPrescriptionPDF(rx) {
     .text('Rx', 60, doc.y, { align: 'left' });
   doc.moveDown(0.5);
 
-  drawSectionTitle(doc, 'PRESCRIBED FORMULARY MEDICATION');
+  // ── Outside-drug detection (affects section title & advisory note) ──
+  const hasOutsideItems = items.some((it) => Boolean(it.is_outside));
+
+  drawSectionTitle(doc, hasOutsideItems ? 'PRESCRIBED MEDICATION' : 'PRESCRIBED FORMULARY MEDICATION');
+  if (hasOutsideItems) {
+    doc
+      .font('Helvetica-Oblique')
+      .fontSize(8.5)
+      .fillColor(DANGER)
+      .text(
+        'Items marked OUTSIDE are not stocked by the infirmary pharmacy and must be purchased by the patient at an external / accredited drugstore.',
+        { width: doc.page.width - 120 }
+      );
+    doc.moveDown(0.4);
+  }
 
   // ── Fixed column grid (A4 = 595pt wide, margin 50 → content band 60..535) ──
   const col1X    = 60;    // Medicine name
@@ -220,8 +234,15 @@ export async function renderPrescriptionPDF(rx) {
   // ── Table rows ──
   for (const it of items) {
     const rowTop = doc.y;
-    const medName = it.medicine_name || 'Prescribed medication';
-    const generic = it.generic_name ? `(${it.generic_name})` : '';
+    const isOutside = Boolean(it.is_outside);
+    const medName = isOutside
+      ? `${it.medicine_name || 'Prescribed medication'}  [OUTSIDE]`
+      : it.medicine_name || 'Prescribed medication';
+    const generic = isOutside
+      ? 'Outside-pharmacy purchase — not dispensed by the infirmary'
+      : it.generic_name
+        ? `(${it.generic_name})`
+        : '';
     const sigLine = `Sig: ${it.instructions || 'Take as directed'} · ${
       it.frequency || 'As needed'
     } · ${it.route || 'Oral'}`;

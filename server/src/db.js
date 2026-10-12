@@ -39,6 +39,9 @@ export async function runAutoMigrations() {
       { table: 'PRESCRIPTIONS', column: 'pdf_s3_key', type: 'VARCHAR(500) NULL' },
       { table: 'PRESCRIPTIONS', column: 'version', type: 'INT NOT NULL DEFAULT 1' },
       { table: 'PRESCRIPTIONS', column: 'deleted_at', type: 'TIMESTAMP NULL DEFAULT NULL' },
+      // Outside-drug prescriptions: free-text medication name for items not
+      // stocked in the infirmary formulary (medicine_id is NULL for these).
+      { table: 'PRESCRIPTION_ITEMS', column: 'outside_name', type: "VARCHAR(200) NULL COMMENT 'Free-text drug name for outside (non-formulary) items'" },
       { table: 'MEDICAL_CLEARANCES', column: 'pdf_s3_key', type: 'VARCHAR(500) NULL' },
       { table: 'MEDICAL_CLEARANCES', column: 'version', type: 'INT NOT NULL DEFAULT 1' },
       { table: 'MEDICAL_CLEARANCES', column: 'deleted_at', type: 'TIMESTAMP NULL DEFAULT NULL' },
@@ -58,6 +61,24 @@ export async function runAutoMigrations() {
         await pool.query(`ALTER TABLE \`${item.table}\` ADD COLUMN \`${item.column}\` ${item.type}`);
         console.log(`📦 [Auto-Migration] Added missing column ${item.table}.${item.column}`);
       }
+    }
+
+    // ── Allow PRESCRIPTION_ITEMS.medicine_id to be NULL (outside drugs) ─────
+    // Outside prescriptions reference no formulary medicine, so the column
+    // must be nullable. The FK constraint still holds — MySQL permits NULL
+    // child values. Only altered when it is currently NOT NULL, to avoid a
+    // needless table rebuild on every boot.
+    try {
+      const [medIdCol] = await pool.query(
+        `SELECT IS_NULLABLE FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'PRESCRIPTION_ITEMS' AND COLUMN_NAME = 'medicine_id'`
+      );
+      if (medIdCol.length > 0 && medIdCol[0].IS_NULLABLE === 'NO') {
+        await pool.query('ALTER TABLE PRESCRIPTION_ITEMS MODIFY COLUMN medicine_id BIGINT NULL');
+        console.log('📦 [Auto-Migration] PRESCRIPTION_ITEMS.medicine_id is now nullable (outside-drug support)');
+      }
+    } catch (nullableErr) {
+      console.warn('⚠️ [Auto-Migration] PRESCRIPTION_ITEMS.medicine_id nullability check warning:', nullableErr.message);
     }
 
     // ── Update AUDIT_LOGS.action ENUM to support 'SIGN' and 'REVOKE' ─────────

@@ -3125,6 +3125,26 @@ const loadPatientTimeline = async (patient: any) => {
                         >
                           <b>{it.medicine_name}</b>
                           {it.generic_name ? ` (${it.generic_name})` : ''}
+                          {it.is_outside && (
+                            <span
+                              style={{
+                                marginLeft: 8,
+                                background: T.warningSoft,
+                                color: T.warning,
+                                border: `1px solid ${T.warningBorder}`,
+                                borderRadius: 999,
+                                padding: '1px 8px',
+                                fontSize: 10,
+                                fontWeight: 800,
+                                letterSpacing: 0.5,
+                                verticalAlign: 'middle',
+                                whiteSpace: 'nowrap',
+                              }}
+                              title="Not dispensed by the infirmary — purchased at an external pharmacy"
+                            >
+                              OUTSIDE Rx
+                            </span>
+                          )}
                           <div style={{ color: T.textSub, marginTop: 2 }}>
                             {it.dosage} · {it.frequency} · {it.route} · {it.duration_days}{' '}
                             day(s) · qty {it.quantity_dispensed}
