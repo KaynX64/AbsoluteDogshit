@@ -20,6 +20,17 @@ const ROLE_OPTIONS = [
   { code: 'ADMIN',               label: 'Administrator' },
 ];
 
+/* ── Admin archetype permission catalog (fallback when the live catalog
+      fetch fails — server remains the source of truth) ──────────────── */
+const ADMIN_PERMISSION_CATALOG: { code: string; name: string; description: string; sort_order: number }[] = [
+  { code: 'USERS_MANAGE',      name: 'Manage user accounts',      description: 'Create, edit, reset passwords and assign roles',          sort_order: 10 },
+  { code: 'AUDIT_VIEW',        name: 'View audit & PHI logs',     description: 'Read-only access to the audit ledger and PHI access log', sort_order: 20 },
+  { code: 'TELEMETRY_VIEW',    name: 'View system health',        description: 'Service telemetry, uptime and health metrics',            sort_order: 30 },
+  { code: 'RETENTION_MANAGE',  name: 'Data retention governance', description: 'Retention status and statutory R.A. 10173 sweeps',         sort_order: 40 },
+  { code: 'ANALYTICS_VIEW',    name: 'View analytics',            description: 'Epidemiological analytics and campus health reports',     sort_order: 50 },
+  { code: 'DATABASE_MANAGE',   name: 'Database Studio',           description: 'Inspect and maintain raw system records',                 sort_order: 60 },
+];
+
 function generateSecurePassword(length = 12): string {
   const upper  = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
   const lower  = 'abcdefghijkmnpqrstuvwxyz';
@@ -58,6 +69,13 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
   const [department, setDepartment] = useState('');
   const [position, setPosition] = useState('');
 
+  // Admin archetype & permissions
+  const [adminArchetype, setAdminArchetype] = useState<'super' | 'limited'>('super');
+  const [adminPerms, setAdminPerms] = useState<string[]>([]);
+  const [permCatalog, setPermCatalog] = useState(ADMIN_PERMISSION_CATALOG);
+  const [callerIsSuper, setCallerIsSuper] = useState(true);
+  const [callerPermCodes, setCallerPermCodes] = useState<string[]>([]);
+
   const [isSaving, setIsSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ text: string; isError: boolean } | null>(null);
 
@@ -82,11 +100,57 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
     setSpecialty('');
     setDepartment('');
     setPosition('');
+    setAdminArchetype('super');
+    setAdminPerms([]);
+    setPermCatalog(ADMIN_PERMISSION_CATALOG);
+    setCallerIsSuper(true);
+    setCallerPermCodes([]);
     setFeedback(null);
     setIsSaving(false);
+
+    // Fetch the live permission catalog + the creator's own archetype.
+    // The server enforces all rules anyway; this only makes the UI honest
+    // about what the current creator is allowed to assign.
+    (async () => {
+      try {
+        const token = localStorage.getItem('valetudo_token');
+        const res = await fetch(`${API_BASE_URL}/api/admin/permissions`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.permissions) && data.permissions.length > 0) {
+            setPermCatalog(data.permissions);
+          }
+          if (data.caller) {
+            setCallerIsSuper(Boolean(data.caller.is_super));
+            setCallerPermCodes(Array.isArray(data.caller.codes) ? data.caller.codes : []);
+            if (!data.caller.is_super) {
+              // A limited creator starts on the Limited archetype — and can
+              // never keep the ADMIN role selected (creating administrator
+              // accounts is a Super Admin privilege now).
+              setAdminArchetype('limited');
+              setRoleCode((current) => (current === 'ADMIN' ? 'STUDENT' : current));
+            }
+          }
+        }
+      } catch (_) {
+        /* Offline / server hiccup → fallback catalog + optimistic defaults */
+      }
+    })();
   }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const isAdminRole = roleCode === 'ADMIN';
+  const grantableCodes = permCatalog.filter((p) => p.code !== 'SUPER_ADMIN');
+  const allSelected = grantableCodes.length > 0 && grantableCodes.every((p) => adminPerms.includes(p.code));
+
+  const togglePerm = (code: string) => {
+    setAdminPerms((prev) =>
+      prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]
+    );
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -102,6 +166,16 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
     }
     if (roleCode === 'FACULTY' && !facultyNo.trim()) {
       setFeedback({ text: 'Faculty number is required for faculty accounts.', isError: true });
+      return;
+    }
+    // Adjusted manage-user-account feature: only Super Admins may create
+    // administrator accounts (server re-enforces this with a 403).
+    if (!callerIsSuper && roleCode === 'ADMIN') {
+      setFeedback({ text: 'Only a Super Admin can create administrator accounts.', isError: true });
+      return;
+    }
+    if (isAdminRole && adminArchetype === 'limited' && adminPerms.length === 0) {
+      setFeedback({ text: 'Select at least one permission for the Limited Admin archetype.', isError: true });
       return;
     }
 
@@ -129,6 +203,9 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
           specialty: specialty.trim() || null,
           department: department.trim() || null,
           position: position.trim() || null,
+          ...(isAdminRole
+            ? { admin_permissions: adminArchetype === 'super' ? ['SUPER_ADMIN'] : adminPerms }
+            : {}),
         }),
       });
       const data = await res.json();
@@ -155,7 +232,6 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
   };
 
   const showStaffFields = ['DOCTOR', 'DENTIST', 'NURSE', 'EMERGENCY_RESPONDER', 'ADMIN'].includes(roleCode);
-  const isAdminRole = roleCode === 'ADMIN';
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -259,9 +335,23 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
               <label style={fieldLabel}>Assigned RBAC role</label>
               <select style={inputStyle} value={roleCode} onChange={(e) => setRoleCode(e.target.value)}>
                 {ROLE_OPTIONS.map((r) => (
-                  <option key={r.code} value={r.code}>{r.code} — {r.label}</option>
+                  <option
+                    key={r.code}
+                    value={r.code}
+                    disabled={r.code === 'ADMIN' && !callerIsSuper}
+                    title={r.code === 'ADMIN' && !callerIsSuper
+                      ? 'Only a Super Admin can create administrator accounts'
+                      : undefined}
+                  >
+                    {r.code} — {r.label}{r.code === 'ADMIN' && !callerIsSuper ? ' (Super Admin only)' : ''}
+                  </option>
                 ))}
               </select>
+              {!callerIsSuper && (
+                <div style={{ fontSize: 11, color: T.textMuted, marginTop: 5, fontStyle: 'italic' }}>
+                  🔒 Only a Super Admin can create administrator accounts.
+                </div>
+              )}
             </div>
             <div>
               <label style={fieldLabel}>Account status</label>
@@ -376,6 +466,139 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
                 <input style={inputStyle} value={department} placeholder="PSU Lingayen Clinic"
                        onChange={(e) => setDepartment(e.target.value)} />
               </div>
+            </div>
+          )}
+
+          {/* ── Admin archetype & permissions ──────────────── */}
+          {isAdminRole && (
+            <div style={{
+              marginTop: 20,
+              padding: 16,
+              borderRadius: T.radius.md,
+              background: '#F5F3FF',
+              border: '1px solid #DDD6FE',
+            }}>
+              <div style={{
+                fontSize: 11, fontWeight: 800, letterSpacing: 1.2,
+                color: '#6D28D9', textTransform: 'uppercase', marginBottom: 10,
+              }}>
+                Admin archetype & permissions
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => setAdminArchetype('super')}
+                  disabled={!callerIsSuper}
+                  style={{
+                    flex: 1, padding: '9px 12px',
+                    border: `1px solid ${adminArchetype === 'super' ? '#6D28D9' : 'transparent'}`,
+                    borderRadius: T.radius.pill,
+                    background: adminArchetype === 'super' ? '#FFFFFF' : 'transparent',
+                    color: adminArchetype === 'super' ? '#6D28D9' : T.textSub,
+                    fontWeight: adminArchetype === 'super' ? 800 : 600,
+                    fontSize: 12, fontFamily: T.font,
+                    cursor: !callerIsSuper ? 'not-allowed' : 'pointer',
+                    opacity: !callerIsSuper ? 0.55 : 1,
+                    boxShadow: adminArchetype === 'super' ? T.shadow.xs : 'none',
+                    transition: 'all 120ms ease',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title={!callerIsSuper ? 'Only a Super Admin can create another Super Admin' : undefined}
+                >
+                  🛡 Super Admin · full access
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAdminArchetype('limited')}
+                  style={{
+                    flex: 1, padding: '9px 12px',
+                    border: `1px solid ${adminArchetype === 'limited' ? '#6D28D9' : 'transparent'}`,
+                    borderRadius: T.radius.pill,
+                    background: adminArchetype === 'limited' ? '#FFFFFF' : 'transparent',
+                    color: adminArchetype === 'limited' ? '#6D28D9' : T.textSub,
+                    fontWeight: adminArchetype === 'limited' ? 800 : 600,
+                    fontSize: 12, fontFamily: T.font,
+                    cursor: 'pointer',
+                    boxShadow: adminArchetype === 'limited' ? T.shadow.xs : 'none',
+                    transition: 'all 120ms ease',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  ⚙ Limited Admin · choose permissions
+                </button>
+              </div>
+
+              {adminArchetype === 'super' ? (
+                <p style={{ fontSize: 12, color: '#5B21B6', margin: 0, lineHeight: 1.55 }}>
+                  Unrestricted access to every console capability — identical to the
+                  seeded administrator account.
+                </p>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <span style={{ fontSize: 12, color: '#5B21B6' }}>
+                      This admin will only be able to use the capabilities selected below.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setAdminPerms(allSelected ? [] : grantableCodes.map((p) => p.code))}
+                      style={{
+                        background: 'none', border: 'none', padding: 0,
+                        color: '#6D28D9', fontSize: 11.5, fontWeight: 700,
+                        cursor: 'pointer', fontFamily: T.font,
+                      }}
+                    >
+                      {allSelected ? 'Clear all' : 'Select all'}
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    {grantableCodes.map((p) => {
+                      const checked = adminPerms.includes(p.code);
+                      const beyondCaller = !callerIsSuper && !callerPermCodes.includes(p.code);
+                      const disabled = beyondCaller;
+                      return (
+                        <label
+                          key={p.code}
+                          style={{
+                            display: 'flex', alignItems: 'flex-start', gap: 8,
+                            padding: '9px 11px',
+                            borderRadius: T.radius.sm,
+                            background: checked ? '#EDE9FE' : '#FFFFFF',
+                            border: `1px solid ${checked ? '#C4B5FD' : '#E9E5F8'}`,
+                            cursor: disabled ? 'not-allowed' : 'pointer',
+                            opacity: disabled ? 0.55 : 1,
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={disabled}
+                            onChange={() => togglePerm(p.code)}
+                            style={{ marginTop: 2, accentColor: '#6D28D9' }}
+                          />
+                          <span>
+                            <span style={{ display: 'block', fontSize: 12, fontWeight: 700, color: T.text }}>
+                              {p.name}
+                            </span>
+                            <span style={{ display: 'block', fontSize: 10.5, color: T.textSub, marginTop: 1, lineHeight: 1.4 }}>
+                              {p.description}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  {!callerIsSuper && (
+                    <div style={{ fontSize: 10.5, color: '#5B21B6', marginTop: 8, fontStyle: 'italic' }}>
+                      Options beyond your own permissions are locked — admins can never grant
+                      capabilities they do not hold themselves.
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
 

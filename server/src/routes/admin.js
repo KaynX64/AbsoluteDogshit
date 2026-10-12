@@ -2,12 +2,14 @@
 import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
-import { requireRoles } from '../middleware/rbac.js';
+import { requireRoles, requirePermission, resolveAdminPermissions, getAdminPermissionCodes } from '../middleware/rbac.js';
 import { logAudit } from '../utils/auditLogger.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
 import {
   isReadOnlyTable,
+  isSecurityTable,
   readOnlyMessage,
+  securityTableMessage,
   phiPatientSource,
   fail,
   normalizeValue,
@@ -26,8 +28,88 @@ const router = express.Router();
 
 router.use(authenticateToken, requireRoles('ADMIN'));
 
+/* ═════════════════════════════════════════════════════════════════════════
+   ADMIN ARCHETYPE PERMISSIONS — shared helpers (local to this router)
+
+   Hierarchy model (adjusted manage-user-account feature):
+   • Super admins (explicit SUPER_ADMIN grant, or legacy admins with no
+     grant rows) own the whole administrator lifecycle. Only they may
+     create ADMIN accounts, assign or change the ADMIN role, edit another
+     administrator's account/permissions, or override an administrator's
+     password.
+   • Limited (non-super) admins manage REGULAR user accounts only — they
+     can create/edit/suspend students, faculty, staff and clinical roles,
+     and reset those accounts' passwords. Administrator accounts are
+     read-only for them (they may still edit their own profile fields,
+     with their own role/status locked).
+   • Role changes away from ADMIN clear stale grants.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/** Validate requested permission codes against the catalog; returns deduped list. */
+async function validatePermissionCodes(connection, requested) {
+  if (!Array.isArray(requested)) {
+    throw new Error('admin_permissions must be an array of permission codes.');
+  }
+  const codes = [...new Set(requested.map((c) => String(c).trim()).filter(Boolean))];
+  if (codes.length === 0) return [];
+  const [rows] = await connection.query(
+    'SELECT code FROM ADMIN_PERMISSIONS WHERE code IN (?)',
+    [codes]
+  );
+  const known = new Set(rows.map((r) => r.code));
+  const unknown = codes.filter((c) => !known.has(c));
+  if (unknown.length > 0) {
+    throw new Error(`Unknown admin permission code(s): ${unknown.join(', ')}`);
+  }
+  return codes;
+}
+
+/**
+ * Replace a user's admin-permission grants inside an open transaction.
+ * codes === ['SUPER_ADMIN']  → explicit super admin.
+ * codes === []               → clear grants (legacy full access).
+ */
+async function setAdminPermissionGrants(connection, targetUserId, codes, grantorId) {
+  await connection.query('DELETE FROM USER_ADMIN_PERMISSIONS WHERE user_id = ?', [targetUserId]);
+  if (!codes || codes.length === 0) return;
+  const [permRows] = await connection.query(
+    'SELECT permission_id, code FROM ADMIN_PERMISSIONS WHERE code IN (?)',
+    [codes]
+  );
+  for (const row of permRows) {
+    await connection.query(
+      'INSERT INTO USER_ADMIN_PERMISSIONS (user_id, permission_id, granted_by) VALUES (?, ?, ?)',
+      [targetUserId, row.permission_id, grantorId || null]
+    );
+  }
+}
+
+/**
+ * Guard helper — resolves the caller's archetype and throws a 403 failure
+ * unless the caller is a Super Admin. Used by every admin-lifecycle route
+ * so non-super admins cannot create, promote, edit or override
+ * administrator accounts (including Super Admin passwords).
+ */
+async function requireSuperAdminCaller(req) {
+  const caller = await resolveAdminPermissions(req.user.user_id);
+  if (!caller.isSuper) {
+    throw fail('Only a Super Admin can perform this administrator-account action.', 403);
+  }
+  return caller;
+}
+
+/** Current role code of a user (null when the user holds no role row). */
+async function getUserRoleCode(connection, userId) {
+  const [rows] = await connection.query(
+    `SELECT r.code FROM USER_ROLES ur INNER JOIN ROLES r ON ur.role_id = r.role_id
+     WHERE ur.user_id = ?`,
+    [userId]
+  );
+  return rows.length > 0 ? rows[0].code : null;
+}
+
 // 1. GET /api/admin/users - Comprehensive User Accounts, Roles & Sub-profiles
-router.get('/users', async (req, res) => {
+router.get('/users', requirePermission('USERS_MANAGE'), async (req, res) => {
   try {
     const [users] = await pool.query(
       `SELECT u.user_id as id,
@@ -50,7 +132,13 @@ router.get('/users', async (req, res) => {
                 ntp.department,
                 'PSU Lingayen'
               ) as department,
-              COALESCE(fp.position, ntp.position) AS position
+              COALESCE(fp.position, ntp.position) AS position,
+              (
+                SELECT GROUP_CONCAT(ap.code ORDER BY ap.sort_order SEPARATOR ',')
+                FROM USER_ADMIN_PERMISSIONS uap
+                INNER JOIN ADMIN_PERMISSIONS ap ON uap.permission_id = ap.permission_id
+                WHERE uap.user_id = u.user_id
+              ) as admin_permissions_raw
        FROM USERS u
        LEFT JOIN USER_ROLES ur ON u.user_id = ur.user_id
        LEFT JOIN ROLES r ON ur.role_id = r.role_id
@@ -61,15 +149,65 @@ router.get('/users', async (req, res) => {
        WHERE u.deleted_at IS NULL
        ORDER BY u.user_id ASC`
     );
-    res.json(users);
+
+    // Derive the admin archetype per user (additive fields; non-admins get null).
+    const enriched = users.map((u) => {
+      if (u.role !== 'ADMIN') {
+        return { ...u, admin_permissions: null, admin_archetype: null };
+      }
+      const granted = (u.admin_permissions_raw || '').split(',').map((c) => c.trim()).filter(Boolean);
+      delete u.admin_permissions_raw;
+      if (granted.length === 0 || granted.includes('SUPER_ADMIN')) {
+        return { ...u, admin_permissions: ['SUPER_ADMIN'], admin_archetype: 'super' };
+      }
+      return { ...u, admin_permissions: granted, admin_archetype: 'limited' };
+    });
+
+    res.json(enriched);
   } catch (error) {
     console.error('Failed to retrieve system users:', error);
     res.status(500).json({ error: 'Failed to retrieve system users.' });
   }
 });
 
+// 1a. GET /api/admin/permissions - Admin archetype permission catalog
+router.get('/permissions', async (req, res) => {
+  try {
+    const [perms] = await pool.query(
+      'SELECT code, name, description, sort_order FROM ADMIN_PERMISSIONS ORDER BY sort_order ASC'
+    );
+    const caller = await resolveAdminPermissions(req.user.user_id);
+    res.json({
+      permissions: perms,
+      caller: {
+        is_super: caller.isSuper,
+        codes: caller.codes,
+      },
+    });
+  } catch (error) {
+    console.error('Failed to retrieve permission catalog:', error);
+    res.status(500).json({ error: 'Failed to retrieve permission catalog.' });
+  }
+});
+
+// 1b. GET /api/admin/my-permissions - Caller's effective admin permission state
+router.get('/my-permissions', async (req, res) => {
+  try {
+    const state = await resolveAdminPermissions(req.user.user_id);
+    res.json({
+      user_id: req.user.user_id,
+      archetype: state.isSuper ? 'super' : 'limited',
+      is_super: state.isSuper,
+      permissions: state.codes,
+    });
+  } catch (error) {
+    console.error('Failed to resolve caller permissions:', error);
+    res.status(500).json({ error: 'Failed to resolve caller permissions.' });
+  }
+});
+
 // 2. GET /api/admin/phi-access-logs - PHI Surveillance Log
-router.get('/phi-access-logs', async (req, res) => {
+router.get('/phi-access-logs', requirePermission('AUDIT_VIEW'), async (req, res) => {
   try {
     const [logs] = await pool.query(
       `SELECT p.access_id as id,
@@ -99,7 +237,7 @@ router.get('/phi-access-logs', async (req, res) => {
 });
 
 // 3. PATCH /api/admin/users/:id/role - Role assignment
-router.patch('/users/:id/role', async (req, res) => {
+router.patch('/users/:id/role', requirePermission('USERS_MANAGE'), async (req, res) => {
   const targetUserId = req.params.id;
   const { role_code } = req.body;
 
@@ -112,7 +250,24 @@ router.patch('/users/:id/role', async (req, res) => {
     const [roleRows] = await connection.query('SELECT role_id FROM ROLES WHERE code = ?', [role_code]);
     if (roleRows.length === 0) throw new Error('Invalid role code specified.');
     const newRoleId = roleRows[0].role_id;
-    
+
+    // Previous role — needed for admin-permission grant transitions
+    const [prevRoleRows] = await connection.query(
+      `SELECT r.code FROM USER_ROLES ur INNER JOIN ROLES r ON ur.role_id = r.role_id
+       WHERE ur.user_id = ?`,
+      [targetUserId]
+    );
+    const previousRole = prevRoleRows.length > 0 ? prevRoleRows[0].code : null;
+
+    // ── Admin-lifecycle guard (adjusted manage-user-account feature) ──
+    // Only Super Admins may assign the ADMIN role or change the role of
+    // any existing ADMIN account. Without this, a limited admin could
+    // bypass the admin-creation block by creating a STUDENT and then
+    // promoting them, or demote/silence a Super Admin.
+    if (role_code === 'ADMIN' || previousRole === 'ADMIN') {
+      await requireSuperAdminCaller(req);
+    }
+
     if (['DOCTOR', 'DENTIST'].includes(role_code)) {
       const [lic] = await connection.query(
         'SELECT license_no FROM STAFF_PROFILES WHERE user_id = ?',
@@ -125,6 +280,16 @@ router.patch('/users/:id/role', async (req, res) => {
 
     await connection.query('DELETE FROM USER_ROLES WHERE user_id = ?', [targetUserId]);
     await connection.query('INSERT INTO USER_ROLES (user_id, role_id) VALUES (?, ?)', [targetUserId, newRoleId]);
+
+    // ── Admin-archetype permission transitions ────────────────────────
+    // • Moving AWAY from ADMIN clears stale grants.
+    // • Promoting TO ADMIN (Super Admin callers only — guarded above)
+    //   leaves the target as a legacy full admin (historical behaviour).
+    if (previousRole === 'ADMIN' && role_code !== 'ADMIN') {
+      await connection.query('DELETE FROM USER_ADMIN_PERMISSIONS WHERE user_id = ?', [targetUserId]);
+    } else if (previousRole !== 'ADMIN' && role_code === 'ADMIN') {
+      await connection.query('DELETE FROM USER_ADMIN_PERMISSIONS WHERE user_id = ?', [targetUserId]);
+    }
 
     await logAudit(connection, {
       userId: req.user.user_id,
@@ -140,14 +305,14 @@ router.patch('/users/:id/role', async (req, res) => {
     res.json({ message: `User #${targetUserId} updated to role ${role_code}.` });
   } catch (error) {
     await connection.rollback();
-    res.status(400).json({ error: error.message });
+    res.status(error.status || 400).json({ error: error.message });
   } finally {
     connection.release();
   }
 });
 
 // 3.1 PUT /api/admin/users/:id - Edit Full Profile & Credentials
-router.put('/users/:id', async (req, res) => {
+router.put('/users/:id', requirePermission('USERS_MANAGE'), async (req, res) => {
   const targetUserId = Number(req.params.id);
   const {
     first_name,
@@ -201,6 +366,33 @@ router.put('/users/:id', async (req, res) => {
     );
 
     // 3. Update Role Assignment if specified
+    // (previousRole is needed by the admin-lifecycle guard below even when
+    //  the request does not change the role, so it is fetched up front.)
+    const previousRole = await getUserRoleCode(connection, targetUserId);
+
+    // ── Admin-lifecycle guards (adjusted manage-user-account feature) ──
+    const callerPerms = await resolveAdminPermissions(req.user.user_id);
+    if (!callerPerms.isSuper && previousRole === 'ADMIN') {
+      if (targetUserId !== Number(req.user.user_id)) {
+        // Another administrator's account: read-only for limited admins.
+        throw fail('Only a Super Admin can modify another administrator account.', 403);
+      }
+      // Self-management is limited to profile fields: a limited admin may
+      // not change their own role (which would clear/alter grants) nor
+      // suspend their own administrator account.
+      if (role_code && role_code !== 'ADMIN') {
+        throw fail('You cannot change the role of your own administrator account. Ask a Super Admin.', 403);
+      }
+      if (is_active === false || is_active === 0) {
+        throw fail('You cannot suspend your own administrator account.', 403);
+      }
+    }
+    // No non-super caller may mint a new administrator via a role change
+    // (closes the create-regular-account-then-promote bypass).
+    if (!callerPerms.isSuper && role_code === 'ADMIN' && previousRole !== 'ADMIN') {
+      throw fail('Only a Super Admin can assign the ADMIN role.', 403);
+    }
+
     if (role_code) {
       const [roleRows] = await connection.query('SELECT role_id FROM ROLES WHERE code = ?', [role_code]);
       if (roleRows.length > 0) {
@@ -210,6 +402,18 @@ router.put('/users/:id', async (req, res) => {
           roleRows[0].role_id,
         ]);
       }
+
+      // ── Admin-archetype permission transitions (mirrors PATCH :id/role) ──
+      // Callers are Super Admins by this point (guards above); promotions
+      // to ADMIN keep the historical legacy-full-admin behaviour, and
+      // leaving the ADMIN role clears stale grants.
+      if (previousRole === 'ADMIN' && role_code !== 'ADMIN') {
+        await connection.query('DELETE FROM USER_ADMIN_PERMISSIONS WHERE user_id = ?', [targetUserId]);
+      } else if (previousRole !== 'ADMIN' && role_code === 'ADMIN') {
+        await connection.query('DELETE FROM USER_ADMIN_PERMISSIONS WHERE user_id = ?', [targetUserId]);
+      }
+      // ADMIN → ADMIN: existing grants are managed via the dedicated
+      // PUT /users/:id/permissions endpoint and are left untouched here.
     }
 
     // 4. Update Role-Specific Sub-profile Table
@@ -304,14 +508,14 @@ router.put('/users/:id', async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('[Admin Profile Update Error]:', error);
-    res.status(400).json({ error: error.message || 'Failed to update user profile.' });
+    res.status(error.status || 400).json({ error: error.message || 'Failed to update user profile.' });
   } finally {
     connection.release();
   }
 });
 
 // 3.2 POST /api/admin/users/:id/reset-password - Admin Password Reset
-router.post('/users/:id/reset-password', async (req, res) => {
+router.post('/users/:id/reset-password', requirePermission('USERS_MANAGE'), async (req, res) => {
   const targetUserId = Number(req.params.id);
   const { newPassword } = req.body;
 
@@ -321,6 +525,33 @@ router.post('/users/:id/reset-password', async (req, res) => {
 
   const connection = await pool.getConnection();
   try {
+    // Target lookup (also gives a clean 404 for missing accounts) — done
+    // before the transaction so the guards below can return directly.
+    const [targetRows] = await connection.query(
+      `SELECT u.user_id, r.code as role_code
+       FROM USERS u
+       LEFT JOIN USER_ROLES ur ON ur.user_id = u.user_id
+       LEFT JOIN ROLES r ON ur.role_id = r.role_id
+       WHERE u.user_id = ? AND u.deleted_at IS NULL`,
+      [targetUserId]
+    );
+    if (targetRows.length === 0) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    // ── Admin-lifecycle guard (adjusted manage-user-account feature) ──
+    // Administrator passwords — Super Admins included — can only be
+    // overridden by another Super Admin. (Limited peers are covered too:
+    // letting a limited admin reset a peer's password would let them borrow
+    // that peer's permissions.) Limited admins may still reset the
+    // passwords of REGULAR user accounts.
+    const callerPerms = await resolveAdminPermissions(req.user.user_id);
+    if (targetRows[0].role_code === 'ADMIN' && !callerPerms.isSuper) {
+      return res.status(403).json({
+        error: 'Only a Super Admin can override an administrator password.',
+      });
+    }
+
     await connection.beginTransaction();
 
     const newHash = await bcrypt.hash(newPassword, 10);
@@ -339,7 +570,7 @@ router.post('/users/:id/reset-password', async (req, res) => {
     await connection.commit();
     res.json({ message: `Password for User #${targetUserId} has been reset successfully.` });
   } catch (error) {
-    await connection.rollback();
+    try { await connection.rollback(); } catch (_) {}
     console.error('[Admin Password Reset Error]:', error);
     res.status(500).json({ error: 'Failed to reset user password.' });
   } finally {
@@ -348,7 +579,7 @@ router.post('/users/:id/reset-password', async (req, res) => {
 });
 
 // 3.3 POST /api/admin/users - Create a brand new user account
-router.post('/users', async (req, res) => {
+router.post('/users', requirePermission('USERS_MANAGE'), async (req, res) => {
   const {
     first_name,
     last_name,
@@ -367,6 +598,7 @@ router.post('/users', async (req, res) => {
     specialty,
     department,
     position,
+    admin_permissions,
   } = req.body;
 
   // ── Validation ────────────────────────────────────────────────
@@ -378,6 +610,18 @@ router.post('/users', async (req, res) => {
 
   if (String(password).length < 8) {
     return res.status(400).json({ error: 'Password must be at least 8 characters long.' });
+  }
+
+  // ── Admin-lifecycle guard (adjusted manage-user-account feature) ──
+  // Creating administrator accounts — super or limited — is a Super Admin
+  // privilege. Limited admins may still create every REGULAR role account.
+  if (role_code === 'ADMIN') {
+    const callerPerms = await resolveAdminPermissions(req.user.user_id);
+    if (!callerPerms.isSuper) {
+      return res.status(403).json({
+        error: 'Only a Super Admin can create administrator accounts.',
+      });
+    }
   }
 
   const connection = await pool.getConnection();
@@ -485,6 +729,17 @@ router.post('/users', async (req, res) => {
       );
     }
 
+    // ── Admin archetype grants (only reachable for SUPER callers — the
+    //    guard above already rejected limited callers) ────────────────
+    // A super admin creating an ADMIN account:
+    //   • no/empty admin_permissions → legacy full access (today's behaviour)
+    //   • ['SUPER_ADMIN'] → explicit super admin
+    //   • other codes → limited to exactly those codes
+    if (role_code === 'ADMIN' && admin_permissions !== undefined) {
+      const codes = await validatePermissionCodes(connection, admin_permissions);
+      await setAdminPermissionGrants(connection, newUserId, codes, req.user.user_id);
+    }
+
     // R.A. 10173 cryptographic audit trail
     // NOTE: never log the plaintext password
     await logAudit(connection, {
@@ -500,6 +755,7 @@ router.post('/users', async (req, res) => {
         last_name: last_name.trim(),
         role_code,
         is_active: Boolean(is_active),
+        ...(role_code === 'ADMIN' ? { admin_permissions: admin_permissions || null } : {}),
       },
       ipAddress: req.ip,
     });
@@ -513,14 +769,87 @@ router.post('/users', async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('[Admin Create User Error]:', error);
-    res.status(400).json({ error: error.message || 'Failed to create user account.' });
+    res.status(error.status || 400).json({ error: error.message || 'Failed to create user account.' });
+  } finally {
+    connection.release();
+  }
+});
+
+// 3.4 PUT /api/admin/users/:id/permissions - Replace an admin's permission set
+router.put('/users/:id/permissions', requirePermission('USERS_MANAGE'), async (req, res) => {
+  const targetUserId = Number(req.params.id);
+  const { admin_permissions } = req.body;
+
+  if (admin_permissions === undefined || !Array.isArray(admin_permissions)) {
+    return res.status(400).json({ error: 'admin_permissions must be an array of permission codes.' });
+  }
+
+  // Guard: an admin may never modify their own permissions (prevents both
+  // self-lockout and self-escalation).
+  if (targetUserId === Number(req.user.user_id)) {
+    return res.status(403).json({ error: 'You cannot modify your own admin permissions.' });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    // Target must hold the ADMIN role
+    const [targetRoleRows] = await connection.query(
+      `SELECT r.code FROM USER_ROLES ur INNER JOIN ROLES r ON ur.role_id = r.role_id
+       WHERE ur.user_id = ?`,
+      [targetUserId]
+    );
+    const targetRole = targetRoleRows.length > 0 ? targetRoleRows[0].code : null;
+    if (targetRole !== 'ADMIN') {
+      throw new Error('Permissions can only be assigned to ADMIN role accounts.');
+    }
+
+    const caller = await resolveAdminPermissions(req.user.user_id);
+    let codes = await validatePermissionCodes(connection, admin_permissions);
+
+    // ── Admin-lifecycle guard (adjusted manage-user-account feature) ──
+    // Administrator permission sets — super AND limited targets — are
+    // managed exclusively by Super Admins. (Previously a limited admin
+    // could edit a limited peer's grants; that peer-management path is
+    // closed so administrator accounts are fully hands-off for non-supers.)
+    if (!caller.isSuper) {
+      throw fail('Only a Super Admin can modify administrator permissions.', 403);
+    }
+
+    const previousCodes = await getAdminPermissionCodes(targetUserId);
+    await setAdminPermissionGrants(connection, targetUserId, codes, req.user.user_id);
+
+    await logAudit(connection, {
+      userId: req.user.user_id,
+      action: 'UPDATE',
+      table: 'USER_ADMIN_PERMISSIONS',
+      recordId: targetUserId,
+      oldValue: { admin_permissions: previousCodes },
+      newValue: {
+        operation: 'ADMIN_PERMISSION_SET_REPLACE',
+        admin_permissions: codes,
+        archetype: codes.includes('SUPER_ADMIN') ? 'super' : codes.length === 0 ? 'legacy-full' : 'limited',
+      },
+      ipAddress: req.ip,
+    });
+
+    await connection.commit();
+    res.json({
+      message: `Permissions updated for user #${targetUserId}.`,
+      admin_permissions: codes.length === 0 ? ['SUPER_ADMIN'] : codes,
+      admin_archetype: codes.includes('SUPER_ADMIN') ? 'super' : codes.length === 0 ? 'super' : 'limited',
+    });
+  } catch (error) {
+    await connection.rollback();
+    res.status(error.status || 400).json({ error: error.message || 'Failed to update permissions.' });
   } finally {
     connection.release();
   }
 });
 
 // 4. GET /api/admin/audit-logs - Append-only Hash Chain
-router.get('/audit-logs', async (req, res) => {
+router.get('/audit-logs', requirePermission('AUDIT_VIEW'), async (req, res) => {
   try {
     const [logs] = await pool.query(
       `SELECT a.audit_id as id,
@@ -543,7 +872,7 @@ router.get('/audit-logs', async (req, res) => {
 });
 
 // 5. GET /api/admin/telemetry - Health Status
-router.get('/telemetry', async (req, res) => {
+router.get('/telemetry', requirePermission('TELEMETRY_VIEW'), async (req, res) => {
   try {
     const [dbTest] = await pool.query('SELECT 1 as isAlive');
     const [userCount] = await pool.query('SELECT COUNT(*) as total FROM USERS WHERE is_active = TRUE AND deleted_at IS NULL');
@@ -649,7 +978,7 @@ async function logDbStudioRead(req, table, rows, pkCols) {
 }
 
 // 1. GET /api/admin/db/tables
-router.get('/db/tables', async (req, res) => {
+router.get('/db/tables', requirePermission('DATABASE_MANAGE'), async (req, res) => {
   try {
     const tables = await getWhitelistedTables();
     res.json(tables);
@@ -660,7 +989,7 @@ router.get('/db/tables', async (req, res) => {
 });
 
 // 2. GET /api/admin/db/tables/:table
-router.get('/db/tables/:table', async (req, res) => {
+router.get('/db/tables/:table', requirePermission('DATABASE_MANAGE'), async (req, res) => {
   const tableName = req.params.table;
   const page = Math.max(Number(req.query.page) || 1, 1);
   const limit = Math.min(Number(req.query.limit) || 20, 100);
@@ -689,6 +1018,12 @@ router.get('/db/tables/:table', async (req, res) => {
     const pkCols = columns.filter((c) => c.columnKey === 'PRI').map((c) => c.columnName);
     void logDbStudioRead(req, tableName, rawRows, pkCols);
 
+    // Per-caller read-only state: statutory ledgers are read-only for
+    // everyone; account-security tables are read-only for limited admins.
+    const callerPerms = await resolveAdminPermissions(req.user.user_id);
+    const auditLocked = isReadOnlyTable(tableName);
+    const securityLocked = !auditLocked && isSecurityTable(tableName) && !callerPerms.isSuper;
+
     res.json({
       tableName,
       columns,
@@ -697,7 +1032,8 @@ router.get('/db/tables/:table', async (req, res) => {
       limit,
       totalPages: Math.ceil(totalRows / limit) || 1,
       rows,
-      isReadOnly: isReadOnlyTable(tableName),
+      isReadOnly: auditLocked || securityLocked,
+      readOnlyReason: auditLocked ? 'audit' : securityLocked ? 'security' : null,
     });
   } catch (error) {
     console.error('[DB Studio] Table query error:', error);
@@ -706,12 +1042,24 @@ router.get('/db/tables/:table', async (req, res) => {
 });
 
 // 3. POST /api/admin/db/tables/:table/rows
-router.post('/db/tables/:table/rows', async (req, res) => {
+router.post('/db/tables/:table/rows', requirePermission('DATABASE_MANAGE'), async (req, res) => {
   const tableName = req.params.table;
   const rowData = req.body;
 
   if (isReadOnlyTable(tableName)) {
     return res.status(403).json({ error: readOnlyMessage(tableName) });
+  }
+
+  // ── Security-table guard (adjusted manage-user-account feature) ──
+  // Account-security tables (USERS, ROLES, USER_ROLES, ADMIN_PERMISSIONS,
+  // USER_ADMIN_PERMISSIONS) are writable from DB Studio only by Super
+  // Admins — otherwise a limited admin with DATABASE_MANAGE could mint
+  // admin accounts or override admin passwords outside User Management.
+  if (isSecurityTable(tableName)) {
+    const callerPerms = await resolveAdminPermissions(req.user.user_id);
+    if (!callerPerms.isSuper) {
+      return res.status(403).json({ error: securityTableMessage(tableName) });
+    }
   }
 
   if (!rowData || typeof rowData !== 'object' || Array.isArray(rowData) || Object.keys(rowData).length === 0) {
@@ -756,12 +1104,24 @@ router.post('/db/tables/:table/rows', async (req, res) => {
 });
 
 // 4. PUT /api/admin/db/tables/:table/rows
-router.put('/db/tables/:table/rows', async (req, res) => {
+router.put('/db/tables/:table/rows', requirePermission('DATABASE_MANAGE'), async (req, res) => {
   const tableName = req.params.table;
   const { primaryKey, updates } = req.body;
 
   if (isReadOnlyTable(tableName)) {
     return res.status(403).json({ error: readOnlyMessage(tableName) });
+  }
+
+  // ── Security-table guard (adjusted manage-user-account feature) ──
+  // Account-security tables (USERS, ROLES, USER_ROLES, ADMIN_PERMISSIONS,
+  // USER_ADMIN_PERMISSIONS) are writable from DB Studio only by Super
+  // Admins — otherwise a limited admin with DATABASE_MANAGE could mint
+  // admin accounts or override admin passwords outside User Management.
+  if (isSecurityTable(tableName)) {
+    const callerPerms = await resolveAdminPermissions(req.user.user_id);
+    if (!callerPerms.isSuper) {
+      return res.status(403).json({ error: securityTableMessage(tableName) });
+    }
   }
 
   if (!primaryKey || typeof primaryKey !== 'object' || Array.isArray(primaryKey) || Object.keys(primaryKey).length === 0) {
@@ -844,12 +1204,24 @@ router.put('/db/tables/:table/rows', async (req, res) => {
 });
 
 // 5. DELETE /api/admin/db/tables/:table/rows
-router.delete('/db/tables/:table/rows', async (req, res) => {
+router.delete('/db/tables/:table/rows', requirePermission('DATABASE_MANAGE'), async (req, res) => {
   const tableName = req.params.table;
   const { primaryKey } = req.body;
 
   if (isReadOnlyTable(tableName)) {
     return res.status(403).json({ error: readOnlyMessage(tableName) });
+  }
+
+  // ── Security-table guard (adjusted manage-user-account feature) ──
+  // Account-security tables (USERS, ROLES, USER_ROLES, ADMIN_PERMISSIONS,
+  // USER_ADMIN_PERMISSIONS) are writable from DB Studio only by Super
+  // Admins — otherwise a limited admin with DATABASE_MANAGE could mint
+  // admin accounts or override admin passwords outside User Management.
+  if (isSecurityTable(tableName)) {
+    const callerPerms = await resolveAdminPermissions(req.user.user_id);
+    if (!callerPerms.isSuper) {
+      return res.status(403).json({ error: securityTableMessage(tableName) });
+    }
   }
 
   if (!primaryKey || typeof primaryKey !== 'object' || Array.isArray(primaryKey) || Object.keys(primaryKey).length === 0) {

@@ -98,6 +98,49 @@ export async function runAutoMigrations() {
       );
     } catch (_) {}
 
+    // ── Admin archetypes: permission catalog + per-user grant tables ─────────
+    // ADMIN_PERMISSIONS      → catalog of discrete admin capabilities.
+    // USER_ADMIN_PERMISSIONS → grants per ADMIN user. An ADMIN user with no
+    // grant rows keeps FULL access (legacy default), so every administrator
+    // created before this feature existed is completely unaffected.
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS ADMIN_PERMISSIONS (
+          permission_id INT AUTO_INCREMENT PRIMARY KEY,
+          code VARCHAR(60) NOT NULL UNIQUE,
+          name VARCHAR(120) NOT NULL,
+          description VARCHAR(300) NULL,
+          sort_order INT NOT NULL DEFAULT 100
+        ) ENGINE=InnoDB
+      `);
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS USER_ADMIN_PERMISSIONS (
+          user_id BIGINT NOT NULL,
+          permission_id INT NOT NULL,
+          granted_by BIGINT NULL,
+          granted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (user_id, permission_id),
+          CONSTRAINT fk_uap_user FOREIGN KEY (user_id) REFERENCES USERS (user_id) ON DELETE CASCADE,
+          CONSTRAINT fk_uap_perm FOREIGN KEY (permission_id) REFERENCES ADMIN_PERMISSIONS (permission_id) ON DELETE CASCADE,
+          CONSTRAINT fk_uap_grantor FOREIGN KEY (granted_by) REFERENCES USERS (user_id) ON DELETE SET NULL
+        ) ENGINE=InnoDB
+      `);
+      // Idempotent catalog seed (INSERT IGNORE on the UNIQUE code)
+      await pool.query(`
+        INSERT IGNORE INTO ADMIN_PERMISSIONS (code, name, description, sort_order) VALUES
+        ('SUPER_ADMIN',       'Super Admin',               'Unrestricted access to every admin console capability', 0),
+        ('USERS_MANAGE',      'Manage user accounts',      'Create, edit, reset passwords and assign roles',        10),
+        ('AUDIT_VIEW',        'View audit & PHI logs',     'Read-only access to the audit ledger and PHI access log', 20),
+        ('TELEMETRY_VIEW',    'View system health',        'Service telemetry, uptime and health metrics',          30),
+        ('RETENTION_MANAGE',  'Data retention governance', 'Retention status and statutory R.A. 10173 sweeps',       40),
+        ('ANALYTICS_VIEW',    'View analytics',            'Epidemiological analytics and campus health reports',   50),
+        ('DATABASE_MANAGE',   'Database Studio',           'Inspect and maintain raw system records',               60)
+      `);
+      console.log('📦 [Auto-Migration] Admin archetype permission tables verified');
+    } catch (permErr) {
+      console.warn('⚠️ [Auto-Migration] Admin permission tables warning:', permErr.message);
+    }
+
   } catch (err) {
     console.warn('⚠️ [Auto-Migration Warning]:', err.message);
   }

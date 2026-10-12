@@ -2,7 +2,7 @@
 import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
-import { requireRoles } from '../middleware/rbac.js';
+import { requireRoles, requirePermission } from '../middleware/rbac.js';
 import { logAudit } from '../utils/auditLogger.js';
 
 const router = express.Router();
@@ -109,7 +109,7 @@ router.get('/status', authenticateToken, async (req, res) => {
 // =============================================================================
 
 // GET /api/privacy/retention/status - Retention status report (Admin only)
-router.get('/retention/status', authenticateToken, requireRoles('ADMIN'), async (req, res) => {
+router.get('/retention/status', authenticateToken, requireRoles('ADMIN'), requirePermission('RETENTION_MANAGE'), async (req, res) => {
   try {
     // 5-year retention cutoff for EMR records
     const [expiredEmrs] = await pool.query(
@@ -167,7 +167,7 @@ router.get('/retention/status', authenticateToken, requireRoles('ADMIN'), async 
 });
 
 // POST /api/privacy/retention/sweep - Execute comprehensive retention purge (Admin only)
-router.post('/retention/sweep', authenticateToken, requireRoles('ADMIN'), async (req, res) => {
+router.post('/retention/sweep', authenticateToken, requireRoles('ADMIN'), requirePermission('RETENTION_MANAGE'), async (req, res) => {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();

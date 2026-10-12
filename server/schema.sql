@@ -37,6 +37,8 @@ DROP TABLE IF EXISTS `STAFF_PROFILES`;
 DROP TABLE IF EXISTS `FACULTY_PROFILES`;
 DROP TABLE IF EXISTS `NON_TEACHING_PROFILES`;
 DROP TABLE IF EXISTS `STUDENT_PROFILES`;
+DROP TABLE IF EXISTS `USER_ADMIN_PERMISSIONS`;
+DROP TABLE IF EXISTS `ADMIN_PERMISSIONS`;
 DROP TABLE IF EXISTS `USER_ROLES`;
 DROP TABLE IF EXISTS `ROLES`;
 DROP TABLE IF EXISTS `USERS`;
@@ -76,6 +78,34 @@ CREATE TABLE `USER_ROLES` (
   PRIMARY KEY (`user_id`, `role_id`),
   CONSTRAINT `fk_ur_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_ur_role` FOREIGN KEY (`role_id`) REFERENCES `ROLES` (`role_id`) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 3a. ADMIN_PERMISSIONS (admin-archetype permission catalog)
+-- Defines the discrete capabilities an ADMIN-role account may hold.
+-- `SUPER_ADMIN` is the sentinel: holding it (or holding no rows at all,
+-- legacy behaviour) grants unrestricted access.
+CREATE TABLE `ADMIN_PERMISSIONS` (
+  `permission_id` INT AUTO_INCREMENT PRIMARY KEY,
+  `code` VARCHAR(60) NOT NULL UNIQUE,
+  `name` VARCHAR(120) NOT NULL,
+  `description` VARCHAR(300) NULL,
+  `sort_order` INT NOT NULL DEFAULT 100
+) ENGINE=InnoDB;
+
+-- 3b. USER_ADMIN_PERMISSIONS (grants per ADMIN user)
+-- Empty for an ADMIN user  =  full access (legacy default, zero breakage
+-- for every administrator created before this feature existed).
+-- Populated for an ADMIN user  =  limited to exactly the granted codes.
+-- Non-ADMIN roles never consult this table.
+CREATE TABLE `USER_ADMIN_PERMISSIONS` (
+  `user_id` BIGINT NOT NULL,
+  `permission_id` INT NOT NULL,
+  `granted_by` BIGINT NULL,
+  `granted_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`user_id`, `permission_id`),
+  CONSTRAINT `fk_uap_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_uap_perm` FOREIGN KEY (`permission_id`) REFERENCES `ADMIN_PERMISSIONS` (`permission_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_uap_grantor` FOREIGN KEY (`granted_by`) REFERENCES `USERS` (`user_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
 -- 4. STUDENT_PROFILES
@@ -517,6 +547,19 @@ INSERT INTO `ROLES` (`role_id`, `code`, `name`) VALUES
 (6, 'EMERGENCY_RESPONDER', 'Campus Quick-Response Personnel'),
 (7, 'ADMIN',               'PSU IT System Administrator'),
 (8, 'NON_TEACHING',        'Non-Teaching / Support Staff');
+
+-- ADMIN_PERMISSIONS — admin-archetype permission catalog.
+-- SUPER_ADMIN is the "full access" sentinel; an ADMIN user holding it (or
+-- holding no grant rows at all, i.e. every pre-existing admin) has
+-- unrestricted access. The other codes map 1:1 to Admin Console capabilities.
+INSERT INTO `ADMIN_PERMISSIONS` (`code`, `name`, `description`, `sort_order`) VALUES
+('SUPER_ADMIN',       'Super Admin',               'Unrestricted access to every admin console capability', 0),
+('USERS_MANAGE',      'Manage user accounts',      'Create, edit, reset passwords and assign roles',        10),
+('AUDIT_VIEW',        'View audit & PHI logs',     'Read-only access to the audit ledger and PHI access log', 20),
+('TELEMETRY_VIEW',    'View system health',        'Service telemetry, uptime and health metrics',          30),
+('RETENTION_MANAGE',  'Data retention governance', 'Retention status and statutory R.A. 10173 sweeps',       40),
+('ANALYTICS_VIEW',    'View analytics',            'Epidemiological analytics and campus health reports',   50),
+('DATABASE_MANAGE',   'Database Studio',           'Inspect and maintain raw system records',               60);
 
 -- Default password for all seeded accounts: 'Password123!'
 SET @default_pw = '$2b$10$Y5.xe6H/ZbWi0K/RYcQE2uGPh9hdAn/vKWCit/EMDrpqigeOQ45n.';

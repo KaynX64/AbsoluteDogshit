@@ -23,6 +23,38 @@ const I = {
   Check: () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>),
 };
 
+/* ── No-permission notice — rendered only for LIMITED admin archetypes.
+      Full/super admins never see this panel (unchanged legacy behaviour). ── */
+function NoPermissionPanel({ required }: { required: string }) {
+  return (
+    <div style={{
+      background: T.surface,
+      border: `1px solid ${T.border}`,
+      borderRadius: T.radius.lg,
+      padding: '56px 32px',
+      textAlign: 'center',
+      boxShadow: T.shadow.xs,
+    }}>
+      <div style={{
+        width: 52, height: 52, margin: '0 auto 18px', borderRadius: T.radius.md,
+        background: '#EDE9FE', color: '#6D28D9',
+        display: 'grid', placeItems: 'center', fontSize: 24,
+      }}>🛡</div>
+      <div style={{ fontSize: 17, fontWeight: 800, color: T.text, marginBottom: 8 }}>
+        Restricted admin archetype
+      </div>
+      <p style={{
+        fontSize: 13, color: T.textSub, margin: 0, lineHeight: 1.6,
+        maxWidth: 460, marginInline: 'auto',
+      }}>
+        This console section requires the <b>{required}</b> permission, which this
+        administrator account does not hold. Contact a Super Admin to adjust this
+        admin archetype's permissions.
+      </p>
+    </div>
+  );
+}
+
 export type AdminTab = 'users' | 'audit' | 'telemetry' | 'analytics' | 'db';
 
 interface AdminConsoleProps {
@@ -49,6 +81,14 @@ export default function AdminConsole({
   const [editingUser, setEditingUser] = useState<any | null>(null);
   const [showCreateUserModal, setShowCreateUserModal] = useState(false);
   const [isSavingUser, setIsSavingUser] = useState(false);
+
+  /* ── Admin archetype permissions (additive — only gates LIMITED admins) ── */
+  const [myPerms, setMyPerms] = useState<{ userId: number | null; archetype: string; is_super: boolean; permissions: string[] }>({
+    userId: null, archetype: 'super', is_super: true, permissions: ['SUPER_ADMIN'],
+  });
+  const [permCatalog, setPermCatalog] = useState<any[]>([]);
+  const [editAdminArchetype, setEditAdminArchetype] = useState<'super' | 'limited'>('super');
+  const [editAdminPerms, setEditAdminPerms] = useState<string[]>([]);
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
   const [modalFeedback, setModalFeedback] = useState<{ text: string; isError: boolean } | null>(null);
 // ── Admin Vaccination History State ──────────────────────────────────────────
@@ -63,6 +103,7 @@ export default function AdminConsole({
   const [tableTotalPages, setTableTotalPages] = useState<number>(1);
   const [tableTotalRows, setTableTotalRows] = useState<number>(0);
   const [isTableReadOnly, setIsTableReadOnly] = useState<boolean>(false);
+  const [tableReadOnlyReason, setTableReadOnlyReason] = useState<'audit' | 'security' | null>(null);
   const [loadingDbTable, setLoadingDbTable] = useState<boolean>(false);
   const [dbRowModal, setDbRowModal] = useState<{ isNew: boolean; rowData: any } | null>(null);
   const [dbSearchFilter, setDbSearchFilter] = useState('');
@@ -98,6 +139,57 @@ export default function AdminConsole({
       if (res.ok) setUsersList(await res.json());
     } catch (_) {}
   };
+
+  /* Caller's effective admin permission state (super admins keep full access). */
+  const fetchMyPermissions = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/my-permissions`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMyPerms({
+          userId: data.user_id ?? null,
+          archetype: data.archetype || 'super',
+          is_super: data.is_super !== false,
+          permissions: Array.isArray(data.permissions) ? data.permissions : ['SUPER_ADMIN'],
+        });
+      }
+    } catch (_) {}
+  };
+
+  /* Live permission catalog for the archetype editors. */
+  const fetchPermissionCatalog = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/permissions`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.permissions) && data.permissions.length > 0) {
+          setPermCatalog(data.permissions);
+        }
+      }
+    } catch (_) {}
+  };
+
+  /* Permission gate — super admins always pass (unchanged legacy behaviour). */
+  const can = (code: string) => myPerms.is_super || myPerms.permissions.includes(code);
+
+  /* ── Adjusted manage-user-account feature (non-super admins) ──────
+     Limited admins keep the full Users workflow for REGULAR accounts, but
+     administrator accounts are hands-off for them (server-enforced):
+       • other admins  → read-only “View” mode (403 on any write)
+       • own account   → profile fields editable; role & status locked;
+                         password override disabled (use Change password)
+     Super admins see the console exactly as before. */
+  const viewingAsLimited = !myPerms.is_super;
+  const editingSelf = Boolean(editingUser && Number(editingUser.id) === Number(myPerms.userId));
+  const editingAdminTarget = Boolean(editingUser && editingUser.role === 'ADMIN');
+  const editingProtectedAdmin = viewingAsLimited && editingAdminTarget && !editingSelf;
+  const editingSelfAdminLocked = viewingAsLimited && editingAdminTarget && editingSelf;
 
   const fetchMutationLogs = async () => {
     setLoadingLogs(true);
@@ -168,6 +260,8 @@ export default function AdminConsole({
     fetchPhiLogs();
     fetchRetention();
     fetchTelemetry();
+    fetchMyPermissions();
+    fetchPermissionCatalog();
   }, []);
 
   // Refetch contextual data whenever the parent (sidebar) switches the active tab
@@ -266,6 +360,17 @@ export default function AdminConsole({
     setAdminPasswordInput('');
     setModalFeedback(null);
     fetchUserVaccinesForAdmin(u.id);
+
+    /* Seed the admin-archetype editor state from the target's current grants. */
+    const targetIsLimited = u.admin_archetype === 'limited';
+    setEditAdminArchetype(
+      targetIsLimited ? 'limited' : (myPerms.is_super ? 'super' : 'limited')
+    );
+    setEditAdminPerms(
+      targetIsLimited
+        ? (Array.isArray(u.admin_permissions) ? u.admin_permissions : [])
+        : (myPerms.is_super ? [] : myPerms.permissions.filter((c) => c !== 'SUPER_ADMIN'))
+    );
   };
 const fetchUserVaccinesForAdmin = async (userId: number) => {
     const token = localStorage.getItem('valetudo_token');
@@ -295,6 +400,15 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
   const handleSaveUserProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
+    // Adjusted manage-user-account feature: protected administrator accounts
+    // are read-only for limited admins (the server 403s any write anyway).
+    if (editingProtectedAdmin) {
+      setModalFeedback({
+        text: '🔒 Read-only: only a Super Admin can modify another administrator account.',
+        isError: true,
+      });
+      return;
+    }
     setIsSavingUser(true);
     setModalFeedback(null);
     const token = localStorage.getItem('valetudo_token');
@@ -330,8 +444,37 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
        body: JSON.stringify({ immunizations: adminUserVaccines }),
      });
+        /* Sync admin archetype permissions (dedicated endpoint; the server
+           enforces self-edit and super-only guards). Only Super Admins may
+           modify administrator permission sets (adjusted feature). */
+        let permWarning: string | null = null;
+        if (editingUser.role === 'ADMIN' && myPerms.is_super) {
+          const originalPerms = editingUser.admin_archetype === 'limited'
+            ? (editingUser.admin_permissions || [])
+            : ['SUPER_ADMIN'];
+          const nextPerms = editAdminArchetype === 'super' ? ['SUPER_ADMIN'] : editAdminPerms;
+          const permsChanged =
+            JSON.stringify([...originalPerms].sort()) !== JSON.stringify([...nextPerms].sort());
+          if (permsChanged) {
+            try {
+              const permRes = await fetch(`${API_BASE_URL}/api/admin/users/${editingUser.id}/permissions`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ admin_permissions: nextPerms }),
+              });
+              const permData = await permRes.json();
+              if (!permRes.ok) {
+                permWarning = permData.error || 'Permissions were not changed.';
+                setModalFeedback({ text: '⚠️ Profile saved, but permissions were not changed: ' + permWarning, isError: true });
+              }
+            } catch (permErr: any) {
+              permWarning = permErr.message;
+              setModalFeedback({ text: '⚠️ Profile saved, but permission sync failed: ' + permErr.message, isError: true });
+            }
+          }
+        }
         fetchUsers();
-        setTimeout(() => setEditingUser(null), 1200);
+        if (!permWarning) setTimeout(() => setEditingUser(null), 1200);
       } else {
         setModalFeedback({ text: '❌ ' + (data.error || 'Failed to update profile.'), isError: true });
       }
@@ -398,6 +541,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
         setTableTotalPages(data.totalPages);
         setTableTotalRows(data.totalRows);
         setIsTableReadOnly(data.isReadOnly);
+        setTableReadOnlyReason(data.readOnlyReason ?? null);
       }
     } catch (err) {
       console.error('Failed to load table content:', err);
@@ -500,7 +644,8 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: USERS                                                 */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      {activeTab === 'users' && (
+      {activeTab === 'users' && !can('USERS_MANAGE') && (<NoPermissionPanel required="USERS_MANAGE" />)}
+      {activeTab === 'users' && can('USERS_MANAGE') && (
         <div>
           {/* Search + count row */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, marginBottom: 14, flexWrap: 'wrap' }}>
@@ -670,6 +815,26 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       <td style={{ color: T.textSub }}>{u.email}</td>
                       <td>
                         <span style={rolePill(u.role)}>{u.role}</span>
+                        {u.role === 'ADMIN' && u.admin_archetype && (
+                          <span
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 4,
+                              marginLeft: 8, padding: '2px 9px',
+                              borderRadius: T.radius.pill,
+                              fontSize: 9.5, fontWeight: 800, letterSpacing: 0.4,
+                              background: u.admin_archetype === 'super' ? '#EDE9FE' : '#F1F5F9',
+                              color: u.admin_archetype === 'super' ? '#6D28D9' : '#64748B',
+                              border: `1px solid ${u.admin_archetype === 'super' ? '#DDD6FE' : '#E2E8F0'}`,
+                            }}
+                            title={
+                              u.admin_archetype === 'super'
+                                ? 'Super Admin — unrestricted access'
+                                : `Limited Admin — ${(u.admin_permissions || []).join(', ')}`
+                            }
+                          >
+                            {u.admin_archetype === 'super' ? '⭐ SUPER' : `⚙ LIMITED · ${u.admin_permissions?.length ?? 0}`}
+                          </span>
+                        )}
                       </td>
                       <td>
                         <span style={{
@@ -684,19 +849,37 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                         </span>
                       </td>
                       <td style={{ textAlign: 'right' }}>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEditModal(u)}
-                          style={{
-                            padding: '6px 14px', borderRadius: T.radius.pill,
-                            background: 'transparent', color: T.primary,
-                            border: `1px solid ${T.primaryTint}`,
-                            fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                            fontFamily: T.font,
-                          }}
-                        >
-                          Edit
-                        </button>
+                        {viewingAsLimited && u.role === 'ADMIN' && Number(u.id) !== Number(myPerms.userId) ? (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(u)}
+                            title="Administrator accounts are read-only for limited admins — only a Super Admin can modify them"
+                            style={{
+                              padding: '6px 14px', borderRadius: T.radius.pill,
+                              background: 'transparent', color: T.textSub,
+                              border: `1px solid ${T.border}`,
+                              fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                              fontFamily: T.font,
+                              display: 'inline-flex', alignItems: 'center', gap: 5,
+                            }}
+                          >
+                            🔒 View
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(u)}
+                            style={{
+                              padding: '6px 14px', borderRadius: T.radius.pill,
+                              background: 'transparent', color: T.primary,
+                              border: `1px solid ${T.primaryTint}`,
+                              fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                              fontFamily: T.font,
+                            }}
+                          >
+                            Edit
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -717,13 +900,21 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           }}>
             Seven RBAC roles govern access. Editing a user changes their assigned permissions;
             suspending an account disables access without deleting its profile.
+            ADMIN accounts carry an archetype — <b>Super</b> (full access) or <b>Limited</b> (only
+            the capabilities granted at creation).
+            {viewingAsLimited && (
+              <> You are signed in as a <b>Limited Admin</b>: administrator accounts are
+              read-only, admin passwords cannot be overridden, and new administrator
+              accounts cannot be created — those actions require a Super Admin.</>
+            )}
           </p>
         </div>
       )}
             {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: AUDIT                                                */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      {activeTab === 'audit' && (
+      {activeTab === 'audit' && !can('AUDIT_VIEW') && (<NoPermissionPanel required="AUDIT_VIEW" />)}
+      {activeTab === 'audit' && can('AUDIT_VIEW') && (
         <div>
           {/* Sub-tabs */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
@@ -1029,7 +1220,10 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: TELEMETRY / SYSTEM HEALTH                            */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      {activeTab === 'telemetry' && (
+      {activeTab === 'telemetry' && !can('TELEMETRY_VIEW') && !can('RETENTION_MANAGE') && (
+        <NoPermissionPanel required="TELEMETRY_VIEW" />
+      )}
+      {activeTab === 'telemetry' && (can('TELEMETRY_VIEW') || can('RETENTION_MANAGE')) && (
         <div>
           {/* KPI cards row */}
           <div style={{
@@ -1111,7 +1305,8 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           {/* Live server ping monitor */}
           <ServerPingMonitor />
 
-          {/* Retention governance panel */}
+          {/* Retention governance panel — RETENTION_MANAGE permission */}
+          {can('RETENTION_MANAGE') ? (
           <div style={{
             background: T.surface,
             border: `1px solid ${T.border}`,
@@ -1238,18 +1433,23 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
               </button>
             </div>
           </div>
+          ) : (
+            <NoPermissionPanel required="RETENTION_MANAGE" />
+          )}
         </div>
       )}
 
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: ANALYTICS                                            */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      {activeTab === 'analytics' && <AnalyticsDashboard />}
+      {activeTab === 'analytics' && !can('ANALYTICS_VIEW') && (<NoPermissionPanel required="ANALYTICS_VIEW" />)}
+      {activeTab === 'analytics' && can('ANALYTICS_VIEW') && <AnalyticsDashboard />}
 
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: DATABASE STUDIO                                      */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      {activeTab === 'db' && (
+      {activeTab === 'db' && !can('DATABASE_MANAGE') && (<NoPermissionPanel required="DATABASE_MANAGE" />)}
+      {activeTab === 'db' && can('DATABASE_MANAGE') && (
         <div>
           <div style={{
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -1275,7 +1475,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                 fontSize: 11.5, fontWeight: 700,
                 display: 'inline-flex', alignItems: 'center', gap: 6,
               }}>
-                <I.Lock /> Read-only audit table
+                <I.Lock /> {tableReadOnlyReason === 'security' ? 'Super-admin-only security table' : 'Read-only audit table'}
               </span>
             )}
           </div>
@@ -1670,7 +1870,27 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   </div>
                 </div>
 
+                {editingProtectedAdmin && (
+                  <div style={{
+                    marginTop: 16, padding: '12px 16px',
+                    borderRadius: T.radius.md,
+                    background: '#FFFBEB', border: '1px solid #FDE68A',
+                    fontSize: 12.5, color: '#92400E', lineHeight: 1.55,
+                    display: 'flex', gap: 8, alignItems: 'flex-start',
+                  }}>
+                    <span style={{ fontSize: 15, lineHeight: 1.3 }}>🔒</span>
+                    <span>
+                      <b>Administrator account — read-only view.</b> Only a Super Admin can
+                      modify administrator accounts, change admin roles, edit admin
+                      permissions or override admin passwords.
+                    </span>
+                  </div>
+                )}
+
                 <form onSubmit={handleSaveUserProfile} style={{ marginTop: 22 }}>
+                  {/* Read-only shield for protected admin accounts: a disabled
+                      fieldset locks every input/select/button inside at once. */}
+                  <fieldset disabled={editingProtectedAdmin} style={{ border: 'none', padding: 0, margin: 0 }}>
                   {/* Identity & contact */}
                   <div style={{ marginBottom: 8, fontSize: 11, fontWeight: 800, letterSpacing: 1.4, color: T.textMuted, textTransform: 'uppercase' }}>
                     Identity & contact
@@ -1743,6 +1963,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       <select
                         style={inputStyle}
                         value={editingUser.role}
+                        disabled={editingProtectedAdmin || editingSelfAdminLocked}
                         onChange={(e) => setEditingUser({ ...editingUser, role: e.target.value })}
                       >
                         <option value="STUDENT">STUDENT</option>
@@ -1752,8 +1973,18 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                         <option value="DENTIST">DENTIST</option>
                         <option value="NURSE">NURSE</option>
                         <option value="EMERGENCY_RESPONDER">EMERGENCY_RESPONDER</option>
-                        <option value="ADMIN">ADMIN</option>
+                        <option value="ADMIN" disabled={viewingAsLimited}>ADMIN</option>
                       </select>
+                      {viewingAsLimited && editingUser.role !== 'ADMIN' && (
+                        <div style={{ fontSize: 11, color: T.textMuted, marginTop: 5, fontStyle: 'italic' }}>
+                          🔒 Only a Super Admin can assign the ADMIN role.
+                        </div>
+                      )}
+                      {editingSelfAdminLocked && (
+                        <div style={{ fontSize: 11, color: T.textMuted, marginTop: 5, fontStyle: 'italic' }}>
+                          🔒 Administrator roles can only be changed by a Super Admin.
+                        </div>
+                      )}
                     </div>
                     <div>
                       <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
@@ -1762,11 +1993,17 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       <select
                         style={inputStyle}
                         value={editingUser.is_active ? '1' : '0'}
+                        disabled={editingProtectedAdmin || editingSelfAdminLocked}
                         onChange={(e) => setEditingUser({ ...editingUser, is_active: e.target.value === '1' })}
                       >
                         <option value="1">Active</option>
                         <option value="0">Suspended / deactivated</option>
                       </select>
+                      {editingSelfAdminLocked && (
+                        <div style={{ fontSize: 11, color: T.textMuted, marginTop: 5, fontStyle: 'italic' }}>
+                          🔒 Your own admin account status is managed by a Super Admin.
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1857,6 +2094,129 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                         <input style={inputStyle} value={editingUser.department || ''}
                                onChange={(e) => setEditingUser({ ...editingUser, department: e.target.value })} />
                       </div>
+                    </div>
+                  )}
+
+                  {/* ADMIN ARCHETYPE — permission grants editor */}
+                  {editingUser.role === 'ADMIN' && (
+                    <div style={{
+                      marginBottom: 20, padding: 16,
+                      borderRadius: T.radius.md,
+                      background: '#F5F3FF', border: '1px solid #DDD6FE',
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 10, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 800, color: '#6D28D9' }}>
+                          🛡 Admin archetype &amp; permissions
+                        </span>
+                        {editingUser.id === myPerms.userId && (
+                          <span style={{ fontSize: 10.5, color: '#5B21B6', fontStyle: 'italic' }}>
+                            This is your own account — permissions cannot be self-modified
+                          </span>
+                        )}
+                      </div>
+
+                      {myPerms.is_super ? (
+                        <>
+                          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                            <button
+                              type="button"
+                              onClick={() => setEditAdminArchetype('super')}
+                              disabled={!myPerms.is_super}
+                              style={{
+                                flex: 1, padding: '9px 12px',
+                                border: `1px solid ${editAdminArchetype === 'super' ? '#6D28D9' : 'transparent'}`,
+                                borderRadius: T.radius.pill,
+                                background: editAdminArchetype === 'super' ? '#FFFFFF' : 'transparent',
+                                color: editAdminArchetype === 'super' ? '#6D28D9' : T.textSub,
+                                fontWeight: editAdminArchetype === 'super' ? 800 : 600,
+                                fontSize: 12, fontFamily: T.font,
+                                cursor: !myPerms.is_super ? 'not-allowed' : 'pointer',
+                                opacity: !myPerms.is_super ? 0.55 : 1,
+                                boxShadow: editAdminArchetype === 'super' ? T.shadow.xs : 'none',
+                                transition: 'all 120ms ease',
+                                whiteSpace: 'nowrap',
+                              }}
+                              title={!myPerms.is_super ? 'Only a Super Admin can assign the SUPER_ADMIN archetype' : undefined}
+                            >
+                              🛡 Super Admin · full access
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditAdminArchetype('limited')}
+                              style={{
+                                flex: 1, padding: '9px 12px',
+                                border: `1px solid ${editAdminArchetype === 'limited' ? '#6D28D9' : 'transparent'}`,
+                                borderRadius: T.radius.pill,
+                                background: editAdminArchetype === 'limited' ? '#FFFFFF' : 'transparent',
+                                color: editAdminArchetype === 'limited' ? '#6D28D9' : T.textSub,
+                                fontWeight: editAdminArchetype === 'limited' ? 800 : 600,
+                                fontSize: 12, fontFamily: T.font,
+                                cursor: 'pointer',
+                                boxShadow: editAdminArchetype === 'limited' ? T.shadow.xs : 'none',
+                                transition: 'all 120ms ease',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              ⚙ Limited Admin · choose permissions
+                            </button>
+                          </div>
+
+                          {editAdminArchetype === 'super' ? (
+                            <p style={{ fontSize: 12, color: '#5B21B6', margin: 0, lineHeight: 1.55 }}>
+                              Unrestricted access to every console capability — identical to the
+                              seeded administrator account.
+                            </p>
+                          ) : (
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                              {permCatalog.filter((p: any) => p.code !== 'SUPER_ADMIN').map((p: any) => {
+                                const checked = editAdminPerms.includes(p.code);
+                                const beyondCaller = !myPerms.is_super && !myPerms.permissions.includes(p.code);
+                                return (
+                                  <label
+                                    key={p.code}
+                                    style={{
+                                      display: 'flex', alignItems: 'flex-start', gap: 8,
+                                      padding: '9px 11px',
+                                      borderRadius: T.radius.sm,
+                                      background: checked ? '#EDE9FE' : '#FFFFFF',
+                                      border: `1px solid ${checked ? '#C4B5FD' : '#E9E5F8'}`,
+                                      cursor: beyondCaller ? 'not-allowed' : 'pointer',
+                                      opacity: beyondCaller ? 0.55 : 1,
+                                    }}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      disabled={beyondCaller}
+                                      onChange={() =>
+                                        setEditAdminPerms((prev) =>
+                                          prev.includes(p.code) ? prev.filter((c) => c !== p.code) : [...prev, p.code]
+                                        )
+                                      }
+                                      style={{ marginTop: 2, accentColor: '#6D28D9' }}
+                                    />
+                                    <span>
+                                      <span style={{ display: 'block', fontSize: 12, fontWeight: 700, color: T.text }}>
+                                        {p.name}
+                                      </span>
+                                      <span style={{ display: 'block', fontSize: 10.5, color: T.textSub, marginTop: 1, lineHeight: 1.4 }}>
+                                        {p.description}
+                                      </span>
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <p style={{ fontSize: 12, color: '#5B21B6', margin: 0, lineHeight: 1.55 }}>
+                          🔒 Only a Super Admin can modify administrator permissions
+                          {editingUser.admin_archetype === 'super'
+                            ? ' — this is a full-access administrator.'
+                            : '.'}
+                        </p>
+                      )}
                     </div>
                   )}
 
@@ -1997,6 +2357,31 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       </button>
                     </div>
                   </div>
+                  {/* Adjusted manage-user-account feature: administrator passwords
+                      (Super Admins included) can only be overridden by a Super
+                      Admin. Limited admins keep the override for regular users. */}
+                  {viewingAsLimited && editingUser.role === 'ADMIN' ? (
+                    <div style={{
+                      marginTop: 20,
+                      padding: '18px 20px',
+                      background: '#EDE9FE',
+                      borderRadius: T.radius.lg,
+                    }}>
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        fontSize: 13, fontWeight: 800, color: '#6D28D9',
+                        marginBottom: 6,
+                      }}>
+                        🔑 Password admin override
+                      </div>
+                      <p style={{ fontSize: 12, color: '#5B21B6', margin: 0, lineHeight: 1.55 }}>
+                        🔒 Only a Super Admin can override an administrator password.
+                        {editingSelf
+                          ? ' To change your own password, use the Change password screen after closing this window.'
+                          : ' Ask a Super Admin if this administrator is locked out.'}
+                      </p>
+                    </div>
+                  ) : (
                   <div style={{
                     marginTop: 20,
                     padding: '18px 20px',
@@ -2047,6 +2432,9 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       Only this action applies the password override.
                     </div>
                   </div>
+                  )}
+
+                  </fieldset>
 
                   {modalFeedback && (
                     <div style={{
@@ -2062,19 +2450,21 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
 
                   <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 22, paddingTop: 18, borderTop: `1px solid ${T.border}` }}>
                     <button type="button" onClick={() => setEditingUser(null)} style={btnGhost}>
-                      Cancel
+                      Close
                     </button>
-                    <button
-                      type="submit"
-                      disabled={isSavingUser}
-                      style={{
-                        ...btnPrimary,
-                        opacity: isSavingUser ? 0.6 : 1,
-                        cursor: isSavingUser ? 'not-allowed' : 'pointer',
-                      }}
-                    >
-                      {isSavingUser ? 'Saving…' : 'Save profile changes'}
-                    </button>
+                    {!editingProtectedAdmin && (
+                      <button
+                        type="submit"
+                        disabled={isSavingUser}
+                        style={{
+                          ...btnPrimary,
+                          opacity: isSavingUser ? 0.6 : 1,
+                          cursor: isSavingUser ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {isSavingUser ? 'Saving…' : 'Save profile changes'}
+                      </button>
+                    )}
                   </div>
                 </form>
               </div>

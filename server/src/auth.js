@@ -8,6 +8,7 @@ import { redis, isRedisActive } from './utils/redisClient.js';
 import { LOGIN_LIMIT } from './config/limits.js';
 import crypto from 'crypto';
 import { evaluatePasswordStrength } from './utils/passwordPolicy.js';
+import { resolveAdminPermissions } from './middleware/rbac.js';
 
 // S-09: Pre-computed dummy hash to prevent user-enumeration timing attacks.
 // bcrypt.compare against this hash takes the same ~100ms as a real check,
@@ -146,6 +147,24 @@ export async function loginUser(req, res) {
       });
     }
 
+    // ── Admin archetype permissions (additive — ADMIN accounts only) ──────
+    // Non-admin roles get `permissions: null` and are completely unaffected.
+    // A failure here must never block a login: fall back to full access.
+    let adminPermissions = null;
+    if (roleCodes.includes('ADMIN')) {
+      try {
+        const state = await resolveAdminPermissions(user.user_id);
+        adminPermissions = {
+          archetype: state.isSuper ? 'super' : 'limited',
+          is_super: state.isSuper,
+          permissions: state.codes,
+        };
+      } catch (permErr) {
+        console.error('[Login Permission Warning]:', permErr.message);
+        adminPermissions = { archetype: 'super', is_super: true, permissions: ['SUPER_ADMIN'] };
+      }
+    }
+
     // 3. Issue JWT Token (Valid 24 hours) with unique JTI for Redis revocation tracking
     const jti = crypto.randomUUID();
     const token = jwt.sign(
@@ -189,6 +208,7 @@ export async function loginUser(req, res) {
         first_name: user.first_name,
         last_name: user.last_name,
         roles: roleCodes,
+        permissions: adminPermissions,
       },
     });
   } catch (error) {

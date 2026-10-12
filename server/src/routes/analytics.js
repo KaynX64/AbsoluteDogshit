@@ -2,7 +2,7 @@
 import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
-import { requireRoles } from '../middleware/rbac.js';
+import { requireRoles, requirePermission } from '../middleware/rbac.js';
 import { decrypt } from '../utils/cryptoVault.js';
 import { getDiagnosisCounts, getRiskCounts } from '../utils/analyticsStats.js';
 import ExcelJS from 'exceljs';
@@ -11,7 +11,7 @@ import PDFDocument from 'pdfkit';
 
 const router = express.Router();
 
-router.use(authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'ADMIN'));
+router.use(authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'ADMIN'), requirePermission('ANALYTICS_VIEW'));
 
 // 1. GET /api/analytics/summary
 router.get('/summary', async (req, res) => {

@@ -12,6 +12,19 @@ export const DECRYPT_FAILED_MARKER = '[ENCRYPTED PHI - INTEGRITY VERIFICATION FA
 // statutory ledgers; INVENTORY_LOGS is the immutable stock-movement trail (see ERD §3.5).
 export const READ_ONLY_TABLES = ['AUDIT_LOGS', 'PHI_ACCESS_LOGS', 'INVENTORY_LOGS'];
 
+// Account-security tables: writable from DB Studio ONLY by Super Admins.
+// A limited admin holding DATABASE_MANAGE must not be able to mint admin
+// accounts (USER_ROLES / USER_ADMIN_PERMISSIONS inserts), flip roles, or
+// override any administrator's password (USERS.password_hash) outside the
+// guarded User Management endpoints. Reading stays allowed (secrets masked).
+export const SECURITY_TABLES = [
+  'USERS',
+  'ROLES',
+  'USER_ROLES',
+  'ADMIN_PERMISSIONS',
+  'USER_ADMIN_PERMISSIONS',
+];
+
 // Columns the application stores as AES-256-GCM ciphertext (enc:v1:...) via cryptoVault.
 // Keep in sync with every encrypt() call site in server/src/routes/*.
 export const ENCRYPTED_COLUMNS = {
@@ -55,12 +68,17 @@ const BCRYPT_RE = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/;
 const CIPHERTEXT_RE = /^enc:v[12]:[0-9a-f]{24}:[0-9a-f]{32}:[0-9a-f]+$/;
 
 export const isReadOnlyTable = (table) => READ_ONLY_TABLES.includes(table);
+export const isSecurityTable = (table) => SECURITY_TABLES.includes(table);
 export const isEncryptedCol = (table, col) => (ENCRYPTED_COLUMNS[table] || []).includes(col);
 export const isSecretCol = (table, col) => (SECRET_COLUMNS[table] || []).includes(col);
 export const phiPatientSource = (table) => PHI_PATIENT_SOURCE[table] || null;
 
 export function readOnlyMessage(table) {
   return `Statutory compliance violation: ${table} is an append-only ledger and cannot be modified from DB Studio.`;
+}
+
+export function securityTableMessage(table) {
+  return `${table} is an account-security table. Only a Super Admin can modify it from Database Studio — use User Management instead.`;
 }
 
 export function fail(message, status = 400) {
