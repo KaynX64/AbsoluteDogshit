@@ -1,12 +1,13 @@
 // desktop/src/components/ServerPingMonitor.tsx
 import { useServerPing, type PingSample } from '../hooks/useServerPing';
 import { T } from '../theme';
+import Icon from './Icon';
 import { API_BASE_URL } from '../config/api';
 
 function toneFor(ms: number, ok: boolean) {
   if (!ok)      return { fg: T.danger,  bg: T.dangerSoft,  label: 'OFFLINE' };
   if (ms < 60)  return { fg: T.success, bg: T.successSoft, label: 'EXCELLENT' };
-  if (ms < 150) return { fg: '#264D36', bg: '#D7E8D2',     label: 'GOOD' };
+  if (ms < 150) return { fg: T.tonalGreenFg, bg: T.tonalGreenBg, label: 'GOOD' };
   if (ms < 350) return { fg: T.warning, bg: T.warningSoft, label: 'FAIR' };
   return             { fg: T.danger,  bg: T.dangerSoft,  label: 'POOR' };
 }
@@ -38,7 +39,7 @@ function Sparkline({ samples }: { samples: PingSample[] }) {
               background: tone.fg,
               borderRadius: 2,
               opacity: 0.85,
-              transition: 'height 200ms ease',
+              transition: `height ${T.durSlow} ${T.ease}`,
             }}
           />
         );
@@ -78,28 +79,38 @@ export default function ServerPingMonitor() {
   return (
     <div style={{
       background: T.surface,
-      border: `1px solid ${T.border}`,
-      borderRadius: T.radius.lg,
-      padding: '20px 22px',
-      boxShadow: T.shadow.xs,
+      border: `1px solid ${T.borderSoft}`,
+      borderRadius: T.radius.xl,
+      padding: '22px 26px',
+      boxShadow: T.shadow.sm,
       display: 'grid',
       gridTemplateColumns: '260px 1fr auto',
-      gap: 28,
+      gap: 32,
       alignItems: 'center',
       marginBottom: 22,
-    }}>
+      transition: `box-shadow ${T.durSlow} ${T.ease}, border-color ${T.durSlow} ${T.ease}`,
+    }}
+    onMouseEnter={(e) => {
+      e.currentTarget.style.boxShadow = T.shadow.md;
+      e.currentTarget.style.borderColor = T.border;
+    }}
+    onMouseLeave={(e) => {
+      e.currentTarget.style.boxShadow = T.shadow.sm;
+      e.currentTarget.style.borderColor = T.borderSoft;
+    }}
+    >
       {/* LEFT: big latency readout */}
       <div>
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8,
           fontSize: 11, fontWeight: 800, letterSpacing: 1.4,
-          color: T.textMuted, textTransform: 'uppercase', marginBottom: 8,
+          color: T.textMuted, textTransform: 'uppercase', marginBottom: 10,
         }}>
           <span style={{
             width: 8, height: 8, borderRadius: '50%',
             background: tone.fg,
             boxShadow: ok ? `0 0 0 4px ${tone.bg}` : 'none',
-            transition: 'background 200ms ease, box-shadow 200ms ease',
+            transition: `background ${T.durSlow} ${T.ease}, box-shadow ${T.durSlow} ${T.ease}`,
           }} />
           Live server ping
         </div>
@@ -107,7 +118,9 @@ export default function ServerPingMonitor() {
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
           <span style={{
             fontSize: 44, fontWeight: 800, letterSpacing: -1.6,
-            color: tone.fg, lineHeight: 1, transition: 'color 200ms ease',
+            color: tone.fg, lineHeight: 1,
+            transition: `color ${T.durSlow} ${T.ease}`,
+            fontVariantNumeric: 'tabular-nums',
           }}>
             {bigNumber}
           </span>
@@ -168,9 +181,10 @@ export default function ServerPingMonitor() {
             background: T.primary, color: '#fff', border: 'none',
             fontSize: 12, fontWeight: 700, cursor: 'pointer',
             fontFamily: T.font, whiteSpace: 'nowrap',
+            display: 'inline-flex', alignItems: 'center', gap: 6,
           }}
         >
-          ⚡ Ping now
+          <Icon name="bolt" size={14} /> Ping now
         </button>
         <button
           type="button"
@@ -182,9 +196,11 @@ export default function ServerPingMonitor() {
             border: `1px solid ${paused ? T.warningBorder : T.border}`,
             fontSize: 12, fontWeight: 700, cursor: 'pointer',
             fontFamily: T.font, whiteSpace: 'nowrap',
+            display: 'inline-flex', alignItems: 'center', gap: 6,
           }}
         >
-          {paused ? '▶ Resume' : '❚❚ Pause'}
+          <Icon name={paused ? 'play_arrow' : 'pause'} size={14} />
+          {paused ? 'Resume' : 'Pause'}
         </button>
       </div>
     </div>

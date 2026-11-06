@@ -397,6 +397,11 @@
   </div>
 
   <script>
+        function esc(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]));
+    }
     (async function initVerification() {
       // 1. Extract token from URL path: /api/documents/verify/:qrToken OR query param: ?token=...
       const pathParts = window.location.pathname.split('/');
@@ -490,7 +495,7 @@
           </div>
           <div class="data-row">
             <span class="data-label">Issued By:</span>
-            <span class="data-value">${doc.issuedBy}</span>
+            <span class="data-value">${esc(doc.issuedBy)}</span>
           </div>
           <div class="data-row">
             <span class="data-label">Date of Issuance:</span>
@@ -566,8 +571,8 @@
             <span class="data-value">${doc.studentNo || 'N/A'}</span>
           </div>
           <div class="data-row">
-            <span class="data-label">Attending Physician:</span>
-            <span class="data-value">${doc.issuedBy}</span>
+            <span class="data-label">Prescribed By:</span>
+            <span class="data-value">${esc(doc.issuedBy)}</span>
           </div>
           <div class="data-row">
             <span class="data-label">Date Prescribed:</span>

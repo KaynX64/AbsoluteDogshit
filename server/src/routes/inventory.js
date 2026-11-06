@@ -16,7 +16,7 @@ export default function inventoryRoutes(io) {
   router.get('/batches', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'DENTIST', 'ADMIN'), async (req, res) => {
     try {
       const [rows] = await pool.query(
-        `SELECT b.batch_id, m.medicine_id, m.name, m.generic_name, m.form, m.strength, m.unit,
+        `SELECT b.batch_id, m.medicine_id, m.name, m.generic_name, m.form, m.strength, m.unit, m.reorder_level,
                 b.batch_no, b.quantity_on_hand, b.manufacture_date, b.expiry_date, b.supplier,
                 DATEDIFF(b.expiry_date, CURDATE()) as days_until_expiry
          FROM MEDICINE_BATCHES b 
@@ -128,6 +128,47 @@ export default function inventoryRoutes(io) {
     } catch (error) {
       console.error('Error fetching inventory consumption logs:', error);
       res.status(500).json({ error: 'Failed to retrieve inventory logs.' });
+    }
+  });
+
+  // GET /api/inventory/dashboard-summary - Live pharmacy inventory metrics for nurse console
+  router.get('/dashboard-summary', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+    try {
+      const [lowStock] = await pool.query(
+        `SELECT COUNT(*) as count 
+         FROM MEDICINE_BATCHES b
+         JOIN MEDICINES m ON b.medicine_id = m.medicine_id
+         WHERE b.deleted_at IS NULL 
+           AND b.quantity_on_hand > 0 
+           AND b.quantity_on_hand <= COALESCE(m.reorder_level, 20)
+           AND b.expiry_date > CURDATE()`
+      );
+
+      const [expiringSoon] = await pool.query(
+        `SELECT COUNT(*) as count
+         FROM MEDICINE_BATCHES b
+         WHERE b.deleted_at IS NULL 
+           AND b.quantity_on_hand > 0 
+           AND b.expiry_date > CURDATE()
+           AND DATEDIFF(b.expiry_date, CURDATE()) <= 90`
+      );
+
+      const [expired] = await pool.query(
+        `SELECT COUNT(*) as count
+         FROM MEDICINE_BATCHES b
+         WHERE b.deleted_at IS NULL 
+           AND b.quantity_on_hand > 0 
+           AND b.expiry_date <= CURDATE()`
+      );
+
+      res.json({
+        lowStockCount: Number(lowStock[0]?.count) || 0,
+        expiringSoonCount: Number(expiringSoon[0]?.count) || 0,
+        expiredCount: Number(expired[0]?.count) || 0,
+      });
+    } catch (error) {
+      console.error('Error fetching inventory summary:', error);
+      res.status(500).json({ error: 'Failed to retrieve inventory summary.' });
     }
   });
 
@@ -360,11 +401,18 @@ export default function inventoryRoutes(io) {
       await connection.beginTransaction();
 
       const [batchRows] = await connection.query(
-        'SELECT quantity_on_hand, batch_no FROM MEDICINE_BATCHES WHERE batch_id = ? FOR UPDATE',
+        'SELECT quantity_on_hand, batch_no, expiry_date, DATEDIFF(expiry_date, CURDATE()) as days_until_expiry FROM MEDICINE_BATCHES WHERE batch_id = ? FOR UPDATE',
         [batch_id]
       );
 
       if (batchRows.length === 0) throw new Error('Medicine batch not found.');
+
+      if (batchRows[0].days_until_expiry < 0) {
+        const expStr = new Date(batchRows[0].expiry_date).toISOString().split('T')[0];
+        throw new Error(
+          `Cannot dispense expired medication: Lot "${batchRows[0].batch_no}" expired on ${expStr}. Please quarantine or dispose of this lot via Adjust & Dispose.`
+        );
+      }
 
       const oldQuantity = batchRows[0].quantity_on_hand;
       if (oldQuantity < Number(quantity_deducted)) {

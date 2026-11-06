@@ -7,8 +7,17 @@ import { logAudit } from '../utils/auditLogger.js';
 import { encrypt, decrypt } from '../utils/cryptoVault.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
 import { validateDentalChart } from '../utils/dentalValidator.js';
+import { assertAppointmentInQueue } from '../utils/signatory.js';
 
 const router = express.Router();
+
+// Only a doctor or dentist may author or edit EMR records.
+function assertClinicalAuthor(user) {
+  const roles = (user && user.roles) || [];
+  if (!roles.some((r) => ['DOCTOR', 'DENTIST'].includes(r))) {
+    throw new Error('Only a doctor or dentist may create or edit EMR records.');
+  }
+}
 
 /**
  * GET /api/sync/bootstrap
@@ -100,7 +109,7 @@ router.get('/bootstrap', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'DEN
  * Replays a batch of offline mutations generated on the clinic Electron desktop.
  * Enforces idempotency via client_mutation_id and flags concurrent edit conflicts.
  */
-router.post('/replay', authenticateToken, async (req, res) => {
+router.post('/replay', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE'), async (req, res) => {
   const { mutations, device_id } = req.body;
   const userId = req.user.user_id;
 
@@ -180,6 +189,10 @@ router.post('/replay', authenticateToken, async (req, res) => {
               continue;
             }
           }
+          
+          // Encounters may only be recorded for a patient in the QUEUE
+          // (checked_in / serving) assigned to this clinician.
+          await assertAppointmentInQueue(connection, appointment_id, patient_user_id, userId);
 
           // Insert new EMR with AES-256 encryption
           const [emrResult] = await connection.query(
@@ -230,17 +243,22 @@ router.post('/replay', authenticateToken, async (req, res) => {
         else if (table_name === 'EMR_RECORDS' && action === 'UPDATE') {
           const { emr_id, chief_complaint, diagnosis, treatment_plan, notes } = payload;
           if (!emr_id) throw new Error('emr_id is required for UPDATE');
-          
-          await connection.query(
+          assertClinicalAuthor(req.user);
+
+          // Only the clinician who authored the EMR may edit it.
+          const [updateResult] = await connection.query(
             `UPDATE EMR_RECORDS SET 
               chief_complaint = ?, diagnosis = ?, treatment_plan = ?, notes = ?, version = version + 1 
-             WHERE emr_id = ? AND deleted_at IS NULL`,
+             WHERE emr_id = ? AND doctor_user_id = ? AND deleted_at IS NULL`,
             [
               encrypt(chief_complaint), encrypt(diagnosis), 
               encrypt(treatment_plan || ''), encrypt(notes || ''), 
-              emr_id
+              emr_id, userId
             ]
           );
+          if (updateResult.affectedRows === 0) {
+            throw new Error('EMR not found, or you are not the authoring clinician.');
+          }
           serverRecordId = emr_id;
         } 
         else if (table_name === 'APPOINTMENTS' && action === 'UPDATE') {

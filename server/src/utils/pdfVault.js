@@ -6,6 +6,7 @@
 
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
+import { formatSignatory } from './signatory.js';
 
 // ─── Brand palette (mirrors the desktop theme) ────────────────────────────
 const BRAND_GREEN = '#1F4A34';
@@ -168,8 +169,10 @@ export async function renderPrescriptionPDF(rx) {
       ? `⚠ ${patient.allergies}`
       : 'None reported'
   );
-  drawInfoRow(doc, 'Attending Physician:', `Dr. ${doctor.first_name} ${doctor.last_name}`);
-  drawInfoRow(doc, 'PRC License:',         doctor.license_no || 'PRC Verified');
+  const signer = formatSignatory(doctor);
+  drawInfoRow(doc, 'Prescribed By:', signer.name);
+  drawInfoRow(doc, 'Designation:',   signer.designation);
+  drawInfoRow(doc, 'PRC License:',   signer.license_no);
   drawInfoRow(doc, 'Issued:',              new Date(issued_at).toLocaleString('en-PH'));
 
   // Rx glyph — ASCII-safe "Rx" because U+211E ("℞") is not part of the
@@ -185,7 +188,21 @@ export async function renderPrescriptionPDF(rx) {
     .text('Rx', 60, doc.y, { align: 'left' });
   doc.moveDown(0.5);
 
-  drawSectionTitle(doc, 'PRESCRIBED FORMULARY MEDICATION');
+  // ── Outside-drug detection (affects section title & advisory note) ──
+  const hasOutsideItems = items.some((it) => Boolean(it.is_outside));
+
+  drawSectionTitle(doc, hasOutsideItems ? 'PRESCRIBED MEDICATION' : 'PRESCRIBED FORMULARY MEDICATION');
+  if (hasOutsideItems) {
+    doc
+      .font('Helvetica-Oblique')
+      .fontSize(8.5)
+      .fillColor(DANGER)
+      .text(
+        'Items marked OUTSIDE are not stocked by the infirmary pharmacy and must be purchased by the patient at an external / accredited drugstore.',
+        { width: doc.page.width - 120 }
+      );
+    doc.moveDown(0.4);
+  }
 
   // ── Fixed column grid (A4 = 595pt wide, margin 50 → content band 60..535) ──
   const col1X    = 60;    // Medicine name
@@ -217,8 +234,15 @@ export async function renderPrescriptionPDF(rx) {
   // ── Table rows ──
   for (const it of items) {
     const rowTop = doc.y;
-    const medName = it.medicine_name || 'Prescribed medication';
-    const generic = it.generic_name ? `(${it.generic_name})` : '';
+    const isOutside = Boolean(it.is_outside);
+    const medName = isOutside
+      ? `${it.medicine_name || 'Prescribed medication'}  [OUTSIDE]`
+      : it.medicine_name || 'Prescribed medication';
+    const generic = isOutside
+      ? 'Outside-pharmacy purchase — not dispensed by the infirmary'
+      : it.generic_name
+        ? `(${it.generic_name})`
+        : '';
     const sigLine = `Sig: ${it.instructions || 'Take as directed'} · ${
       it.frequency || 'As needed'
     } · ${it.route || 'Oral'}`;
@@ -312,8 +336,32 @@ export async function renderPrescriptionPDF(rx) {
   doc.y = panelY + 140;
 
   // Signature line
-  doc.moveDown(2);
+  doc.moveDown(doctor.signature_png ? 4 : 2);
   const sigY = doc.y;
+  if (doctor.signature_png) {
+    try {
+      doc.image(doctor.signature_png, doc.page.width - 250, sigY - 48, {
+        fit: [180, 46],
+        align: 'center',
+        valign: 'bottom',
+      });
+    } catch (e) {
+      console.warn('⚠️ [PDF] Signature image skipped:', e.message);
+    }
+  }
+  
+  if (doctor.signature_png) {
+    try {
+      doc.image(doctor.signature_png, doc.page.width - 250, sigY - 48, {
+        fit: [180, 46],
+        align: 'center',
+        valign: 'bottom',
+      });
+    } catch (e) {
+      console.warn('⚠️ [PDF] Signature image skipped:', e.message);
+    }
+  }
+
   doc
     .moveTo(doc.page.width - 260, sigY)
     .lineTo(doc.page.width - 60, sigY)
@@ -324,17 +372,12 @@ export async function renderPrescriptionPDF(rx) {
     .font('Helvetica-Bold')
     .fontSize(9.5)
     .fillColor(TEXT_DARK)
-    .text(
-      `Dr. ${doctor.first_name} ${doctor.last_name}`,
-      doc.page.width - 260,
-      sigY + 4,
-      { width: 200, align: 'center' }
-    );
+    .text(signer.name, doc.page.width - 260, sigY + 4, { width: 200, align: 'center' });
   doc
     .font('Helvetica')
     .fontSize(8)
-    .fillColor(TEXT_SUB)
-    .text('PRC Verified E-Signature', doc.page.width - 260, doc.y, {
+    .fillColor(signer.qualified ? TEXT_SUB : DANGER)
+    .text(signer.caption, doc.page.width - 260, doc.y, {
       width: 200,
       align: 'center',
     });
@@ -420,8 +463,10 @@ export async function renderClearancePDF(clearance) {
 
   doc.y = bannerY + 70;
 
-  drawInfoRow(doc, 'Issued By:',   `Dr. ${doctor.first_name} ${doctor.last_name}`);
-  drawInfoRow(doc, 'PRC License:', doctor.license_no || 'PRC Verified');
+  const signer = formatSignatory(doctor);
+  drawInfoRow(doc, 'Issued By:',   signer.name);
+  drawInfoRow(doc, 'Designation:', signer.designation);
+  drawInfoRow(doc, 'PRC License:', signer.license_no);
   drawInfoRow(doc, 'Date Issued:', new Date(issued_at).toLocaleDateString('en-PH'));
   drawInfoRow(doc, 'Valid Until:', new Date(expires_at).toLocaleDateString('en-PH'));
 
@@ -470,8 +515,20 @@ export async function renderClearancePDF(clearance) {
   doc.y = panelY + 140;
 
   // Signature line
-  doc.moveDown(2);
+  doc.moveDown(doctor.signature_png ? 4 : 2);
   const sigY = doc.y;
+  if (doctor.signature_png) {
+    try {
+      doc.image(doctor.signature_png, doc.page.width - 250, sigY - 48, {
+        fit: [180, 46],
+        align: 'center',
+        valign: 'bottom',
+      });
+    } catch (e) {
+      console.warn('⚠️ [PDF] Signature image skipped:', e.message);
+    }
+  }
+
   doc
     .moveTo(doc.page.width - 260, sigY)
     .lineTo(doc.page.width - 60, sigY)
@@ -482,17 +539,12 @@ export async function renderClearancePDF(clearance) {
     .font('Helvetica-Bold')
     .fontSize(9.5)
     .fillColor(TEXT_DARK)
-    .text(
-      `Dr. ${doctor.first_name} ${doctor.last_name}`,
-      doc.page.width - 260,
-      sigY + 4,
-      { width: 200, align: 'center' }
-    );
+    .text(signer.name, doc.page.width - 260, sigY + 4, { width: 200, align: 'center' });
   doc
     .font('Helvetica')
     .fontSize(8)
-    .fillColor(TEXT_SUB)
-    .text('PRC Verified E-Signature', doc.page.width - 260, doc.y, {
+    .fillColor(signer.qualified ? TEXT_SUB : DANGER)
+    .text(signer.caption, doc.page.width - 260, doc.y, {
       width: 200,
       align: 'center',
     });

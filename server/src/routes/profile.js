@@ -7,6 +7,7 @@ import { encrypt, decrypt } from '../utils/cryptoVault.js';
 import { requirePrivacyConsent } from '../middleware/consent.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
+import { SignerError, assertAppointmentInQueue } from '../utils/signatory.js';
 
 const router = express.Router();
 
@@ -124,7 +125,7 @@ router.put(
   requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'),
   async (req, res) => {
     const patientId = Number(req.params.patientId);
-    const { immunizations } = req.body;
+    const { immunizations, appointment_id } = req.body;
 
     if (!Array.isArray(immunizations)) {
       return res.status(400).json({ error: 'immunizations must be an array of strings.' });
@@ -133,6 +134,17 @@ router.put(
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
+      
+      // Doctors/dentists may only record immunizations for a patient in their
+      // QUEUE. Nurses and admins are exempt.
+      const roles = req.user.roles || [];
+      const isPractitionerOnly =
+        (roles.includes('DOCTOR') || roles.includes('DENTIST')) &&
+        !roles.includes('ADMIN') &&
+        !roles.includes('NURSE');
+      if (isPractitionerOnly) {
+        await assertAppointmentInQueue(connection, appointment_id, patientId, req.user.user_id);
+      }
 
       const [hpRows] = await connection.query(
         'SELECT profile_id FROM HEALTH_PROFILES WHERE user_id = ? FOR UPDATE',
@@ -170,6 +182,9 @@ router.put(
       res.json({ message: 'Immunization records updated successfully.', immunizations });
     } catch (error) {
       await connection.rollback();
+            if (error instanceof SignerError) {
+        return res.status(error.status).json({ error: error.message, code: error.code });
+      }
       console.error('[Immunizations Update Error]:', error);
       res.status(500).json({ error: 'Failed to save immunization records.' });
     } finally {
@@ -292,101 +307,14 @@ router.post('/fcm-token', authenticateToken, async (req, res) => {
   }
 });
 
-// ── PUT /api/profile/patient/:userId/immunizations ────────────────────────────
-router.put('/patient/:userId/immunizations', authenticateToken, async (req, res) => {
-  const targetUserId = Number(req.params.userId);
-  const userRoles = req.user.roles || [];
-  const isAuthorized = userRoles.some((r) => ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'].includes(r));
-
-  if (!isAuthorized) {
-    return res.status(403).json({ error: 'Access Denied: Only clinical staff and administrators can update vaccination history.' });
-  }
-
-  const { immunizations } = req.body;
-  if (!Array.isArray(immunizations)) {
-    return res.status(400).json({ error: 'immunizations must be an array of vaccine names.' });
-  }
-
-  const cleanedList = Array.from(new Set(immunizations.map((v) => String(v).trim()).filter(Boolean)));
-  const jsonPayload = JSON.stringify(cleanedList);
-
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-
-    const [existing] = await connection.query(
-      'SELECT profile_id FROM HEALTH_PROFILES WHERE user_id = ? FOR UPDATE',
-      [targetUserId]
-    );
-
-    let profileId;
-    if (existing.length > 0) {
-      profileId = existing[0].profile_id;
-      await connection.query(
-        `UPDATE HEALTH_PROFILES 
-         SET immunization_history = ?, updated_at = CURRENT_TIMESTAMP, version = version + 1
-         WHERE user_id = ?`,
-        [jsonPayload, targetUserId]
-      );
-    } else {
-      const [insertRes] = await connection.query(
-        `INSERT INTO HEALTH_PROFILES (user_id, immunization_history)
-         VALUES (?, ?)`,
-        [targetUserId, jsonPayload]
-      );
-      profileId = insertRes.insertId;
-    }
-
-    await logAudit(connection, {
-      userId: req.user.user_id,
-      action: 'UPDATE',
-      table: 'HEALTH_PROFILES',
-      recordId: profileId,
-      oldValue: null,
-      newValue: {
-        operation: 'IMMUNIZATION_HISTORY_UPDATE',
-        target_user_id: targetUserId,
-        count: cleanedList.length,
-        vaccines: cleanedList,
-      },
-      ipAddress: req.ip,
-    });
-
-    await connection.commit();
-    res.json({
-      message: 'Vaccination history updated successfully.',
-      immunizations: cleanedList,
-    });
-  } catch (error) {
-    await connection.rollback();
-    console.error('[Immunization Update Error]:', error);
-    res.status(500).json({ error: 'Failed to update vaccination history.' });
-  } finally {
-    connection.release();
-  }
-});
-
-// ── GET /api/profile/patient/:userId/immunizations ────────────────────────────
-router.get('/patient/:userId/immunizations', authenticateToken, async (req, res) => {
-  const targetUserId = Number(req.params.userId);
-  try {
-    const [rows] = await pool.query(
-      'SELECT immunization_history FROM HEALTH_PROFILES WHERE user_id = ? AND deleted_at IS NULL',
-      [targetUserId]
-    );
-
-    if (rows.length === 0 || !rows[0].immunization_history) {
-      return res.json({ immunizations: [] });
-    }
-
-    let list = rows[0].immunization_history;
-    if (typeof list === 'string') {
-      try { list = JSON.parse(list); } catch (_) { list = [list]; }
-    }
-    res.json({ immunizations: Array.isArray(list) ? list : [] });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch immunization history.' });
-  }
-});
+// ── SEC-11 Remediation (duplicate route removal) ─────────────────────────────
+// An unauthenticated duplicate GET /patient/:userId/immunizations handler used
+// to be registered here — it carried authenticateToken but NOT the
+// requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN') gate that the real
+// endpoint (registered at the top of this file) enforces. Express matches
+// routes in registration order, so the duplicate was dead code today but a
+// silent authorization bypass waiting to happen at the first refactor that
+// reorders or renames routes. It has been deleted. Do not re-register this
+// path (or any patient-data path) without requireRoles().
 
 export default router;

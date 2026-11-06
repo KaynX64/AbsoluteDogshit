@@ -7,7 +7,8 @@ services:
       MYSQL_ROOT_PASSWORD: rootpassword
       MYSQL_DATABASE: valetudo_healthlink
     ports:
-      - "3307:3306"
+      # SEC-12: bind to loopback only — never expose MySQL on campus LAN/public IPs
+      - "127.0.0.1:3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
 
@@ -17,15 +18,17 @@ services:
     restart: always
     command: ["redis-server", "--requirepass", "valetudo_redis_secret_password_2026"]
     ports:
-      - "6379:6379"
+      # SEC-12: bind to loopback only — Redis must not be reachable off-host
+      - "127.0.0.1:6379:6379"
 
   minio:
     image: cgr.dev/chainguard/minio:latest
     container_name: valetudo-minio
     restart: always
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      # SEC-12: bind to loopback only — MinIO API + console stay host-private
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadminpassword

@@ -4,6 +4,8 @@ import QrIntakeScanner from './QrIntakeScanner';
 import InventoryManager from './InventoryManager';
 import { io } from 'socket.io-client';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
+import { T } from '../theme';
+import Icon from './Icon';
 
 interface QueueItem {
   queue_id: number;
@@ -15,6 +17,22 @@ interface QueueItem {
   status: string;
   arrival_time: string;
   is_emergency?: number;
+}
+
+interface SosAlert {
+  alert_id: number;
+  first_name: string;
+  last_name: string;
+  phone?: string;
+  studentNo?: string;
+  course?: string;
+  blood_type?: string;
+  allergies?: string;
+  notes?: string;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+  status: string;
+  created_at: string;
 }
 
 interface ExpectedItem {
@@ -60,6 +78,7 @@ interface NurseConsoleProps {
 
 export default function NurseConsole({
   viewMode: controlledView,
+  onViewModeChange,
 }: NurseConsoleProps = {}) {
   const [internalView] = useState<NurseViewMode>('triage');
   const viewMode = controlledView ?? internalView;
@@ -70,7 +89,15 @@ export default function NurseConsole({
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [loadingQueue, setLoadingQueue] = useState(false);
   const [activeSosCount, setActiveSosCount] = useState<number>(0);
+  const [sosAlerts, setSosAlerts] = useState<SosAlert[]>([]);
+  const [sosBusyId, setSosBusyId] = useState<number | null>(null);
   const [noShowCount, setNoShowCount] = useState<number>(0);
+  const [invStats, setInvStats] = useState<{
+    lowStockCount: number;
+    expiringSoonCount: number;
+    expiredCount: number;
+  }>({ lowStockCount: 0, expiringSoonCount: 0, expiredCount: 0 });
+  const [selectedInvTab, setSelectedInvTab] = useState<'catalog' | 'stockin' | 'adjust' | 'alerts' | 'logs' | 'addmed'>('catalog');
 
   /* ── Expected arrivals state ─────────────────────────────── */
   const [expected, setExpected] = useState<ExpectedItem[]>([]);
@@ -138,9 +165,50 @@ export default function NurseConsole({
       });
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data)) setActiveSosCount(data.length);
+        if (Array.isArray(data)) {
+          setSosAlerts(data);
+          setActiveSosCount(data.length);
+        }
       }
     } catch (_) {}
+  };
+
+
+  const updateSosStatus = async (
+    alertId: number,
+    status: 'acknowledged' | 'dispatched' | 'resolved' | 'false_alarm'
+  ) => {
+    if (
+      (status === 'resolved' || status === 'false_alarm') &&
+      !window.confirm(
+        status === 'resolved'
+          ? 'Mark this SOS as resolved and close it?'
+          : 'Mark this SOS as a false alarm and close it?'
+      )
+    ) {
+      return;
+    }
+    setSosBusyId(alertId);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/emergency/${alertId}/status`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        window.alert(err.error || 'Failed to update SOS alert.');
+      }
+    } catch (_) {
+      window.alert('Network error while updating the SOS alert.');
+    } finally {
+      setSosBusyId(null);
+      fetchActiveSosCount();
+    }
   };
 
   const fetchNoShowCount = async () => {
@@ -152,6 +220,23 @@ export default function NurseConsole({
       if (res.ok) {
         const data = await res.json();
         setNoShowCount(Number(data.count) || 0);
+      }
+    } catch (_) {}
+  };
+
+  const fetchInventoryStats = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/inventory/dashboard-summary`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setInvStats({
+          lowStockCount: Number(data.lowStockCount) || 0,
+          expiringSoonCount: Number(data.expiringSoonCount) || 0,
+          expiredCount: Number(data.expiredCount) || 0,
+        });
       }
     } catch (_) {}
   };
@@ -179,6 +264,7 @@ export default function NurseConsole({
     fetchLiveQueue();
     fetchActiveSosCount();
     fetchNoShowCount();
+    fetchInventoryStats();
 
     const token = localStorage.getItem('valetudo_token');
     const socket = io(SOCKET_URL, {
@@ -200,6 +286,10 @@ export default function NurseConsole({
     socket.on('emergency:status_change', () => {
       fetchLiveQueue();
       fetchActiveSosCount();
+    });
+
+    socket.on('inventory:updated', () => {
+      fetchInventoryStats();
     });
 
     // The reminder worker flips appointments to 'no_show' every 60s and
@@ -293,7 +383,7 @@ export default function NurseConsole({
       const data = await res.json();
 
       if (res.status === 409) {
-        setExpectedFeedback({ text: '⚠️ ' + data.error, ok: false });
+        setExpectedFeedback({ text: '' + data.error, ok: false });
         await openCheckInConfirm(item);
         fetchLiveQueue();
         return;
@@ -302,14 +392,14 @@ export default function NurseConsole({
       if (!res.ok) throw new Error(data.error || 'Failed to check in patient.');
 
       setExpectedFeedback({
-        text: `✅ ${item.first_name} ${item.last_name} checked in as ${data.queueTicket} at ${data.arrivalTime}.`,
+        text: `${item.first_name} ${item.last_name} checked in as ${data.queueTicket} at ${data.arrivalTime}.`,
         ok: true,
       });
       setConfirmCheckIn(null);
       fetchExpected();
       fetchLiveQueue();
     } catch (err: any) {
-      setExpectedFeedback({ text: '❌ ' + err.message, ok: false });
+      setExpectedFeedback({ text: '' + err.message, ok: false });
       setConfirmCheckIn(null);
     } finally {
       setCheckingInId(null);
@@ -317,7 +407,7 @@ export default function NurseConsole({
   };
 
   if (viewMode === 'inventory') {
-    return <InventoryManager />;
+    return <InventoryManager initialTab={selectedInvTab} />;
   }
 
   if (viewMode === 'expected') {
@@ -565,7 +655,7 @@ export default function NurseConsole({
                         )}
                         {allergyIsWarning && (
                           <span style={{ color: C.danger, fontWeight: 700 }}>
-                            ⚠️ {item.allergies}
+                            <Icon name="warning" size={14} /> {item.allergies}
                           </span>
                         )}
                       </div>
@@ -590,7 +680,7 @@ export default function NurseConsole({
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      {checkingInId === item.appointment_id ? 'Checking in…' : '✓ Check in'}
+                      {checkingInId === item.appointment_id ? 'Checking in…' : 'Check in'}
                     </button>
                   </div>
                 );
@@ -662,7 +752,7 @@ export default function NurseConsole({
                         color: C.warning,
                       }}
                     >
-                      ⚠️
+                      <Icon name="warning" size={14} />
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: C.text }}>
@@ -738,7 +828,7 @@ export default function NurseConsole({
                         flexShrink: 0,
                       }}
                     >
-                      ✓
+                      <Icon name="check" size={14} />
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: C.text }}>
@@ -807,7 +897,7 @@ export default function NurseConsole({
                         fontFamily: 'inherit',
                       }}
                     >
-                      {checkingInId !== null ? 'Checking in…' : '✓ Confirm check-in'}
+                      {checkingInId !== null ? 'Checking in…' : 'Confirm check-in'}
                     </button>
                   </div>
                 </>
@@ -833,6 +923,177 @@ export default function NurseConsole({
         gap: 22,
       }}
     >
+    {/* ── ACTIVE SOS ALERTS (separate from the triage queue) ───── */}
+      {sosAlerts.length > 0 && (
+        <section
+          style={{
+            background: C.dangerSoft,
+            border: `1.5px solid ${C.dangerBorder}`,
+            borderRadius: 22,
+            padding: 22,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 14,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 24 }}><Icon name="emergency" size={14} /></span>
+            <div>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: C.danger }}>
+                Active SOS alerts
+              </h3>
+              <p style={{ margin: '2px 0 0', fontSize: 12.5, color: C.textSub }}>
+                {sosAlerts.length} open · handled separately from the triage queue
+              </p>
+            </div>
+          </div>
+
+          {sosAlerts.map((a) => {
+            const busy = sosBusyId === a.alert_id;
+            const btn = (bg: string, fg: string, bd: string) =>
+              ({
+                padding: '8px 14px',
+                borderRadius: 999,
+                background: bg,
+                color: fg,
+                border: `1px solid ${bd}`,
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: busy ? 'not-allowed' : 'pointer',
+                opacity: busy ? 0.6 : 1,
+                fontFamily: 'inherit',
+              } as const);
+            const statusText =
+              a.status === 'triggered'
+                ? 'NEW'
+                : a.status === 'acknowledged'
+                ? 'ACKNOWLEDGED'
+                : 'DISPATCHED';
+            return (
+              <div
+                key={a.alert_id}
+                style={{
+                  background: C.surface,
+                  border: `1px solid ${C.dangerBorder}`,
+                  borderRadius: 16,
+                  padding: '14px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 10,
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <div style={{ fontSize: 15, fontWeight: 800, color: C.text }}>
+                    {a.first_name} {a.last_name}
+                    <span
+                      style={{
+                        marginLeft: 8,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: C.textSub,
+                      }}
+                    >
+                      {a.studentNo || ''} {a.course ? `· ${a.course}` : ''}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 11.5, color: C.textMuted }}>
+                      {new Date(a.created_at).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                    <span
+                      style={{
+                        padding: '3px 10px',
+                        borderRadius: 999,
+                        background: T.danger,
+                        color: '#FFFFFF',
+                        fontSize: 10,
+                        fontWeight: 800,
+                        letterSpacing: 0.3,
+                      }}
+                    >
+                      {statusText}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: 12.5, color: C.textSub, lineHeight: 1.6 }}>
+                  <Icon name="bloodtype" size={14} /> Blood: <strong>{a.blood_type || 'Unknown'}</strong> · <Icon name="warning" size={14} /> Allergies:{' '}
+                  <strong>{a.allergies || 'None'}</strong>
+                  {a.phone ? <> · <Icon name="call" size={14} /> {a.phone}</> : null}
+                </div>
+                {a.notes && (
+                  <div style={{ fontSize: 12.5, color: C.text }}><Icon name="location_on" size={14} /> {a.notes}</div>
+                )}
+
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+                  {a.status === 'triggered' && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => updateSosStatus(a.alert_id, 'acknowledged')}
+                      style={btn(T.danger, '#FFFFFF', T.danger)}
+                    >
+                      Acknowledge
+                    </button>
+                  )}
+                  {a.status !== 'dispatched' && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => updateSosStatus(a.alert_id, 'dispatched')}
+                      style={btn(C.surface, C.danger, C.dangerBorder)}
+                    >
+                      Mark dispatched
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => updateSosStatus(a.alert_id, 'resolved')}
+                    style={btn(C.primary, '#FFFFFF', C.primary)}
+                  >
+                    <Icon name="check" size={14} /> Resolved
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => updateSosStatus(a.alert_id, 'false_alarm')}
+                    style={btn(C.surface, C.textSub, C.border)}
+                  >
+                    False alarm
+                  </button>
+                  {a.latitude != null && a.longitude != null && (
+                    <a
+                      href={`https://www.google.com/maps?q=${a.latitude},${a.longitude}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        ...btn(C.surface, C.primary, C.border),
+                        textDecoration: 'none',
+                        display: 'inline-block',
+                      }}
+                    >
+                      <Icon name="map" size={14} /> Open map
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </section>
+      )}
+
       <div
         style={{
           display: 'grid',
@@ -874,30 +1135,27 @@ export default function NurseConsole({
                   width: 42,
                   height: 42,
                   borderRadius: 14,
-                  background: activeSosCount > 0 ? C.dangerSoft : C.primaryTint,
+                  background: C.primaryTint,
                   display: 'grid',
                   placeItems: 'center',
                   flexShrink: 0,
                 }}
               >
-                {activeSosCount > 0 ? (
-                  <span style={{ fontSize: 20 }}>🚨</span>
-                ) : (
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke={C.primary}
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    style={{ width: 20, height: 20 }}
-                  >
-                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                    <circle cx="9" cy="7" r="4" />
-                    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                  </svg>
-                )}
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke={C.primary}
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ width: 20, height: 20 }}
+                >
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
+
               </div>
               <div>
                 <h3
@@ -912,7 +1170,7 @@ export default function NurseConsole({
                   Live triage queue
                 </h3>
                 <p style={{ margin: '2px 0 0', fontSize: 12.5, color: C.textSub }}>
-                  {waitingCount} waiting today {activeSosCount > 0 ? `· 🚨 ${activeSosCount} active SOS` : ''}
+                  {waitingCount} waiting today
                 </p>
               </div>
             </div>
@@ -1060,7 +1318,7 @@ export default function NurseConsole({
                             style={{
                               fontSize: 9.5,
                               fontWeight: 900,
-                              background: '#DC2626',
+                              background: T.danger,
                               color: '#FFFFFF',
                               padding: '1px 6px',
                               borderRadius: 4,
@@ -1102,7 +1360,7 @@ export default function NurseConsole({
                         letterSpacing: 0.6,
                         textTransform: 'uppercase',
                         whiteSpace: 'nowrap',
-                        background: isEmergency ? '#DC2626' : isServing ? C.primary : C.sage200,
+                        background: isEmergency ? T.danger : isServing ? C.primary : C.sage200,
                         color: '#FFFFFF',
                         border: 'none',
                         boxShadow: isServing || isEmergency ? '0 3px 10px rgba(31,74,52,0.22)' : 'none',
@@ -1162,34 +1420,67 @@ export default function NurseConsole({
         </section>
       </div>
 
-      {/* Stat row with Dynamic Open SOS count */}
-      {/* Stat row with Dynamic Open SOS count + No-shows today */}
+      {/* Stat row with Dynamic Open SOS count + No-shows today + Live Inventory metrics */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(5, 1fr)',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
           gap: 14,
         }}
       >
         {[
           { label: 'Seen today', value: '27', bg: '#DDEBD8', color: C.text },
           { label: 'Avg. wait', value: '6 min', bg: '#DDE7EE', color: C.text },
-          { label: 'Low stock lots', value: '1', bg: '#EDE5D6', color: C.text },
+          {
+            label: 'Low stock lots',
+            value: String(invStats.lowStockCount),
+            bg: invStats.lowStockCount > 0 ? T.warningSoft : '#EDE5D6',
+            color: invStats.lowStockCount > 0 ? T.warning : C.text,
+            onClick: () => {
+              setSelectedInvTab('alerts');
+              onViewModeChange?.('inventory');
+            },
+            title: 'Click to view Low stock lots in Alerts & Reorder',
+          },
+          {
+            label: 'Expiring soon',
+            value: String(invStats.expiringSoonCount),
+            bg: invStats.expiringSoonCount > 0 ? T.warningSoft : '#EDE5D6',
+            color: invStats.expiringSoonCount > 0 ? T.warning : C.text,
+            onClick: () => {
+              setSelectedInvTab('alerts');
+              onViewModeChange?.('inventory');
+            },
+            title: 'Click to view Expiring lots in Alerts & Reorder',
+          },
+          {
+            label: 'Expired',
+            value: String(invStats.expiredCount),
+            bg: invStats.expiredCount > 0 ? T.dangerSoft : '#EDE5D6',
+            color: invStats.expiredCount > 0 ? T.danger : C.text,
+            onClick: () => {
+              setSelectedInvTab('adjust');
+              onViewModeChange?.('inventory');
+            },
+            title: 'Click to quarantine or dispose expired lots in Adjust & Dispose',
+          },
           {
             label: 'No-shows today',
             value: String(noShowCount),
-            bg: noShowCount > 0 ? '#FEF3C7' : '#E6E1EF',
-            color: noShowCount > 0 ? '#8C6826' : C.text,
+            bg: noShowCount > 0 ? T.warningSoft : '#E6E1EF',
+            color: noShowCount > 0 ? T.warning : C.text,
           },
           {
             label: 'Open SOS alerts',
             value: String(activeSosCount),
-            bg: activeSosCount > 0 ? '#FDE8E8' : '#E6E1EF',
-            color: activeSosCount > 0 ? '#DC2626' : C.text,
+            bg: activeSosCount > 0 ? T.dangerSoft : '#E6E1EF',
+            color: activeSosCount > 0 ? T.danger : C.text,
           },
         ].map((card) => (
           <div
             key={card.label}
+            onClick={card.onClick}
+            title={card.title}
             style={{
               padding: '18px 20px',
               borderRadius: 22,
@@ -1197,13 +1488,14 @@ export default function NurseConsole({
               display: 'flex',
               flexDirection: 'column',
               gap: 8,
+              cursor: card.onClick ? 'pointer' : 'default',
             }}
           >
             <div
               style={{
                 fontSize: 11.5,
                 fontWeight: 600,
-                color: card.color === '#DC2626' ? '#991B1B' : C.textSub,
+                color: card.color === T.danger ? T.danger : C.textSub,
                 letterSpacing: 0.1,
               }}
             >

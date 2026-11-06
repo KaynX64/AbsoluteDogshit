@@ -1,7 +1,8 @@
 // desktop/src/components/AnalyticsDashboard.tsx
 import { useEffect, useState } from 'react';
-import { btnGhost, btnPrimary } from '../theme';
+import { T, btnGhost, btnPrimary } from '../theme';
 import { API_BASE_URL } from '../config/api';
+import Icon from './Icon';
 
 interface TimePoint {
   date: string;
@@ -440,7 +441,7 @@ function SvgHorizontalBarChart({ data }: { data: DeptItem[] }) {
               textAnchor="end"
               fontSize="12.5"
               fontWeight="600"
-              fill="#334155"
+              fill="#1F4462"
             >
               {d.department}
             </text>
@@ -622,7 +623,7 @@ export default function AnalyticsDashboard() {
         style={{
           padding: 80,
           textAlign: 'center',
-          color: '#7A2E26',
+          color: T.danger,
           fontSize: 14,
         }}
       >
@@ -636,14 +637,14 @@ export default function AnalyticsDashboard() {
 
   const getRoleTone = (code: string) => {
     switch (code) {
-      case 'STUDENT':             return { bg: '#D6E3F0', fg: '#1F4462', icon: '🎓' };
-      case 'FACULTY':             return { bg: '#F0E6D2', fg: '#6E5526', icon: '🏫' };
-      case 'DOCTOR':              return { bg: '#D7E8D2', fg: '#264D36', icon: '🩺' };
-      case 'DENTIST':             return { bg: '#D3E8E5', fg: '#1F5A55', icon: '🦷' };
-      case 'NURSE':               return { bg: '#DFEBE0', fg: '#2A5A38', icon: '👩‍⚕️' };
-      case 'EMERGENCY_RESPONDER': return { bg: '#F4DBD6', fg: '#7A2E26', icon: '🚨' };
-      case 'ADMIN':               return { bg: '#E4DEF2', fg: '#4A3A80', icon: '⚙️' };
-      default:                    return { bg: '#EEF3EC', fg: '#5A635B', icon: '👤' };
+      case 'STUDENT':             return { bg: T.tonalBlueBg, fg: T.tonalBlueFg, icon: 'school' };
+      case 'FACULTY':             return { bg: T.tonalCreamBg, fg: T.tonalCreamFg, icon: 'work' };
+      case 'DOCTOR':              return { bg: T.tonalGreenBg, fg: T.tonalGreenFg, icon: 'medical_services' };
+      case 'DENTIST':             return { bg: '#D3E8E5', fg: '#1F5A55', icon: 'medical_information' };
+      case 'NURSE':               return { bg: '#DFEBE0', fg: '#2A5A38', icon: 'medical_information' };
+      case 'EMERGENCY_RESPONDER': return { bg: '#F4DBD6', fg: T.danger, icon: 'emergency' };
+      case 'ADMIN':               return { bg: T.tonalLilacBg, fg: T.tonalLilacFg, icon: 'admin_panel_settings' };
+      default:                    return { bg: '#EEF3EC', fg: '#5A635B', icon: 'person' };
     }
   };
 
@@ -706,53 +707,44 @@ export default function AnalyticsDashboard() {
           gap: 12,
         }}
       >
-        <div>
-          <h1
-            style={{
-              fontSize: 28,
-              fontWeight: 800,
-              letterSpacing: -0.6,
-              color: 'var(--text)',
-              margin: 0,
-            }}
-          >
-            Epidemiological analytics
-          </h1>
-          <p style={{ fontSize: 13.5, color: 'var(--text-sub)', margin: '6px 0 0' }}>
+        <div className="vd-page-head" style={{ marginBottom: 0 }}>
+          <div className="vd-page-head-eyebrow">Analytics</div>
+          <h1 className="vd-page-head-title">Epidemiological analytics</h1>
+          <p className="vd-page-head-sub">
             Campus illness trajectories, seasonal spike monitoring & health reports
           </p>
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button type="button" onClick={fetchAnalytics} style={btnGhost}>
-            🔄 Refresh
+            <Icon name="refresh" size={14} /> Refresh
           </button>
           <button
             type="button"
             onClick={handleDownloadExcelXlsx}
             style={{
               ...btnGhost,
-              background: '#D7E8D2',
-              color: '#264D36',
+              background: T.tonalGreenBg,
+              color: T.tonalGreenFg,
               border: 'none',
               fontWeight: 700,
             }}
           >
-            📗 Export Excel (.xlsx)
+            <Icon name="menu_book" size={14} /> Export Excel (.xlsx)
           </button>
           <button
             type="button"
             onClick={handleDownloadServerPdf}
             style={btnPrimary}
           >
-            📑 Official PDF Report
+            <Icon name="library_books" size={14} /> Official PDF Report
           </button>
           <button
             type="button"
             onClick={() => window.print()}
             style={btnGhost}
           >
-            🖨️ Print View
+            <Icon name="print" size={14} />️ Print View
           </button>
         </div>
       </div>
@@ -770,33 +762,33 @@ export default function AnalyticsDashboard() {
           {
             label: 'Enrolled students',
             value: data.totalStudents,
-            icon: '🎓',
-            bg: '#D7E8D2',
-            fg: '#264D36',
+            icon: 'school',
+            bg: T.tonalGreenBg,
+            fg: T.tonalGreenFg,
             sub: 'Verified student profiles',
           },
           {
             label: 'Total consultations',
             value: data.totalConsultations,
-            icon: '🩺',
-            bg: '#D7E8D2',
-            fg: '#264D36',
+            icon: 'medical_services',
+            bg: T.tonalGreenBg,
+            fg: T.tonalGreenFg,
             sub: 'All-time encounters logged',
           },
           {
             label: 'Active emergencies',
             value: data.emergencyMetrics?.active || 0,
-            icon: '🚨',
+            icon: 'emergency',
             bg: '#F4DBD6',
-            fg: '#7A2E26',
+            fg: T.danger,
             sub: 'Pending / in-dispatch triage',
           },
           {
             label: 'Avg. response time',
             value: `${Math.round(data.emergencyMetrics?.avgResponseSeconds || 0)}s`,
-            icon: '⚡',
-            bg: '#E4DEF2',
-            fg: '#4A3A80',
+            icon: 'schedule',
+            bg: T.tonalLilacBg,
+            fg: T.tonalLilacFg,
             sub: 'Trigger to resolution average',
           },
         ].map((card) => (
@@ -827,9 +819,10 @@ export default function AnalyticsDashboard() {
                   background: 'rgba(255,255,255,0.55)',
                   display: 'grid',
                   placeItems: 'center',
+                  color: card.fg,
                 }}
               >
-                {card.icon}
+                <Icon name={card.icon} size={20} />
               </span>
               <span
                 style={{
@@ -877,7 +870,7 @@ export default function AnalyticsDashboard() {
           borderRadius: 24,
           background: isFluSpike && (data.fluStats?.cases_past_7_days || 0) > 0
             ? '#F4DBD6'
-            : '#D7E8D2',
+            : T.tonalGreenBg,
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -891,21 +884,21 @@ export default function AnalyticsDashboard() {
               fontSize: 15,
               fontWeight: 800,
               color: isFluSpike && (data.fluStats?.cases_past_7_days || 0) > 0
-                ? '#7A2E26'
-                : '#264D36',
+                ? T.danger
+                : T.tonalGreenFg,
             }}
           >
             {isFluSpike && (data.fluStats?.cases_past_7_days || 0) > 0
-              ? '⚠️ Seasonal illness / flu spike alert'
-              : '✅ Seasonal illness trends stable'}
+              ? 'Seasonal illness / flu spike alert'
+              : 'Seasonal illness trends stable'}
           </div>
           <p
             style={{
               margin: '6px 0 0',
               fontSize: 13,
               color: isFluSpike && (data.fluStats?.cases_past_7_days || 0) > 0
-                ? '#7A2E26'
-                : '#264D36',
+                ? T.danger
+                : T.tonalGreenFg,
               opacity: 0.85,
               fontWeight: 500,
             }}
@@ -920,8 +913,8 @@ export default function AnalyticsDashboard() {
           style={{
             background: 'rgba(255,255,255,0.6)',
             color: isFluSpike && (data.fluStats?.cases_past_7_days || 0) > 0
-              ? '#7A2E26'
-              : '#264D36',
+              ? T.danger
+              : T.tonalGreenFg,
             fontSize: 10.5,
             letterSpacing: 0.6,
           }}
@@ -979,7 +972,9 @@ export default function AnalyticsDashboard() {
                   textAlign: 'center',
                 }}
               >
-                <div style={{ fontSize: 22 }}>{tone.icon}</div>
+                <div style={{ fontSize: 22, display: 'grid', placeItems: 'center' }}>
+                  <Icon name={tone.icon} size={22} />
+                </div>
                 <div
                   style={{
                     fontSize: 22,
@@ -1114,26 +1109,26 @@ export default function AnalyticsDashboard() {
               {
                 label: 'Asthma / respiratory',
                 value: data.highRiskGroups?.asthma_count || 0,
-                bg: '#D6E3F0',
-                fg: '#1F4462',
+                bg: T.tonalBlueBg,
+                fg: T.tonalBlueFg,
               },
               {
                 label: 'Hypertension / cardiac',
                 value: data.highRiskGroups?.hypertension_count || 0,
                 bg: '#F4DBD6',
-                fg: '#7A2E26',
+                fg: T.danger,
               },
               {
                 label: 'Severe allergies',
                 value: data.highRiskGroups?.severe_allergies_count || 0,
-                bg: '#F0E6D2',
-                fg: '#6E5526',
+                bg: T.tonalCreamBg,
+                fg: T.tonalCreamFg,
               },
               {
                 label: 'Diabetes / endocrine',
                 value: data.highRiskGroups?.diabetes_count || 0,
-                bg: '#E4DEF2',
-                fg: '#4A3A80',
+                bg: T.tonalLilacBg,
+                fg: T.tonalLilacFg,
               },
             ].map((item) => (
               <div
@@ -1186,14 +1181,14 @@ export default function AnalyticsDashboard() {
               style={{
                 padding: '32px 20px',
                 textAlign: 'center',
-                color: '#264D36',
+                color: T.tonalGreenFg,
                 fontSize: 13,
                 fontWeight: 700,
-                background: '#D7E8D2',
+                background: T.tonalGreenBg,
                 borderRadius: 20,
               }}
             >
-              ✅ All clinic supplies have adequate stock buffers.
+              <Icon name="check_circle" size={14} /> All clinic supplies have adequate stock buffers.
             </div>
           ) : (
             <div
@@ -1243,7 +1238,7 @@ export default function AnalyticsDashboard() {
                       style={{
                         fontSize: 13,
                         fontWeight: 800,
-                        color: criticalStock ? '#7A2E26' : '#264D36',
+                        color: criticalStock ? T.danger : T.tonalGreenFg,
                         textAlign: 'right',
                       }}
                     >
@@ -1252,7 +1247,7 @@ export default function AnalyticsDashboard() {
                     <div
                       style={{
                         fontSize: 11,
-                        color: criticalExpiry ? '#7A2E26' : 'var(--text-sub)',
+                        color: criticalExpiry ? T.danger : 'var(--text-sub)',
                         fontWeight: 600,
                         textAlign: 'right',
                       }}

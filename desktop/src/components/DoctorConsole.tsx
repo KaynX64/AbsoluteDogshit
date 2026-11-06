@@ -6,6 +6,8 @@ import AnalyticsDashboard from './AnalyticsDashboard';
 import { queueOfflineMutation } from '../services/offlineSync';
 import { T, btnPrimary, btnGhost, inputStyle } from '../theme';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
+import SignatureEnrollment from './SignatureEnrollment';
+import Icon from './Icon';
 
 /* ── ODONTOGRAM TYPES (declared before use) ─────────────────── */
 export type ToothCondition =
@@ -102,45 +104,45 @@ const COMMON_VACCINES = [
   'Typhoid',
 ];
 
-/* Odontogram colour palette */
+/* Odontogram colour palette — sourced from theme tokens for palette cohesion. */
 const CONDITION_COLORS: Record<
   ToothCondition,
   { bg: string; text: string; label: string; border: string }
 > = {
   sound: {
-    bg: '#EEF3EC',
-    text: '#2E5C43',
-    border: '#C9D9C7',
+    bg: T.sage100,
+    text: T.primaryMid,
+    border: T.sage300,
     label: 'Sound',
   },
   caries: {
-    bg: '#FDE8E8',
-    text: '#7A2E26',
-    border: '#F8B4B4',
+    bg: T.dangerSoft,
+    text: T.danger,
+    border: T.dangerBorder,
     label: 'Caries (Decay)',
   },
   filled: {
-    bg: '#E0F2FE',
-    text: '#0369A1',
-    border: '#BAE6FD',
+    bg: T.infoSoft,
+    text: T.info,
+    border: T.infoBorder,
     label: 'Restored / Filled',
   },
   missing: {
-    bg: '#F3F4F6',
-    text: '#6B7280',
-    border: '#D1D5DB',
+    bg: T.surface2,
+    text: T.textSub,
+    border: T.border,
     label: 'Missing / Extracted',
   },
   extraction_needed: {
-    bg: '#FEF3C7',
-    text: '#92400E',
-    border: '#FDE68A',
+    bg: T.warningSoft,
+    text: T.warning,
+    border: T.warningBorder,
     label: 'Needs Extraction',
   },
   prophylaxis: {
-    bg: '#F0FDFA',
-    text: '#0F766E',
-    border: '#99F6E4',
+    bg: T.tonalTealBg,
+    text: T.tonalTealFg,
+    border: '#9FD9CB',
     label: 'Calculus / Prophylaxis',
   },
 };
@@ -148,9 +150,24 @@ const CONDITION_COLORS: Record<
 const UPPER_TEETH = Array.from({ length: 16 }, (_, i) => i + 1); // 1-16
 const LOWER_TEETH = Array.from({ length: 16 }, (_, i) => 32 - i); // 32-17
 
+const DEFAULT_CHIEF_COMPLAINT =
+  'Moderate grade fever (38.4 C), sore throat, rhinorrhea, and non-productive hacking cough x 3 days.';
+const DEFAULT_DIAGNOSIS =
+  'Acute Viral Upper Respiratory Tract Infection / Pharyngitis (ICD-10 J06.9).';
+const DEFAULT_TREATMENT_PLAN = [
+  '1. Paracetamol 500mg tab 1 tab q4h PRN for fever > 37.8 C.',
+  '2. Cetirizine 10mg tab once daily at bedtime x 5 days.',
+  '3. Warm salt water gargles TID; increase oral hydration to 2.5L/day.',
+  '4. Advised rest and excuse slip issued for classes.',
+].join('\n');
+
 /* Strip any legacy inline odontogram text out of treatment plans */
 function stripLegacyOdontogram(text: string): string {
   return (text || '').replace(/\n*\[DENTAL ODONTOGRAM CHART\]:[^\n]*/g, '').trim();
+}
+
+function isDefaultDiagnosis(text: string): boolean {
+  return text.trim().replace(/[.\s]+$/, '') === DEFAULT_DIAGNOSIS.replace(/[.\s]+$/, '');
 }
 
 export default function DoctorConsole({
@@ -159,6 +176,7 @@ export default function DoctorConsole({
 }: DoctorConsoleProps = {}) {
   const [internalView] = useState<DoctorViewMode>('active');
   const viewMode = controlledView ?? internalView;
+  const [showSignature, setShowSignature] = useState(false);
 
   /* Safe dentist detection: prop first, then JWT fallback */
   const isDentist = currentRole
@@ -187,6 +205,7 @@ export default function DoctorConsole({
   const [diagnosis, setDiagnosis] = useState('');
   const [treatmentPlan, setTreatmentPlan] = useState('');
   const [clinicalNotes, setClinicalNotes] = useState('');
+  const [encounterConfirmation, setEncounterConfirmation] = useState<string[] | null>(null);
   const [isSubmittingEMR, setIsSubmittingEMR] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<{
     text: string;
@@ -242,6 +261,20 @@ export default function DoctorConsole({
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [patientHistory, setPatientHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  
+  /* ── Prescription history modal (issuer-only) ──────────────── */
+  const [showRxHistoryModal, setShowRxHistoryModal] = useState(false);
+  const [rxHistory, setRxHistory] = useState<any[]>([]);
+  const [loadingRxHistory, setLoadingRxHistory] = useState(false);
+  const [rxHistoryPatientName, setRxHistoryPatientName] = useState('');
+  const [rxHistoryError, setRxHistoryError] = useState<string | null>(null);
+
+  /* ── Clearance history modal (issuer-only) ─────────────────── */
+  const [showClrHistoryModal, setShowClrHistoryModal] = useState(false);
+  const [clrHistory, setClrHistory] = useState<any[]>([]);
+  const [loadingClrHistory, setLoadingClrHistory] = useState(false);
+  const [clrHistoryPatientName, setClrHistoryPatientName] = useState('');
+  const [clrHistoryError, setClrHistoryError] = useState<string | null>(null);
 
   /* ── Archive (patient directory) state ────────────────────── */
   const [patientSearchQuery, setPatientSearchQuery] = useState('');
@@ -320,7 +353,7 @@ export default function DoctorConsole({
       fetchAppointments(viewMode, true);
       if (evt?.status === 'checked_in' && window.electronAPI?.showNotification) {
         window.electronAPI.showNotification({
-          title: '🔔 Patient Triaged & Ready',
+          title: 'Patient Triaged & Ready',
           body: 'A student booked under your care has been checked in by the triage nurse.',
         });
       }
@@ -342,7 +375,7 @@ export default function DoctorConsole({
     if (conflicts.length > 0) {
       // Show a prominent UI warning to the doctor
       setFeedbackMsg({
-        text: `⚠️ Offline Sync Conflict: ${conflicts.length} record(s) were modified by someone else while you were offline, or failed to process. Please review the patient's current status manually.`,
+        text: `Offline Sync Conflict: ${conflicts.length} record(s) were modified by someone else while you were offline, or failed to process. Please review the patient's current status manually.`,
         type: 'error' // Assuming your feedbackMsg supports 'error' type styling
       });
     }
@@ -357,6 +390,7 @@ export default function DoctorConsole({
     setDiagnosis('');
     setTreatmentPlan('');
     setClinicalNotes('');
+    setEncounterConfirmation(null);
     setAttachedFile(null);
     setFeedbackMsg(null);
     setDentalChartData({});
@@ -368,15 +402,21 @@ export default function DoctorConsole({
   const selectPatient = (app: AppointmentItem) => {
     setSelectedApp(app);
 
-    let rawComplaint =
-      app.past_chief_complaint || app.notes || `${app.appointment_type} requested`;
+    let rawComplaint = app.past_chief_complaint || app.notes || '';
     if (rawComplaint.includes('[TRIAGE VITALS]')) {
       rawComplaint = rawComplaint.replace(/\[TRIAGE VITALS\][^\n]*\n?/, '').trim();
     }
-    setChiefComplaint(rawComplaint || `${app.appointment_type} requested`);
-    setDiagnosis(app.past_diagnosis || '');
-    setTreatmentPlan(stripLegacyOdontogram(app.past_treatment || ''));
+    setChiefComplaint(
+      rawComplaint.trim() === DEFAULT_CHIEF_COMPLAINT ? '' : rawComplaint
+    );
+    const pastDiagnosis = app.past_diagnosis || '';
+    setDiagnosis(isDefaultDiagnosis(pastDiagnosis) ? '' : pastDiagnosis);
+    const pastTreatment = stripLegacyOdontogram(app.past_treatment || '');
+    setTreatmentPlan(
+      pastTreatment.trim() === DEFAULT_TREATMENT_PLAN ? '' : pastTreatment
+    );
     setClinicalNotes(app.past_clinical_notes || '');
+    setEncounterConfirmation(null);
     setHeight(app.height ? String(app.height) : '');
     setWeight(app.weight ? String(app.weight) : '');
     setAttachedFile(null);
@@ -526,16 +566,22 @@ export default function DoctorConsole({
     }
   };
 
-  const handleFinishConsultation = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedApp) return;
-    if (!diagnosis.trim()) {
-      setFeedbackMsg({
-        text: '⚠️ Please enter a clinical diagnosis before finalizing.',
-        type: 'error',
-      });
+  const handleFinishConsultation = async (
+    e?: React.FormEvent,
+    confirmed = false
+  ) => {
+    e?.preventDefault();
+    if (!selectedApp || isBookingMode) return;
+    if (!confirmed) {
+      const defaultedFields = [
+        !chiefComplaint.trim() && `Chief complaint: ${DEFAULT_CHIEF_COMPLAINT}`,
+        !diagnosis.trim() && `Clinical diagnosis: ${DEFAULT_DIAGNOSIS}`,
+        !treatmentPlan.trim() && `Treatment plan: ${DEFAULT_TREATMENT_PLAN}`,
+      ].filter((field): field is string => Boolean(field));
+      setEncounterConfirmation(defaultedFields);
       return;
     }
+    setEncounterConfirmation(null);
     setIsSubmittingEMR(true);
     setFeedbackMsg(null);
     const token = localStorage.getItem('valetudo_token');
@@ -547,9 +593,9 @@ export default function DoctorConsole({
     const encounterPayload = {
       patient_user_id: selectedApp.patient_id,
       appointment_id: selectedApp.appointment_id,
-      chief_complaint: chiefComplaint,
-      diagnosis,
-      treatment_plan: treatmentPlan,
+      chief_complaint: chiefComplaint.trim() || DEFAULT_CHIEF_COMPLAINT,
+      diagnosis: diagnosis.trim() || DEFAULT_DIAGNOSIS,
+      treatment_plan: treatmentPlan.trim() || DEFAULT_TREATMENT_PLAN,
       notes: clinicalNotes,
       dental_chart:
         isDentist && chartedTeeth.length > 0 ? dentalChartData : undefined,
@@ -577,7 +623,7 @@ export default function DoctorConsole({
       setIsSubmittingEMR(false);
       setFeedbackMsg({
         text:
-          '🌐 [Offline Mode] Network unavailable. Encounter saved to local offline queue. Will auto-sync to MySQL upon reconnection.',
+          '[Offline Mode] Network unavailable. Encounter saved to local offline queue. Will auto-sync to MySQL upon reconnection.',
         type: 'success',
       });
       return;
@@ -621,11 +667,21 @@ export default function DoctorConsole({
       resetForm();
       setFeedbackMsg({
         text: fileSuccess
-          ? '✅ Encounter finalized, lab file uploaded to MinIO S3, and patient discharged.'
-          : '✅ Encounter finalized and patient discharged to History Archive.',
+          ? 'Encounter finalized, lab file uploaded to MinIO S3, and patient discharged.'
+          : 'Encounter finalized and patient discharged to History Archive.',
         type: 'success',
       });
     } catch (err: any) {
+      /* Only a real network failure (fetch TypeError) is queued offline.
+         Server rejections must be shown, not silently queued. */
+      if (!(err instanceof TypeError)) {
+        setFeedbackMsg({
+          text: err.message || 'Failed to complete encounter.',
+          type: 'error',
+        });
+        return;
+      }
+      
       queueOfflineMutation({
         table_name: 'EMR_RECORDS',
         record_uuid: crypto.randomUUID(),
@@ -635,7 +691,7 @@ export default function DoctorConsole({
       resetForm();
       setFeedbackMsg({
         text:
-          '⚠️ Server unreachable. Encounter queued locally in offline storage. Will replay automatically when online.',
+          'Server unreachable. Encounter queued locally in offline storage. Will replay automatically when online.',
         type: 'success',
       });
     } finally {
@@ -677,6 +733,63 @@ const handleViewPatientHistory = async () => {
       console.error('History fetch error:', err);
     } finally {
       setLoadingHistory(false);
+    }
+  };
+
+  /* ═══════════════════════════════════════════════════════════ */
+  /* PRESCRIPTION HISTORY (issuer-only)                          */
+  /* ═══════════════════════════════════════════════════════════ */
+
+  const openPrescriptionHistory = async (patientId: number, patientName: string) => {
+    setRxHistoryPatientName(patientName);
+    setRxHistory([]);
+    setRxHistoryError(null);
+    setShowRxHistoryModal(true);
+    setLoadingRxHistory(true);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/documents/prescriptions/patient/${patientId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !Array.isArray(data)) {
+        throw new Error((data && data.error) || `HTTP ${res.status}`);
+      }
+      setRxHistory(data);
+    } catch (err: any) {
+      setRxHistoryError(
+        'Could not load prescription history: ' + (err?.message || 'Network error')
+      );
+    } finally {
+      setLoadingRxHistory(false);
+    }
+  };
+
+  
+  const openClearanceHistory = async (patientId: number, patientName: string) => {
+    setClrHistoryPatientName(patientName);
+    setClrHistory([]);
+    setClrHistoryError(null);
+    setShowClrHistoryModal(true);
+    setLoadingClrHistory(true);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/documents/clearances/patient/${patientId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !Array.isArray(data)) {
+        throw new Error((data && data.error) || `HTTP ${res.status}`);
+      }
+      setClrHistory(data);
+    } catch (err: any) {
+      setClrHistoryError(
+        'Could not load clearance history: ' + (err?.message || 'Network error')
+      );
+    } finally {
+      setLoadingClrHistory(false);
     }
   };
 
@@ -759,7 +872,7 @@ const loadPatientTimeline = async (patient: any) => {
   /* ═══════════════════════════════════════════════════════════ */
 
   const openImmunizationModal = async () => {
-    if (!selectedApp) return;
+    if (!selectedApp || isBookingMode) return;
     setShowImmunizationModal(true);
     setPatientImmunizations([]);
     setNewImmunizations([]);
@@ -781,13 +894,13 @@ const loadPatientTimeline = async (patient: any) => {
       } else {
         const err = await res.json().catch(() => ({}));
         setImmunizationFeedback({
-          text: '❌ ' + (err.error || 'Failed to load immunization records.'),
+          text: '' + (err.error || 'Failed to load immunization records.'),
           type: 'error',
         });
       }
     } catch (err: any) {
       setImmunizationFeedback({
-        text: '❌ Network error: ' + err.message,
+        text: 'Network error: ' + err.message,
         type: 'error',
       });
     } finally {
@@ -825,7 +938,7 @@ const loadPatientTimeline = async (patient: any) => {
       newImmunizations.some((p) => p.toLowerCase() === lower)
     ) {
       setImmunizationFeedback({
-        text: '⚠️ That immunization is already on record or already queued for this visit.',
+        text: 'That immunization is already on record or already queued for this visit.',
         type: 'error',
       });
       return;
@@ -858,7 +971,10 @@ const loadPatientTimeline = async (patient: any) => {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ immunizations: mergedList }),
+          body: JSON.stringify({
+            immunizations: mergedList,
+            appointment_id: selectedApp.appointment_id,
+          }),
         }
       );
       const data = await res.json();
@@ -868,10 +984,10 @@ const loadPatientTimeline = async (patient: any) => {
         Array.isArray(data.immunizations) ? data.immunizations : mergedList
       );
       setNewImmunizations([]);
-      setImmunizationFeedback({ text: '✅ ' + data.message, type: 'success' });
-      setFeedbackMsg({ text: `💉 ${data.message}`, type: 'success' });
+      setImmunizationFeedback({ text: '' + data.message, type: 'success' });
+      setFeedbackMsg({ text: `${data.message}`, type: 'success' });
     } catch (err: any) {
-      setImmunizationFeedback({ text: '❌ ' + err.message, type: 'error' });
+      setImmunizationFeedback({ text: '' + err.message, type: 'error' });
     } finally {
       setSavingImmunizations(false);
     }
@@ -883,7 +999,8 @@ const loadPatientTimeline = async (patient: any) => {
 
   const handleDownloadPdf = async (
     kind: 'prescriptions' | 'clearances',
-    id: number
+    id: number,
+    onError?: (message: string) => void
   ) => {
     const token = localStorage.getItem('valetudo_token');
     try {
@@ -893,10 +1010,9 @@ const loadPatientTimeline = async (patient: any) => {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        setFeedbackMsg({
-          text: '❌ PDF download failed: ' + (err.error || `HTTP ${res.status}`),
-          type: 'error',
-        });
+        const message = 'PDF download failed: ' + (err.error || `HTTP ${res.status}`);
+        if (onError) onError(message);
+        else setFeedbackMsg({ text: message, type: 'error' });
         return;
       }
 
@@ -915,10 +1031,41 @@ const loadPatientTimeline = async (patient: any) => {
 
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (err: any) {
-      setFeedbackMsg({
-        text: '❌ Network error fetching PDF: ' + err.message,
-        type: 'error',
+      const message = 'Network error fetching PDF: ' + err.message;
+      if (onError) onError(message);
+      else setFeedbackMsg({ text: message, type: 'error' });
+    }
+  };
+
+  
+  /* Opens the server-generated PDF (same file as "Download PDF") in the preview window */
+  const openIssuedPdf = async (
+    kind: 'prescriptions' | 'clearances',
+    id: number
+  ): Promise<boolean> => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/documents/${kind}/${id}/pdf`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const blob = new Blob([await res.blob()], { type: 'application/pdf' });
+      const objectUrl = URL.createObjectURL(blob);
+      const fileName =
+        kind === 'prescriptions' ? `prescription-${id}.pdf` : `clearance-${id}.pdf`;
+      setPreviewModal((prev) => {
+        if (prev?.url) URL.revokeObjectURL(prev.url);
+        return { url: objectUrl, fileName, mimeType: 'application/pdf' };
+      });
+      return true;
+    } catch (err: any) {
+      alert(
+        `Issued successfully, but the PDF could not be opened (${err.message}). Use the Download PDF button.`
+      );
+      return false;
     }
   };
 
@@ -927,7 +1074,7 @@ const loadPatientTimeline = async (patient: any) => {
   /* ═══════════════════════════════════════════════════════════ */
 
   const handlePrintClearance = async () => {
-    if (!selectedApp) return;
+    if (!selectedApp || isBookingMode) return;
     setIsIssuingClearance(true);
     const token = localStorage.getItem('valetudo_token');
     try {
@@ -939,6 +1086,7 @@ const loadPatientTimeline = async (patient: any) => {
         },
         body: JSON.stringify({
           user_id: selectedApp.patient_id,
+          appointment_id: selectedApp.appointment_id,
           purpose: clearancePurpose,
           remarks: clearanceRemarks,
           expires_at: clearanceExpiryDate,
@@ -947,87 +1095,11 @@ const loadPatientTimeline = async (patient: any) => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to issue medical clearance.');
 
-      const realQrToken = data.qrToken;
       const clearanceId = data.clearanceId;
-      const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
-        realQrToken
-      )}`;
-
-      const htmlContent = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <title>Medical Clearance #${clearanceId}</title>
-            <style>
-              body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 40px; color: #1e293b; max-width: 800px; margin: 0 auto; }
-              .header { text-align: center; border-bottom: 2px solid #0f766e; padding-bottom: 12px; }
-              .header h1 { margin: 0; color: #0f766e; font-size: 20px; }
-              .title { text-align: center; margin: 26px 0 16px; font-size: 18px; font-weight: bold; text-decoration: underline; }
-              .patient-box { margin: 16px 0; padding: 14px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; line-height: 1.6; }
-              .body-text { font-size: 14px; line-height: 1.8; margin-top: 18px; }
-              .verification-panel { margin-top: 26px; display: flex; align-items: center; gap: 20px; border: 1px solid #99f6e4; background: #f0fdfa; padding: 16px; border-radius: 6px; }
-              .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: flex-end; font-size: 12px; }
-              .sig-line { border-top: 1px solid #000; width: 220px; text-align: center; font-weight: bold; padding-top: 4px; }
-            </style>
-          </head>
-          <body>
-            <div class="header">
-              <h1>PANGASINAN STATE UNIVERSITY INFIRMARY</h1>
-              <p>Lingayen Campus Medical Services • Republic Act No. 10173 Verified E-Clearance</p>
-            </div>
-            <div class="title">OFFICIAL MEDICAL CLEARANCE CERTIFICATE</div>
-            <div class="patient-box">
-              <b>Student Name:</b> ${selectedApp.first_name} ${selectedApp.last_name} &nbsp;|&nbsp; <b>ID No:</b> ${selectedApp.student_no || 'N/A'}<br/>
-              <b>Course / Department:</b> ${selectedApp.course || 'PSU Student'}<br/>
-              <b>Vital Signs:</b> Height: ${height || selectedApp.height || '162'} cm &nbsp;|&nbsp; Weight: ${weight || selectedApp.weight || '54'} kg &nbsp;|&nbsp; Blood Type: ${selectedApp.blood_type || 'O+'}
-            </div>
-            <p class="body-text">
-              To Whom It May Concern:<br/><br/>
-              This certifies that the student named above has undergone clinical evaluation at the PSU Lingayen Campus Infirmary on <b>${new Date().toLocaleDateString()}</b> and is determined to be:
-              <br/><br/>
-              <b>Purpose:</b> ${clearancePurpose}<br/>
-              <b>Valid Until:</b> <span style="color: #0f766e; font-weight: bold;">${new Date(clearanceExpiryDate).toLocaleDateString()}</span><br/>
-              <b>Clinical Assessment / Remarks:</b> ${clearanceRemarks}
-            </p>
-            <div class="verification-panel">
-              <img src="${qrImageUrl}" width="110" height="110" alt="Clearance QR Verification" />
-              <div>
-                <b style="color: #0f766e;">Republic Act No. 10173 Cryptographic Seal</b>
-                <p style="margin: 4px 0; font-size: 11px; color: #64748b;">
-                  Verifiable by university deans, athletic screening committees, or host training establishments.
-                </p>
-                <code style="font-size: 10px; background: #fff; padding: 2px 6px; border: 1px solid #cbd5e1; border-radius: 4px;">${realQrToken}</code>
-              </div>
-            </div>
-            <div class="footer">
-              <div>
-                <p>Issued Date: ${new Date().toLocaleDateString()}</p>
-                <p>Expiration Date: ${new Date(clearanceExpiryDate).toLocaleDateString()}</p>
-                <p>Clearance Ref: CLR-${clearanceId}</p>
-              </div>
-              <div class="sig-line">
-                Attending Campus Physician<br/>
-                <small>PRC License Verified E-Signature</small>
-              </div>
-            </div>
-          </body>
-        </html>
-      `;
-
-      if (window.electronAPI?.printDocument) {
-        await window.electronAPI.printDocument({ htmlContent });
-      } else {
-        const printWin = window.open('', '_blank');
-        if (printWin) {
-          printWin.document.write(htmlContent);
-          printWin.document.close();
-          printWin.focus();
-          printWin.print();
-        }
-      }
+      await openIssuedPdf('clearances', clearanceId);
 
       setFeedbackMsg({
-        text: `✅ Clearance #${clearanceId} (Expires: ${clearanceExpiryDate}) issued!`,
+        text: `Clearance #${clearanceId} (Expires: ${clearanceExpiryDate}) issued!`,
         type: 'success',
         pdfKind: 'clearances',
         pdfId: clearanceId,
@@ -1050,6 +1122,11 @@ const loadPatientTimeline = async (patient: any) => {
     viewMode === 'history' ||
     selectedApp?.status === 'completed' ||
     selectedApp?.status === 'cancelled';
+
+      /* Bookings (not yet triaged) are VIEW-ONLY. Documents and encounters
+     may only be created from the QUEUE. */
+  const isBookingMode =
+    viewMode === 'scheduled' || selectedApp?.status === 'scheduled';
 
   const isDentalVisit =
     isDentist &&
@@ -1085,21 +1162,27 @@ const loadPatientTimeline = async (patient: any) => {
     <div style={{ width: '100%' }}>
       {/* ── Page header ─────────────────────────────────────── */}
       {viewMode !== 'analytics' && (
-        <div style={{ marginBottom: 20 }}>
-          <h1
-            style={{
-              fontSize: 28,
-              fontWeight: 800,
-              letterSpacing: -0.6,
-              color: T.text,
-              margin: 0,
-            }}
+        <div
+          style={{
+            marginBottom: 20,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            gap: 16,
+          }}
+        >
+          <div className="vd-page-head" style={{ marginBottom: 0 }}>
+            <div className="vd-page-head-eyebrow">Consultation</div>
+            <h1 className="vd-page-head-title">{headerTitle[viewMode]}</h1>
+            <p className="vd-page-head-sub">{headerSub[viewMode]}</p>
+          </div>
+          <button
+            type="button"
+            style={btnGhost}
+            onClick={() => setShowSignature(true)}
           >
-            {headerTitle[viewMode]}
-          </h1>
-          <p style={{ fontSize: 13.5, color: T.textSub, margin: '6px 0 0' }}>
-            {headerSub[viewMode]}
-          </p>
+            <Icon name="edit_note" size={14} /> My signature
+          </button>
         </div>
       )}
 
@@ -1193,7 +1276,7 @@ const loadPatientTimeline = async (patient: any) => {
                           border: `1px solid ${T.primaryTint}`,
                         }}
                       >
-                        🎫 {app.queue_ticket || (app.status === 'completed' ? 'DONE' : 'WAITING')}
+                        <Icon name="confirmation_number" size={14} /> {app.queue_ticket || (app.status === 'completed' ? 'DONE' : 'WAITING')}
                       </span>
                       <span
                         style={{
@@ -1235,7 +1318,7 @@ const loadPatientTimeline = async (patient: any) => {
                         fontFamily: T.mono,
                       }}
                     >
-                         📅 {app.date_str} · ⏰ {app.time_slot}
+                         <Icon name="calendar_month" size={14} /> {app.date_str} · ⏰ {app.time_slot}
                     </div>
                   </button>
                 );
@@ -1402,6 +1485,43 @@ const loadPatientTimeline = async (patient: any) => {
                         {selectedDirectoryPatient.allergies}
                       </span>
                     </p>
+                                        <button
+                      type="button"
+                      onClick={() =>
+                        openPrescriptionHistory(
+                          selectedDirectoryPatient.user_id,
+                          `${selectedDirectoryPatient.first_name} ${selectedDirectoryPatient.last_name}`
+                        )
+                      }
+                      style={{
+                        ...btnGhost,
+                        marginTop: 10,
+                        color: T.primary,
+                        borderColor: T.primaryTint,
+                      }}
+                      title="Prescriptions you issued to this patient"
+                    >
+                      <Icon name="medication" size={14} /> My prescriptions
+                    </button>
+                                        <button
+                      type="button"
+                      onClick={() =>
+                        openClearanceHistory(
+                          selectedDirectoryPatient.user_id,
+                          `${selectedDirectoryPatient.first_name} ${selectedDirectoryPatient.last_name}`
+                        )
+                      }
+                      style={{
+                        ...btnGhost,
+                        marginTop: 10,
+                        marginLeft: 8,
+                        color: T.primary,
+                        borderColor: T.primaryTint,
+                      }}
+                      title="Clearances you issued to this patient"
+                    >
+                      <Icon name="description" size={14} /> My clearances
+                    </button>
                   </div>
 
                   <div
@@ -1552,7 +1672,7 @@ const loadPatientTimeline = async (patient: any) => {
                                     cursor: 'pointer',
                                   }}
                                 >
-                                  📎 {att.file_name}{' '}
+                                  <Icon name="attach_file" size={14} /> {att.file_name}{' '}
                                   {openingAttachmentId === att.attachment_id
                                     ? '(Loading…)'
                                     : ''}
@@ -1679,7 +1799,7 @@ const loadPatientTimeline = async (patient: any) => {
                       }}
                     >
                       {selectedApp.allergies
-                        ? `⚠️ ${selectedApp.allergies}`
+                        ? `${selectedApp.allergies}`
                         : 'None reported'}
                     </span>
                   </span>
@@ -1723,35 +1843,74 @@ const loadPatientTimeline = async (patient: any) => {
                     borderColor: T.infoBorder,
                   }}
                 >
-                  📜 Past EMR history
+                  <Icon name="article" size={14} /> Past EMR history
                 </button>
-
+                
                 <button
                   type="button"
-                  onClick={openImmunizationModal}
+                  onClick={() =>
+                    openPrescriptionHistory(
+                      selectedApp.patient_id,
+                      `${selectedApp.first_name} ${selectedApp.last_name}`
+                    )
+                  }
                   style={{
                     ...btnGhost,
                     color: T.primary,
                     borderColor: T.primaryTint,
                   }}
-                  title="View and append immunization records"
+                  title="Prescriptions you issued to this patient"
                 >
-                  💉 Immunizations
+                  <Icon name="medication" size={14} /> My prescriptions
                 </button>
 
-                {isDentist && (
+                
+                <button
+                  type="button"
+                  onClick={() =>
+                    openClearanceHistory(
+                      selectedApp.patient_id,
+                      `${selectedApp.first_name} ${selectedApp.last_name}`
+                    )
+                  }
+                  style={{
+                    ...btnGhost,
+                    color: T.primary,
+                    borderColor: T.primaryTint,
+                  }}
+                  title="Clearances you issued to this patient"
+                >
+                  <Icon name="description" size={14} /> My clearances
+                </button>
+
+                {!isBookingMode && (
+                  <button
+                    type="button"
+                    onClick={openImmunizationModal}
+                    style={{
+                      ...btnGhost,
+                      color: T.primary,
+                      borderColor: T.primaryTint,
+                    }}
+                    title="View and append immunization records"
+                  >
+                    <Icon name="vaccines" size={14} /> Immunizations
+                  </button>
+                )}
+
+                {isDentist && !isBookingMode && (
                   <button
                     type="button"
                     onClick={() => setForceShowDentalChart((prev) => !prev)}
                     style={{
                       ...btnGhost,
-                      color: isDentalVisit ? '#0F766E' : T.textSub,
-                      borderColor: isDentalVisit ? '#99F6E4' : T.border,
-                      background: isDentalVisit ? '#F0FDFA' : T.surface,
+                      color: isDentalVisit ? T.tonalTealFg : T.textSub,
+                      borderColor: isDentalVisit ? '#9FD9CB' : T.border,
+                      background: isDentalVisit ? T.tonalTealBg : T.surface,
                     }}
                     title="Toggle Dental Odontogram"
                   >
-                    🦷 {isDentalVisit ? 'Odontogram Active' : 'Dental Chart'}
+                    <Icon name="dentistry" size={14} /> {isDentalVisit ? 'Odontogram Active' : 'Dental Chart'}
                   </button>
                 )}
 
@@ -1767,7 +1926,7 @@ const loadPatientTimeline = async (patient: any) => {
                       border: `1px solid ${T.successBorder}`,
                     }}
                   >
-                    ✅ Encounter discharged
+                    <Icon name="check_circle" size={14} /> Encounter discharged
                   </span>
                 ) : selectedApp.status === 'scheduled' ? (
                   <span
@@ -1795,7 +1954,7 @@ const loadPatientTimeline = async (patient: any) => {
                       border: `1px solid ${T.successBorder}`,
                     }}
                   >
-                    🩺 In consultation
+                    <Icon name="medical_services" size={14} /> In consultation
                   </span>
                 ) : (
                   <button
@@ -1840,10 +1999,10 @@ const loadPatientTimeline = async (patient: any) => {
                     gap: 6,
                   }}
                 >
-                  📂 Prior Diagnostic Records & Lab Imaging on File (
+                  <Icon name="folder_open" size={14} /> Prior Diagnostic Records & Lab Imaging on File (
                   {activePatientAttachments.length})
                 </span>
-                <span style={{ fontSize: 11, color: '#0284C7', fontWeight: 600 }}>
+                <span style={{ fontSize: 11, color: T.info, fontWeight: 600 }}>
                   Click to open/inspect attachment
                 </span>
               </div>
@@ -1867,24 +2026,24 @@ const loadPatientTimeline = async (patient: any) => {
                       borderRadius: T.radius.pill,
                       fontSize: 12,
                       fontWeight: 700,
-                      color: '#0284C7',
+                      color: T.info,
                       cursor: 'pointer',
                       boxShadow: T.shadow.xs,
                       fontFamily: T.font,
                     }}
                   >
-                    📄 {att.file_name}
+                    <Icon name="draft" size={14} /> {att.file_name}
                     <span
                       style={{
                         fontSize: 10.5,
-                        color: '#64748B',
+                        color: T.textMuted,
                         fontWeight: 500,
                       }}
                     >
                       ({new Date(att.encounter_date).toLocaleDateString()})
                     </span>
                     <span style={{ fontSize: 11, color: '#0369A1' }}>
-                      {openingAttachmentId === att.attachment_id ? '⏳' : '👁️'}
+                      {openingAttachmentId === att.attachment_id ? '⏳' : '️'}
                     </span>
                   </button>
                 ))}
@@ -1893,11 +2052,11 @@ const loadPatientTimeline = async (patient: any) => {
           )}
 
           {/* ── INTERACTIVE ODONTOGRAM ───────────────────────── */}
-          {selectedApp && isDentalVisit && (
+          {selectedApp && isDentalVisit && !isBookingMode && (
             <div
               style={{
                 background: T.surface,
-                border: '1.5px solid #0F766E',
+                border: `1.5px solid ${T.tonalTealFg}`,
                 borderRadius: T.radius.lg,
                 padding: '18px 22px',
                 marginBottom: 20,
@@ -1920,13 +2079,13 @@ const loadPatientTimeline = async (patient: any) => {
                       margin: 0,
                       fontSize: 15,
                       fontWeight: 800,
-                      color: '#0F766E',
+                      color: T.tonalTealFg,
                       display: 'flex',
                       alignItems: 'center',
                       gap: 6,
                     }}
                   >
-                    🦷 Adult Dental Chart (Odontogram) · Universal Numbering System
+                    <Icon name="dentistry" size={14} /> Adult Dental Chart (Odontogram) · Universal Numbering System
                   </h4>
                   <p style={{ margin: '3px 0 0', fontSize: 12, color: T.textSub }}>
                     Click a tooth (Upper 1–16, Lower 32–17) to record or update findings.
@@ -2176,7 +2335,26 @@ const loadPatientTimeline = async (patient: any) => {
             </div>
           )}
 
-          {/* Two-column workspace */}
+          {/* Two-column workspace — QUEUE ONLY (bookings are view-only) */}
+          {isBookingMode ? (
+            <div
+              style={{
+                padding: '18px 22px',
+                background: T.warningSoft,
+                border: `1px solid ${T.border}`,
+                borderLeft: `5px solid ${T.warning}`,
+                borderRadius: T.radius.lg,
+                color: T.text,
+                fontSize: 13.5,
+                lineHeight: 1.6,
+              }}
+            >
+              <strong><Icon name="lock" size={14} /> View-only booking.</strong> Prescriptions, clearances and
+              encounter records can only be created from the{' '}
+              <strong>Consultation queue</strong> after the nurse has triaged the
+              patient.
+            </div>
+          ) : (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.15fr', gap: 20 }}>
             {/* LEFT: Document issuance */}
             <section
@@ -2294,7 +2472,7 @@ const loadPatientTimeline = async (patient: any) => {
                           whiteSpace: 'nowrap',
                         }}
                       >
-                        ⬇️ Download PDF
+                        <Icon name="download" size={14} />️ Download PDF
                       </button>
                     )}
                 </div>
@@ -2304,6 +2482,7 @@ const loadPatientTimeline = async (patient: any) => {
                 <PrescriptionGenerator
                   key={selectedApp?.appointment_id}
                   patientUserId={selectedApp?.patient_id || 5}
+                  appointmentId={selectedApp?.appointment_id}
                   verifiedPatient={{
                     first_name: selectedApp?.first_name || 'Daniella',
                     last_name: selectedApp?.last_name || 'Movida',
@@ -2315,11 +2494,12 @@ const loadPatientTimeline = async (patient: any) => {
                   isArchived={isArchivedMode}
                   onPrescriptionIssued={(info) => {
                     setFeedbackMsg({
-                      text: `✅ Prescription #${info.prescriptionId} recorded and signed.`,
+                      text: `Prescription #${info.prescriptionId} recorded and signed.`,
                       type: 'success',
                       pdfKind: 'prescriptions',
                       pdfId: info.prescriptionId,
                     });
+                    void openIssuedPdf('prescriptions', info.prescriptionId);
                   }}
                   onPrescriptionError={(message) => {
                     setFeedbackMsg({ text: message, type: 'error' });
@@ -2483,10 +2663,10 @@ const loadPatientTimeline = async (patient: any) => {
                     }}
                   >
                     {isArchivedMode
-                      ? '🔒 Clearance already archived'
+                      ? 'Clearance already archived'
                       : isIssuingClearance
                       ? 'Signing & spooling…'
-                      : '🖨️ Issue, sign & print clearance'}
+                      : '️ Issue, sign & print clearance'}
                   </button>
                 </div>
               )}
@@ -2510,7 +2690,7 @@ const loadPatientTimeline = async (patient: any) => {
                   fontWeight: 800,
                 }}
               >
-                🩺 Encounter diagnosis & vitals
+                <Icon name="medical_services" size={14} /> Encounter diagnosis & vitals
               </h3>
 
               {isArchivedMode && (
@@ -2525,7 +2705,7 @@ const loadPatientTimeline = async (patient: any) => {
                     border: `1px solid ${T.border}`,
                   }}
                 >
-                  🔒 <b>Archived record.</b> This encounter is completed and
+                  <Icon name="lock" size={14} /> <b>Archived record.</b> This encounter is completed and
                   permanently signed. Fields below reflect the recorded EMR entry.
                 </div>
               )}
@@ -2535,14 +2715,14 @@ const loadPatientTimeline = async (patient: any) => {
                   style={{
                     padding: '12px 16px',
                     background: T.warningSoft,
-                    color: '#92400E',
+                    color: T.warning,
                     borderRadius: T.radius.md,
                     marginBottom: 16,
                     fontSize: 12.5,
                     border: `1px solid ${T.warningBorder}`,
                   }}
                 >
-                  ⚠️ <b>Patient not yet triaged.</b> The student must first present
+                  <Icon name="warning" size={14} /> <b>Patient not yet triaged.</b> The student must first present
                   their QR Health Pass at the intake desk for the clinic nurse to
                   record initial vitals.
                 </div>
@@ -2650,7 +2830,7 @@ const loadPatientTimeline = async (patient: any) => {
                     }}
                     value={chiefComplaint}
                     onChange={(e) => setChiefComplaint(e.target.value)}
-                    required
+                    placeholder={DEFAULT_CHIEF_COMPLAINT}
                   />
                 </div>
 
@@ -2671,9 +2851,8 @@ const loadPatientTimeline = async (patient: any) => {
                     disabled={isArchivedMode}
                     readOnly={isArchivedMode}
                     value={diagnosis}
-                    placeholder="e.g. Fit for OJT / Acute viral pharyngitis"
+                    placeholder={DEFAULT_DIAGNOSIS}
                     onChange={(e) => setDiagnosis(e.target.value)}
-                    required
                   />
                 </div>
 
@@ -2699,7 +2878,7 @@ const loadPatientTimeline = async (patient: any) => {
                       fontFamily: T.font,
                     }}
                     value={treatmentPlan}
-                    placeholder="Prescribed regimen, rest recommendations…"
+                    placeholder={DEFAULT_TREATMENT_PLAN}
                     onChange={(e) => setTreatmentPlan(e.target.value)}
                   />
                 </div>
@@ -2723,7 +2902,7 @@ const loadPatientTimeline = async (patient: any) => {
                         marginBottom: 8,
                       }}
                     >
-                      📎 Attach diagnostic lab result (CBC, urinalysis, X-ray
+                      <Icon name="attach_file" size={14} /> Attach diagnostic lab result (CBC, urinalysis, X-ray
                       PDF/image)
                     </label>
                     <input
@@ -2749,7 +2928,7 @@ const loadPatientTimeline = async (patient: any) => {
                         }}
                       >
                         <span>
-                          📄 {attachedFile.name} (
+                          <Icon name="draft" size={14} /> {attachedFile.name} (
                           {(attachedFile.size / 1024).toFixed(1)} KB)
                         </span>
                         <button
@@ -2764,7 +2943,7 @@ const loadPatientTimeline = async (patient: any) => {
                             fontSize: 12,
                           }}
                         >
-                          ✕ Remove
+                          <Icon name="close" size={14} /> Remove
                         </button>
                       </div>
                     )}
@@ -2806,17 +2985,474 @@ const loadPatientTimeline = async (patient: any) => {
                   {isSubmittingEMR
                     ? 'Finalizing encounter & uploading to MinIO…'
                     : isArchivedMode
-                    ? '🔒 Encounter already finalized & discharged'
+                    ? 'Encounter already finalized & discharged'
                     : selectedApp?.status === 'scheduled'
                     ? '⏳ Patient not triaged by nurse'
-                    : '✅ Finish consultation & discharge'}
+                    : 'Finish consultation & discharge'}
                 </button>
               </form>
             </section>
           </div>
+          )}
         </>
       )}
 
+      {encounterConfirmation && (
+        <div className="modal-backdrop" onClick={() => setEncounterConfirmation(null)}>
+          <div
+            className="modal-card"
+            style={{ maxWidth: 560 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: '0 0 10px', color: T.primary, fontSize: 17 }}>
+              Confirm encounter details
+            </h3>
+            {encounterConfirmation.length > 0 ? (
+              <>
+                <p style={{ margin: '0 0 10px', color: T.warning, fontSize: 13, fontWeight: 700 }}>
+                  Some fields are blank. The default text below will be recorded unless you go back and edit.
+                </p>
+                <ul style={{ margin: '0 0 18px', paddingLeft: 22, color: T.textSub, fontSize: 12.5 }}>
+                  {encounterConfirmation.map((field) => (
+                    <li key={field} style={{ whiteSpace: 'pre-line', marginBottom: 6 }}>{field}</li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p style={{ margin: '0 0 18px', color: T.textSub, fontSize: 13 }}>
+                Review the encounter details before finalizing and discharging the patient.
+              </p>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type="button"
+                style={btnGhost}
+                onClick={() => setEncounterConfirmation(null)}
+              >
+                Go back and edit
+              </button>
+              <button
+                type="button"
+                style={btnPrimary}
+                disabled={isSubmittingEMR}
+                onClick={() => void handleFinishConsultation(undefined, true)}
+              >
+                Confirm and finalize
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+            {/* ── Prescription history modal (issuer-only) ─────────── */}
+      {showRxHistoryModal && (
+        <div className="modal-backdrop" onClick={() => setShowRxHistoryModal(false)}>
+          <div
+            className="modal-card"
+            style={{ maxWidth: 780 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                borderBottom: `1px solid ${T.border}`,
+                paddingBottom: 14,
+                marginBottom: 18,
+              }}
+            >
+              <div>
+                <h3
+                  style={{
+                    margin: 0,
+                    color: T.primary,
+                    fontSize: 17,
+                    fontWeight: 800,
+                  }}
+                >
+                  <Icon name="medication" size={14} /> Prescriptions you issued: {rxHistoryPatientName}
+                </h3>
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: T.textSub }}>
+                  Only prescriptions issued by you to this patient are shown.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRxHistoryModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: 20,
+                  cursor: 'pointer',
+                  color: T.textSub,
+                }}
+              >
+                <Icon name="close" size={14} />
+              </button>
+            </div>
+
+            {rxHistoryError && (
+              <div
+                style={{
+                  background: T.dangerSoft,
+                  color: T.danger,
+                  border: `1px solid ${T.dangerBorder}`,
+                  borderRadius: T.radius.md,
+                  padding: '10px 14px',
+                  fontSize: 13,
+                  marginBottom: 14,
+                }}
+              >
+                {rxHistoryError}
+              </div>
+            )}
+
+            {loadingRxHistory ? (
+              <div
+                style={{
+                  padding: '40px 20px',
+                  textAlign: 'center',
+                  color: T.textSub,
+                }}
+              >
+                Loading prescriptions…
+              </div>
+            ) : rxHistory.length === 0 && !rxHistoryError ? (
+              <div
+                style={{
+                  padding: '40px 20px',
+                  textAlign: 'center',
+                  color: T.textMuted,
+                }}
+              >
+                You have not issued any prescriptions to this patient.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {rxHistory.map((rx) => {
+                  const tone =
+                    rx.status === 'active'
+                      ? { bg: T.successSoft, fg: T.success, bd: T.successBorder }
+                      : rx.status === 'cancelled'
+                      ? { bg: T.dangerSoft, fg: T.danger, bd: T.dangerBorder }
+                      : { bg: T.warningSoft, fg: T.warning, bd: T.warningBorder };
+                  return (
+                    <div
+                      key={rx.prescription_id}
+                      style={{
+                        border: `1px solid ${T.border}`,
+                        borderRadius: T.radius.md,
+                        padding: 16,
+                        background: T.sage50,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: 10,
+                        }}
+                      >
+                        <b style={{ color: T.primary, fontSize: 13.5 }}>
+                          {new Date(rx.issued_at).toLocaleString()}{' '}
+                          <span style={{ color: T.textSub, fontWeight: 600 }}>
+                            · Rx #{rx.prescription_id}
+                          </span>
+                        </b>
+                        <span
+                          style={{
+                            background: tone.bg,
+                            color: tone.fg,
+                            border: `1px solid ${tone.bd}`,
+                            borderRadius: 999,
+                            padding: '2px 10px',
+                            fontSize: 11,
+                            fontWeight: 800,
+                            textTransform: 'uppercase',
+                            letterSpacing: 0.6,
+                          }}
+                        >
+                          {rx.status}
+                        </span>
+                      </div>
+
+                      {rx.items.map((it: any) => (
+                        <div
+                          key={it.item_id}
+                          style={{
+                            fontSize: 13,
+                            marginBottom: 8,
+                            paddingBottom: 8,
+                            borderBottom: `1px dashed ${T.border}`,
+                          }}
+                        >
+                          <b>{it.medicine_name}</b>
+                          {it.generic_name ? ` (${it.generic_name})` : ''}
+                          {it.is_outside && (
+                            <span
+                              style={{
+                                marginLeft: 8,
+                                background: T.warningSoft,
+                                color: T.warning,
+                                border: `1px solid ${T.warningBorder}`,
+                                borderRadius: 999,
+                                padding: '1px 8px',
+                                fontSize: 10,
+                                fontWeight: 800,
+                                letterSpacing: 0.5,
+                                verticalAlign: 'middle',
+                                whiteSpace: 'nowrap',
+                              }}
+                              title="Not dispensed by the infirmary — purchased at an external pharmacy"
+                            >
+                              OUTSIDE Rx
+                            </span>
+                          )}
+                          <div style={{ color: T.textSub, marginTop: 2 }}>
+                            {it.dosage} · {it.frequency} · {it.route} · {it.duration_days}{' '}
+                            day(s) · qty {it.quantity_dispensed}
+                          </div>
+                          {it.instructions && (
+                            <div style={{ color: T.textSub, marginTop: 2 }}>
+                              <b>Instructions:</b> {it.instructions}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+
+                      {rx.notes && (
+                        <div
+                          style={{
+                            fontSize: 13,
+                            color: T.textSub,
+                            whiteSpace: 'pre-wrap',
+                            marginBottom: 10,
+                          }}
+                        >
+                          <b>Notes:</b> {rx.notes}
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleDownloadPdf(
+                            'prescriptions',
+                            rx.prescription_id,
+                            setRxHistoryError
+                          )
+                        }
+                        style={{
+                          ...btnGhost,
+                          color: T.info,
+                          borderColor: T.infoBorder,
+                        }}
+                      >
+                        <Icon name="draft" size={14} /> Download PDF
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      
+            {/* ── Clearance history modal (issuer-only) ────────────── */}
+      {showClrHistoryModal && (
+        <div className="modal-backdrop" onClick={() => setShowClrHistoryModal(false)}>
+          <div
+            className="modal-card"
+            style={{ maxWidth: 780 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                borderBottom: `1px solid ${T.border}`,
+                paddingBottom: 14,
+                marginBottom: 18,
+              }}
+            >
+              <div>
+                <h3
+                  style={{
+                    margin: 0,
+                    color: T.primary,
+                    fontSize: 17,
+                    fontWeight: 800,
+                  }}
+                >
+                  <Icon name="description" size={14} /> Clearances you issued: {clrHistoryPatientName}
+                </h3>
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: T.textSub }}>
+                  Only clearances issued by you to this patient are shown.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowClrHistoryModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: 20,
+                  cursor: 'pointer',
+                  color: T.textSub,
+                }}
+              >
+                <Icon name="close" size={14} />
+              </button>
+            </div>
+
+            {clrHistoryError && (
+              <div
+                style={{
+                  background: T.dangerSoft,
+                  color: T.danger,
+                  border: `1px solid ${T.dangerBorder}`,
+                  borderRadius: T.radius.md,
+                  padding: '10px 14px',
+                  fontSize: 13,
+                  marginBottom: 14,
+                }}
+              >
+                {clrHistoryError}
+              </div>
+            )}
+
+            {loadingClrHistory ? (
+              <div
+                style={{
+                  padding: '40px 20px',
+                  textAlign: 'center',
+                  color: T.textSub,
+                }}
+              >
+                Loading clearances…
+              </div>
+            ) : clrHistory.length === 0 && !clrHistoryError ? (
+              <div
+                style={{
+                  padding: '40px 20px',
+                  textAlign: 'center',
+                  color: T.textMuted,
+                }}
+              >
+                You have not issued any clearances to this patient.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {clrHistory.map((c) => {
+                  const isPastExpiry =
+                    c.expires_at &&
+                    new Date(c.expires_at).getTime() < new Date().setHours(0, 0, 0, 0);
+                  const shownStatus =
+                    c.status === 'approved' && isPastExpiry ? 'expired' : c.status;
+                  const tone =
+                    shownStatus === 'approved'
+                      ? { bg: T.successSoft, fg: T.success, bd: T.successBorder }
+                      : shownStatus === 'revoked' || shownStatus === 'rejected'
+                      ? { bg: T.dangerSoft, fg: T.danger, bd: T.dangerBorder }
+                      : { bg: T.warningSoft, fg: T.warning, bd: T.warningBorder };
+                  return (
+                    <div
+                      key={c.clearance_id}
+                      style={{
+                        border: `1px solid ${T.border}`,
+                        borderRadius: T.radius.md,
+                        padding: 16,
+                        background: T.sage50,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: 10,
+                        }}
+                      >
+                        <b style={{ color: T.primary, fontSize: 13.5 }}>
+                          {new Date(c.issued_at).toLocaleString()}{' '}
+                          <span style={{ color: T.textSub, fontWeight: 600 }}>
+                            · Clearance #{c.clearance_id}
+                          </span>
+                        </b>
+                        <span
+                          style={{
+                            background: tone.bg,
+                            color: tone.fg,
+                            border: `1px solid ${tone.bd}`,
+                            borderRadius: 999,
+                            padding: '2px 10px',
+                            fontSize: 11,
+                            fontWeight: 800,
+                            textTransform: 'uppercase',
+                            letterSpacing: 0.6,
+                          }}
+                        >
+                          {shownStatus}
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: 13, marginBottom: 6 }}>
+                        <b>{c.purpose}</b>
+                      </div>
+                      <div style={{ fontSize: 13, color: T.textSub, marginBottom: 6 }}>
+                        <b>Valid until:</b> {new Date(c.expires_at).toLocaleDateString()}
+                      </div>
+
+                      {c.remarks && (
+                        <div
+                          style={{
+                            fontSize: 13,
+                            color: T.textSub,
+                            whiteSpace: 'pre-wrap',
+                            marginBottom: 6,
+                          }}
+                        >
+                          <b>Remarks:</b> {c.remarks}
+                        </div>
+                      )}
+
+                      {c.status === 'revoked' && (
+                        <div style={{ fontSize: 13, color: T.danger, marginBottom: 6 }}>
+                          <b>Revoked</b>
+                          {c.revoked_at
+                            ? ` on ${new Date(c.revoked_at).toLocaleDateString()}`
+                            : ''}
+                          {c.revocation_reason ? `: ${c.revocation_reason}` : ''}
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleDownloadPdf('clearances', c.clearance_id, setClrHistoryError)
+                        }
+                        style={{
+                          ...btnGhost,
+                          marginTop: 6,
+                          color: T.info,
+                          borderColor: T.infoBorder,
+                        }}
+                      >
+                        <Icon name="draft" size={14} /> Download PDF
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      
       {/* ── EMR History modal ───────────────────────────────── */}
       {showHistoryModal && (
         <div className="modal-backdrop" onClick={() => setShowHistoryModal(false)}>
@@ -2843,7 +3479,7 @@ const loadPatientTimeline = async (patient: any) => {
                   fontWeight: 800,
                 }}
               >
-                📜 Medical history: {selectedApp?.first_name}{' '}
+                <Icon name="article" size={14} /> Medical history: {selectedApp?.first_name}{' '}
                 {selectedApp?.last_name}
               </h3>
               <button
@@ -2857,7 +3493,7 @@ const loadPatientTimeline = async (patient: any) => {
                   color: T.textSub,
                 }}
               >
-                ✕
+                <Icon name="close" size={14} />
               </button>
             </div>
 
@@ -2967,7 +3603,7 @@ const loadPatientTimeline = async (patient: any) => {
                             marginBottom: 8,
                           }}
                         >
-                          📎 Diagnostic lab attachments
+                          <Icon name="attach_file" size={14} /> Diagnostic lab attachments
                         </div>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           {item.attachments.map((att: any) => (
@@ -2992,7 +3628,7 @@ const loadPatientTimeline = async (patient: any) => {
                                 cursor: 'pointer',
                               }}
                             >
-                              📄 {att.file_name} (
+                              <Icon name="draft" size={14} /> {att.file_name} (
                               {(att.file_size / 1024).toFixed(0)} KB){' '}
                               {openingAttachmentId === att.attachment_id ? '⏳' : ''}
                             </button>
@@ -3049,7 +3685,7 @@ const loadPatientTimeline = async (patient: any) => {
                     flexShrink: 0,
                   }}
                 >
-                  💉
+                  <Icon name="vaccines" size={14} />
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <h3
@@ -3087,7 +3723,7 @@ const loadPatientTimeline = async (patient: any) => {
                   padding: 4,
                 }}
               >
-                ✕
+                <Icon name="close" size={14} />
               </button>
             </div>
 
@@ -3156,7 +3792,7 @@ const loadPatientTimeline = async (patient: any) => {
                           fontWeight: 700,
                         }}
                       >
-                        ✓ {imm}
+                        <Icon name="check" size={14} /> {imm}
                       </span>
                     ))}
                   </div>
@@ -3318,7 +3954,7 @@ const loadPatientTimeline = async (patient: any) => {
                           }}
                           title="Remove"
                         >
-                          ✕
+                          <Icon name="close" size={14} />
                         </button>
                       </span>
                     ))}
@@ -3453,7 +4089,7 @@ const loadPatientTimeline = async (patient: any) => {
                   minWidth: 0,
                 }}
               >
-                <span style={{ fontSize: 22 }}>📄</span>
+                <span style={{ fontSize: 22 }}><Icon name="draft" size={22} /></span>
                 <div style={{ minWidth: 0 }}>
                   <h3
                     style={{
@@ -3493,7 +4129,7 @@ const loadPatientTimeline = async (patient: any) => {
                     color: T.primary,
                   }}
                 >
-                  💾 Save to PC
+                  <Icon name="save" size={14} /> Save to PC
                 </button>
                 <button
                   type="button"
@@ -3507,7 +4143,7 @@ const loadPatientTimeline = async (patient: any) => {
                     lineHeight: 1,
                   }}
                 >
-                  ✕
+                  <Icon name="close" size={14} />
                 </button>
               </div>
             </div>
@@ -3515,7 +4151,7 @@ const loadPatientTimeline = async (patient: any) => {
             <div
               style={{
                 flex: 1,
-                background: '#F8FAFC',
+                background: T.surfaceMuted,
                 borderRadius: T.radius.md,
                 overflow: 'hidden',
                 border: `1px solid ${T.border}`,
@@ -3552,6 +4188,35 @@ const loadPatientTimeline = async (patient: any) => {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+      
+      {/* ── My signature (enroll / renew) ───────────────────── */}
+      {showSignature && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15,30,23,0.45)',
+            display: 'grid',
+            placeItems: 'center',
+            zIndex: 1000,
+            padding: 16,
+            overflow: 'auto',
+          }}
+        >
+          <div style={{ width: '100%', maxWidth: 640 }}>
+            <div style={{ textAlign: 'right', marginBottom: 8 }}>
+              <button
+                type="button"
+                style={btnGhost}
+                onClick={() => setShowSignature(false)}
+              >
+                <Icon name="close" size={14} /> Close
+              </button>
+            </div>
+            <SignatureEnrollment />
           </div>
         </div>
       )}

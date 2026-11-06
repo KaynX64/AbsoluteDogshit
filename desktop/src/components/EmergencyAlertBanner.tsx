@@ -2,6 +2,8 @@
 import React, { useEffect, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
+import { T } from '../theme';
+import Icon from './Icon';
 
 interface EmergencyAlert {
   alertId: number;
@@ -96,21 +98,21 @@ export default function EmergencyAlertBanner() {
     });
 
     socket.on('connect', () => {
-      console.log('✅ [EmergencyAlertBanner] Live Socket connected:', socket.id);
+      console.log('[EmergencyAlertBanner] Live Socket connected:', socket.id);
     });
 
     socket.on('connect_error', (err) => {
-      console.error('❌ [EmergencyAlertBanner] Socket error:', err.message);
+      console.error('[EmergencyAlertBanner] Socket error:', err.message);
     });
 
     socket.on('emergency:new_alert', (newAlert: EmergencyAlert) => {
-      console.log('🚨 [EmergencyAlertBanner] New SOS received in real-time:', newAlert);
+      console.log('[EmergencyAlertBanner] New SOS received in real-time:', newAlert);
       playEmergencyAlarm();
 
       // Trigger native OS system tray notification
       if ((window as any).electronAPI?.showNotification) {
         (window as any).electronAPI.showNotification({
-          title: `🚨 SOS: ${newAlert.patientName} (${newAlert.roleLabel || 'PSU Member'})`,
+          title: `SOS: ${newAlert.patientName} (${newAlert.roleLabel || 'PSU Member'})`,
           body: `Location: ${newAlert.latitude.toFixed(5)}, ${newAlert.longitude.toFixed(5)}. Blood: ${newAlert.bloodType}. Allergies: ${newAlert.allergies}`,
         });
       }
@@ -153,7 +155,7 @@ export default function EmergencyAlertBanner() {
     playEmergencyAlarm();
     if ((window as any).electronAPI?.showNotification) {
       (window as any).electronAPI.showNotification({
-        title: '🚨 Valetudo HealthLink — SOS Alert Test',
+        title: 'Valetudo HealthLink — SOS Alert Test',
         body: 'Daniella Movida (BSIT) reported a medical emergency at PSU Lingayen Library. Allergies: Penicillin.',
       });
     } else {
@@ -189,106 +191,51 @@ export default function EmergencyAlertBanner() {
   return (
     <div style={{ marginBottom: 20 }}>
       {/* TEST TRIGGER TOOLBAR */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          gap: 8,
-          marginBottom: alerts.length > 0 ? 12 : 0,
-        }}
-      >
-        <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 'bold' }}>TEST HARNESS:</span>
+      <div className="ea-toolbar">
+        <span className="ea-toolbar-label">Test harness</span>
         <button
           type="button"
+          className="ea-btn-test"
           onClick={handleTestDirectNotification}
-          style={{
-            padding: '4px 10px',
-            fontSize: 12,
-            borderRadius: 4,
-            border: '1px solid #cbd5e1',
-            background: '#f8fafc',
-            color: '#334155',
-            cursor: 'pointer',
-            fontWeight: 'bold',
-          }}
           title="Directly test the OS banner without server"
         >
-          🧪 Test OS Notification (Instant)
+          <Icon name="science" size={14} /> Test OS Notification (Instant)
         </button>
 
         <button
           type="button"
+          className="ea-btn-live"
           onClick={handleTestFullStackSOS}
-          style={{
-            padding: '4px 10px',
-            fontSize: 12,
-            borderRadius: 4,
-            border: '1px solid #fca5a5',
-            background: '#fef2f2',
-            color: '#dc2626',
-            cursor: 'pointer',
-            fontWeight: 'bold',
-          }}
           title="Sends real SOS request to backend and broadcasts over Socket.IO"
         >
-          🚨 Trigger Live SOS (Full System Test)
+          <Icon name="emergency" size={14} /> Trigger Live SOS (Full System Test)
         </button>
       </div>
 
       {/* ACTIVE EMERGENCY ALERTS BANNER */}
       {alerts.map((alert) => (
-        <div
-          key={alert.alertId}
-          style={{
-            background: '#fee2e2',
-            border: '2px solid #ef4444',
-            borderRadius: 8,
-            padding: 16,
-            marginBottom: 12,
-            boxShadow: '0 4px 6px -1px rgba(239, 68, 68, 0.2)',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 24 }}>🚨</span>
-              <h3 style={{ margin: 0, color: '#b91c1c' }}>
-                ACTIVE SOS ALERT: {alert.patientName} ({alert.roleLabel || alert.studentNo || 'Campus Personnel'})
-              </h3>
-            </div>
-            <span
-              style={{
-                background: '#ef4444',
-                color: '#fff',
-                padding: '4px 10px',
-                borderRadius: 4,
-                fontSize: 12,
-                fontWeight: 'bold',
-                textTransform: 'uppercase',
-              }}
-            >
+        <div key={alert.alertId} className="ea-alert">
+          <div className="ea-alert-head">
+            <h3 className="ea-alert-title">
+              <Icon name="emergency" size={22} fill tone="danger" />
+              ACTIVE SOS ALERT: {alert.patientName} ({alert.roleLabel || alert.studentNo || 'Campus Personnel'})
+            </h3>
+            <span className="ea-status-pill">
               Status: {alert.status}
             </span>
           </div>
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(4, 1fr)',
-              gap: 12,
-              marginTop: 12,
-              fontSize: 13,
-              background: '#fff',
-              padding: 12,
-              borderRadius: 6,
-            }}
-          >
+          <div className="ea-grid">
             <div>
               <b>Contact:</b> {alert.phone || 'N/A'}<br />
               <b>Blood Type:</b> {alert.bloodType}
             </div>
             <div>
-              <b>Allergies:</b> <span style={{ color: 'red' }}>{alert.allergies}</span><br />
+              <b>Allergies:</b>{' '}
+              <span style={{ color: T.danger, fontWeight: 700 }}>
+                {alert.allergies}
+              </span>
+              <br />
               <b>Role / Unit:</b> {alert.roleLabel || alert.course || 'PSU Personnel'}
             </div>
             <div>
@@ -297,47 +244,49 @@ export default function EmergencyAlertBanner() {
             </div>
             <div>
               <b>GPS Coordinates:</b><br />
-              <code>{alert.latitude.toFixed(6)}, {alert.longitude.toFixed(6)}</code>
-              <div style={{ marginTop: 4 }}>
+              <code style={{ fontFamily: T.mono, fontSize: 12, color: T.textSub }}>
+                {alert.latitude.toFixed(6)}, {alert.longitude.toFixed(6)}
+              </code>
+              <div style={{ marginTop: 4, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                 <a
                   href={alert.googleMapsUrl}
                   target="_blank"
                   rel="noreferrer"
-                  style={{ color: '#2563eb', fontWeight: 'bold', textDecoration: 'underline' }}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
                 >
-                  📍 Open in Google Maps
+                  <Icon name="location_on" size={14} /> Open in Google Maps
                 </a>
               </div>
             </div>
           </div>
 
           {/* Action dispatch buttons */}
-          <div style={{ display: 'flex', gap: 10, marginTop: 12, justifyContent: 'flex-end' }}>
+          <div className="ea-actions">
             {alert.status === 'triggered' && (
               <button
+                className="ea-action ea-action-ack"
                 onClick={() => updateStatus(alert.alertId, 'acknowledged')}
-                style={{ background: '#f59e0b', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
               >
                 Acknowledge Alert
               </button>
             )}
             {alert.status !== 'dispatched' && (
               <button
+                className="ea-action ea-action-dispatch"
                 onClick={() => updateStatus(alert.alertId, 'dispatched')}
-                style={{ background: '#0284c7', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
               >
                 Dispatch Response Team
               </button>
             )}
             <button
+              className="ea-action ea-action-resolve"
               onClick={() => updateStatus(alert.alertId, 'resolved')}
-              style={{ background: '#10b981', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
             >
               Mark Resolved
             </button>
             <button
+              className="ea-action ea-action-false"
               onClick={() => updateStatus(alert.alertId, 'false_alarm')}
-              style={{ background: '#6b7280', color: '#fff', border: 'none', padding: '6px 10px', borderRadius: 4, cursor: 'pointer' }}
             >
               False Alarm
             </button>

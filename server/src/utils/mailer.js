@@ -21,6 +21,18 @@ const transporter = nodemailer.createTransport({
     : undefined,
 });
 
+// ── SEC-07 Remediation: HTML-escape every dynamic email parameter ──
+// patientName / doctorName come from user-controlled registration data and
+// purpose (appointment_type) from the booking form. Concatenating them raw
+// into the HTML body allowed markup & phishing-link injection into emails
+// delivered to students and clinical staff (audit SEC-07, CVSS 6.1).
+// Every dynamic interpolation below now passes through this escaper.
+function escapeHtml(str) {
+  return String(str || '').replace(/[&<>"']/g, (m) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[m]);
+}
+
 export async function sendAppointmentEmail({ toEmail, patientName, doctorName, specialty, dateTime, purpose, type }) {
   let subject = '';
   let html = '';
@@ -29,12 +41,12 @@ export async function sendAppointmentEmail({ toEmail, patientName, doctorName, s
     subject = '✅ PSU Infirmary: Consultation Appointment Confirmed';
     html = `
       <h2>Consultation Scheduled</h2>
-      <p>Dear <b>${patientName}</b>,</p>
+      <p>Dear <b>${escapeHtml(patientName)}</b>,</p>
       <p>Your appointment at the PSU Lingayen Campus Infirmary has been confirmed.</p>
       <ul>
-        <li><b>Practitioner:</b> Dr. ${doctorName} (${specialty})</li>
-        <li><b>Date & Time:</b> ${dateTime}</li>
-        <li><b>Purpose:</b> ${purpose}</li>
+        <li><b>Practitioner:</b> Dr. ${escapeHtml(doctorName)} (${escapeHtml(specialty)})</li>
+        <li><b>Date & Time:</b> ${escapeHtml(dateTime)}</li>
+        <li><b>Purpose:</b> ${escapeHtml(purpose)}</li>
       </ul>
       <p><b>Reminders:</b></p>
       <ul>
@@ -46,16 +58,16 @@ export async function sendAppointmentEmail({ toEmail, patientName, doctorName, s
     subject = '⏰ Reminder: Upcoming Consultation at PSU Infirmary';
     html = `
       <h2>Appointment Reminder</h2>
-      <p>Dear <b>${patientName}</b>,</p>
-      <p>This is a reminder for your upcoming consultation today at <b>${dateTime}</b> with Dr. ${doctorName}.</p>
+      <p>Dear <b>${escapeHtml(patientName)}</b>,</p>
+      <p>This is a reminder for your upcoming consultation today at <b>${escapeHtml(dateTime)}</b> with Dr. ${escapeHtml(doctorName)}.</p>
       <p>Location: PSU Lingayen Campus Infirmary.</p>
     `;
   } else if (type === 'cancellation') {
     subject = '⚠️ Consultation Appointment Cancelled';
     html = `
       <h2>Appointment Cancelled</h2>
-      <p>Dear <b>${patientName}</b>,</p>
-      <p>Your consultation appointment scheduled for <b>${dateTime}</b> has been cancelled.</p>
+      <p>Dear <b>${escapeHtml(patientName)}</b>,</p>
+      <p>Your consultation appointment scheduled for <b>${escapeHtml(dateTime)}</b> has been cancelled.</p>
     `;
   }
 

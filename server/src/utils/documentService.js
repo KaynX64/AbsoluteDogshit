@@ -12,6 +12,7 @@ import { pool } from '../db.js';
 import { uploadToS3 } from './s3Vault.js';
 import { decrypt } from './cryptoVault.js';
 import { renderPrescriptionPDF, renderClearancePDF } from './pdfVault.js';
+import { loadSignature } from './signatureVault.js';
 
 const API_BASE_URL = process.env.PUBLIC_API_BASE_URL || 'https://localhost:5000';
 
@@ -29,7 +30,7 @@ export async function generateAndStorePrescriptionPDF(prescriptionId) {
   try {
     // 1. Fetch header + patient + doctor
     const [rows] = await pool.query(
-      `SELECT p.prescription_id, p.issued_at, p.notes, p.qr_token,
+         `SELECT p.prescription_id, p.issued_at, p.notes, p.qr_token, p.signature_metadata,
               pt.first_name, pt.last_name,
               sp.student_no, sp.course,
               hp.blood_type, hp.allergies,
@@ -48,14 +49,22 @@ export async function generateAndStorePrescriptionPDF(prescriptionId) {
 
     if (rows.length === 0) throw new Error('Prescription not found.');
     const p = rows[0];
+    const rxMeta =
+         typeof p.signature_metadata === 'string'
+           ? JSON.parse(p.signature_metadata)
+           : p.signature_metadata || {};
 
     // 2. Fetch line items
+    //    LEFT JOIN + COALESCE so outside (non-formulary) drugs — which have a
+    //    NULL medicine_id and a free-text outside_name — still render on the PDF.
     const [items] = await pool.query(
       `SELECT pi.dosage, pi.frequency, pi.route, pi.duration_days,
               pi.quantity_dispensed, pi.instructions,
-              m.name AS medicine_name, m.generic_name
+              COALESCE(m.name, pi.outside_name) AS medicine_name,
+              m.generic_name,
+              (pi.medicine_id IS NULL) AS is_outside
        FROM PRESCRIPTION_ITEMS pi
-       JOIN MEDICINES m ON pi.medicine_id = m.medicine_id
+       LEFT JOIN MEDICINES m ON pi.medicine_id = m.medicine_id
        WHERE pi.prescription_id = ?`,
       [prescriptionId]
     );
@@ -79,6 +88,8 @@ export async function generateAndStorePrescriptionPDF(prescriptionId) {
         first_name: p.doc_first_name,
         last_name: p.doc_last_name,
         license_no: p.doc_license,
+        role: rxMeta.signer_role,
+        signature_png: await loadSignature(rxMeta.signature_s3_key),
       },
       items: items.map((it) => ({
         ...it,
@@ -154,6 +165,8 @@ export async function generateAndStoreClearancePDF(clearanceId) {
         first_name: c.doc_first_name,
         last_name: c.doc_last_name,
         license_no: c.doc_license,
+        role: metadata.signer_role,
+        signature_png: await loadSignature(metadata.signature_s3_key),
       },
     });
 
