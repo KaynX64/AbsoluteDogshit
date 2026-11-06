@@ -1448,12 +1448,62 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                       ),
                       onPressed: () async {
                         final token = await _storage.read(key: 'jwt_token');
-                        final authenticatedUrl = '$downloadUrl?token=$token';
+                        // SEC-06: fetch a single-use, 60-second download token
+                        // instead of appending the long-lived JWT to the URL
+                        // (query-string tokens leak into browser history,
+                        // proxy logs, and Referer headers).
+                        try {
+                          final res = await ApiConfig.client.post(
+                            Uri.parse('$downloadUrl-token'),
+                            headers: {
+                              'Content-Type': 'application/json',
+                              'Authorization': 'Bearer $token',
+                            },
+                          );
 
-                        launchUrl(
-                          Uri.parse(authenticatedUrl),
-                          mode: LaunchMode.externalApplication,
-                        );
+                          if (res.statusCode != 200) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                      'Could not open file. Please try again.'),
+                                  backgroundColor: Color(0xFF7A2E26),
+                                ),
+                              );
+                            }
+                            return;
+                          }
+
+                          final data =
+                              jsonDecode(res.body) as Map<String, dynamic>;
+                          final dlToken = data['downloadToken'] as String?;
+                          if (dlToken == null || dlToken.isEmpty) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                      'Could not open file. Please try again.'),
+                                  backgroundColor: Color(0xFF7A2E26),
+                                ),
+                              );
+                            }
+                            return;
+                          }
+
+                          await launchUrl(
+                            Uri.parse('$downloadUrl?dlToken=$dlToken'),
+                            mode: LaunchMode.externalApplication,
+                          );
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Network error: $e'),
+                                backgroundColor: const Color(0xFF7A2E26),
+                              ),
+                            );
+                          }
+                        }
                       },
                       icon: const Icon(Icons.open_in_new, size: 14),
                       label: Text(

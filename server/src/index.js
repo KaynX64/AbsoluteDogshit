@@ -42,7 +42,47 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-app.use(cors());
+
+// ── SEC-10 Remediation (trust proxy) ──────────────────────────────────
+// Behind Nginx/HAProxy/a load balancer, req.ip must honor the
+// X-Forwarded-For header set by that proxy — otherwise every client
+// shares the proxy's IP and a single rate-limit quota (audit SEC-10).
+// Opt in with TRUST_PROXY=true when the API runs behind a reverse
+// proxy; the default (unset) keeps direct-exposure behavior so clients
+// cannot spoof X-Forwarded-For against the per-IP limiters.
+if (process.env.TRUST_PROXY === 'true') {
+  app.set('trust proxy', 1);
+}
+
+// ── SEC-10 Remediation (CORS allow-list) ──────────────────────────────
+// cors() (allow-everything) let ANY website reach the API from a
+// student's or clinician's browser. Browser origins are now restricted
+// to the known clinic clients: the Electron desktop console's Vite dev
+// server and its packaged file:// build (which sends the opaque origin
+// "null"), plus anything explicitly listed in CORS_ALLOWED_ORIGINS
+// (e.g. a campus web portal). Non-browser clients — the Flutter mobile
+// app, curl, service integrations — send no Origin header and are
+// unaffected. The public verify.html page is served by this same
+// origin and needs no cross-origin entry.
+const ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ||
+  'https://localhost:5173,https://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:5173,null')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+function isOriginAllowed(origin) {
+  return ALLOWED_ORIGINS.includes(origin);
+}
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || isOriginAllowed(origin)) return callback(null, true);
+      console.warn(`⚠️ [CORS] Cross-origin request from unauthorized origin blocked: ${origin}`);
+      return callback(null, false);
+    },
+  })
+);
 app.use(express.json());
 
 // =============================================================================
@@ -79,9 +119,17 @@ if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
 }
 
 // Mount Secure WebSockets (WSS over HTTPS)
+// ── SEC-10: the same origin allow-list as the HTTP API. Engine.IO
+// aborts the handshake when the origin callback errors, so browser
+// pages from unauthorized origins cannot open realtime connections
+// either (non-browser clients send no Origin header and pass).
 export const io = new Server(server, {
   cors: {
-    origin: '*',
+    origin(origin, callback) {
+      if (!origin || isOriginAllowed(origin)) return callback(null, true);
+      console.warn(`⚠️ [Socket.IO CORS] Handshake from unauthorized origin rejected: ${origin}`);
+      return callback(new Error('Origin not allowed by Socket.IO CORS policy'), false);
+    },
     methods: ['GET', 'POST', 'PATCH'],
   },
 });

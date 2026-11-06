@@ -23,53 +23,96 @@ function loginRateLimitKey(ip) {
   return `ratelimit:login:${ip}`;
 }
 
-export async function loginRateLimit(req, res, next) {
-  // If the cache layer is unavailable, skip the guard entirely
-  if (!isRedisActive()) return next();
+// ── SEC-05 Remediation: in-memory fallback counter ──────────────────────
+// Redis is the primary (distributed) counter. When the cache layer is
+// unavailable or fails mid-request, this process-local Map takes over —
+// mirroring the verifyRateLimit pattern in routes/documents.js — so the
+// login guard NEVER fails open. (Previously `if (!isRedisActive()) return
+// next();` allowed unlimited credential stuffing during Redis outages.)
+const loginMemoryHits = new Map();
 
+export async function loginRateLimit(req, res, next) {
   const ip = req.ip || req.socket?.remoteAddress || 'unknown';
   const key = loginRateLimitKey(ip);
 
-  try {
-    const count = await redis.incr(key);
+  // ── Primary: distributed Redis counter ────────────────────────────────
+  if (isRedisActive()) {
+    try {
+      const count = await redis.incr(key);
 
-    // First hit in this window — start the TTL clock
-    if (count === 1) {
-      await redis.expire(key, LOGIN_LIMIT.windowSeconds);
-    }
+      // First hit in this window — start the TTL clock
+      if (count === 1) {
+        await redis.expire(key, LOGIN_LIMIT.windowSeconds);
+      }
 
-    if (count > LOGIN_LIMIT.maxAttempts) {
-      const ttl = await redis.ttl(key);
-      const minutesLeft = Math.max(
-        1,
-        Math.ceil((ttl > 0 ? ttl : LOGIN_LIMIT.windowSeconds) / 60)
+      if (count > LOGIN_LIMIT.maxAttempts) {
+        const ttl = await redis.ttl(key);
+        const retrySec = ttl > 0 ? ttl : LOGIN_LIMIT.windowSeconds;
+        const minutesLeft = Math.max(1, Math.ceil(retrySec / 60));
+
+        res.setHeader('Retry-After', String(retrySec));
+        return res.status(429).json({
+          error: `Too many login attempts. Please wait ${minutesLeft} minute(s) before trying again.`,
+        });
+      }
+
+      res.setHeader(
+        'X-RateLimit-Remaining',
+        String(Math.max(0, LOGIN_LIMIT.maxAttempts - count))
       );
-
-      res.setHeader('Retry-After', String(ttl > 0 ? ttl : LOGIN_LIMIT.windowSeconds));
-      return res.status(429).json({
-        error: `Too many login attempts. Please wait ${minutesLeft} minute(s) before trying again.`,
-      });
+      return next();
+    } catch (err) {
+      // Redis threw mid-request — fall through to the in-memory counter
+      // below instead of skipping the guard (SEC-05: never fail open).
+      console.error('[Rate Limit Error]:', err.message);
     }
-
-    res.setHeader(
-      'X-RateLimit-Remaining',
-      String(Math.max(0, LOGIN_LIMIT.maxAttempts - count))
-    );
-    next();
-  } catch (err) {
-    // If Redis throws mid-request, don't block a legitimate login
-    console.error('[Rate Limit Error]:', err.message);
-    next();
   }
+
+  // ── Fallback: process-local fixed-window counter (SEC-05) ─────────────
+  const now = Date.now();
+  let entry = loginMemoryHits.get(ip);
+  if (!entry || entry.resetAt <= now) {
+    entry = { count: 0, resetAt: now + LOGIN_LIMIT.windowSeconds * 1000 };
+    loginMemoryHits.set(ip, entry);
+  }
+  entry.count += 1;
+
+  // Bound the map so spoofed-IP floods cannot grow it without limit
+  // (same hygiene as verifyRateLimit in documents.js).
+  if (loginMemoryHits.size > 5000) {
+    for (const [k, v] of loginMemoryHits) {
+      if (v.resetAt <= now) loginMemoryHits.delete(k);
+    }
+  }
+
+  if (entry.count > LOGIN_LIMIT.maxAttempts) {
+    const retrySec = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
+    const minutesLeft = Math.max(1, Math.ceil(retrySec / 60));
+
+    res.setHeader('Retry-After', String(retrySec));
+    return res.status(429).json({
+      error: `Too many login attempts. Please wait ${minutesLeft} minute(s) before trying again.`,
+    });
+  }
+
+  res.setHeader(
+    'X-RateLimit-Remaining',
+    String(Math.max(0, LOGIN_LIMIT.maxAttempts - entry.count))
+  );
+  next();
 }
 
 // Clears the IP's attempt counter after a successful login so that
 // someone who mistyped a few passwords and finally got in starts fresh.
 async function clearLoginAttempts(ip) {
-  if (!isRedisActive()) return;
-  try {
-    await redis.del(loginRateLimitKey(ip));
-  } catch (_) {}
+  if (isRedisActive()) {
+    try {
+      await redis.del(loginRateLimitKey(ip));
+    } catch (_) {}
+  }
+  // SEC-05: also clear the in-memory fallback counter, whichever track
+  // the failed attempts were counted on.
+  loginMemoryHits.delete(ip);
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -222,8 +265,14 @@ export async function loginUser(req, res) {
 // ─────────────────────────────────────────────────────────────────────────
 export function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
-  // Support both HTTP Authorization header and URL query parameter (?token=...)
-  const token = (authHeader && authHeader.split(' ')[1]) || req.query.token;
+  // ── SEC-06 Remediation ──
+  // Bearer tokens are accepted ONLY from the Authorization header. The
+  // previous `|| req.query.token` fallback leaked long-lived (24h) JWTs into
+  // browser histories, bookmarks, proxy/load-balancer access logs, and
+  // Referer headers. Browser-initiated file downloads use the dedicated
+  // single-use, 60-second download tokens issued by
+  // issueAttachmentDownloadToken() below instead of the primary JWT.
+  const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
     return res.status(401).json({ error: 'Access token required.' });
@@ -254,6 +303,123 @@ export function authenticateToken(req, res, next) {
     req.token = token;
     next();
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// SEC-06: SINGLE-USE, SHORT-LIVED DOWNLOAD TOKENS
+// ─────────────────────────────────────────────────────────────────────────
+// External-browser downloads cannot set Authorization headers, which is why
+// the server previously accepted the primary 24-hour JWT via ?token=. To
+// close that leak (SEC-06) without breaking the patient "Open & View File"
+// flow, this issues a dedicated token that is:
+//   • valid for 60 seconds only,
+//   • bound to exactly one attachment id and one user,
+//   • single-use (replayed tokens are rejected),
+//   • distinct from the primary authentication JWT (dedicated purpose claim),
+//     so even if it leaks into a URL log it is worthless.
+const DOWNLOAD_TOKEN_TTL_SECONDS = 60;
+const DOWNLOAD_TOKEN_PURPOSE = 'EMR_ATTACHMENT_DOWNLOAD';
+
+export function issueAttachmentDownloadToken(user, attachmentId) {
+  return jwt.sign(
+    {
+      purpose: DOWNLOAD_TOKEN_PURPOSE,
+      user_id: user.user_id,
+      roles: user.roles || [],
+      att: Number(attachmentId),
+      jti: crypto.randomUUID(),
+    },
+    JWT_SECRET,
+    { expiresIn: DOWNLOAD_TOKEN_TTL_SECONDS }
+  );
+}
+
+// Single-use tracking: Redis SET NX EX when available, process-local Map as
+// fallback — the same degraded-mode philosophy as the login limiter (SEC-05).
+const usedDownloadTokens = new Map();
+
+async function isDownloadTokenReplayed(jti, expiresAtSeconds) {
+  const nowMs = Date.now();
+
+  // Opportunistic hygiene: purge expired entries when the map grows.
+  if (usedDownloadTokens.size > 5000) {
+    for (const [k, v] of usedDownloadTokens) {
+      if (v <= nowMs) usedDownloadTokens.delete(k);
+    }
+  }
+
+  if (isRedisActive()) {
+    try {
+      // SET key 1 NX EX ttl → returns 'OK' only on first use.
+      const key = `download:token:used:${jti}`;
+      const ttl = Math.max(1, expiresAtSeconds - Math.floor(nowMs / 1000));
+      const result = await redis.set(key, '1', 'EX', ttl, 'NX');
+      return result !== 'OK'; // key already present → replay
+    } catch (err) {
+      console.error('[Download Token Replay Check Warning]:', err.message);
+      // Fall through to the in-memory check — do not fail open.
+    }
+  }
+
+  if (usedDownloadTokens.has(jti)) return true;
+  usedDownloadTokens.set(jti, expiresAtSeconds * 1000);
+  return false;
+}
+
+/**
+ * Middleware for GET /api/documents/attachments/:attachmentId/download.
+ * Accepts EITHER:
+ *   • Authorization: Bearer <primary JWT>  — normal API clients, or
+ *   • ?dlToken=<single-use 60s download token> — external-browser downloads.
+ * The route's pre-existing ownership / clinical-role authorization runs
+ * unchanged for both paths.
+ */
+export async function authenticateAttachmentDownload(req, res, next) {
+  const authHeader = req.headers['authorization'];
+
+  // Path 1: standard header authentication — reuse the normal verifier.
+  const headerToken = authHeader && authHeader.split(' ')[1];
+  if (headerToken) {
+    return authenticateToken(req, res, next);
+  }
+
+  // Path 2: dedicated short-lived single-use download token (SEC-06).
+  const dlToken = req.query.dlToken;
+  if (!dlToken) {
+    return res.status(401).json({ error: 'Access token required.' });
+  }
+
+  let payload;
+  try {
+    payload = jwt.verify(dlToken, JWT_SECRET); // synchronous form — throws on failure
+  } catch (err) {
+    return res
+      .status(401)
+      .json({ error: 'Download token expired or invalid. Please reopen the file from the app.' });
+  }
+
+  if (payload.purpose !== DOWNLOAD_TOKEN_PURPOSE) {
+    return res.status(401).json({ error: 'Invalid download token.' });
+  }
+
+  // The token is bound to exactly one attachment.
+  if (Number(payload.att) !== Number(req.params.attachmentId)) {
+    return res.status(403).json({ error: 'Download token is not valid for this file.' });
+  }
+
+  // Enforce single use (replay protection).
+  const replayed = await isDownloadTokenReplayed(payload.jti, payload.exp);
+  if (replayed) {
+    return res
+      .status(401)
+      .json({ error: 'Download token already used. Please reopen the file from the app.' });
+  }
+
+  // Reconstruct the caller identity so the route's existing
+  // owner / clinical-role authorization runs unchanged.
+  req.user = { user_id: payload.user_id, roles: payload.roles || [] };
+  req.token = dlToken;
+  next();
 }
 
 // ─────────────────────────────────────────────────────────────────────────
