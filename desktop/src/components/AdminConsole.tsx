@@ -1,5 +1,5 @@
 // desktop/src/components/AdminConsole.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import AnalyticsDashboard from './AnalyticsDashboard';
 import CreateUserModal from './CreateUserModal';
 import { T, rolePill, inputStyle, btnPrimary, btnGhost } from '../theme';
@@ -277,7 +277,9 @@ export default function AdminConsole({
     }
     if (activeTab === 'db') {
       fetchDbTables();
-      fetchTableData('USERS', 1);
+      setDbSearchFilter('');
+      prevDbSearchRef.current = '';
+      fetchTableData('USERS', 1, '');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
@@ -526,11 +528,14 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
     }
   };
 
-  const fetchTableData = async (table = selectedDbTable, page = 1) => {
+  const prevDbSearchRef = useRef(dbSearchFilter);
+
+  const fetchTableData = async (table = selectedDbTable, page = 1, search = dbSearchFilter) => {
     setLoadingDbTable(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/db/tables/${table}?page=${page}&limit=15`, {
+      const searchParam = search ? `&search=${encodeURIComponent(search.trim())}` : '';
+      const res = await fetch(`${API_BASE_URL}/api/admin/db/tables/${table}?page=${page}&limit=15${searchParam}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -550,6 +555,16 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       setLoadingDbTable(false);
     }
   };
+
+  useEffect(() => {
+    if (activeTab !== 'db') return;
+    if (prevDbSearchRef.current === dbSearchFilter) return;
+    prevDbSearchRef.current = dbSearchFilter;
+    const timer = setTimeout(() => {
+      fetchTableData(selectedDbTable, 1, dbSearchFilter);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [dbSearchFilter, activeTab, selectedDbTable]);
 
   const handleSaveDbRow = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1497,8 +1512,9 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       type="button"
                       onClick={() => {
                         setSelectedDbTable(t.tableName);
-                        fetchTableData(t.tableName, 1);
                         setDbSearchFilter('');
+                        prevDbSearchRef.current = '';
+                        fetchTableData(t.tableName, 1, '');
                       }}
                       style={{
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -1546,21 +1562,53 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     background: T.sage100, color: T.primary,
                     fontSize: 11, fontWeight: 700,
                   }}>
-                    {tableTotalRows} records
+                    {tableTotalRows} {dbSearchFilter ? 'matching ' : ''}records
                   </span>
                 </div>
 
                 <div className="my-toolbar">
-                  <input
-                    type="text"
-                    placeholder="Search loaded records…"
-                    value={dbSearchFilter}
-                    onChange={(e) => setDbSearchFilter(e.target.value)}
-                    className="my-toolbar-search"
-                  />
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      placeholder="Search records across table…"
+                      value={dbSearchFilter}
+                      onChange={(e) => setDbSearchFilter(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          fetchTableData(selectedDbTable, 1, dbSearchFilter);
+                        }
+                      }}
+                      className="my-toolbar-search"
+                      style={{ paddingRight: dbSearchFilter ? 28 : undefined }}
+                    />
+                    {dbSearchFilter && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDbSearchFilter('');
+                          prevDbSearchRef.current = '';
+                          fetchTableData(selectedDbTable, 1, '');
+                        }}
+                        style={{
+                          position: 'absolute',
+                          right: 8,
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: T.textSub,
+                          fontSize: 13,
+                          lineHeight: 1,
+                          padding: '4px 6px',
+                        }}
+                        title="Clear search"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
                   <button
                     type="button"
-                    onClick={() => fetchTableData(selectedDbTable, tablePage)}
+                    onClick={() => fetchTableData(selectedDbTable, tablePage, dbSearchFilter)}
                     className="my-toolbar-icon-btn"
                     title="Refresh"
                   >
@@ -1586,7 +1634,9 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
               {loadingDbTable ? (
                 <div style={{ padding: 40, textAlign: 'center', color: T.textSub }}>Loading records…</div>
               ) : tableRows.length === 0 ? (
-                <div style={{ padding: 40, textAlign: 'center', color: T.textMuted }}>Table is empty.</div>
+                <div style={{ padding: 40, textAlign: 'center', color: T.textMuted }}>
+                  {dbSearchFilter.trim() ? `No records found matching "${dbSearchFilter}".` : 'Table is empty.'}
+                </div>
               ) : (
                 <div style={{
                   border: `1px solid ${T.borderSoft}`,
@@ -1624,9 +1674,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       </tr>
                     </thead>
                     <tbody>
-                      {tableRows
-                        .filter((r) => !dbSearchFilter || JSON.stringify(r).toLowerCase().includes(dbSearchFilter.toLowerCase()))
-                        .map((row, idx) => (
+                      {tableRows.map((row, idx) => (
                           <tr key={idx} style={{ borderBottom: `1px solid ${T.borderSoft}` }}>
                             {!isTableReadOnly && (
                               <td style={{ padding: '8px 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
@@ -1690,14 +1738,14 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
               {/* Pagination */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, fontSize: 12, color: T.textSub }}>
                 <span>
-                  Page <b style={{ color: T.text }}>{tablePage}</b> of <b style={{ color: T.text }}>{tableTotalPages}</b>
-                  {' · '}Showing {tableRows.length} records
+                  Page <b style={{ color: T.text }}>{tablePage}</b> of <b style={{ color: T.text }}>{Math.max(1, tableTotalPages)}</b>
+                  {' · '}Showing {tableRows.length} of {tableTotalRows} records{dbSearchFilter.trim() ? ' (matching search)' : ''}
                 </span>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button
                     type="button"
                     disabled={tablePage <= 1}
-                    onClick={() => fetchTableData(selectedDbTable, tablePage - 1)}
+                    onClick={() => fetchTableData(selectedDbTable, tablePage - 1, dbSearchFilter)}
                     style={{
                       ...btnGhost, padding: '6px 14px', fontSize: 12,
                       opacity: tablePage <= 1 ? 0.4 : 1,
@@ -1709,7 +1757,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   <button
                     type="button"
                     disabled={tablePage >= tableTotalPages}
-                    onClick={() => fetchTableData(selectedDbTable, tablePage + 1)}
+                    onClick={() => fetchTableData(selectedDbTable, tablePage + 1, dbSearchFilter)}
                     style={{
                       ...btnGhost, padding: '6px 14px', fontSize: 12,
                       opacity: tablePage >= tableTotalPages ? 0.4 : 1,

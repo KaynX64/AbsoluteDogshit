@@ -523,7 +523,7 @@ export default function InventoryManager() {
             background: T.sage50, padding: 12,
             borderRadius: T.radius.md, border: `1px solid ${T.borderSoft}`,
           }}>
-            <span style={{ fontSize: 18 }}><Icon name="pager" size={14} /></span>
+            <span style={{ fontSize: 18 }}><Icon name="Search" size={14} /></span>  
             <input
               ref={barcodeInputRef}
               type="text"

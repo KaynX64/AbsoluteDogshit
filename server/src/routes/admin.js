@@ -8,6 +8,7 @@ import { logPhiAccess } from '../utils/phiLogger.js';
 import {
   isReadOnlyTable,
   isSecurityTable,
+  isSecretCol,
   readOnlyMessage,
   securityTableMessage,
   phiPatientSource,
@@ -994,6 +995,7 @@ router.get('/db/tables/:table', requirePermission('DATABASE_MANAGE'), async (req
   const page = Math.max(Number(req.query.page) || 1, 1);
   const limit = Math.min(Number(req.query.limit) || 20, 100);
   const offset = (page - 1) * limit;
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
 
   try {
     const tables = await getWhitelistedTables();
@@ -1009,10 +1011,44 @@ router.get('/db/tables/:table', requirePermission('DATABASE_MANAGE'), async (req
       [tableName]
     );
 
-    const [countResult] = await pool.query(`SELECT COUNT(*) as total FROM ??`, [tableName]);
+    // Identify searchable columns (exclude binary, spatial/geometry, and secret hashed columns)
+    const nonSearchableDataTypes = [
+      'geometry', 'point', 'linestring', 'polygon',
+      'multipoint', 'multilinestring', 'multipolygon', 'geometrycollection',
+      'blob', 'tinyblob', 'mediumblob', 'longblob', 'binary', 'varbinary',
+    ];
+
+    const searchableCols = columns
+      .filter((c) => {
+        const dt = (c.dataType || '').toLowerCase();
+        return !nonSearchableDataTypes.includes(dt) && !isSecretCol(tableName, c.columnName);
+      })
+      .map((c) => c.columnName);
+
+    let countQuery = `SELECT COUNT(*) as total FROM ??`;
+    let countParams = [tableName];
+    let dataQuery = `SELECT * FROM ??`;
+    let dataParams = [tableName];
+
+    if (search && searchableCols.length > 0) {
+      const searchPattern = `%${search}%`;
+      const whereClause = searchableCols.map(() => `CAST(?? AS CHAR) LIKE ?`).join(' OR ');
+      const searchParams = searchableCols.flatMap((col) => [col, searchPattern]);
+
+      countQuery += ` WHERE (${whereClause})`;
+      countParams.push(...searchParams);
+
+      dataQuery += ` WHERE (${whereClause})`;
+      dataParams.push(...searchParams);
+    }
+
+    dataQuery += ` LIMIT ? OFFSET ?`;
+    dataParams.push(limit, offset);
+
+    const [countResult] = await pool.query(countQuery, countParams);
     const totalRows = countResult[0]?.total || 0;
 
-    const [rawRows] = await pool.query(`SELECT * FROM ?? LIMIT ? OFFSET ?`, [tableName, limit, offset]);
+    const [rawRows] = await pool.query(dataQuery, dataParams);
     const rows = rawRows.map((r) => maskRowForDisplay(tableName, r));
 
     const pkCols = columns.filter((c) => c.columnKey === 'PRI').map((c) => c.columnName);
@@ -1034,6 +1070,7 @@ router.get('/db/tables/:table', requirePermission('DATABASE_MANAGE'), async (req
       rows,
       isReadOnly: auditLocked || securityLocked,
       readOnlyReason: auditLocked ? 'audit' : securityLocked ? 'security' : null,
+      searchQuery: search,
     });
   } catch (error) {
     console.error('[DB Studio] Table query error:', error);

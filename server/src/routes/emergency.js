@@ -205,10 +205,9 @@ export default function emergencyRouter(io) {
         data: { alertId: String(alertId), type: 'EMERGENCY_SOS' },
       }).catch((err) => console.error('[FCM SOS Push Error]:', err.message));
 
-      // 2. Broadcast via WebSockets (Socket.IO) to both responder room and clinical consoles
+      // 2. Broadcast via WebSockets (Socket.IO) strictly to authorized clinical responders
       if (io) {
         io.to('responders').emit('emergency:new_alert', alertPayload);
-        io.emit('emergency:new_alert', alertPayload);
       }
 
       res.status(201).json({
@@ -307,7 +306,7 @@ export default function emergencyRouter(io) {
       }
 
       if (io) {
-        io.emit('emergency:status_change', { alertId: Number(alertId), status, responderId });
+        io.to('responders').emit('emergency:status_change', { alertId: Number(alertId), status, responderId });
         io.emit('queue:updated');
       }
 

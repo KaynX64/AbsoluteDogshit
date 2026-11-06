@@ -494,6 +494,26 @@ export default function appointmentRoutes(io) {
 
       const app = appRows[0];
 
+      // ── SEC-02 Remediation: BOLA/IDOR ownership check (Critical, CVSS 8.5) ──
+      // The caller must be the patient who booked the appointment, the assigned
+      // doctor, or an ADMIN. Without this, any authenticated user could cancel
+      // anyone's appointment by iterating over sequential appointment IDs.
+      const isOwner = Number(app.patient_user_id) === Number(userId);
+      const isDoctor = Number(app.doctor_user_id) === Number(userId);
+      const isAdmin = (req.user.roles || []).includes('ADMIN');
+      if (!isOwner && !isDoctor && !isAdmin) {
+        await connection.rollback();
+        console.warn(
+          `[Appointments] Authorization denied (SEC-02): user ${userId} attempted to cancel ` +
+            `appointment ${appointmentId} owned by ${app.patient_user_id} ` +
+            `(roles: ${(req.user.roles || []).join(', ') || 'none'})`
+        );
+        return res.status(403).json({
+          error: 'You are not authorized to cancel this appointment.',
+          code: 'APPOINTMENT_CANCEL_FORBIDDEN',
+        });
+      }
+
       if (['checked_in', 'serving', 'completed'].includes(app.status)) {
         await connection.rollback();
         return res.status(409).json({

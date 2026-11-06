@@ -33,7 +33,7 @@ import signatureRoutes from './routes/signature.js';
 
 // Utilities (MinIO S3 & Redis)
 import { ensureBucketExists } from './utils/s3Vault.js';
-import { initRedis } from './utils/redisClient.js';
+import { initRedis, redis, isRedisActive } from './utils/redisClient.js';
 import { runAutoMigrations } from './db.js';
 
 dotenv.config();
@@ -87,22 +87,39 @@ export const io = new Server(server, {
 });
 
 // Socket.IO authentication middleware (asynchronous token validation)
-io.use((socket, next) => {
+io.use(async (socket, next) => {
   const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.split(' ')[1];
-  if (token) {
-    jwt.verify(token, JWT_SECRET, (err, user) => {
-      if (!err && user) {
-        socket.user = user;
-      }
-      next();
-    });
-  } else {
-    next();
+  if (!token) {
+    return next(new Error('Authentication required for WebSocket connection.'));
   }
+
+  jwt.verify(token, JWT_SECRET, async (err, user) => {
+    if (err || !user) {
+      return next(new Error('Invalid or expired WebSocket authentication token.'));
+    }
+
+    // Check Redis token revocation blacklist
+    if (isRedisActive()) {
+      try {
+        const blacklistKey = user.jti
+          ? `token:blacklist:${user.jti}`
+          : `token:blacklist:${token}`;
+        const isRevoked = await redis.get(blacklistKey);
+        if (isRevoked) {
+          return next(new Error('WebSocket session revoked. Please re-authenticate.'));
+        }
+      } catch (redisErr) {
+        console.error('[Socket.IO Revocation Check Warning]:', redisErr.message);
+      }
+    }
+
+    socket.user = user;
+    next();
+  });
 });
 
 io.on('connection', (socket) => {
-  const userEmail = socket.user?.email || 'Anonymous / Kiosk';
+  const userEmail = socket.user?.email || 'Authenticated User';
   const roles = socket.user?.roles || [];
   console.log(`⚡ [Socket.IO ${isHttps ? 'WSS' : 'WS'}] Client connected: ${socket.id} (${userEmail})`);
 
@@ -112,10 +129,15 @@ io.on('connection', (socket) => {
     console.log(`🛡️ [Socket.IO] Socket ${socket.id} joined 'responders' room`);
   }
 
-  // Explicit registration listener for mobile responders
+  // Explicit registration listener for mobile responders (role-verified)
   socket.on('join:responders', () => {
-    socket.join('responders');
-    console.log(`🛡️ [Socket.IO] Socket ${socket.id} manually joined 'responders' room`);
+    const userRoles = socket.user?.roles || [];
+    if (userRoles.some((r) => authorizedRoles.includes(r))) {
+      socket.join('responders');
+      console.log(`🛡️ [Socket.IO] Socket ${socket.id} (${socket.user?.email}) joined 'responders' room`);
+    } else {
+      console.warn(`⚠️ [Socket.IO] Socket ${socket.id} (${socket.user?.email}) denied entry to 'responders' room: insufficient privileges.`);
+    }
   });
 
   socket.on('disconnect', (reason) => {
