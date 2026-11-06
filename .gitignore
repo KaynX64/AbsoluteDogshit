@@ -35,5 +35,6 @@ mobile/android/app/google-services.json
 server/serviceAccountKey.json
 mobile/android/app/google-services.json
 
-#audit_files
+#audit_files/Misc Files
 audit.md
+draft_prompts.txt
