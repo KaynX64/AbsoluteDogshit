@@ -103,15 +103,25 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
       return res.status(404).json({ error: 'Patient not found or deactivated.' });
     }
 
-//logphiaccess
-const parsedPatientId = Number(patientUserId);
-if (!isNaN(parsedPatientId) && parsedPatientId > 0) {
-  logPhiAccess({
-    viewerUserId: req.user.user_id,
-    patientUserId: parsedPatientId,
-    // ...
-  });
-}
+    // ── SEC-03 Remediation: record the complete statutory PHI audit entry ──
+    // PHI_ACCESS_LOGS.table_affected and record_id are NOT NULL. The previous
+    // call omitted table/recordId/purpose/ipAddress, so every QR scan's INSERT
+    // failed with ER_BAD_NULL_ERROR (silently caught inside phiLogger) and no
+    // audit entry was ever recorded — a violation of R.A. 10173 Sections 12/13
+    // accountability mandates. All mandatory fields are now passed, and the
+    // call is awaited so the entry is durably written before patient data is
+    // returned to the scanner.
+    const parsedPatientId = Number(patientUserId);
+    if (!isNaN(parsedPatientId) && parsedPatientId > 0) {
+      await logPhiAccess({
+        viewerUserId: req.user.user_id,
+        patientUserId: parsedPatientId,
+        table: 'HEALTH_PROFILES',
+        recordId: parsedPatientId,
+        purpose: 'QR Health Pass Verification & Intake',
+        ipAddress: req.ip,
+      });
+    }
 
     await connection.commit();
 
