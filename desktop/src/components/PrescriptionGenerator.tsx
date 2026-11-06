@@ -9,6 +9,16 @@ import {
   type InteractionCheckResult,
 } from '../services/interactionService';
 
+const DEFAULT_FREQUENCY = 'Every 4-6 hours as needed';
+const DEFAULT_INSTRUCTIONS = 'Take 1 tablet after meals when fever exceeds 37.8°C.';
+const DEFAULT_DOCTOR_NOTES =
+  'Take Paracetamol every 4 to 6 hours as needed for fever and throat discomfort.';
+
+function getInitialDoctorNotes(initialNotes?: string, isArchived = false): string {
+  const notes = initialNotes?.trim() === DEFAULT_DOCTOR_NOTES ? '' : initialNotes;
+  return notes || (isArchived ? 'None recorded' : '');
+}
+
 interface MedicineMaster {
   medicine_id: number;
   name: string;
@@ -278,16 +288,15 @@ export default function PrescriptionGenerator({
   const [selectedMedicineId, setSelectedMedicineId] = useState<number>(1);
   const [rxMedName, setRxMedName] = useState('Biogesic (Paracetamol)');
   const [rxDosage, setRxDosage] = useState('500mg');
-  const [rxFrequency, setRxFrequency] = useState('Every 4-6 hours as needed');
+  const [rxFrequency, setRxFrequency] = useState('');
   const [rxDurationDays, setRxDurationDays] = useState('5');
   const [rxQuantity, setRxQuantity] = useState('10');
-  const [rxInstructions, setRxInstructions] = useState(
-    'Take 1 tablet after meals when fever exceeds 37.8°C.'
-  );
-  const [doctorNotes, setDoctorNotes] = useState(
-    initialNotes || (isArchived ? 'None recorded' : 'Maintain proper hydration and rest.')
+  const [rxInstructions, setRxInstructions] = useState('');
+  const [doctorNotes, setDoctorNotes] = useState(() =>
+    getInitialDoctorNotes(initialNotes, isArchived)
   );
   const [isSaving, setIsSaving] = useState(false);
+  const [showIssueConfirmation, setShowIssueConfirmation] = useState(false);
 
   /* ── Outside-drug mode state ──────────────────────────────────── */
   const [rxMode, setRxMode] = useState<'formulary' | 'outside'>('formulary');
@@ -305,13 +314,7 @@ export default function PrescriptionGenerator({
   const [checkingInteractions, setCheckingInteractions] = useState(false);
 
   useEffect(() => {
-    if (initialNotes !== undefined && initialNotes !== null && initialNotes !== '') {
-      setDoctorNotes(initialNotes);
-    } else if (isArchived) {
-      setDoctorNotes('None recorded');
-    } else {
-      setDoctorNotes('Maintain proper hydration and rest.');
-    }
+    setDoctorNotes(getInitialDoctorNotes(initialNotes, isArchived));
   }, [initialNotes, isArchived]);
 
   const hasInitializedRef = useRef(false);
@@ -382,10 +385,13 @@ export default function PrescriptionGenerator({
     if (mode === 'outside') {
       setInteractionResult(null);
       setStockError(null);
+      setRxDosage('');
+    } else if (selectedMed) {
+      setRxDosage(selectedMed.strength);
     }
   };
 
-  const handleSaveAndPrintPrescription = async () => {
+  const handleSaveAndPrintPrescription = async (confirmed = false) => {
     if (!patientUserId) {
       if (onPrescriptionError) {
         onPrescriptionError('No patient selected. Please choose a patient from the queue first.');
@@ -408,6 +414,10 @@ export default function PrescriptionGenerator({
         }
         return;
       }
+      if (!confirmed) {
+        setShowIssueConfirmation(true);
+        return;
+      }
 
       setIsSaving(true);
       const token = localStorage.getItem('valetudo_token');
@@ -418,17 +428,17 @@ export default function PrescriptionGenerator({
           body: JSON.stringify({
             patient_user_id: patientUserId,
             appointment_id: appointmentId,
-            notes: doctorNotes,
+            notes: doctorNotes.trim() || DEFAULT_DOCTOR_NOTES,
             items: [
               {
                 medicine_id: null,
                 outside_drug_name: trimmedName,
                 dosage: rxDosage || 'As per packaging',
-                frequency: rxFrequency || 'As needed',
+                frequency: rxFrequency.trim() || DEFAULT_FREQUENCY,
                 route: 'Oral',
                 duration_days: Number(rxDurationDays) || 3,
                 quantity_dispensed: outsideQty,
-                instructions: rxInstructions,
+                instructions: rxInstructions.trim() || DEFAULT_INSTRUCTIONS,
               },
             ],
           }),
@@ -453,6 +463,11 @@ export default function PrescriptionGenerator({
       } finally {
         setIsSaving(false);
       }
+      return;
+    }
+
+    if (!confirmed) {
+      setShowIssueConfirmation(true);
       return;
     }
 
@@ -500,16 +515,16 @@ export default function PrescriptionGenerator({
         body: JSON.stringify({
           patient_user_id: patientUserId,
           appointment_id: appointmentId,
-          notes: doctorNotes,
+          notes: doctorNotes.trim() || DEFAULT_DOCTOR_NOTES,
           items: [
             {
               medicine_id: selectedMedicineId,
               dosage: rxDosage,
-              frequency: rxFrequency,
+              frequency: rxFrequency.trim() || DEFAULT_FREQUENCY,
               route: 'Oral',
               duration_days: Number(rxDurationDays) || 3,
               quantity_dispensed: Number(rxQuantity) || 10,
-              instructions: rxInstructions,
+              instructions: rxInstructions.trim() || DEFAULT_INSTRUCTIONS,
             },
           ],
         }),
@@ -560,6 +575,12 @@ export default function PrescriptionGenerator({
     Number(rxQuantity) > selectedMed.available_stock;
   const isBlocked = rxMode === 'formulary' && (interactionResult?.blocking ?? false);
   const isOutsideNameMissing = rxMode === 'outside' && !outsideName.trim();
+  const issueDefaults = [
+    rxMode === 'outside' && !rxDosage.trim() && 'Dosage: As per packaging',
+    !rxFrequency.trim() && `Frequency: ${DEFAULT_FREQUENCY}`,
+    !rxInstructions.trim() && `Instructions: ${DEFAULT_INSTRUCTIONS}`,
+    !doctorNotes.trim() && `Physician notes: ${DEFAULT_DOCTOR_NOTES}`,
+  ].filter((item): item is string => Boolean(item));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -633,6 +654,8 @@ export default function PrescriptionGenerator({
           <input
             style={inputStyle}
             disabled={isArchived}
+            readOnly={rxMode === 'formulary'}
+            placeholder={rxMode === 'outside' ? 'As per packaging' : undefined}
             value={rxDosage}
             onChange={(e) => setRxDosage(e.target.value)}
           />
@@ -676,6 +699,7 @@ export default function PrescriptionGenerator({
           <input
             style={inputStyle}
             disabled={isArchived}
+            placeholder={DEFAULT_FREQUENCY}
             value={rxFrequency}
             onChange={(e) => setRxFrequency(e.target.value)}
           />
@@ -697,6 +721,7 @@ export default function PrescriptionGenerator({
           rows={2}
           style={{ ...inputStyle, resize: 'vertical', fontFamily: T.font }}
           disabled={isArchived}
+          placeholder={DEFAULT_INSTRUCTIONS}
           value={rxInstructions}
           onChange={(e) => setRxInstructions(e.target.value)}
         />
@@ -706,6 +731,7 @@ export default function PrescriptionGenerator({
         <input
           style={inputStyle}
           disabled={isArchived}
+          placeholder={DEFAULT_DOCTOR_NOTES}
           value={doctorNotes}
           onChange={(e) => setDoctorNotes(e.target.value)}
         />
@@ -737,7 +763,7 @@ export default function PrescriptionGenerator({
       {/* Submit */}
       <button
         type="button"
-        onClick={handleSaveAndPrintPrescription}
+        onClick={() => void handleSaveAndPrintPrescription()}
         disabled={
           isSaving ||
           isArchived ||
@@ -905,6 +931,56 @@ export default function PrescriptionGenerator({
                   Understood
                 </button>
               )}
+
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showIssueConfirmation && (
+        <div className="modal-backdrop" onClick={() => setShowIssueConfirmation(false)}>
+          <div
+            className="modal-card"
+            style={{ maxWidth: 560 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: '0 0 10px', color: T.primary, fontSize: 17 }}>
+              Confirm prescription
+            </h3>
+            {issueDefaults.length > 0 ? (
+              <>
+                <p style={{ margin: '0 0 10px', color: T.warning, fontSize: 13, fontWeight: 700 }}>
+                  Some fields are blank. The defaults below will be included in the prescription.
+                  Review them or go back to edit.
+                </p>
+                <ul style={{ margin: '0 0 18px', paddingLeft: 22, color: T.textSub, fontSize: 12.5 }}>
+                  {issueDefaults.map((item) => <li key={item}>{item}</li>)}
+                </ul>
+              </>
+            ) : (
+              <p style={{ margin: '0 0 18px', color: T.textSub, fontSize: 13 }}>
+                Review the prescription details before issuing.
+              </p>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type="button"
+                style={btnGhost}
+                onClick={() => setShowIssueConfirmation(false)}
+              >
+                Go back and edit
+              </button>
+              <button
+                type="button"
+                style={btnPrimary}
+                disabled={isSaving}
+                onClick={() => {
+                  setShowIssueConfirmation(false);
+                  void handleSaveAndPrintPrescription(true);
+                }}
+              >
+                Confirm and issue
+              </button>
             </div>
           </div>
         </div>

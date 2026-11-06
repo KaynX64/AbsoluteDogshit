@@ -150,9 +150,24 @@ const CONDITION_COLORS: Record<
 const UPPER_TEETH = Array.from({ length: 16 }, (_, i) => i + 1); // 1-16
 const LOWER_TEETH = Array.from({ length: 16 }, (_, i) => 32 - i); // 32-17
 
+const DEFAULT_CHIEF_COMPLAINT =
+  'Moderate grade fever (38.4 C), sore throat, rhinorrhea, and non-productive hacking cough x 3 days.';
+const DEFAULT_DIAGNOSIS =
+  'Acute Viral Upper Respiratory Tract Infection / Pharyngitis (ICD-10 J06.9).';
+const DEFAULT_TREATMENT_PLAN = [
+  '1. Paracetamol 500mg tab 1 tab q4h PRN for fever > 37.8 C.',
+  '2. Cetirizine 10mg tab once daily at bedtime x 5 days.',
+  '3. Warm salt water gargles TID; increase oral hydration to 2.5L/day.',
+  '4. Advised rest and excuse slip issued for classes.',
+].join('\n');
+
 /* Strip any legacy inline odontogram text out of treatment plans */
 function stripLegacyOdontogram(text: string): string {
   return (text || '').replace(/\n*\[DENTAL ODONTOGRAM CHART\]:[^\n]*/g, '').trim();
+}
+
+function isDefaultDiagnosis(text: string): boolean {
+  return text.trim().replace(/[.\s]+$/, '') === DEFAULT_DIAGNOSIS.replace(/[.\s]+$/, '');
 }
 
 export default function DoctorConsole({
@@ -190,6 +205,7 @@ export default function DoctorConsole({
   const [diagnosis, setDiagnosis] = useState('');
   const [treatmentPlan, setTreatmentPlan] = useState('');
   const [clinicalNotes, setClinicalNotes] = useState('');
+  const [encounterConfirmation, setEncounterConfirmation] = useState<string[] | null>(null);
   const [isSubmittingEMR, setIsSubmittingEMR] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<{
     text: string;
@@ -374,6 +390,7 @@ export default function DoctorConsole({
     setDiagnosis('');
     setTreatmentPlan('');
     setClinicalNotes('');
+    setEncounterConfirmation(null);
     setAttachedFile(null);
     setFeedbackMsg(null);
     setDentalChartData({});
@@ -385,15 +402,21 @@ export default function DoctorConsole({
   const selectPatient = (app: AppointmentItem) => {
     setSelectedApp(app);
 
-    let rawComplaint =
-      app.past_chief_complaint || app.notes || `${app.appointment_type} requested`;
+    let rawComplaint = app.past_chief_complaint || app.notes || '';
     if (rawComplaint.includes('[TRIAGE VITALS]')) {
       rawComplaint = rawComplaint.replace(/\[TRIAGE VITALS\][^\n]*\n?/, '').trim();
     }
-    setChiefComplaint(rawComplaint || `${app.appointment_type} requested`);
-    setDiagnosis(app.past_diagnosis || '');
-    setTreatmentPlan(stripLegacyOdontogram(app.past_treatment || ''));
+    setChiefComplaint(
+      rawComplaint.trim() === DEFAULT_CHIEF_COMPLAINT ? '' : rawComplaint
+    );
+    const pastDiagnosis = app.past_diagnosis || '';
+    setDiagnosis(isDefaultDiagnosis(pastDiagnosis) ? '' : pastDiagnosis);
+    const pastTreatment = stripLegacyOdontogram(app.past_treatment || '');
+    setTreatmentPlan(
+      pastTreatment.trim() === DEFAULT_TREATMENT_PLAN ? '' : pastTreatment
+    );
     setClinicalNotes(app.past_clinical_notes || '');
+    setEncounterConfirmation(null);
     setHeight(app.height ? String(app.height) : '');
     setWeight(app.weight ? String(app.weight) : '');
     setAttachedFile(null);
@@ -543,16 +566,22 @@ export default function DoctorConsole({
     }
   };
 
-  const handleFinishConsultation = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleFinishConsultation = async (
+    e?: React.FormEvent,
+    confirmed = false
+  ) => {
+    e?.preventDefault();
     if (!selectedApp || isBookingMode) return;
-    if (!diagnosis.trim()) {
-      setFeedbackMsg({
-        text: 'Please enter a clinical diagnosis before finalizing.',
-        type: 'error',
-      });
+    if (!confirmed) {
+      const defaultedFields = [
+        !chiefComplaint.trim() && `Chief complaint: ${DEFAULT_CHIEF_COMPLAINT}`,
+        !diagnosis.trim() && `Clinical diagnosis: ${DEFAULT_DIAGNOSIS}`,
+        !treatmentPlan.trim() && `Treatment plan: ${DEFAULT_TREATMENT_PLAN}`,
+      ].filter((field): field is string => Boolean(field));
+      setEncounterConfirmation(defaultedFields);
       return;
     }
+    setEncounterConfirmation(null);
     setIsSubmittingEMR(true);
     setFeedbackMsg(null);
     const token = localStorage.getItem('valetudo_token');
@@ -564,9 +593,9 @@ export default function DoctorConsole({
     const encounterPayload = {
       patient_user_id: selectedApp.patient_id,
       appointment_id: selectedApp.appointment_id,
-      chief_complaint: chiefComplaint,
-      diagnosis,
-      treatment_plan: treatmentPlan,
+      chief_complaint: chiefComplaint.trim() || DEFAULT_CHIEF_COMPLAINT,
+      diagnosis: diagnosis.trim() || DEFAULT_DIAGNOSIS,
+      treatment_plan: treatmentPlan.trim() || DEFAULT_TREATMENT_PLAN,
       notes: clinicalNotes,
       dental_chart:
         isDentist && chartedTeeth.length > 0 ? dentalChartData : undefined,
@@ -2801,7 +2830,7 @@ const loadPatientTimeline = async (patient: any) => {
                     }}
                     value={chiefComplaint}
                     onChange={(e) => setChiefComplaint(e.target.value)}
-                    required
+                    placeholder={DEFAULT_CHIEF_COMPLAINT}
                   />
                 </div>
 
@@ -2822,9 +2851,8 @@ const loadPatientTimeline = async (patient: any) => {
                     disabled={isArchivedMode}
                     readOnly={isArchivedMode}
                     value={diagnosis}
-                    placeholder="e.g. Fit for OJT / Acute viral pharyngitis"
+                    placeholder={DEFAULT_DIAGNOSIS}
                     onChange={(e) => setDiagnosis(e.target.value)}
-                    required
                   />
                 </div>
 
@@ -2850,7 +2878,7 @@ const loadPatientTimeline = async (patient: any) => {
                       fontFamily: T.font,
                     }}
                     value={treatmentPlan}
-                    placeholder="Prescribed regimen, rest recommendations…"
+                    placeholder={DEFAULT_TREATMENT_PLAN}
                     onChange={(e) => setTreatmentPlan(e.target.value)}
                   />
                 </div>
@@ -2967,6 +2995,53 @@ const loadPatientTimeline = async (patient: any) => {
           </div>
           )}
         </>
+      )}
+
+      {encounterConfirmation && (
+        <div className="modal-backdrop" onClick={() => setEncounterConfirmation(null)}>
+          <div
+            className="modal-card"
+            style={{ maxWidth: 560 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: '0 0 10px', color: T.primary, fontSize: 17 }}>
+              Confirm encounter details
+            </h3>
+            {encounterConfirmation.length > 0 ? (
+              <>
+                <p style={{ margin: '0 0 10px', color: T.warning, fontSize: 13, fontWeight: 700 }}>
+                  Some fields are blank. The default text below will be recorded unless you go back and edit.
+                </p>
+                <ul style={{ margin: '0 0 18px', paddingLeft: 22, color: T.textSub, fontSize: 12.5 }}>
+                  {encounterConfirmation.map((field) => (
+                    <li key={field} style={{ whiteSpace: 'pre-line', marginBottom: 6 }}>{field}</li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p style={{ margin: '0 0 18px', color: T.textSub, fontSize: 13 }}>
+                Review the encounter details before finalizing and discharging the patient.
+              </p>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type="button"
+                style={btnGhost}
+                onClick={() => setEncounterConfirmation(null)}
+              >
+                Go back and edit
+              </button>
+              <button
+                type="button"
+                style={btnPrimary}
+                disabled={isSubmittingEMR}
+                onClick={() => void handleFinishConsultation(undefined, true)}
+              >
+                Confirm and finalize
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
             {/* ── Prescription history modal (issuer-only) ─────────── */}

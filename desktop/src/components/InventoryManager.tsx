@@ -26,8 +26,15 @@ interface ConfirmDialogState {
   onConfirm: () => void;
 }
 
-export default function InventoryManager() {
-  const [activeTab, setActiveTab] = useState<InvTab>('catalog');
+function getExpiryStatus(expiryDate: string) {
+  const daysUntil = (new Date(expiryDate).getTime() - new Date().getTime()) / (1000 * 3600 * 24);
+  if (daysUntil < 0) return { label: 'Expired', bg: T.dangerSoft, color: T.danger };
+  if (daysUntil <= 90) return { label: 'Expiring soon', bg: T.warningSoft, color: T.warning };
+  return { label: 'Good', bg: T.successSoft, color: T.success };
+}
+
+export default function InventoryManager({ initialTab = 'catalog' }: { initialTab?: InvTab } = {}) {
+  const [activeTab, setActiveTab] = useState<InvTab>(initialTab);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
 
   /* ── Catalog & Deduction ─────────────────────────────────── */
@@ -78,6 +85,21 @@ export default function InventoryManager() {
   const [newMedUnit, setNewMedUnit] = useState('pcs');
   const [newMedReorder, setNewMedReorder] = useState('30');
   const [medSearchFilter, setMedSearchFilter] = useState('');
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
+  const lowStockLots = (batches || [])
+    .filter((b) => {
+      if (!b || !b.expiry_date) return false;
+      const isUnexpired = getExpiryStatus(b.expiry_date).label !== 'Expired';
+      const threshold = b.reorder_level ?? 20;
+      return isUnexpired && b.quantity_on_hand <= threshold;
+    })
+    .sort((a, b) => a.quantity_on_hand - b.quantity_on_hand);
 
   /* ── Fetchers ────────────────────────────────────────────── */
   const fetchBatches = async () => {
@@ -165,6 +187,16 @@ export default function InventoryManager() {
     );
 
     if (match) {
+      if (activeTab === 'catalog') {
+        const expStatus = getExpiryStatus(match.expiry_date);
+        if (expStatus.label === 'Expired') {
+          setStatusMessage(
+            `⚠️ Cannot select Lot "${match.batch_no}" (${match.name}): Batch EXPIRED on ${new Date(match.expiry_date).toISOString().split('T')[0]}. Expired medications are barred from dispensation and must be disposed of via Adjust & Dispose.`
+          );
+          setBarcodeQuery('');
+          return;
+        }
+      }
       setBatchId(match.batch_id.toString());
       setAdjustBatchId(match.batch_id);
       setStatusMessage(
@@ -238,6 +270,13 @@ export default function InventoryManager() {
   const handleDeductStock = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatusMessage('');
+    const targetBatch = batches.find((b) => b.batch_id.toString() === batchId);
+    if (targetBatch && getExpiryStatus(targetBatch.expiry_date).label === 'Expired') {
+      setStatusMessage(
+        `Cannot dispense expired medication: Lot "${targetBatch.batch_no}" is expired. Please quarantine or dispose of this lot via Adjust & Dispose.`
+      );
+      return;
+    }
     const token = localStorage.getItem('valetudo_token');
     try {
       const res = await fetch(`${API_BASE_URL}/api/inventory/deduct`, {
@@ -431,13 +470,6 @@ export default function InventoryManager() {
     });
   };
 
-  const getExpiryStatus = (expiryDate: string) => {
-    const daysUntil = (new Date(expiryDate).getTime() - new Date().getTime()) / (1000 * 3600 * 24);
-    if (daysUntil < 0) return { label: 'Expired', bg: T.dangerSoft, color: T.danger };
-    if (daysUntil <= 90) return { label: 'Expiring soon', bg: T.warningSoft, color: T.warning };
-    return { label: 'Good', bg: T.successSoft, color: T.success };
-  };
-
   const tabs: { id: InvTab; label: string }[] = [
     { id: 'catalog', label: 'Catalog & dispense' },
     { id: 'stockin', label: 'Stock-in' },
@@ -454,9 +486,11 @@ export default function InventoryManager() {
 
   return (
     <section style={{
+      flex: 1,
+      minHeight: 0,
       background: T.surface,
       border: `1px solid ${T.border}`,
-      borderRadius: T.radius.lg,
+      borderRadius: 0,
       padding: 22,
       boxShadow: T.shadow.xs,
     }}>
@@ -570,68 +604,78 @@ export default function InventoryManager() {
                     </tr>
                   </thead>
                   <tbody>
-                    {batches.map((b) => {
-                      const status = getExpiryStatus(b.expiry_date);
-                      const isSelected = batchId === b.batch_id.toString();
-                      return (
-                        <tr
-                          key={b.batch_id}
-                          onClick={() => {
-                            setBatchId(b.batch_id.toString());
-                            setAdjustBatchId(b.batch_id);
-                            setStatusMessage(`Selected: ${b.name} (${b.batch_no})`);
-                          }}
-                          style={{
-                            cursor: 'pointer',
-                            background: isSelected ? T.primaryTint : 'transparent',
-                          }}
-                        >
-                          <td style={{ padding: '12px 14px' }}>
-                            <div style={{
-                              width: 16, height: 16, borderRadius: '50%',
-                              border: `2px solid ${isSelected ? T.primary : T.sage300}`,
-                              background: isSelected ? T.primary : 'transparent',
-                              display: 'grid', placeItems: 'center',
-                            }}>
-                              {isSelected && <span style={{ color: '#fff', fontSize: 9, fontWeight: 900 }}><Icon name="check" size={14} /></span>}
-                            </div>
-                          </td>
-                          <td style={{ padding: '12px 14px' }}>
-                            <div style={{ fontWeight: 700, color: T.text }}>{b.name}</div>
-                            <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>
-                              {b.generic_name} · {b.strength}
-                            </div>
-                          </td>
-                          <td style={{
-                            padding: '12px 14px', fontFamily: T.mono,
-                            fontSize: 11.5, color: T.textSub,
-                          }}>
-                            {b.batch_no}
-                          </td>
-                          <td style={{
-                            padding: '12px 14px', textAlign: 'right', fontWeight: 800,
-                            color: b.quantity_on_hand < 20 ? T.danger : T.primary,
-                          }}>
-                            {b.quantity_on_hand}
-                            <span style={{ fontSize: 10.5, color: T.textMuted, fontWeight: 600, marginLeft: 4 }}>
-                              {b.unit || 'pcs'}
-                            </span>
-                          </td>
-                          <td style={{ padding: '12px 14px', fontSize: 11.5, color: T.textSub }}>
-                            {new Date(b.expiry_date).toISOString().split('T')[0]}
-                          </td>
-                          <td style={{ padding: '12px 14px' }}>
-                            <span style={{
-                              padding: '3px 10px', borderRadius: T.radius.pill,
-                              background: status.bg, color: status.color,
-                              fontSize: 10.5, fontWeight: 800, letterSpacing: 0.3,
-                            }}>
-                              {status.label}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {batches.filter((b) => getExpiryStatus(b.expiry_date).label !== 'Expired').length === 0 ? (
+                      <tr>
+                        <td colSpan={6} style={{ padding: '36px 16px', textAlign: 'center', color: T.textMuted }}>
+                          No unexpired lots available for dispensation.
+                        </td>
+                      </tr>
+                    ) : (
+                      batches
+                        .filter((b) => getExpiryStatus(b.expiry_date).label !== 'Expired')
+                        .map((b) => {
+                          const status = getExpiryStatus(b.expiry_date);
+                          const isSelected = batchId === b.batch_id.toString();
+                          return (
+                            <tr
+                              key={b.batch_id}
+                              onClick={() => {
+                                setBatchId(b.batch_id.toString());
+                                setAdjustBatchId(b.batch_id);
+                                setStatusMessage(`Selected: ${b.name} (${b.batch_no})`);
+                              }}
+                              style={{
+                                cursor: 'pointer',
+                                background: isSelected ? T.primaryTint : 'transparent',
+                              }}
+                            >
+                              <td style={{ padding: '12px 14px' }}>
+                                <div style={{
+                                  width: 16, height: 16, borderRadius: '50%',
+                                  border: `2px solid ${isSelected ? T.primary : T.sage300}`,
+                                  background: isSelected ? T.primary : 'transparent',
+                                  display: 'grid', placeItems: 'center',
+                                }}>
+                                  {isSelected && <span style={{ color: '#fff', fontSize: 9, fontWeight: 900 }}><Icon name="check" size={14} /></span>}
+                                </div>
+                              </td>
+                              <td style={{ padding: '12px 14px' }}>
+                                <div style={{ fontWeight: 700, color: T.text }}>{b.name}</div>
+                                <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>
+                                  {b.generic_name} · {b.strength}
+                                </div>
+                              </td>
+                              <td style={{
+                                padding: '12px 14px', fontFamily: T.mono,
+                                fontSize: 11.5, color: T.textSub,
+                              }}>
+                                {b.batch_no}
+                              </td>
+                              <td style={{
+                                padding: '12px 14px', textAlign: 'right', fontWeight: 800,
+                                color: b.quantity_on_hand < 20 ? T.danger : T.primary,
+                              }}>
+                                {b.quantity_on_hand}
+                                <span style={{ fontSize: 10.5, color: T.textMuted, fontWeight: 600, marginLeft: 4 }}>
+                                  {b.unit || 'pcs'}
+                                </span>
+                              </td>
+                              <td style={{ padding: '12px 14px', fontSize: 11.5, color: T.textSub }}>
+                                {new Date(b.expiry_date).toISOString().split('T')[0]}
+                              </td>
+                              <td style={{ padding: '12px 14px' }}>
+                                <span style={{
+                                  padding: '3px 10px', borderRadius: T.radius.pill,
+                                  background: status.bg, color: status.color,
+                                  fontSize: 10.5, fontWeight: 800, letterSpacing: 0.3,
+                                }}>
+                                  {status.label}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -859,106 +903,190 @@ export default function InventoryManager() {
 
       {/* ── ALERTS & REORDER ────────────────────────────── */}
       {activeTab === 'alerts' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-          <div>
-            <h4 style={{
-              margin: '0 0 12px', fontSize: 14, fontWeight: 800, color: T.warning,
-              display: 'flex', alignItems: 'center', gap: 8,
-            }}>
-              <Icon name="trending_down" size={14} /> Automated reorder suggestions
-            </h4>
-            <div style={{
-              border: `1px solid ${T.border}`,
-              borderRadius: T.radius.md,
-              overflow: 'hidden', maxHeight: 360, overflowY: 'auto',
-            }}>
-              <table className="tbl" style={{ fontSize: 12 }}>
-                <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
-                  <tr>
-                    <th>Medicine</th>
-                    <th style={{ textAlign: 'right' }}>Current stock</th>
-                    <th style={{ textAlign: 'right' }}>Buffer</th>
-                    <th style={{ textAlign: 'right' }}>Suggested order</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reorderSuggestions.map((s) => (
-                    <tr key={s.medicine_id}>
-                      <td style={{ fontWeight: 700 }}>{s.name}</td>
-                      <td style={{
-                        textAlign: 'right', fontWeight: 700,
-                        color: s.total_stock_on_hand <= s.reorder_level ? T.danger : T.success,
-                      }}>
-                        {s.total_stock_on_hand} {s.unit}
-                      </td>
-                      <td style={{ textAlign: 'right', color: T.textSub }}>
-                        {s.reorder_level} {s.unit}
-                      </td>
-                      <td style={{
-                        textAlign: 'right', fontWeight: 700,
-                        color: s.suggested_reorder_qty > 0 ? T.warning : T.textMuted,
-                      }}>
-                        {s.suggested_reorder_qty > 0 ? `+${s.suggested_reorder_qty} ${s.unit}` : 'Adequate'}
-                      </td>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          {/* Top row: 2 columns for Reorder suggestions & Expiring stocks */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+            <div>
+              <h4 style={{
+                margin: '0 0 12px', fontSize: 14, fontWeight: 800, color: T.warning,
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <Icon name="trending_down" size={14} /> Automated reorder suggestions
+              </h4>
+              <div style={{
+                border: `1px solid ${T.border}`,
+                borderRadius: T.radius.md,
+                overflow: 'hidden', maxHeight: 360, overflowY: 'auto',
+              }}>
+                <table className="tbl" style={{ fontSize: 12 }}>
+                  <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
+                    <tr>
+                      <th>Medicine</th>
+                      <th style={{ textAlign: 'right' }}>Current stock</th>
+                      <th style={{ textAlign: 'right' }}>Buffer</th>
+                      <th style={{ textAlign: 'right' }}>Suggested order</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {reorderSuggestions.map((s) => (
+                      <tr key={s.medicine_id}>
+                        <td style={{ fontWeight: 700 }}>{s.name}</td>
+                        <td style={{
+                          textAlign: 'right', fontWeight: 700,
+                          color: s.total_stock_on_hand <= s.reorder_level ? T.danger : T.success,
+                        }}>
+                          {s.total_stock_on_hand} {s.unit}
+                        </td>
+                        <td style={{ textAlign: 'right', color: T.textSub }}>
+                          {s.reorder_level} {s.unit}
+                        </td>
+                        <td style={{
+                          textAlign: 'right', fontWeight: 700,
+                          color: s.suggested_reorder_qty > 0 ? T.warning : T.textMuted,
+                        }}>
+                          {s.suggested_reorder_qty > 0 ? `+${s.suggested_reorder_qty} ${s.unit}` : 'Adequate'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div>
+              <h4 style={{
+                margin: '0 0 12px', fontSize: 14, fontWeight: 800, color: T.danger,
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                ⏳ Expiring stocks on shelf (&lt; 90 days)
+              </h4>
+              <div style={{
+                border: `1px solid ${T.border}`,
+                borderRadius: T.radius.md,
+                overflow: 'hidden', maxHeight: 360, overflowY: 'auto',
+              }}>
+                {expiringLots.length === 0 ? (
+                  <div style={{
+                    padding: 24, textAlign: 'center',
+                    color: T.success, fontSize: 12.5, fontWeight: 700,
+                  }}>
+                    <Icon name="check_circle" size={14} /> No active batches expiring within 90 days.
+                  </div>
+                ) : (
+                  <table className="tbl" style={{ fontSize: 12 }}>
+                    <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
+                      <tr>
+                        <th>Medicine</th>
+                        <th style={{ textAlign: 'right' }}>Stock on hand</th>
+                        <th>Expiry date</th>
+                        <th>Alert</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {expiringLots.map((e) => (
+                        <tr key={e.batch_id}>
+                          <td>
+                            <div style={{ fontWeight: 700 }}>{e.name}</div>
+                            <div style={{ fontSize: 10.5, color: T.textMuted }}>{e.generic_name}</div>
+                          </td>
+                          <td style={{ textAlign: 'right', fontWeight: 800, color: T.danger }}>
+                            {e.quantity_on_hand}
+                          </td>
+                          <td style={{ fontSize: 11, color: T.textSub }}>{e.expiry_date}</td>
+                          <td>
+                            <span style={{
+                              padding: '2px 8px', borderRadius: T.radius.pill,
+                              background: e.alert_level === 'EXPIRED' ? T.dangerSoft : T.warningSoft,
+                              color: e.alert_level === 'EXPIRED' ? T.danger : T.warning,
+                              fontSize: 10, fontWeight: 800, letterSpacing: 0.3,
+                            }}>
+                              {e.alert_level}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
             </div>
           </div>
 
-          <div>
-            <h4 style={{
-              margin: '0 0 12px', fontSize: 14, fontWeight: 800, color: T.danger,
-              display: 'flex', alignItems: 'center', gap: 8,
-            }}>
-              ⏳ Expiring stocks on shelf (&lt; 90 days)
-            </h4>
+          {/* Low stock category: placed in the middle below them */}
+          <div style={{ maxWidth: 1100, width: '100%', margin: '0 auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h4 style={{
+                margin: 0, fontSize: 14, fontWeight: 800, color: T.warning,
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <Icon name="warning" size={14} /> Low stock lots
+              </h4>
+              <span style={{ fontSize: 11.5, color: T.textSub, fontWeight: 600 }}>
+                {lowStockLots.length} lot{lowStockLots.length === 1 ? '' : 's'} at or below reorder buffer
+              </span>
+            </div>
+
             <div style={{
               border: `1px solid ${T.border}`,
               borderRadius: T.radius.md,
               overflow: 'hidden', maxHeight: 360, overflowY: 'auto',
             }}>
-              {expiringLots.length === 0 ? (
+              {lowStockLots.length === 0 ? (
                 <div style={{
-                  padding: 24, textAlign: 'center',
+                  padding: 28, textAlign: 'center',
                   color: T.success, fontSize: 12.5, fontWeight: 700,
                 }}>
-                  <Icon name="check_circle" size={14} /> No active batches expiring within 90 days.
+                  <Icon name="check_circle" size={14} /> All active lots have adequate stock buffers.
                 </div>
               ) : (
                 <table className="tbl" style={{ fontSize: 12 }}>
                   <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
                     <tr>
                       <th>Medicine</th>
+                      <th>Lot / batch</th>
                       <th style={{ textAlign: 'right' }}>Stock on hand</th>
+                      <th style={{ textAlign: 'right' }}>Reorder buffer</th>
                       <th>Expiry date</th>
-                      <th>Alert</th>
+                      <th style={{ width: 150 }}>Status</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {expiringLots.map((e) => (
-                      <tr key={e.batch_id}>
-                        <td>
-                          <div style={{ fontWeight: 700 }}>{e.name}</div>
-                          <div style={{ fontSize: 10.5, color: T.textMuted }}>{e.generic_name}</div>
-                        </td>
-                        <td style={{ textAlign: 'right', fontWeight: 800, color: T.danger }}>
-                          {e.quantity_on_hand}
-                        </td>
-                        <td style={{ fontSize: 11, color: T.textSub }}>{e.expiry_date}</td>
-                        <td>
-                          <span style={{
-                            padding: '2px 8px', borderRadius: T.radius.pill,
-                            background: e.alert_level === 'EXPIRED' ? T.dangerSoft : T.warningSoft,
-                            color: e.alert_level === 'EXPIRED' ? T.danger : T.warning,
-                            fontSize: 10, fontWeight: 800, letterSpacing: 0.3,
+                    {lowStockLots.map((lot) => {
+                      const isCritical = lot.quantity_on_hand <= Math.max(5, Math.floor((lot.reorder_level || 20) / 2));
+                      return (
+                        <tr key={lot.batch_id}>
+                          <td>
+                            <div style={{ fontWeight: 700 }}>{lot.name}</div>
+                            <div style={{ fontSize: 10.5, color: T.textMuted }}>{lot.generic_name} · {lot.strength}</div>
+                          </td>
+                          <td style={{ fontFamily: T.mono, fontSize: 11.5, color: T.textSub }}>
+                            {lot.batch_no}
+                          </td>
+                          <td style={{
+                            textAlign: 'right', fontWeight: 800,
+                            color: isCritical ? T.danger : T.warning,
                           }}>
-                            {e.alert_level}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
+                            {lot.quantity_on_hand} <span style={{ fontSize: 10, color: T.textMuted }}>{lot.unit || 'pcs'}</span>
+                          </td>
+                          <td style={{ textAlign: 'right', color: T.textSub }}>
+                            {lot.reorder_level || 20} {lot.unit || 'pcs'}
+                          </td>
+                          <td style={{ fontSize: 11, color: T.textSub }}>
+                            {new Date(lot.expiry_date).toISOString().split('T')[0]}
+                          </td>
+                          <td style={{ whiteSpace: 'nowrap' }}>
+                            <span style={{
+                              padding: '2px 8px', borderRadius: T.radius.pill,
+                              background: isCritical ? T.dangerSoft : T.warningSoft,
+                              color: isCritical ? T.danger : T.warning,
+                              fontSize: 10, fontWeight: 800, letterSpacing: 0.3,
+                            }}>
+                              {isCritical ? 'CRITICAL BUFFER' : 'LOW STOCK'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}

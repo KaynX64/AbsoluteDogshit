@@ -78,6 +78,7 @@ interface NurseConsoleProps {
 
 export default function NurseConsole({
   viewMode: controlledView,
+  onViewModeChange,
 }: NurseConsoleProps = {}) {
   const [internalView] = useState<NurseViewMode>('triage');
   const viewMode = controlledView ?? internalView;
@@ -91,6 +92,12 @@ export default function NurseConsole({
   const [sosAlerts, setSosAlerts] = useState<SosAlert[]>([]);
   const [sosBusyId, setSosBusyId] = useState<number | null>(null);
   const [noShowCount, setNoShowCount] = useState<number>(0);
+  const [invStats, setInvStats] = useState<{
+    lowStockCount: number;
+    expiringSoonCount: number;
+    expiredCount: number;
+  }>({ lowStockCount: 0, expiringSoonCount: 0, expiredCount: 0 });
+  const [selectedInvTab, setSelectedInvTab] = useState<'catalog' | 'stockin' | 'adjust' | 'alerts' | 'logs' | 'addmed'>('catalog');
 
   /* ── Expected arrivals state ─────────────────────────────── */
   const [expected, setExpected] = useState<ExpectedItem[]>([]);
@@ -217,6 +224,23 @@ export default function NurseConsole({
     } catch (_) {}
   };
 
+  const fetchInventoryStats = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/inventory/dashboard-summary`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setInvStats({
+          lowStockCount: Number(data.lowStockCount) || 0,
+          expiringSoonCount: Number(data.expiringSoonCount) || 0,
+          expiredCount: Number(data.expiredCount) || 0,
+        });
+      }
+    } catch (_) {}
+  };
+
   const fetchExpected = async () => {
     setLoadingExpected(true);
     setExpectedFeedback(null);
@@ -240,6 +264,7 @@ export default function NurseConsole({
     fetchLiveQueue();
     fetchActiveSosCount();
     fetchNoShowCount();
+    fetchInventoryStats();
 
     const token = localStorage.getItem('valetudo_token');
     const socket = io(SOCKET_URL, {
@@ -261,6 +286,10 @@ export default function NurseConsole({
     socket.on('emergency:status_change', () => {
       fetchLiveQueue();
       fetchActiveSosCount();
+    });
+
+    socket.on('inventory:updated', () => {
+      fetchInventoryStats();
     });
 
     // The reminder worker flips appointments to 'no_show' every 60s and
@@ -378,7 +407,7 @@ export default function NurseConsole({
   };
 
   if (viewMode === 'inventory') {
-    return <InventoryManager />;
+    return <InventoryManager initialTab={selectedInvTab} />;
   }
 
   if (viewMode === 'expected') {
@@ -1391,19 +1420,50 @@ export default function NurseConsole({
         </section>
       </div>
 
-      {/* Stat row with Dynamic Open SOS count */}
-      {/* Stat row with Dynamic Open SOS count + No-shows today */}
+      {/* Stat row with Dynamic Open SOS count + No-shows today + Live Inventory metrics */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(5, 1fr)',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
           gap: 14,
         }}
       >
         {[
           { label: 'Seen today', value: '27', bg: '#DDEBD8', color: C.text },
           { label: 'Avg. wait', value: '6 min', bg: '#DDE7EE', color: C.text },
-          { label: 'Low stock lots', value: '1', bg: '#EDE5D6', color: C.text },
+          {
+            label: 'Low stock lots',
+            value: String(invStats.lowStockCount),
+            bg: invStats.lowStockCount > 0 ? T.warningSoft : '#EDE5D6',
+            color: invStats.lowStockCount > 0 ? T.warning : C.text,
+            onClick: () => {
+              setSelectedInvTab('alerts');
+              onViewModeChange?.('inventory');
+            },
+            title: 'Click to view Low stock lots in Alerts & Reorder',
+          },
+          {
+            label: 'Expiring soon',
+            value: String(invStats.expiringSoonCount),
+            bg: invStats.expiringSoonCount > 0 ? T.warningSoft : '#EDE5D6',
+            color: invStats.expiringSoonCount > 0 ? T.warning : C.text,
+            onClick: () => {
+              setSelectedInvTab('alerts');
+              onViewModeChange?.('inventory');
+            },
+            title: 'Click to view Expiring lots in Alerts & Reorder',
+          },
+          {
+            label: 'Expired',
+            value: String(invStats.expiredCount),
+            bg: invStats.expiredCount > 0 ? T.dangerSoft : '#EDE5D6',
+            color: invStats.expiredCount > 0 ? T.danger : C.text,
+            onClick: () => {
+              setSelectedInvTab('adjust');
+              onViewModeChange?.('inventory');
+            },
+            title: 'Click to quarantine or dispose expired lots in Adjust & Dispose',
+          },
           {
             label: 'No-shows today',
             value: String(noShowCount),
@@ -1419,6 +1479,8 @@ export default function NurseConsole({
         ].map((card) => (
           <div
             key={card.label}
+            onClick={card.onClick}
+            title={card.title}
             style={{
               padding: '18px 20px',
               borderRadius: 22,
@@ -1426,6 +1488,7 @@ export default function NurseConsole({
               display: 'flex',
               flexDirection: 'column',
               gap: 8,
+              cursor: card.onClick ? 'pointer' : 'default',
             }}
           >
             <div

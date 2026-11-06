@@ -754,7 +754,10 @@ const handleChangePassword = async (e: React.FormEvent) => {
   </div>
 )}
 
-        <main className="app-content">
+        <main
+          className="app-content"
+          style={activeRoleView === 'NURSE' && nurseViewMode === 'inventory' ? { padding: 0, display: 'flex' } : undefined}
+        >
           {activeRoleView === 'NURSE' && (
             <NurseConsole
               viewMode={nurseViewMode}
