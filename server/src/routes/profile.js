@@ -307,27 +307,14 @@ router.post('/fcm-token', authenticateToken, async (req, res) => {
   }
 });
 
-// ── GET /api/profile/patient/:userId/immunizations ────────────────────────────
-router.get('/patient/:userId/immunizations', authenticateToken, async (req, res) => {
-  const targetUserId = Number(req.params.userId);
-  try {
-    const [rows] = await pool.query(
-      'SELECT immunization_history FROM HEALTH_PROFILES WHERE user_id = ? AND deleted_at IS NULL',
-      [targetUserId]
-    );
-
-    if (rows.length === 0 || !rows[0].immunization_history) {
-      return res.json({ immunizations: [] });
-    }
-
-    let list = rows[0].immunization_history;
-    if (typeof list === 'string') {
-      try { list = JSON.parse(list); } catch (_) { list = [list]; }
-    }
-    res.json({ immunizations: Array.isArray(list) ? list : [] });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch immunization history.' });
-  }
-});
+// ── SEC-11 Remediation (duplicate route removal) ─────────────────────────────
+// An unauthenticated duplicate GET /patient/:userId/immunizations handler used
+// to be registered here — it carried authenticateToken but NOT the
+// requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN') gate that the real
+// endpoint (registered at the top of this file) enforces. Express matches
+// routes in registration order, so the duplicate was dead code today but a
+// silent authorization bypass waiting to happen at the first refactor that
+// reorders or renames routes. It has been deleted. Do not re-register this
+// path (or any patient-data path) without requireRoles().
 
 export default router;

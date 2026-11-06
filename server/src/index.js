@@ -94,6 +94,26 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  // ── SEC-14 Remediation (Content-Security-Policy) ──────────────────────
+  // Defense in depth against cross-site scripting on the HTML this API
+  // serves — chiefly the public /api/documents/verify/:qrToken page
+  // (verify.html), which renders patient-facing document data. The policy
+  // is calibrated to that page's real asset needs:
+  //   • script-src 'unsafe-inline' — verify.html ships an inline <script>
+  //     and inline onclick handlers. External/CDN scripts stay forbidden
+  //     ('self' only). Once the page's script is externalized to a
+  //     same-origin asset, drop 'unsafe-inline' to harden this further.
+  //   • style-src 'unsafe-inline' — the page's inline <style> block and
+  //     style="" attributes.
+  //   • img-src data: + https://api.qrserver.com — the inline SVG favicon
+  //     and the third-party QR seal renderer the page depends on.
+  //   • object-src 'none' / base-uri 'self' / form-action 'self' /
+  //     frame-ancestors 'none' — hardening: no plugin content, no <base>
+  //     or form hijacking, and no embedding (matches X-Frame-Options).
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://api.qrserver.com; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+  );
   next();
 });
 
