@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
 import { T, btnPrimary, btnGhost } from '../theme';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
+import Icon from './Icon';
 
 export default function ResponderConsole() {
   const [activeAlerts, setActiveAlerts] = useState<any[]>([]);
@@ -53,7 +54,7 @@ export default function ResponderConsole() {
       playEmergencyAlarm();
       if (window.electronAPI?.showNotification) {
         window.electronAPI.showNotification({
-          title: `🚨 SOS: ${newAlert.patientName || 'Campus incident'}`,
+          title: `SOS: ${newAlert.patientName || 'Campus incident'}`,
           body: `Location: ${newAlert.latitude?.toFixed(5)}, ${newAlert.longitude?.toFixed(5)}. Blood: ${newAlert.bloodType}. Allergies: ${newAlert.allergies}`,
         });
       }
@@ -109,7 +110,7 @@ export default function ResponderConsole() {
     playEmergencyAlarm();
     if (window.electronAPI?.showNotification) {
       window.electronAPI.showNotification({
-        title: '🚨 Valetudo HealthLink — SOS alert test',
+        title: 'Valetudo HealthLink — SOS alert test',
         body: 'Daniella Movida (BSIT) reported a medical emergency at PSU Lingayen Library. Allergies: Penicillin.',
       });
     } else {
@@ -155,14 +156,10 @@ export default function ResponderConsole() {
   return (
     <div style={{ width: '100%' }}>
       {/* ── Page header ─────────────────────────────────── */}
-      <div style={{ marginBottom: 22 }}>
-        <h1 style={{
-          fontSize: 28, fontWeight: 800, letterSpacing: -0.6,
-          color: T.text, margin: 0,
-        }}>
-          Campus emergency dispatch
-        </h1>
-        <p style={{ fontSize: 13.5, color: T.textSub, margin: '6px 0 0' }}>
+      <div className="vd-page-head">
+        <div className="vd-page-head-eyebrow">PSU Quick-Response Unit</div>
+        <h1 className="vd-page-head-title">Campus emergency dispatch</h1>
+        <p className="vd-page-head-sub">
           PSU Lingayen Campus Security & Medical Quick-Response Unit · Live on-duty · auto-syncing
         </p>
       </div>
@@ -179,7 +176,7 @@ export default function ResponderConsole() {
           flexWrap: 'wrap',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 15 }}>🛠️</span>
+            <span style={{ fontSize: 15 }}><Icon name="build" size={14} />️</span>
             <span style={{
               fontSize: 11, fontWeight: 800, letterSpacing: 1.2,
               color: T.textSub, textTransform: 'uppercase',
@@ -199,7 +196,7 @@ export default function ResponderConsole() {
                 fontFamily: T.font,
               }}
             >
-              🧪 Test OS tray banner
+              <Icon name="science" size={14} /> Test OS tray banner
             </button>
             <button
               type="button"
@@ -212,7 +209,7 @@ export default function ResponderConsole() {
                 fontFamily: T.font,
               }}
             >
-              🚨 Trigger live SOS
+              <Icon name="emergency" size={14} /> Trigger live SOS
             </button>
           </div>
         </div>
@@ -259,7 +256,7 @@ export default function ResponderConsole() {
         </div>
 
         <button type="button" onClick={() => fetchAlerts(false)} style={btnGhost}>
-          🔄 Refresh
+          <Icon name="refresh" size={14} /> Refresh
         </button>
       </div>
 
@@ -275,7 +272,7 @@ export default function ResponderConsole() {
           border: `1px solid ${T.successBorder}`,
           borderRadius: T.radius.xl,
         }}>
-          <div style={{ fontSize: 48, marginBottom: 12 }}>🛡️</div>
+          <div style={{ fontSize: 48, marginBottom: 12 }}><Icon name="shield" size={14} />️</div>
           <div style={{ fontSize: 17, fontWeight: 800, color: T.success, marginBottom: 6 }}>
             All clear
           </div>
@@ -316,7 +313,7 @@ export default function ResponderConsole() {
                       display: 'grid', placeItems: 'center', fontSize: 22,
                       flexShrink: 0,
                     }}>
-                      🚨
+                      <Icon name="emergency" size={14} />
                     </div>
                     <div>
                       <div style={{ fontSize: 17, fontWeight: 800, color: T.text }}>
@@ -369,7 +366,7 @@ export default function ResponderConsole() {
                       fontSize: 14, fontWeight: 800,
                       color: allergyIsWarning ? T.danger : T.success,
                     }}>
-                      {allergyIsWarning ? `⚠️ ${a.allergies}` : (a.allergies || 'None listed')}
+                      {allergyIsWarning ? `${a.allergies}` : (a.allergies || 'None listed')}
                     </div>
                   </div>
                   <div>
@@ -422,7 +419,7 @@ export default function ResponderConsole() {
                       display: 'inline-flex', alignItems: 'center', gap: 6,
                       fontSize: 12, fontWeight: 700, color: T.primary,
                     }}>
-                      Open in Maps ↗
+                      Open in Maps <Icon name="north_east" size={14} />
                     </span>
                   )}
                 </a>

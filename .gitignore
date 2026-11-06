@@ -34,3 +34,6 @@ mobile/android/app/google-services.json
 #googleFirebaseCredentials.json
 server/serviceAccountKey.json
 mobile/android/app/google-services.json
+
+#audit_files
+audit.md

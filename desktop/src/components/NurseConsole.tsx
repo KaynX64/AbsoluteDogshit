@@ -4,6 +4,8 @@ import QrIntakeScanner from './QrIntakeScanner';
 import InventoryManager from './InventoryManager';
 import { io } from 'socket.io-client';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
+import { T } from '../theme';
+import Icon from './Icon';
 
 interface QueueItem {
   queue_id: number;
@@ -352,7 +354,7 @@ export default function NurseConsole({
       const data = await res.json();
 
       if (res.status === 409) {
-        setExpectedFeedback({ text: '⚠️ ' + data.error, ok: false });
+        setExpectedFeedback({ text: '' + data.error, ok: false });
         await openCheckInConfirm(item);
         fetchLiveQueue();
         return;
@@ -361,14 +363,14 @@ export default function NurseConsole({
       if (!res.ok) throw new Error(data.error || 'Failed to check in patient.');
 
       setExpectedFeedback({
-        text: `✅ ${item.first_name} ${item.last_name} checked in as ${data.queueTicket} at ${data.arrivalTime}.`,
+        text: `${item.first_name} ${item.last_name} checked in as ${data.queueTicket} at ${data.arrivalTime}.`,
         ok: true,
       });
       setConfirmCheckIn(null);
       fetchExpected();
       fetchLiveQueue();
     } catch (err: any) {
-      setExpectedFeedback({ text: '❌ ' + err.message, ok: false });
+      setExpectedFeedback({ text: '' + err.message, ok: false });
       setConfirmCheckIn(null);
     } finally {
       setCheckingInId(null);
@@ -624,7 +626,7 @@ export default function NurseConsole({
                         )}
                         {allergyIsWarning && (
                           <span style={{ color: C.danger, fontWeight: 700 }}>
-                            ⚠️ {item.allergies}
+                            <Icon name="warning" size={14} /> {item.allergies}
                           </span>
                         )}
                       </div>
@@ -649,7 +651,7 @@ export default function NurseConsole({
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      {checkingInId === item.appointment_id ? 'Checking in…' : '✓ Check in'}
+                      {checkingInId === item.appointment_id ? 'Checking in…' : 'Check in'}
                     </button>
                   </div>
                 );
@@ -721,7 +723,7 @@ export default function NurseConsole({
                         color: C.warning,
                       }}
                     >
-                      ⚠️
+                      <Icon name="warning" size={14} />
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: C.text }}>
@@ -797,7 +799,7 @@ export default function NurseConsole({
                         flexShrink: 0,
                       }}
                     >
-                      ✓
+                      <Icon name="check" size={14} />
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: C.text }}>
@@ -866,7 +868,7 @@ export default function NurseConsole({
                         fontFamily: 'inherit',
                       }}
                     >
-                      {checkingInId !== null ? 'Checking in…' : '✓ Confirm check-in'}
+                      {checkingInId !== null ? 'Checking in…' : 'Confirm check-in'}
                     </button>
                   </div>
                 </>
@@ -906,7 +908,7 @@ export default function NurseConsole({
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{ fontSize: 24 }}>🚨</span>
+            <span style={{ fontSize: 24 }}><Icon name="emergency" size={14} /></span>
             <div>
               <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: C.danger }}>
                 Active SOS alerts
@@ -984,7 +986,7 @@ export default function NurseConsole({
                       style={{
                         padding: '3px 10px',
                         borderRadius: 999,
-                        background: '#DC2626',
+                        background: T.danger,
                         color: '#FFFFFF',
                         fontSize: 10,
                         fontWeight: 800,
@@ -997,12 +999,12 @@ export default function NurseConsole({
                 </div>
 
                 <div style={{ fontSize: 12.5, color: C.textSub, lineHeight: 1.6 }}>
-                  🩸 Blood: <strong>{a.blood_type || 'Unknown'}</strong> · ⚠️ Allergies:{' '}
+                  <Icon name="bloodtype" size={14} /> Blood: <strong>{a.blood_type || 'Unknown'}</strong> · <Icon name="warning" size={14} /> Allergies:{' '}
                   <strong>{a.allergies || 'None'}</strong>
-                  {a.phone ? <> · 📞 {a.phone}</> : null}
+                  {a.phone ? <> · <Icon name="call" size={14} /> {a.phone}</> : null}
                 </div>
                 {a.notes && (
-                  <div style={{ fontSize: 12.5, color: C.text }}>📍 {a.notes}</div>
+                  <div style={{ fontSize: 12.5, color: C.text }}><Icon name="location_on" size={14} /> {a.notes}</div>
                 )}
 
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
@@ -1011,7 +1013,7 @@ export default function NurseConsole({
                       type="button"
                       disabled={busy}
                       onClick={() => updateSosStatus(a.alert_id, 'acknowledged')}
-                      style={btn('#DC2626', '#FFFFFF', '#DC2626')}
+                      style={btn(T.danger, '#FFFFFF', T.danger)}
                     >
                       Acknowledge
                     </button>
@@ -1032,7 +1034,7 @@ export default function NurseConsole({
                     onClick={() => updateSosStatus(a.alert_id, 'resolved')}
                     style={btn(C.primary, '#FFFFFF', C.primary)}
                   >
-                    ✓ Resolved
+                    <Icon name="check" size={14} /> Resolved
                   </button>
                   <button
                     type="button"
@@ -1053,7 +1055,7 @@ export default function NurseConsole({
                         display: 'inline-block',
                       }}
                     >
-                      🗺 Open map
+                      <Icon name="map" size={14} /> Open map
                     </a>
                   )}
                 </div>
@@ -1287,7 +1289,7 @@ export default function NurseConsole({
                             style={{
                               fontSize: 9.5,
                               fontWeight: 900,
-                              background: '#DC2626',
+                              background: T.danger,
                               color: '#FFFFFF',
                               padding: '1px 6px',
                               borderRadius: 4,
@@ -1329,7 +1331,7 @@ export default function NurseConsole({
                         letterSpacing: 0.6,
                         textTransform: 'uppercase',
                         whiteSpace: 'nowrap',
-                        background: isEmergency ? '#DC2626' : isServing ? C.primary : C.sage200,
+                        background: isEmergency ? T.danger : isServing ? C.primary : C.sage200,
                         color: '#FFFFFF',
                         border: 'none',
                         boxShadow: isServing || isEmergency ? '0 3px 10px rgba(31,74,52,0.22)' : 'none',
@@ -1405,14 +1407,14 @@ export default function NurseConsole({
           {
             label: 'No-shows today',
             value: String(noShowCount),
-            bg: noShowCount > 0 ? '#FEF3C7' : '#E6E1EF',
-            color: noShowCount > 0 ? '#8C6826' : C.text,
+            bg: noShowCount > 0 ? T.warningSoft : '#E6E1EF',
+            color: noShowCount > 0 ? T.warning : C.text,
           },
           {
             label: 'Open SOS alerts',
             value: String(activeSosCount),
-            bg: activeSosCount > 0 ? '#FDE8E8' : '#E6E1EF',
-            color: activeSosCount > 0 ? '#DC2626' : C.text,
+            bg: activeSosCount > 0 ? T.dangerSoft : '#E6E1EF',
+            color: activeSosCount > 0 ? T.danger : C.text,
           },
         ].map((card) => (
           <div
@@ -1430,7 +1432,7 @@ export default function NurseConsole({
               style={{
                 fontSize: 11.5,
                 fontWeight: 600,
-                color: card.color === '#DC2626' ? '#991B1B' : C.textSub,
+                color: card.color === T.danger ? T.danger : C.textSub,
                 letterSpacing: 0.1,
               }}
             >

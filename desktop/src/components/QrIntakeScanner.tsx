@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import jsQR from 'jsqr';
 import { API_BASE_URL } from '../config/api';
+import Icon from './Icon';
 
 interface QrIntakeScannerProps {
   onPatientVerified: (patient: any, token: string) => void;
@@ -64,14 +65,14 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
     text:        '#191C1A',
     textSub:     '#5A635B',
     textMuted:   '#94A396',
-    danger:      '#7A2E26',
-    dangerSoft:  '#FDE8E8',
-    dangerBorder:'#F8B4B4',
-    warning:     '#8C6826',
-    warningSoft: '#FEF3C7',
+    danger:       '#7A2E26',
+    dangerSoft:   '#FDE8E8',
+    dangerBorder: '#F8B4B4',
+    warning:      '#8C6826',
+    warningSoft:  '#FEF3C7',
     warningBorder:'#FDE68A',
-    success:     '#15803D',
-    successSoft: '#DCFCE7',
+    success:      '#15803D',
+    successSoft:  '#DCFCE7',
     successBorder:'#BBF7D0',
   };
 
@@ -99,7 +100,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
   /* ── Verify QR token ─────────────────────────────────────── */
   const verifyToken = async (tokenToVerify: string) => {
     if (!tokenToVerify || tokenToVerify.trim().length === 0) return;
-    setScanStatus('🔍 Verifying cryptographic QR pass signature...');
+    setScanStatus('Verifying cryptographic QR pass signature...');
     setVerifiedPatient(null);
     setPendingAppointment(null);
     setCheckInSuccess(null);
@@ -117,7 +118,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
       if (res.ok && data.verified) {
         setVerifiedPatient(data.patient);
         onPatientVerified(data.patient, tokenToVerify.trim());
-        setScanStatus('✅ Patient identity verified.');
+        setScanStatus('Patient identity verified.');
         setHeight(data.patient?.height ? String(data.patient.height) : '');
         setWeight(data.patient?.weight ? String(data.patient.weight) : '');
         setLastVerifiedAt(data.patient?.health_profile_updated_at || '');
@@ -128,17 +129,17 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
           checkPatientAppointments(data.patient.user_id),
         ]);
       } else {
-        setScanStatus('❌ Verification failed: ' + (data.error || 'Invalid or expired QR pass'));
+        setScanStatus('Verification failed: ' + (data.error || 'Invalid or expired QR pass'));
       }
     } catch (err: any) {
-      setScanStatus('❌ Connection error: ' + err.message);
+      setScanStatus('Connection error: ' + err.message);
     }
   };
 
   const handleManualSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
-    setScanStatus('🔍 Searching student records...');
+    setScanStatus('Searching student records...');
     setCheckInSuccess(null);
     setWalkInSuccess(null);
     setActiveTicket(null);
@@ -164,13 +165,13 @@ try {
           weight: app.weight,
         });
         setPendingAppointment(app);
-        setScanStatus(`✅ Patient record located: ${app.first_name} ${app.last_name}`);
+        setScanStatus(`Patient record located: ${app.first_name} ${app.last_name}`);
         setHeight(app.height ? String(app.height) : '');
         setWeight(app.weight ? String(app.weight) : '');
         setLastVerifiedAt(app.health_profile_updated_at || '');
         await checkActiveTicket(app.user_id);
       } else {
-        setScanStatus('❌ No scheduled appointments found matching that query.');
+        setScanStatus('No scheduled appointments found matching that query.');
       }
     } catch (err: any) {
       // Feature 6: Offline SQLite Fallback for Intake Station
@@ -192,14 +193,14 @@ try {
               weight: null,
             });
             setPendingAppointment(null); // Offline walk-in mode
-            setScanStatus(`🌐 [Offline Cache] Patient located: ${p.first_name} ${p.last_name} (${p.student_no})`);
+            setScanStatus(`[Offline Cache] Patient located: ${p.first_name} ${p.last_name} (${p.student_no})`);
             return;
           }
         } catch (sqliteErr) {
           console.error('[SQLite Intake Search Error]:', sqliteErr);
         }
       }
-      setScanStatus('❌ Search error: ' + err.message);
+      setScanStatus('Search error: ' + err.message);
     }
   };
 
@@ -241,18 +242,18 @@ try {
 
       // Race-condition path: server rejected because patient is already in queue
       if (res.status === 409) {
-        setScanStatus('⚠️ ' + data.error);
+        setScanStatus('' + data.error);
         if (verifiedPatient) await checkActiveTicket(verifiedPatient.user_id);
         return;
       }
 
       if (!res.ok) throw new Error(data.error || 'Failed to check in patient.');
 
-      setCheckInSuccess(`✅ Arrival confirmed! Ticket ${data.queueTicket} assigned at ${data.arrivalTime}.`);
+      setCheckInSuccess(`Arrival confirmed! Ticket ${data.queueTicket} assigned at ${data.arrivalTime}.`);
       setPendingAppointment({ ...pendingAppointment, status: 'checked_in' });
       if (verifiedPatient) await checkActiveTicket(verifiedPatient.user_id);
     } catch (err: any) {
-      setScanStatus('❌ ' + err.message);
+      setScanStatus('' + err.message);
     }
   };
 
@@ -281,17 +282,17 @@ try {
 
       // Race-condition path: server rejected because patient is already in queue
       if (res.status === 409) {
-        setScanStatus('⚠️ ' + data.error);
+        setScanStatus('' + data.error);
         await checkActiveTicket(verifiedPatient.user_id);
         return;
       }
 
       if (!res.ok) throw new Error(data.error || 'Failed to register walk-in patient.');
 
-      setWalkInSuccess(`✅ Walk-in registered! Ticket ${data.queueTicket} at ${data.arrivalTime}.`);
+      setWalkInSuccess(`Walk-in registered! Ticket ${data.queueTicket} at ${data.arrivalTime}.`);
       await checkActiveTicket(verifiedPatient.user_id);
     } catch (err: any) {
-      setScanStatus('❌ ' + err.message);
+      setScanStatus('' + err.message);
     } finally {
       setIsRegisteringWalkIn(false);
     }
@@ -300,7 +301,7 @@ try {
   const startCamera = async () => {
     setCameraError('');
     setIsCameraActive(true);
-    setScanStatus('📷 Webcam active. Center the student QR code.');
+    setScanStatus('Webcam active. Center the student QR code.');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
@@ -366,7 +367,7 @@ try {
       const imageData = ctx.getImageData(0, 0, img.width, img.height);
       const code = jsQR(imageData.data, imageData.width, imageData.height);
       if (code && code.data) verifyToken(code.data);
-      else setScanStatus('❌ No QR code found in the uploaded image.');
+      else setScanStatus('No QR code found in the uploaded image.');
     };
     img.src = URL.createObjectURL(file);
   };
@@ -388,9 +389,9 @@ try {
   };
 
   /* ── Derived status ──────────────────────────────────────── */
-  const statusIsOk = scanStatus.includes('✅');
-  const statusIsErr = scanStatus.includes('❌');
-  const statusIsWarn = scanStatus.includes('⚠️');
+  const statusIsOk = scanStatus.includes('');
+  const statusIsErr = scanStatus.includes('');
+  const statusIsWarn = scanStatus.includes('');
 
   /* ── Render ──────────────────────────────────────────────── */
   return (
@@ -939,7 +940,7 @@ try {
                 }}
               >
                 <b style={{ fontSize: 13, color: C.warning, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 16 }}>⚠️</span>
+                  <span style={{ fontSize: 16 }}><Icon name="warning" size={14} /></span>
                   Patient already in today's queue
                 </b>
                 <span
@@ -1316,7 +1317,7 @@ try {
                   >
                     {isRegisteringWalkIn
                       ? 'Registering walk-in…'
-                      : '✓ Register as walk-in patient'}
+                      : 'Register as walk-in patient'}
                   </button>
                 </>
               )}

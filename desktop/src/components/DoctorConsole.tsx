@@ -7,6 +7,7 @@ import { queueOfflineMutation } from '../services/offlineSync';
 import { T, btnPrimary, btnGhost, inputStyle } from '../theme';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
 import SignatureEnrollment from './SignatureEnrollment';
+import Icon from './Icon';
 
 /* ── ODONTOGRAM TYPES (declared before use) ─────────────────── */
 export type ToothCondition =
@@ -103,45 +104,45 @@ const COMMON_VACCINES = [
   'Typhoid',
 ];
 
-/* Odontogram colour palette */
+/* Odontogram colour palette — sourced from theme tokens for palette cohesion. */
 const CONDITION_COLORS: Record<
   ToothCondition,
   { bg: string; text: string; label: string; border: string }
 > = {
   sound: {
-    bg: '#EEF3EC',
-    text: '#2E5C43',
-    border: '#C9D9C7',
+    bg: T.sage100,
+    text: T.primaryMid,
+    border: T.sage300,
     label: 'Sound',
   },
   caries: {
-    bg: '#FDE8E8',
-    text: '#7A2E26',
-    border: '#F8B4B4',
+    bg: T.dangerSoft,
+    text: T.danger,
+    border: T.dangerBorder,
     label: 'Caries (Decay)',
   },
   filled: {
-    bg: '#E0F2FE',
-    text: '#0369A1',
-    border: '#BAE6FD',
+    bg: T.infoSoft,
+    text: T.info,
+    border: T.infoBorder,
     label: 'Restored / Filled',
   },
   missing: {
-    bg: '#F3F4F6',
-    text: '#6B7280',
-    border: '#D1D5DB',
+    bg: T.surface2,
+    text: T.textSub,
+    border: T.border,
     label: 'Missing / Extracted',
   },
   extraction_needed: {
-    bg: '#FEF3C7',
-    text: '#92400E',
-    border: '#FDE68A',
+    bg: T.warningSoft,
+    text: T.warning,
+    border: T.warningBorder,
     label: 'Needs Extraction',
   },
   prophylaxis: {
-    bg: '#F0FDFA',
-    text: '#0F766E',
-    border: '#99F6E4',
+    bg: T.tonalTealBg,
+    text: T.tonalTealFg,
+    border: '#9FD9CB',
     label: 'Calculus / Prophylaxis',
   },
 };
@@ -336,7 +337,7 @@ export default function DoctorConsole({
       fetchAppointments(viewMode, true);
       if (evt?.status === 'checked_in' && window.electronAPI?.showNotification) {
         window.electronAPI.showNotification({
-          title: '🔔 Patient Triaged & Ready',
+          title: 'Patient Triaged & Ready',
           body: 'A student booked under your care has been checked in by the triage nurse.',
         });
       }
@@ -358,7 +359,7 @@ export default function DoctorConsole({
     if (conflicts.length > 0) {
       // Show a prominent UI warning to the doctor
       setFeedbackMsg({
-        text: `⚠️ Offline Sync Conflict: ${conflicts.length} record(s) were modified by someone else while you were offline, or failed to process. Please review the patient's current status manually.`,
+        text: `Offline Sync Conflict: ${conflicts.length} record(s) were modified by someone else while you were offline, or failed to process. Please review the patient's current status manually.`,
         type: 'error' // Assuming your feedbackMsg supports 'error' type styling
       });
     }
@@ -547,7 +548,7 @@ export default function DoctorConsole({
     if (!selectedApp || isBookingMode) return;
     if (!diagnosis.trim()) {
       setFeedbackMsg({
-        text: '⚠️ Please enter a clinical diagnosis before finalizing.',
+        text: 'Please enter a clinical diagnosis before finalizing.',
         type: 'error',
       });
       return;
@@ -593,7 +594,7 @@ export default function DoctorConsole({
       setIsSubmittingEMR(false);
       setFeedbackMsg({
         text:
-          '🌐 [Offline Mode] Network unavailable. Encounter saved to local offline queue. Will auto-sync to MySQL upon reconnection.',
+          '[Offline Mode] Network unavailable. Encounter saved to local offline queue. Will auto-sync to MySQL upon reconnection.',
         type: 'success',
       });
       return;
@@ -637,8 +638,8 @@ export default function DoctorConsole({
       resetForm();
       setFeedbackMsg({
         text: fileSuccess
-          ? '✅ Encounter finalized, lab file uploaded to MinIO S3, and patient discharged.'
-          : '✅ Encounter finalized and patient discharged to History Archive.',
+          ? 'Encounter finalized, lab file uploaded to MinIO S3, and patient discharged.'
+          : 'Encounter finalized and patient discharged to History Archive.',
         type: 'success',
       });
     } catch (err: any) {
@@ -661,7 +662,7 @@ export default function DoctorConsole({
       resetForm();
       setFeedbackMsg({
         text:
-          '⚠️ Server unreachable. Encounter queued locally in offline storage. Will replay automatically when online.',
+          'Server unreachable. Encounter queued locally in offline storage. Will replay automatically when online.',
         type: 'success',
       });
     } finally {
@@ -729,7 +730,7 @@ const handleViewPatientHistory = async () => {
       setRxHistory(data);
     } catch (err: any) {
       setRxHistoryError(
-        '❌ Could not load prescription history: ' + (err?.message || 'Network error')
+        'Could not load prescription history: ' + (err?.message || 'Network error')
       );
     } finally {
       setLoadingRxHistory(false);
@@ -756,7 +757,7 @@ const handleViewPatientHistory = async () => {
       setClrHistory(data);
     } catch (err: any) {
       setClrHistoryError(
-        '❌ Could not load clearance history: ' + (err?.message || 'Network error')
+        'Could not load clearance history: ' + (err?.message || 'Network error')
       );
     } finally {
       setLoadingClrHistory(false);
@@ -864,13 +865,13 @@ const loadPatientTimeline = async (patient: any) => {
       } else {
         const err = await res.json().catch(() => ({}));
         setImmunizationFeedback({
-          text: '❌ ' + (err.error || 'Failed to load immunization records.'),
+          text: '' + (err.error || 'Failed to load immunization records.'),
           type: 'error',
         });
       }
     } catch (err: any) {
       setImmunizationFeedback({
-        text: '❌ Network error: ' + err.message,
+        text: 'Network error: ' + err.message,
         type: 'error',
       });
     } finally {
@@ -908,7 +909,7 @@ const loadPatientTimeline = async (patient: any) => {
       newImmunizations.some((p) => p.toLowerCase() === lower)
     ) {
       setImmunizationFeedback({
-        text: '⚠️ That immunization is already on record or already queued for this visit.',
+        text: 'That immunization is already on record or already queued for this visit.',
         type: 'error',
       });
       return;
@@ -954,10 +955,10 @@ const loadPatientTimeline = async (patient: any) => {
         Array.isArray(data.immunizations) ? data.immunizations : mergedList
       );
       setNewImmunizations([]);
-      setImmunizationFeedback({ text: '✅ ' + data.message, type: 'success' });
-      setFeedbackMsg({ text: `💉 ${data.message}`, type: 'success' });
+      setImmunizationFeedback({ text: '' + data.message, type: 'success' });
+      setFeedbackMsg({ text: `${data.message}`, type: 'success' });
     } catch (err: any) {
-      setImmunizationFeedback({ text: '❌ ' + err.message, type: 'error' });
+      setImmunizationFeedback({ text: '' + err.message, type: 'error' });
     } finally {
       setSavingImmunizations(false);
     }
@@ -980,7 +981,7 @@ const loadPatientTimeline = async (patient: any) => {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        const message = '❌ PDF download failed: ' + (err.error || `HTTP ${res.status}`);
+        const message = 'PDF download failed: ' + (err.error || `HTTP ${res.status}`);
         if (onError) onError(message);
         else setFeedbackMsg({ text: message, type: 'error' });
         return;
@@ -1001,7 +1002,7 @@ const loadPatientTimeline = async (patient: any) => {
 
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (err: any) {
-      const message = '❌ Network error fetching PDF: ' + err.message;
+      const message = 'Network error fetching PDF: ' + err.message;
       if (onError) onError(message);
       else setFeedbackMsg({ text: message, type: 'error' });
     }
@@ -1069,7 +1070,7 @@ const loadPatientTimeline = async (patient: any) => {
       await openIssuedPdf('clearances', clearanceId);
 
       setFeedbackMsg({
-        text: `✅ Clearance #${clearanceId} (Expires: ${clearanceExpiryDate}) issued!`,
+        text: `Clearance #${clearanceId} (Expires: ${clearanceExpiryDate}) issued!`,
         type: 'success',
         pdfKind: 'clearances',
         pdfId: clearanceId,
@@ -1141,28 +1142,17 @@ const loadPatientTimeline = async (patient: any) => {
             gap: 16,
           }}
         >
-          <div>
-            <h1
-              style={{
-                fontSize: 28,
-                fontWeight: 800,
-                letterSpacing: -0.6,
-                color: T.text,
-                margin: 0,
-              }}
-            >
-              {headerTitle[viewMode]}
-            </h1>
-            <p style={{ fontSize: 13.5, color: T.textSub, margin: '6px 0 0' }}>
-              {headerSub[viewMode]}
-            </p>
+          <div className="vd-page-head" style={{ marginBottom: 0 }}>
+            <div className="vd-page-head-eyebrow">Consultation</div>
+            <h1 className="vd-page-head-title">{headerTitle[viewMode]}</h1>
+            <p className="vd-page-head-sub">{headerSub[viewMode]}</p>
           </div>
           <button
             type="button"
             style={btnGhost}
             onClick={() => setShowSignature(true)}
           >
-            ✍ My signature
+            <Icon name="edit_note" size={14} /> My signature
           </button>
         </div>
       )}
@@ -1257,7 +1247,7 @@ const loadPatientTimeline = async (patient: any) => {
                           border: `1px solid ${T.primaryTint}`,
                         }}
                       >
-                        🎫 {app.queue_ticket || (app.status === 'completed' ? 'DONE' : 'WAITING')}
+                        <Icon name="confirmation_number" size={14} /> {app.queue_ticket || (app.status === 'completed' ? 'DONE' : 'WAITING')}
                       </span>
                       <span
                         style={{
@@ -1299,7 +1289,7 @@ const loadPatientTimeline = async (patient: any) => {
                         fontFamily: T.mono,
                       }}
                     >
-                         📅 {app.date_str} · ⏰ {app.time_slot}
+                         <Icon name="calendar_month" size={14} /> {app.date_str} · ⏰ {app.time_slot}
                     </div>
                   </button>
                 );
@@ -1482,7 +1472,7 @@ const loadPatientTimeline = async (patient: any) => {
                       }}
                       title="Prescriptions you issued to this patient"
                     >
-                      💊 My prescriptions
+                      <Icon name="medication" size={14} /> My prescriptions
                     </button>
                                         <button
                       type="button"
@@ -1501,7 +1491,7 @@ const loadPatientTimeline = async (patient: any) => {
                       }}
                       title="Clearances you issued to this patient"
                     >
-                      📋 My clearances
+                      <Icon name="description" size={14} /> My clearances
                     </button>
                   </div>
 
@@ -1653,7 +1643,7 @@ const loadPatientTimeline = async (patient: any) => {
                                     cursor: 'pointer',
                                   }}
                                 >
-                                  📎 {att.file_name}{' '}
+                                  <Icon name="attach_file" size={14} /> {att.file_name}{' '}
                                   {openingAttachmentId === att.attachment_id
                                     ? '(Loading…)'
                                     : ''}
@@ -1780,7 +1770,7 @@ const loadPatientTimeline = async (patient: any) => {
                       }}
                     >
                       {selectedApp.allergies
-                        ? `⚠️ ${selectedApp.allergies}`
+                        ? `${selectedApp.allergies}`
                         : 'None reported'}
                     </span>
                   </span>
@@ -1824,7 +1814,7 @@ const loadPatientTimeline = async (patient: any) => {
                     borderColor: T.infoBorder,
                   }}
                 >
-                  📜 Past EMR history
+                  <Icon name="article" size={14} /> Past EMR history
                 </button>
                 
                 <button
@@ -1842,7 +1832,7 @@ const loadPatientTimeline = async (patient: any) => {
                   }}
                   title="Prescriptions you issued to this patient"
                 >
-                  💊 My prescriptions
+                  <Icon name="medication" size={14} /> My prescriptions
                 </button>
 
                 
@@ -1861,7 +1851,7 @@ const loadPatientTimeline = async (patient: any) => {
                   }}
                   title="Clearances you issued to this patient"
                 >
-                  📋 My clearances
+                  <Icon name="description" size={14} /> My clearances
                 </button>
 
                 {!isBookingMode && (
@@ -1875,7 +1865,7 @@ const loadPatientTimeline = async (patient: any) => {
                     }}
                     title="View and append immunization records"
                   >
-                    💉 Immunizations
+                    <Icon name="vaccines" size={14} /> Immunizations
                   </button>
                 )}
 
@@ -1885,13 +1875,13 @@ const loadPatientTimeline = async (patient: any) => {
                     onClick={() => setForceShowDentalChart((prev) => !prev)}
                     style={{
                       ...btnGhost,
-                      color: isDentalVisit ? '#0F766E' : T.textSub,
-                      borderColor: isDentalVisit ? '#99F6E4' : T.border,
-                      background: isDentalVisit ? '#F0FDFA' : T.surface,
+                      color: isDentalVisit ? T.tonalTealFg : T.textSub,
+                      borderColor: isDentalVisit ? '#9FD9CB' : T.border,
+                      background: isDentalVisit ? T.tonalTealBg : T.surface,
                     }}
                     title="Toggle Dental Odontogram"
                   >
-                    🦷 {isDentalVisit ? 'Odontogram Active' : 'Dental Chart'}
+                    <Icon name="dentistry" size={14} /> {isDentalVisit ? 'Odontogram Active' : 'Dental Chart'}
                   </button>
                 )}
 
@@ -1907,7 +1897,7 @@ const loadPatientTimeline = async (patient: any) => {
                       border: `1px solid ${T.successBorder}`,
                     }}
                   >
-                    ✅ Encounter discharged
+                    <Icon name="check_circle" size={14} /> Encounter discharged
                   </span>
                 ) : selectedApp.status === 'scheduled' ? (
                   <span
@@ -1935,7 +1925,7 @@ const loadPatientTimeline = async (patient: any) => {
                       border: `1px solid ${T.successBorder}`,
                     }}
                   >
-                    🩺 In consultation
+                    <Icon name="medical_services" size={14} /> In consultation
                   </span>
                 ) : (
                   <button
@@ -1980,10 +1970,10 @@ const loadPatientTimeline = async (patient: any) => {
                     gap: 6,
                   }}
                 >
-                  📂 Prior Diagnostic Records & Lab Imaging on File (
+                  <Icon name="folder_open" size={14} /> Prior Diagnostic Records & Lab Imaging on File (
                   {activePatientAttachments.length})
                 </span>
-                <span style={{ fontSize: 11, color: '#0284C7', fontWeight: 600 }}>
+                <span style={{ fontSize: 11, color: T.info, fontWeight: 600 }}>
                   Click to open/inspect attachment
                 </span>
               </div>
@@ -2007,24 +1997,24 @@ const loadPatientTimeline = async (patient: any) => {
                       borderRadius: T.radius.pill,
                       fontSize: 12,
                       fontWeight: 700,
-                      color: '#0284C7',
+                      color: T.info,
                       cursor: 'pointer',
                       boxShadow: T.shadow.xs,
                       fontFamily: T.font,
                     }}
                   >
-                    📄 {att.file_name}
+                    <Icon name="draft" size={14} /> {att.file_name}
                     <span
                       style={{
                         fontSize: 10.5,
-                        color: '#64748B',
+                        color: T.textMuted,
                         fontWeight: 500,
                       }}
                     >
                       ({new Date(att.encounter_date).toLocaleDateString()})
                     </span>
                     <span style={{ fontSize: 11, color: '#0369A1' }}>
-                      {openingAttachmentId === att.attachment_id ? '⏳' : '👁️'}
+                      {openingAttachmentId === att.attachment_id ? '⏳' : '️'}
                     </span>
                   </button>
                 ))}
@@ -2037,7 +2027,7 @@ const loadPatientTimeline = async (patient: any) => {
             <div
               style={{
                 background: T.surface,
-                border: '1.5px solid #0F766E',
+                border: `1.5px solid ${T.tonalTealFg}`,
                 borderRadius: T.radius.lg,
                 padding: '18px 22px',
                 marginBottom: 20,
@@ -2060,13 +2050,13 @@ const loadPatientTimeline = async (patient: any) => {
                       margin: 0,
                       fontSize: 15,
                       fontWeight: 800,
-                      color: '#0F766E',
+                      color: T.tonalTealFg,
                       display: 'flex',
                       alignItems: 'center',
                       gap: 6,
                     }}
                   >
-                    🦷 Adult Dental Chart (Odontogram) · Universal Numbering System
+                    <Icon name="dentistry" size={14} /> Adult Dental Chart (Odontogram) · Universal Numbering System
                   </h4>
                   <p style={{ margin: '3px 0 0', fontSize: 12, color: T.textSub }}>
                     Click a tooth (Upper 1–16, Lower 32–17) to record or update findings.
@@ -2330,7 +2320,7 @@ const loadPatientTimeline = async (patient: any) => {
                 lineHeight: 1.6,
               }}
             >
-              <strong>🔒 View-only booking.</strong> Prescriptions, clearances and
+              <strong><Icon name="lock" size={14} /> View-only booking.</strong> Prescriptions, clearances and
               encounter records can only be created from the{' '}
               <strong>Consultation queue</strong> after the nurse has triaged the
               patient.
@@ -2453,7 +2443,7 @@ const loadPatientTimeline = async (patient: any) => {
                           whiteSpace: 'nowrap',
                         }}
                       >
-                        ⬇️ Download PDF
+                        <Icon name="download" size={14} />️ Download PDF
                       </button>
                     )}
                 </div>
@@ -2475,7 +2465,7 @@ const loadPatientTimeline = async (patient: any) => {
                   isArchived={isArchivedMode}
                   onPrescriptionIssued={(info) => {
                     setFeedbackMsg({
-                      text: `✅ Prescription #${info.prescriptionId} recorded and signed.`,
+                      text: `Prescription #${info.prescriptionId} recorded and signed.`,
                       type: 'success',
                       pdfKind: 'prescriptions',
                       pdfId: info.prescriptionId,
@@ -2644,10 +2634,10 @@ const loadPatientTimeline = async (patient: any) => {
                     }}
                   >
                     {isArchivedMode
-                      ? '🔒 Clearance already archived'
+                      ? 'Clearance already archived'
                       : isIssuingClearance
                       ? 'Signing & spooling…'
-                      : '🖨️ Issue, sign & print clearance'}
+                      : '️ Issue, sign & print clearance'}
                   </button>
                 </div>
               )}
@@ -2671,7 +2661,7 @@ const loadPatientTimeline = async (patient: any) => {
                   fontWeight: 800,
                 }}
               >
-                🩺 Encounter diagnosis & vitals
+                <Icon name="medical_services" size={14} /> Encounter diagnosis & vitals
               </h3>
 
               {isArchivedMode && (
@@ -2686,7 +2676,7 @@ const loadPatientTimeline = async (patient: any) => {
                     border: `1px solid ${T.border}`,
                   }}
                 >
-                  🔒 <b>Archived record.</b> This encounter is completed and
+                  <Icon name="lock" size={14} /> <b>Archived record.</b> This encounter is completed and
                   permanently signed. Fields below reflect the recorded EMR entry.
                 </div>
               )}
@@ -2696,14 +2686,14 @@ const loadPatientTimeline = async (patient: any) => {
                   style={{
                     padding: '12px 16px',
                     background: T.warningSoft,
-                    color: '#92400E',
+                    color: T.warning,
                     borderRadius: T.radius.md,
                     marginBottom: 16,
                     fontSize: 12.5,
                     border: `1px solid ${T.warningBorder}`,
                   }}
                 >
-                  ⚠️ <b>Patient not yet triaged.</b> The student must first present
+                  <Icon name="warning" size={14} /> <b>Patient not yet triaged.</b> The student must first present
                   their QR Health Pass at the intake desk for the clinic nurse to
                   record initial vitals.
                 </div>
@@ -2884,7 +2874,7 @@ const loadPatientTimeline = async (patient: any) => {
                         marginBottom: 8,
                       }}
                     >
-                      📎 Attach diagnostic lab result (CBC, urinalysis, X-ray
+                      <Icon name="attach_file" size={14} /> Attach diagnostic lab result (CBC, urinalysis, X-ray
                       PDF/image)
                     </label>
                     <input
@@ -2910,7 +2900,7 @@ const loadPatientTimeline = async (patient: any) => {
                         }}
                       >
                         <span>
-                          📄 {attachedFile.name} (
+                          <Icon name="draft" size={14} /> {attachedFile.name} (
                           {(attachedFile.size / 1024).toFixed(1)} KB)
                         </span>
                         <button
@@ -2925,7 +2915,7 @@ const loadPatientTimeline = async (patient: any) => {
                             fontSize: 12,
                           }}
                         >
-                          ✕ Remove
+                          <Icon name="close" size={14} /> Remove
                         </button>
                       </div>
                     )}
@@ -2967,10 +2957,10 @@ const loadPatientTimeline = async (patient: any) => {
                   {isSubmittingEMR
                     ? 'Finalizing encounter & uploading to MinIO…'
                     : isArchivedMode
-                    ? '🔒 Encounter already finalized & discharged'
+                    ? 'Encounter already finalized & discharged'
                     : selectedApp?.status === 'scheduled'
                     ? '⏳ Patient not triaged by nurse'
-                    : '✅ Finish consultation & discharge'}
+                    : 'Finish consultation & discharge'}
                 </button>
               </form>
             </section>
@@ -3006,7 +2996,7 @@ const loadPatientTimeline = async (patient: any) => {
                     fontWeight: 800,
                   }}
                 >
-                  💊 Prescriptions you issued: {rxHistoryPatientName}
+                  <Icon name="medication" size={14} /> Prescriptions you issued: {rxHistoryPatientName}
                 </h3>
                 <p style={{ margin: '4px 0 0', fontSize: 12, color: T.textSub }}>
                   Only prescriptions issued by you to this patient are shown.
@@ -3023,7 +3013,7 @@ const loadPatientTimeline = async (patient: any) => {
                   color: T.textSub,
                 }}
               >
-                ✕
+                <Icon name="close" size={14} />
               </button>
             </div>
 
@@ -3185,7 +3175,7 @@ const loadPatientTimeline = async (patient: any) => {
                           borderColor: T.infoBorder,
                         }}
                       >
-                        📄 Download PDF
+                        <Icon name="draft" size={14} /> Download PDF
                       </button>
                     </div>
                   );
@@ -3223,7 +3213,7 @@ const loadPatientTimeline = async (patient: any) => {
                     fontWeight: 800,
                   }}
                 >
-                  📋 Clearances you issued: {clrHistoryPatientName}
+                  <Icon name="description" size={14} /> Clearances you issued: {clrHistoryPatientName}
                 </h3>
                 <p style={{ margin: '4px 0 0', fontSize: 12, color: T.textSub }}>
                   Only clearances issued by you to this patient are shown.
@@ -3240,7 +3230,7 @@ const loadPatientTimeline = async (patient: any) => {
                   color: T.textSub,
                 }}
               >
-                ✕
+                <Icon name="close" size={14} />
               </button>
             </div>
 
@@ -3377,7 +3367,7 @@ const loadPatientTimeline = async (patient: any) => {
                           borderColor: T.infoBorder,
                         }}
                       >
-                        📄 Download PDF
+                        <Icon name="draft" size={14} /> Download PDF
                       </button>
                     </div>
                   );
@@ -3414,7 +3404,7 @@ const loadPatientTimeline = async (patient: any) => {
                   fontWeight: 800,
                 }}
               >
-                📜 Medical history: {selectedApp?.first_name}{' '}
+                <Icon name="article" size={14} /> Medical history: {selectedApp?.first_name}{' '}
                 {selectedApp?.last_name}
               </h3>
               <button
@@ -3428,7 +3418,7 @@ const loadPatientTimeline = async (patient: any) => {
                   color: T.textSub,
                 }}
               >
-                ✕
+                <Icon name="close" size={14} />
               </button>
             </div>
 
@@ -3538,7 +3528,7 @@ const loadPatientTimeline = async (patient: any) => {
                             marginBottom: 8,
                           }}
                         >
-                          📎 Diagnostic lab attachments
+                          <Icon name="attach_file" size={14} /> Diagnostic lab attachments
                         </div>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           {item.attachments.map((att: any) => (
@@ -3563,7 +3553,7 @@ const loadPatientTimeline = async (patient: any) => {
                                 cursor: 'pointer',
                               }}
                             >
-                              📄 {att.file_name} (
+                              <Icon name="draft" size={14} /> {att.file_name} (
                               {(att.file_size / 1024).toFixed(0)} KB){' '}
                               {openingAttachmentId === att.attachment_id ? '⏳' : ''}
                             </button>
@@ -3620,7 +3610,7 @@ const loadPatientTimeline = async (patient: any) => {
                     flexShrink: 0,
                   }}
                 >
-                  💉
+                  <Icon name="vaccines" size={14} />
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <h3
@@ -3658,7 +3648,7 @@ const loadPatientTimeline = async (patient: any) => {
                   padding: 4,
                 }}
               >
-                ✕
+                <Icon name="close" size={14} />
               </button>
             </div>
 
@@ -3727,7 +3717,7 @@ const loadPatientTimeline = async (patient: any) => {
                           fontWeight: 700,
                         }}
                       >
-                        ✓ {imm}
+                        <Icon name="check" size={14} /> {imm}
                       </span>
                     ))}
                   </div>
@@ -3889,7 +3879,7 @@ const loadPatientTimeline = async (patient: any) => {
                           }}
                           title="Remove"
                         >
-                          ✕
+                          <Icon name="close" size={14} />
                         </button>
                       </span>
                     ))}
@@ -4024,7 +4014,7 @@ const loadPatientTimeline = async (patient: any) => {
                   minWidth: 0,
                 }}
               >
-                <span style={{ fontSize: 22 }}>📄</span>
+                <span style={{ fontSize: 22 }}><Icon name="draft" size={22} /></span>
                 <div style={{ minWidth: 0 }}>
                   <h3
                     style={{
@@ -4064,7 +4054,7 @@ const loadPatientTimeline = async (patient: any) => {
                     color: T.primary,
                   }}
                 >
-                  💾 Save to PC
+                  <Icon name="save" size={14} /> Save to PC
                 </button>
                 <button
                   type="button"
@@ -4078,7 +4068,7 @@ const loadPatientTimeline = async (patient: any) => {
                     lineHeight: 1,
                   }}
                 >
-                  ✕
+                  <Icon name="close" size={14} />
                 </button>
               </div>
             </div>
@@ -4086,7 +4076,7 @@ const loadPatientTimeline = async (patient: any) => {
             <div
               style={{
                 flex: 1,
-                background: '#F8FAFC',
+                background: T.surfaceMuted,
                 borderRadius: T.radius.md,
                 overflow: 'hidden',
                 border: `1px solid ${T.border}`,
@@ -4148,7 +4138,7 @@ const loadPatientTimeline = async (patient: any) => {
                 style={btnGhost}
                 onClick={() => setShowSignature(false)}
               >
-                ✕ Close
+                <Icon name="close" size={14} /> Close
               </button>
             </div>
             <SignatureEnrollment />

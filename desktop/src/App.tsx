@@ -13,6 +13,8 @@ import {
 } from './services/offlineSync';
 import { API_BASE_URL } from './config/api';
 import PasswordStrengthIndicator, { evaluatePassword } from './components/PasswordStrengthIndicator';
+import { T, btnPrimary, btnSubtle } from './theme';
+import Icon from './components/Icon';
 import valetudoLogo from './assets/valetudo_logo.png';
 
 
@@ -122,7 +124,7 @@ export function useSessionTimeout(isActive: boolean, timeoutMinutes = 480) {
       timeoutId = setTimeout(() => {
         localStorage.removeItem('valetudo_token');
         localStorage.removeItem('token');
-        alert('🔒 Session expired due to 8 hours of inactivity (R.A. 10173 Compliance). Please log in again.');
+        alert('Session expired due to 8 hours of inactivity (R.A. 10173 Compliance). Please log in again.');
         window.location.reload();
       }, timeoutMinutes * 60 * 1000);
     };
@@ -149,62 +151,36 @@ interface SidebarProps {
 }
 
 function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, badgeCounts }: SidebarProps) {
-  const navByRole: Record<string, { key: string; label: string; icon: React.ReactNode }[]> = {
+  // Each item now uses Material Symbols ligatures for clean, consistent icons.
+  const navByRole: Record<string, { key: string; label: string; icon: string }[]> = {
     ADMIN: [
-      { key: 'users',     label: 'Users',      icon: <I.Users /> },
-      { key: 'audit',     label: 'Audit',      icon: <I.Shield /> },
-      { key: 'telemetry', label: 'Health',     icon: <I.Activity /> },
-      { key: 'analytics', label: 'Analytics',  icon: <I.Chart /> },
-      { key: 'db',        label: 'Database',   icon: <I.Database /> },
+      { key: 'users',     label: 'Users & roles',    icon: 'manage_accounts' },
+      { key: 'audit',     label: 'Privacy & audit',  icon: 'shield_lock' },
+      { key: 'telemetry', label: 'System health',    icon: 'dns' },
+      { key: 'analytics', label: 'Health analytics', icon: 'monitoring' },
+      { key: 'db',        label: 'Database Studio',  icon: 'database' },
     ],
     NURSE: [
-      {
-        key: 'triage',
-        label: 'Triage',
-        icon: (
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-          </svg>
-        )
-      },
-      {
-        key: 'expected',
-        label: 'Expected',
-        icon: (
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="4" width="18" height="18" rx="2" />
-            <path d="M16 2v4M8 2v4M3 10h18" />
-            <path d="M9 15l2 2 4-4" />
-          </svg>
-        )
-      },
-      {
-        key: 'inventory',
-        label: 'Inventory',
-        icon: (
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M10.5 20.5a7 7 0 0 1-9.9-9.9l6.4-6.4a7 7 0 0 1 9.9 9.9z" />
-            <path d="M8.5 8.5l7 7" />
-          </svg>
-        )
-      },
+      { key: 'triage',    label: 'Triage',     icon: 'local_hospital' },
+      { key: 'expected',  label: 'Expected',   icon: 'monitor_heart' },
+      { key: 'inventory', label: 'Inventory',  icon: 'medication' },
     ],
     DOCTOR: [
-      { key: 'active',    label: 'Queue',     icon: <I.Stethoscope /> },
-      { key: 'scheduled', label: 'Bookings',  icon: <I.Calendar /> },
-      { key: 'history',   label: 'History',   icon: <I.History /> },
-      { key: 'archive',   label: 'EMR',       icon: <I.Folder /> },
-      { key: 'analytics', label: 'Analytics', icon: <I.Chart /> },
+      { key: 'active',    label: 'Queue',      icon: 'stethoscope' },
+      { key: 'scheduled', label: 'Bookings',   icon: 'event' },
+      { key: 'history',   label: 'History',    icon: 'history' },
+      { key: 'archive',   label: 'EMR',        icon: 'folder_shared' },
+      { key: 'analytics', label: 'Analytics',  icon: 'monitoring' },
     ],
     DENTIST: [
-      { key: 'active',    label: 'Queue',     icon: <I.Stethoscope /> },
-      { key: 'scheduled', label: 'Bookings',  icon: <I.Calendar /> },
-      { key: 'history',   label: 'History',   icon: <I.History /> },
-      { key: 'archive',   label: 'EMR',       icon: <I.Folder /> },
-      { key: 'analytics', label: 'Analytics', icon: <I.Chart /> },
+      { key: 'active',    label: 'Queue',      icon: 'stethoscope' },
+      { key: 'scheduled', label: 'Bookings',   icon: 'event' },
+      { key: 'history',   label: 'History',    icon: 'history' },
+      { key: 'archive',   label: 'EMR',        icon: 'folder_shared' },
+      { key: 'analytics', label: 'Analytics',  icon: 'monitoring' },
     ],
     EMERGENCY_RESPONDER: [
-      { key: 'dispatch', label: 'Dispatch', icon: <I.Alert /> },
+      { key: 'dispatch',  label: 'Dispatch',   icon: 'emergency' },
     ],
   };
 
@@ -216,25 +192,30 @@ function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, b
         <div className="sb-logo-lg">
           <img src={valetudoLogo} alt="Valetudo HealthLink" />
         </div>
+        <div className="sb-brand-text">
+          <span className="sb-brand-name">Valetudo</span>
+          <span className="sb-brand-sub">HealthLink</span>
+        </div>
       </div>
       <nav className="sb-nav">
         {navItems.map((item) => {
           const isActive = activeItem === item.key;
+          const badge = badgeCounts?.[item.key] ?? 0;
           return (
             <button
               key={item.key}
               type="button"
               className={`sb-item${isActive ? ' is-active' : ''}`}
               onClick={() => onItemClick?.(item.key)}
-              style={{ cursor: onItemClick ? 'pointer' : 'default' }}
+              style={{ cursor: onItemClick ? 'pointer' : 'default', position: 'relative' }}
             >
-              {item.icon}
-              {(badgeCounts?.[item.key] ?? 0) > 0 && (
-                <span key={badgeCounts![item.key]} className="sb-badge">
-                  {badgeCounts![item.key] > 99 ? '99+' : badgeCounts![item.key]}
+              <Icon name={item.icon} size={20} />
+              <span>{item.label}</span>
+              {badge > 0 && (
+                <span className="sb-badge">
+                  {badge > 99 ? '99+' : badge}
                 </span>
               )}
-              <span>{item.label}</span>
             </button>
           );
         })}
@@ -249,7 +230,8 @@ function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, b
           onClick={onChangePassword}
           title="Change password"
         >
-          <I.Key />
+          <Icon name="key" size={20} />
+          <span>Change password</span>
         </button>
         <button
           type="button"
@@ -257,7 +239,8 @@ function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, b
           onClick={onSignOut}
           title="Sign out"
         >
-          <I.Logout />
+          <Icon name="logout" size={20} />
+          <span>Sign out</span>
         </button>
       </div>
     </aside>
@@ -293,6 +276,13 @@ function TopBar({
     : hour >= 12 && hour < 18 ? 'Good afternoon'
     : 'Good evening';
 
+  // Format current time in PHT for the sync-status pill
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString('en-PH', {
+    hour: '2-digit', minute: '2-digit', hour12: false,
+    timeZone: 'Asia/Shanghai',
+  });
+
   return (
     <header className="tb">
       <div className="tb-left">
@@ -315,7 +305,7 @@ function TopBar({
 
         <span className={`tb-online ${isOnline ? 'is-on' : 'is-off'}`}>
           <span style={{ fontSize: 8 }}>●</span>
-          {isOnline ? 'Online' : 'Offline'}
+          {isOnline ? `Connected · ${timeStr}` : 'Offline'}
         </span>
 
         {offlineQueueCount > 0 && (
@@ -325,7 +315,7 @@ function TopBar({
             onClick={onManualReplay}
             disabled={isReplaying}
           >
-            {isReplaying ? '⏳ Syncing…' : `⏳ ${offlineQueueCount} queued`}
+            {isReplaying ? 'Syncing…' : `${offlineQueueCount} queued`}
           </button>
         )}
 
@@ -381,21 +371,14 @@ function LoginScreen({ email, setEmail, password, setPassword, error, onSubmit }
             A considered workspace for the people who keep our campus clinic running.
           </p>
           <div className="login-left-tag">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-              <path d="M9 12l2 2 4-4" />
-            </svg>
+            <Icon name="verified_user" size={16} tone="primary" />
             <span>Secure access · Responsible health data stewardship</span>
           </div>
         </div>
 
         <div className="login-left-footer">
           <div className="login-left-footer-logo">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ width: 26, height: 26 }}>
-              <path d="M3 21h18" />
-              <path d="M5 21V10l7-5 7 5v11" />
-              <path d="M9 21v-6h6v6" />
-            </svg>
+            <Icon name="apartment" size={26} tone="primary" />
           </div>
           <div>
             <div className="login-left-footer-name">Pangasinan State University</div>
@@ -443,10 +426,7 @@ function LoginScreen({ email, setEmail, password, setPassword, error, onSubmit }
 
             <button type="submit" className="login-submit">
               Sign in to clinic terminal
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 16, height: 16 }}>
-                <path d="M5 12h14" />
-                <path d="M13 6l6 6-6 6" />
-              </svg>
+              <Icon name="arrow_right_alt" size={18} />
             </button>
 
             <p className="login-note">
@@ -459,16 +439,16 @@ function LoginScreen({ email, setEmail, password, setPassword, error, onSubmit }
                 <p className="dev-chips-label">Quick select test role (dev only)</p>
                 <div className="dev-chip-grid">
                   <button type="button" className="dev-chip" onClick={() => { setEmail('nurse@psu.edu.ph'); setPassword('Password123!'); }}>
-                    👩‍⚕️ Clinic Nurse
+                    <Icon name="medical_information" size={16} /> Clinic Nurse
                   </button>
                   <button type="button" className="dev-chip" onClick={() => { setEmail('doctor@psu.edu.ph'); setPassword('Password123!'); }}>
-                    🩺 Campus Doctor
+                    <Icon name="medical_services" size={16} /> Campus Doctor
                   </button>
                   <button type="button" className="dev-chip" onClick={() => { setEmail('admin@psu.edu.ph'); setPassword('Password123!'); }}>
-                    ⚙️ System Admin
+                    <Icon name="admin_panel_settings" size={16} /> System Admin
                   </button>
                   <button type="button" className="dev-chip" onClick={() => { setEmail('responder@psu.edu.ph'); setPassword('Password123!'); }}>
-                    🚨 SOS Responder
+                    <Icon name="emergency" size={16} /> SOS Responder
                   </button>
                 </div>
               </div>
@@ -614,9 +594,9 @@ export default function App() {
     setIsReplaying(true);
     try {
       const result = await replayOfflineQueue();
-      alert(`✅ Replay complete. Synced ${result.synced} offline mutations.`);
+      alert(`Replay complete. Synced ${result.synced} offline mutations.`);
     } catch (err: any) {
-      alert(`⚠️ Replay failed: ${err.message}`);
+      alert(`Replay failed: ${err.message}`);
     } finally {
       setIsReplaying(false);
     }
@@ -656,7 +636,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
 
     const data = await res.json();
     if (res.ok) {
-      setPasswordMsg({ text: '✅ ' + data.message, isError: false });
+      setPasswordMsg({ text: data.message, isError: false });
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
@@ -670,10 +650,10 @@ const handleChangePassword = async (e: React.FormEvent) => {
         Array.isArray(data.issues) && data.issues.length > 0
           ? data.issues.join(' ')
           : data.error || 'Failed to update password.';
-      setPasswordMsg({ text: '❌ ' + detailed, isError: true });
+      setPasswordMsg({ text: detailed, isError: true });
     }
   } catch (err: any) {
-    setPasswordMsg({ text: '❌ Network error: ' + err.message, isError: true });
+    setPasswordMsg({ text: 'Network error: ' + err.message, isError: true });
   } finally {
     setIsSubmittingPassword(false);
   }
@@ -737,36 +717,35 @@ const handleChangePassword = async (e: React.FormEvent) => {
 
         {updateStatus && !updateDismissed &&
   (updateStatus.state === 'downloading' || updateStatus.state === 'downloaded') && (
-  <div
-    style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-      padding: '10px 20px', background: 'var(--sage-100)', color: 'var(--text)',
-      fontSize: 13, fontWeight: 600, fontFamily: 'var(--font)',
-    }}
-  >
-    <span>
+  <div className="update-banner">
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      <Icon
+        name={updateStatus.state === 'downloading' ? 'download' : 'cloud_done'}
+        size={18}
+        tone={updateStatus.state === 'downloading' ? 'info' : 'success'}
+      />
       {updateStatus.state === 'downloading'
-        ? `⬇️ Downloading update… ${updateStatus.percent ?? 0}%`
-        : `✅ Update ${updateStatus.version ?? ''} is ready to install.`}
+        ? `Downloading update… ${updateStatus.percent ?? 0}%`
+        : `Update ${updateStatus.version ?? ''} is ready to install.`}
     </span>
 
     {updateStatus.state === 'downloaded' && (
       <span style={{ display: 'flex', gap: 8 }}>
         <button
           type="button"
+          className="update-btn update-btn-later"
           onClick={() => setUpdateDismissed(true)}
-          style={{ padding: '6px 14px', borderRadius: 'var(--r-pill)', border: 'none', cursor: 'pointer', fontWeight: 700, fontFamily: 'var(--font)', background: '#fff', color: 'var(--text)' }}
         >
           Later
         </button>
         <button
           type="button"
+          className="update-btn update-btn-install"
           onClick={() => {
             if (offlineQueueCount > 0 &&
                 !window.confirm(`${offlineQueueCount} offline changes are still queued. Restart anyway? They stay saved locally and sync after restart.`)) return;
             window.electronAPI?.installUpdate();
           }}
-          style={{ padding: '6px 14px', borderRadius: 'var(--r-pill)', border: 'none', cursor: 'pointer', fontWeight: 700, fontFamily: 'var(--font)', background: 'var(--primary)', color: '#fff' }}
         >
           Restart now
         </button>
@@ -800,14 +779,30 @@ const handleChangePassword = async (e: React.FormEvent) => {
         <div className="modal-backdrop" onClick={() => setShowPasswordModal(false)}>
           <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-              <h3 style={{ margin: 0, color: 'var(--primary)', fontSize: 17, fontWeight: 800 }}>
-                🔑 Update account password
+              <h3 style={{ margin: 0, color: T.primary, fontSize: 17, fontWeight: 800, letterSpacing: -0.3, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <Icon name="key" size={20} tone="primary" />
+                Update account password
               </h3>
               <button
                 type="button"
                 onClick={() => setShowPasswordModal(false)}
-                style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-sub)' }}
-              >✕</button>
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: T.textSub,
+                  width: 32,
+                  height: 32,
+                  borderRadius: T.radius.sm,
+                  transition: `background ${T.durBase} ${T.ease}`,
+                  display: 'grid',
+                  placeItems: 'center',
+                  padding: 0,
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = T.sage100)}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
+                aria-label="Close"
+              ><Icon name="close" size={20} /></button>
             </div>
 
             <form onSubmit={handleChangePassword}>
@@ -847,12 +842,12 @@ const handleChangePassword = async (e: React.FormEvent) => {
                   style={{
                     marginTop: 14,
                     padding: '10px 14px',
-                    borderRadius: 'var(--r-md)',
+                    borderRadius: T.radius.md,
                     fontSize: 12.5,
                     fontWeight: 600,
-                    background: passwordMsg.isError ? 'var(--danger-soft)' : 'var(--success-soft)',
-                    color: passwordMsg.isError ? 'var(--danger)' : 'var(--success)',
-                    border: `1px solid ${passwordMsg.isError ? 'var(--danger-border)' : 'var(--success-border)'}`,
+                    background: passwordMsg.isError ? T.dangerSoft : T.successSoft,
+                    color: passwordMsg.isError ? T.danger : T.success,
+                    border: `1px solid ${passwordMsg.isError ? T.dangerBorder : T.successBorder}`,
                   }}
                 >
                   {passwordMsg.text}
@@ -863,17 +858,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
                 <button
                   type="button"
                   onClick={() => setShowPasswordModal(false)}
-                  style={{
-                    flex: 1,
-                    padding: 12,
-                    borderRadius: 'var(--r-pill)',
-                    background: 'var(--sage-100)',
-                    border: 'none',
-                    cursor: 'pointer',
-                    fontWeight: 700,
-                    color: 'var(--text)',
-                    fontFamily: 'var(--font)',
-                  }}
+                  style={{ ...btnSubtle, flex: 1, padding: 12 }}
                 >
                   Cancel
                 </button>
@@ -881,21 +866,15 @@ const handleChangePassword = async (e: React.FormEvent) => {
                 type="submit"
                 disabled={isSubmittingPassword || !evaluatePassword(newPassword).isAcceptable}
                 style={{
+                  ...btnPrimary,
                   flex: 1,
                   padding: 12,
-                  borderRadius: 'var(--r-pill)',
-                  background: 'var(--primary)',
-                  color: '#fff',
-                  border: 'none',
                   cursor:
                     isSubmittingPassword || !evaluatePassword(newPassword).isAcceptable
                       ? 'not-allowed'
                       : 'pointer',
-                  fontWeight: 700,
-                  fontFamily: 'var(--font)',
                   opacity:
                     isSubmittingPassword || !evaluatePassword(newPassword).isAcceptable ? 0.55 : 1,
-                  transition: 'opacity 120ms ease',
                 }}
               >
                 {isSubmittingPassword ? 'Updating…' : 'Save password'}

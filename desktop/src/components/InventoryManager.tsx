@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { T, btnPrimary, btnGhost, inputStyle } from '../theme';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
+import Icon from './Icon';
 
 interface MedicineMaster {
   medicine_id: number;
@@ -144,7 +145,7 @@ export default function InventoryManager() {
       fetchMedicines();
       fetchReorderAndAlerts();
       fetchLogs();
-      setStatusMessage('🔄 Inventory synchronized with latest clinical dispensations.');
+      setStatusMessage('Inventory synchronized with latest clinical dispensations.');
     });
 
     return () => {
@@ -167,11 +168,11 @@ export default function InventoryManager() {
       setBatchId(match.batch_id.toString());
       setAdjustBatchId(match.batch_id);
       setStatusMessage(
-        `🎯 ${isHardwareHID ? 'USB HID Scanner' : 'Barcode search'}: Selected ${match.name} (Lot ${match.batch_no}) · ${match.quantity_on_hand} ${match.unit || 'pcs'} on hand`
+        `${isHardwareHID ? 'USB HID Scanner' : 'Barcode search'}: Selected ${match.name} (Lot ${match.batch_no}) · ${match.quantity_on_hand} ${match.unit || 'pcs'} on hand`
       );
       setBarcodeQuery('');
     } else {
-      setStatusMessage(`⚠️ Barcode / Lot "${trimmed}" not found in active clinic inventory.`);
+      setStatusMessage(`Barcode / Lot "${trimmed}" not found in active clinic inventory.`);
     }
   };
 
@@ -250,16 +251,16 @@ export default function InventoryManager() {
       });
       const data = await res.json();
       if (res.ok) {
-        setStatusMessage('✅ ' + data.message);
+        setStatusMessage('' + data.message);
         fetchBatches();
         fetchReorderAndAlerts();
         setBatchId('');
         setQuantity('1');
       } else {
-        setStatusMessage('❌ ' + (data.error || 'Failed to deduct stock'));
+        setStatusMessage('' + (data.error || 'Failed to deduct stock'));
       }
     } catch (err: any) {
-      setStatusMessage('❌ Network error: ' + err.message);
+      setStatusMessage('Network error: ' + err.message);
     }
   };
 
@@ -282,16 +283,16 @@ export default function InventoryManager() {
       });
       const data = await res.json();
       if (res.ok) {
-        setStatusMessage('✅ ' + data.message);
+        setStatusMessage('' + data.message);
         setStockInBatchNo('');
         setStockInQty('100');
         fetchBatches();
         fetchReorderAndAlerts();
       } else {
-        setStatusMessage('❌ ' + (data.error || 'Failed to record shipment intake'));
+        setStatusMessage('' + (data.error || 'Failed to record shipment intake'));
       }
     } catch (err: any) {
-      setStatusMessage('❌ Network error: ' + err.message);
+      setStatusMessage('Network error: ' + err.message);
     }
   };
 
@@ -311,23 +312,23 @@ export default function InventoryManager() {
       });
       const data = await res.json();
       if (res.ok) {
-        setStatusMessage('✅ ' + data.message);
+        setStatusMessage('' + data.message);
         fetchBatches();
         fetchReorderAndAlerts();
         setAdjustBatchId('');
         setAdjustQty('1');
       } else {
-        setStatusMessage('❌ ' + (data.error || 'Failed to adjust inventory'));
+        setStatusMessage('' + (data.error || 'Failed to adjust inventory'));
       }
     } catch (err: any) {
-      setStatusMessage('❌ Network error: ' + err.message);
+      setStatusMessage('Network error: ' + err.message);
     }
   };
 
   const handleAdjustStock = (e: React.FormEvent) => {
     e.preventDefault();
     if (!adjustBatchId) {
-      setStatusMessage('⚠️ Please select a batch to adjust.');
+      setStatusMessage('Please select a batch to adjust.');
       return;
     }
 
@@ -335,7 +336,7 @@ export default function InventoryManager() {
     const targetName = targetBatch ? `${targetBatch.name} (${targetBatch.batch_no})` : `Batch #${adjustBatchId}`;
 
     setConfirmDialog({
-      title: '⚠️ Confirm Removal',
+      title: 'Confirm Removal',
       message: `Are you sure you want to mark ${adjustQty} unit(s) as '${adjustType.toUpperCase()}' for:\n\n${targetName}\n\nReason: "${adjustReason}"\n\nThis will permanently deduct the quantity from available stock.`,
       confirmLabel: 'Confirm Removal',
       isDestructive: true,
@@ -361,15 +362,15 @@ export default function InventoryManager() {
       });
       const data = await res.json();
       if (res.ok) {
-        setStatusMessage('✅ ' + data.message);
+        setStatusMessage('' + data.message);
         setNewMedName('');
         setNewMedGeneric('');
         fetchMedicines();
       } else {
-        setStatusMessage('❌ ' + (data.error || 'Failed to add medicine'));
+        setStatusMessage('' + (data.error || 'Failed to add medicine'));
       }
     } catch (err: any) {
-      setStatusMessage('❌ Network error: ' + err.message);
+      setStatusMessage('Network error: ' + err.message);
     }
   };
 
@@ -384,7 +385,7 @@ export default function InventoryManager() {
 
     if (existingMatch) {
       setConfirmDialog({
-        title: '⚠️ Duplicate Formulary Warning',
+        title: 'Duplicate Formulary Warning',
         message: `"${newMedName} (${newMedStrength})" already exists in the formulary catalog!\n\nAre you sure you want to create another separate entry for this medicine?`,
         confirmLabel: 'Add Duplicate',
         isDestructive: false,
@@ -392,7 +393,7 @@ export default function InventoryManager() {
       });
     } else {
       setConfirmDialog({
-        title: '➕ Confirm Formulary Entry',
+        title: 'Confirm Formulary Entry',
         message: `Add new medicine to formulary?\n\n• Name: ${newMedName.trim()}\n• Generic: ${newMedGeneric.trim()}\n• Form & Strength: ${newMedForm} · ${newMedStrength.trim()}\n• Buffer threshold: ${newMedReorder} ${newMedUnit}`,
         confirmLabel: 'Add to Formulary',
         isDestructive: false,
@@ -403,7 +404,7 @@ export default function InventoryManager() {
 
   const handleDeleteMedicine = (medicineId: number, medName: string) => {
     setConfirmDialog({
-      title: '🗑️ Delete Formulary Entry',
+      title: 'Delete Formulary Entry',
       message: `Are you sure you want to delete "${medName}" from the formulary catalog?\n\nThis will remove it from the Stock-in dropdown.`,
       confirmLabel: 'Delete',
       isDestructive: true,
@@ -417,14 +418,14 @@ export default function InventoryManager() {
           });
           const data = await res.json();
           if (res.ok) {
-            setStatusMessage(`✅ ${data.message}`);
+            setStatusMessage(`${data.message}`);
             fetchMedicines();
             fetchBatches();
           } else {
-            setStatusMessage(`❌ ${data.error || 'Failed to delete medicine'}`);
+            setStatusMessage(`${data.error || 'Failed to delete medicine'}`);
           }
         } catch (err: any) {
-          setStatusMessage(`❌ Network error: ${err.message}`);
+          setStatusMessage(`Network error: ${err.message}`);
         }
       },
     });
@@ -459,11 +460,12 @@ export default function InventoryManager() {
       padding: 22,
       boxShadow: T.shadow.xs,
     }}>
-      <div style={{ marginBottom: 18 }}>
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: T.primary }}>
-          💊 Medicine & first-aid inventory
+      <div className="vd-page-head" style={{ marginBottom: 18 }}>
+        <div className="vd-page-head-eyebrow">Clinic operations</div>
+        <h3 className="vd-page-head-title" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Icon name="medication" size={18} tone="primary" /> Medicine & first-aid inventory
         </h3>
-        <p style={{ margin: '4px 0 0', fontSize: 12.5, color: T.textSub }}>
+        <p className="vd-page-head-sub">
           FEFO lot traceability, USB HID scanner integration & real-time automated dispensation sync
         </p>
       </div>
@@ -505,9 +507,9 @@ export default function InventoryManager() {
         <div style={{
           padding: '12px 16px', marginBottom: 16,
           borderRadius: T.radius.md, fontSize: 13, fontWeight: 600,
-          background: statusMessage.includes('✅') || statusMessage.includes('🎯') ? T.successSoft : T.dangerSoft,
-          color: statusMessage.includes('✅') || statusMessage.includes('🎯') ? T.success : T.danger,
-          border: `1px solid ${statusMessage.includes('✅') || statusMessage.includes('🎯') ? T.successBorder : T.dangerBorder}`,
+          background: statusMessage.includes('Selected') ? T.successSoft : T.dangerSoft,
+          color: statusMessage.includes('Selected') ? T.success : T.danger,
+          border: `1px solid ${statusMessage.includes('Selected') ? T.successBorder : T.dangerBorder}`,
         }}>
           {statusMessage}
         </div>
@@ -521,7 +523,7 @@ export default function InventoryManager() {
             background: T.sage50, padding: 12,
             borderRadius: T.radius.md, border: `1px solid ${T.borderSoft}`,
           }}>
-            <span style={{ fontSize: 18 }}>📟</span>
+            <span style={{ fontSize: 18 }}><Icon name="pager" size={14} /></span>
             <input
               ref={barcodeInputRef}
               type="text"
@@ -591,7 +593,7 @@ export default function InventoryManager() {
                               background: isSelected ? T.primary : 'transparent',
                               display: 'grid', placeItems: 'center',
                             }}>
-                              {isSelected && <span style={{ color: '#fff', fontSize: 9, fontWeight: 900 }}>✓</span>}
+                              {isSelected && <span style={{ color: '#fff', fontSize: 9, fontWeight: 900 }}><Icon name="check" size={14} /></span>}
                             </div>
                           </td>
                           <td style={{ padding: '12px 14px' }}>
@@ -646,7 +648,7 @@ export default function InventoryManager() {
                 margin: '0 0 14px 0', fontSize: 14, fontWeight: 800, color: T.primary,
                 display: 'flex', alignItems: 'center', gap: 8,
               }}>
-                ➖ Dispense stock
+                <Icon name="remove" size={14} /> Dispense stock
               </h4>
               <form onSubmit={handleDeductStock}>
                 <div style={{ marginBottom: 14 }}>
@@ -700,7 +702,7 @@ export default function InventoryManager() {
       {activeTab === 'stockin' && (
         <div style={{ maxWidth: 720 }}>
           <h4 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 800, color: T.primary }}>
-            📥 Log incoming medication shipment
+            <Icon name="download" size={14} /> Log incoming medication shipment
           </h4>
           <p style={{ margin: '0 0 20px', fontSize: 12.5, color: T.textSub }}>
             Every lot is tracked by batch and expiry for FEFO dispensing.
@@ -775,7 +777,7 @@ export default function InventoryManager() {
 
             <div style={{ gridColumn: 'span 2', marginTop: 6 }}>
               <button type="submit" style={{ ...btnPrimary, width: '100%', padding: 13 }}>
-                📥 Record stock intake to central ledger
+                <Icon name="download" size={14} /> Record stock intake to central ledger
               </button>
             </div>
           </form>
@@ -786,7 +788,7 @@ export default function InventoryManager() {
       {activeTab === 'adjust' && (
         <div style={{ maxWidth: 620 }}>
           <h4 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 800, color: T.danger }}>
-            🗑️ Discard expired / damaged medicines
+            <Icon name="delete" size={14} /> Discard expired / damaged medicines
           </h4>
           <p style={{ margin: '0 0 20px', fontSize: 12.5, color: T.textSub }}>
             Removals are permanent and written to the activity log.
@@ -863,7 +865,7 @@ export default function InventoryManager() {
               margin: '0 0 12px', fontSize: 14, fontWeight: 800, color: T.warning,
               display: 'flex', alignItems: 'center', gap: 8,
             }}>
-              📉 Automated reorder suggestions
+              <Icon name="trending_down" size={14} /> Automated reorder suggestions
             </h4>
             <div style={{
               border: `1px solid ${T.border}`,
@@ -922,7 +924,7 @@ export default function InventoryManager() {
                   padding: 24, textAlign: 'center',
                   color: T.success, fontSize: 12.5, fontWeight: 700,
                 }}>
-                  ✅ No active batches expiring within 90 days.
+                  <Icon name="check_circle" size={14} /> No active batches expiring within 90 days.
                 </div>
               ) : (
                 <table className="tbl" style={{ fontSize: 12 }}>
@@ -974,14 +976,14 @@ export default function InventoryManager() {
           }}>
             <div>
               <h4 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: T.primary }}>
-                📜 Central inventory consumption log
+                <Icon name="article" size={14} /> Central inventory consumption log
               </h4>
               <p style={{ margin: '4px 0 0', fontSize: 12, color: T.textSub }}>
                 Showing <b>{filteredLogs.length}</b> of <b>{inventoryLogs.length}</b> recorded transactions
               </p>
             </div>
             <button type="button" onClick={fetchLogs} style={btnGhost}>
-              🔄 Refresh
+              <Icon name="refresh" size={14} /> Refresh
             </button>
           </div>
 
@@ -994,9 +996,9 @@ export default function InventoryManager() {
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {([
                 { id: 'all',      label: `All actions (${inventoryLogs.length})` },
-                { id: 'dispense', label: `📤 Dispensed (${inventoryLogs.filter((l) => l.transaction_type === 'dispense').length})` },
-                { id: 'receive',  label: `📥 Received (${inventoryLogs.filter((l) => l.transaction_type === 'receive').length})` },
-                { id: 'dispose',  label: `🗑️ Disposals (${inventoryLogs.filter((l) => ['dispose', 'adjust', 'recall', 'return'].includes(l.transaction_type)).length})` },
+                { id: 'dispense', label: `Dispensed (${inventoryLogs.filter((l) => l.transaction_type === 'dispense').length})` },
+                { id: 'receive',  label: `Received (${inventoryLogs.filter((l) => l.transaction_type === 'receive').length})` },
+                { id: 'dispose',  label: `Disposals (${inventoryLogs.filter((l) => ['dispose', 'adjust', 'recall', 'return'].includes(l.transaction_type)).length})` },
               ] as const).map((chip) => {
                 const isActive = logTypeFilter === chip.id;
                 return (
@@ -1112,7 +1114,7 @@ export default function InventoryManager() {
         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.6fr', gap: 24, alignItems: 'start' }}>
           <div style={{ background: T.sage50, padding: 20, borderRadius: T.radius.md, border: `1px solid ${T.borderSoft}` }}>
             <h4 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 800, color: T.primary }}>
-              ➕ Register new drug
+              <Icon name="add" size={14} /> Register new drug
             </h4>
             <p style={{ margin: '0 0 16px', fontSize: 12, color: T.textSub }}>
               Adds a new formulation definition to the master catalog.
@@ -1186,7 +1188,7 @@ export default function InventoryManager() {
                 </div>
               </div>
               <button type="submit" style={{ ...btnPrimary, padding: 12, marginTop: 4 }}>
-                ➕ Add to master formulary
+                <Icon name="add" size={14} /> Add to master formulary
               </button>
             </form>
           </div>
@@ -1195,7 +1197,7 @@ export default function InventoryManager() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div>
                 <h4 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: T.text }}>
-                  📋 Registered formulary drugs ({medicines.length})
+                  <Icon name="description" size={14} /> Registered formulary drugs ({medicines.length})
                 </h4>
                 <p style={{ margin: '2px 0 0', fontSize: 11.5, color: T.textSub }}>
                   Real-time stock computed across active unexpired batches.
@@ -1267,7 +1269,7 @@ export default function InventoryManager() {
                             }}
                             title="Delete this formulary definition"
                           >
-                            🗑️ Delete
+                            <Icon name="delete" size={12} /> Delete
                           </button>
                         </td>
                       </tr>

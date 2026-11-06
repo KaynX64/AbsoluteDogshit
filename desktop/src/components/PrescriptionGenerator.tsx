@@ -1,5 +1,6 @@
 // desktop/src/components/PrescriptionGenerator.tsx
 import React, { useState, useEffect, useRef } from 'react';
+import Icon from './Icon';
 import { T, btnPrimary, btnGhost, inputStyle } from '../theme';
 import { API_BASE_URL } from '../config/api';
 import InteractionWarning from './InteractionWarning';
@@ -387,7 +388,7 @@ export default function PrescriptionGenerator({
   const handleSaveAndPrintPrescription = async () => {
     if (!patientUserId) {
       if (onPrescriptionError) {
-        onPrescriptionError('❌ No patient selected. Please choose a patient from the queue first.');
+        onPrescriptionError('No patient selected. Please choose a patient from the queue first.');
       }
       return;
     }
@@ -396,14 +397,14 @@ export default function PrescriptionGenerator({
       const trimmedName = outsideName.trim();
       if (!trimmedName) {
         if (onPrescriptionError) {
-          onPrescriptionError('❌ Please enter the name of the outside drug before issuing.');
+          onPrescriptionError('Please enter the name of the outside drug before issuing.');
         }
         return;
       }
       const outsideQty = Number(rxQuantity);
       if (!Number.isFinite(outsideQty) || outsideQty < 1) {
         if (onPrescriptionError) {
-          onPrescriptionError('❌ Quantity to purchase must be at least 1.');
+          onPrescriptionError('Quantity to purchase must be at least 1.');
         }
         return;
       }
@@ -445,7 +446,7 @@ export default function PrescriptionGenerator({
         }
       } catch (err: any) {
         if (onPrescriptionError) {
-          onPrescriptionError('❌ Error issuing outside prescription: ' + err.message);
+          onPrescriptionError('Error issuing outside prescription: ' + err.message);
         } else {
           console.error('[Prescription Generator - Outside]', err);
         }
@@ -458,14 +459,14 @@ export default function PrescriptionGenerator({
     if (selectedMed && selectedMed.available_stock !== undefined) {
       if (selectedMed.available_stock <= 0) {
         if (onPrescriptionError) {
-          onPrescriptionError(`❌ Cannot issue prescription: "${selectedMed.name}" is OUT OF STOCK in the infirmary.`);
+          onPrescriptionError(`Cannot issue prescription: "${selectedMed.name}" is OUT OF STOCK in the infirmary.`);
         }
         return;
       }
       if (Number(rxQuantity) > selectedMed.available_stock) {
         if (onPrescriptionError) {
           onPrescriptionError(
-            `❌ Insufficient stock: Requested ${rxQuantity} ${selectedMed.unit || 'pcs'}, but only ${selectedMed.available_stock} unexpired units are available.`
+            `Insufficient stock: Requested ${rxQuantity} ${selectedMed.unit || 'pcs'}, but only ${selectedMed.available_stock} unexpired units are available.`
           );
         }
         return;
@@ -482,7 +483,7 @@ export default function PrescriptionGenerator({
         setIsSaving(false);
         if (onPrescriptionError) {
           onPrescriptionError(
-            '🚫 Prescription blocked: a CONTRAINDICATED drug interaction was detected. Review the warning panel.'
+            'Prescription blocked: a CONTRAINDICATED drug interaction was detected. Review the warning panel.'
           );
         }
         return;
@@ -537,7 +538,7 @@ export default function PrescriptionGenerator({
 
     } catch (err: any) {
       if (onPrescriptionError) {
-        onPrescriptionError('❌ Error issuing prescription: ' + err.message);
+        onPrescriptionError('Error issuing prescription: ' + err.message);
       } else {
         console.error('[Prescription Generator]', err);
       }
@@ -578,14 +579,14 @@ export default function PrescriptionGenerator({
           disabled={isArchived}
           onClick={() => handleSwitchMode('formulary')}
         >
-          🏥 Infirmary formulary
+          <Icon name="local_hospital" size={14} /> Infirmary formulary
         </ModePill>
         <ModePill
           active={rxMode === 'outside'}
           disabled={isArchived}
           onClick={() => handleSwitchMode('outside')}
         >
-          🛒 Outside pharmacy drug
+          <Icon name="shopping_cart" size={14} /> Outside pharmacy drug
         </ModePill>
       </div>
 
@@ -621,8 +622,8 @@ export default function PrescriptionGenerator({
             }}
           >
             {isOutsideNameMissing
-              ? '⚠️ Drug name is required for outside prescriptions.'
-              : '🛒 Not stocked by the infirmary — the patient purchases this at an external pharmacy. No inventory is deducted.'}
+              ? 'Drug name is required for outside prescriptions.'
+              : 'Not stocked by the infirmary — the patient purchases this at an external pharmacy. No inventory is deducted.'}
           </div>
         </Field>
       )}
@@ -661,9 +662,9 @@ export default function PrescriptionGenerator({
               }}
             >
               {isOutOfStock
-                ? '⚠️ Currently OUT OF STOCK'
+                ? 'Currently OUT OF STOCK'
                 : isOverStock
-                ? `⚠️ Exceeds unexpired stock (${selectedMed.available_stock} available)`
+                ? `Exceeds unexpired stock (${selectedMed.available_stock} available)`
                 : `Stock on hand: ${selectedMed.available_stock} ${selectedMed.unit || 'pcs'} (FEFO)`}
             </div>
           )}
@@ -722,7 +723,7 @@ export default function PrescriptionGenerator({
             textAlign: 'center',
           }}
         >
-          🔍 Checking for drug interactions…
+          <Icon name="search" size={14} /> Checking for drug interactions…
         </div>
       )}
       {rxMode === 'formulary' && interactionResult?.hasInteractions && (
@@ -760,22 +761,22 @@ export default function PrescriptionGenerator({
         }}
       >
         {isArchived
-          ? '🔒 Prescription issued & archived'
+          ? 'Prescription issued & archived'
           : rxMode === 'outside'
           ? isOutsideNameMissing
-            ? '🛒 Enter the outside drug name to issue'
+            ? 'Enter the outside drug name to issue'
             : isSaving
             ? 'Signing outside prescription…'
-            : '🛒 Issue outside prescription & print'
+            : 'Issue outside prescription & print'
           : isOutOfStock
-          ? '❌ Cannot issue: Formulary Out of Stock'
+          ? 'Cannot issue: Formulary Out of Stock'
           : isOverStock
-          ? '⚠️ Cannot issue: Quantity exceeds available stock'
+          ? 'Cannot issue: Quantity exceeds available stock'
           : isBlocked
-          ? '🚫 Blocked by interaction safety check'
+          ? 'Blocked by interaction safety check'
           : isSaving
           ? 'Signing & deducting inventory…'
-          : '🖨️ Issue, deduct inventory & print prescription'}
+          : '️ Issue, deduct inventory & print prescription'}
       </button>
 
       {/* ── Stock-shortfall modal ─────────────────────────── */}
@@ -815,7 +816,7 @@ export default function PrescriptionGenerator({
                   fontSize: 26,
                 }}
               >
-                💊
+                <Icon name="medication" size={14} />
               </div>
               <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.danger, letterSpacing: -0.3 }}>
                 Pharmacy stock shortfall
@@ -872,7 +873,7 @@ export default function PrescriptionGenerator({
 
             <p style={{ padding: '12px 28px 0', margin: 0, fontSize: 11.5, color: T.textMuted, lineHeight: 1.55 }}>
               Dispensing follows FEFO (first-expiry-first-out): only unexpired batches with
-              stock on hand are counted. Restock via <b>Nurse Console → Inventory</b>, or
+              stock on hand are counted. Restock via <b>Nurse Console <Icon name="arrow_forward" size={14} /> Inventory</b>, or
               reduce the quantity below.
             </p>
 

@@ -5,6 +5,7 @@ import CreateUserModal from './CreateUserModal';
 import { T, rolePill, inputStyle, btnPrimary, btnGhost } from '../theme';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
 import ServerPingMonitor from './ServerPingMonitor';
+import Icon from './Icon';
 
 /* ── Icons (inline, no dependency) ─────────────────────────────── */
 const I = {
@@ -38,8 +39,8 @@ function NoPermissionPanel({ required }: { required: string }) {
       <div style={{
         width: 52, height: 52, margin: '0 auto 18px', borderRadius: T.radius.md,
         background: '#EDE9FE', color: '#6D28D9',
-        display: 'grid', placeItems: 'center', fontSize: 24,
-      }}>🛡</div>
+        display: 'grid', placeItems: 'center',
+      }}><Icon name="shield" size={26} tone="inherit" /></div>
       <div style={{ fontSize: 17, fontWeight: 800, color: T.text, marginBottom: 8 }}>
         Restricted admin archetype
       </div>
@@ -67,7 +68,7 @@ interface AdminConsoleProps {
 export default function AdminConsole({
   activeTab: controlledTab,
 }: AdminConsoleProps = {}) {
-  /* Controlled ⇄ uncontrolled: fall back to internal state when no parent props are passed. */
+  /* Controlled <Icon name="swap_horiz" size={14} /> uncontrolled: fall back to internal state when no parent props are passed. */
   const [internalTab] = useState<AdminTab>('users');
   const activeTab = controlledTab ?? internalTab;
 
@@ -181,8 +182,8 @@ export default function AdminConsole({
   /* ── Adjusted manage-user-account feature (non-super admins) ──────
      Limited admins keep the full Users workflow for REGULAR accounts, but
      administrator accounts are hands-off for them (server-enforced):
-       • other admins  → read-only “View” mode (403 on any write)
-       • own account   → profile fields editable; role & status locked;
+       • other admins  <Icon name="arrow_forward" size={14} /> read-only “View” mode (403 on any write)
+       • own account   <Icon name="arrow_forward" size={14} /> profile fields editable; role & status locked;
                          password override disabled (use Change password)
      Super admins see the console exactly as before. */
   const viewingAsLimited = !myPerms.is_super;
@@ -404,7 +405,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
     // are read-only for limited admins (the server 403s any write anyway).
     if (editingProtectedAdmin) {
       setModalFeedback({
-        text: '🔒 Read-only: only a Super Admin can modify another administrator account.',
+        text: 'Read-only: only a Super Admin can modify another administrator account.',
         isError: true,
       });
       return;
@@ -437,7 +438,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       });
       const data = await res.json();
       if (res.ok) {
-        setModalFeedback({ text: '✅ ' + data.message, isError: false });
+        setModalFeedback({ text: '' + data.message, isError: false });
         // Save updated immunization history
      await fetch(`${API_BASE_URL}/api/profile/patient/${editingUser.id}/immunizations`, {
        method: 'PUT',
@@ -465,21 +466,21 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
               const permData = await permRes.json();
               if (!permRes.ok) {
                 permWarning = permData.error || 'Permissions were not changed.';
-                setModalFeedback({ text: '⚠️ Profile saved, but permissions were not changed: ' + permWarning, isError: true });
+                setModalFeedback({ text: 'Profile saved, but permissions were not changed: ' + permWarning, isError: true });
               }
             } catch (permErr: any) {
               permWarning = permErr.message;
-              setModalFeedback({ text: '⚠️ Profile saved, but permission sync failed: ' + permErr.message, isError: true });
+              setModalFeedback({ text: 'Profile saved, but permission sync failed: ' + permErr.message, isError: true });
             }
           }
         }
         fetchUsers();
         if (!permWarning) setTimeout(() => setEditingUser(null), 1200);
       } else {
-        setModalFeedback({ text: '❌ ' + (data.error || 'Failed to update profile.'), isError: true });
+        setModalFeedback({ text: '' + (data.error || 'Failed to update profile.'), isError: true });
       }
     } catch (err: any) {
-      setModalFeedback({ text: '❌ Error: ' + err.message, isError: true });
+      setModalFeedback({ text: 'Error: ' + err.message, isError: true });
     } finally {
       setIsSavingUser(false);
     }
@@ -503,13 +504,13 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       });
       const data = await res.json();
       if (res.ok) {
-        setModalFeedback({ text: '🔑 ' + data.message, isError: false });
+        setModalFeedback({ text: '' + data.message, isError: false });
         setAdminPasswordInput('');
       } else {
-        setModalFeedback({ text: '❌ ' + (data.error || 'Password reset failed.'), isError: true });
+        setModalFeedback({ text: '' + (data.error || 'Password reset failed.'), isError: true });
       }
     } catch (err: any) {
-      setModalFeedback({ text: '❌ Network error: ' + err.message, isError: true });
+      setModalFeedback({ text: 'Network error: ' + err.message, isError: true });
     }
   };
 
@@ -583,11 +584,11 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       }
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || 'Database operation failed.');
-      alert('✅ ' + result.message);
+      alert('' + result.message);
       setDbRowModal(null);
       fetchTableData(selectedDbTable, tablePage);
     } catch (err: any) {
-      alert('❌ Error: ' + err.message);
+      alert('Error: ' + err.message);
     }
   };
 
@@ -607,10 +608,10 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to delete row.');
-      alert('✅ ' + data.message);
+      alert('' + data.message);
       fetchTableData(selectedDbTable, tablePage);
     } catch (err: any) {
-      alert('❌ Delete error: ' + err.message);
+      alert('Delete error: ' + err.message);
     }
   };
 
@@ -624,16 +625,17 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
   return (
     <div style={{ width: '100%' }}>
       {/* ── Header ────────────────────────────────────────────── */}
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: -0.6, color: T.text, margin: 0 }}>
+      <div className="vd-page-head">
+        <div className="vd-page-head-eyebrow">Administration</div>
+        <h1 className="vd-page-head-title">
           {activeTab === 'users' && 'Users & roles'}
           {activeTab === 'audit' && 'Privacy & audit'}
           {activeTab === 'telemetry' && 'System health & retention'}
-          {activeTab === 'analytics' && 'Epidemiological analytics'}
+          {activeTab === 'analytics' && 'Health analytics'}
           {activeTab === 'db' && 'Database Studio'}
         </h1>
-        <p style={{ fontSize: 13.5, color: T.textSub, margin: '6px 0 0' }}>
-          {activeTab === 'users' && 'Manage institutional accounts, access permissions and account status.'}
+        <p className="vd-page-head-sub">
+          {activeTab === 'users' && 'Manage institutional accounts, access permissions and account status. Seven RBAC roles govern access. Editing a user changes their assigned permissions; suspending an account disables access without deleting its profile.'}
           {activeTab === 'audit' && 'Trace access and changes to clinic information with read-only audit records.'}
           {activeTab === 'telemetry' && 'Service telemetry and clinical data lifecycle governance, in one place.'}
           {activeTab === 'analytics' && 'Campus illness trajectories, seasonal spike monitoring & health reports.'}
@@ -652,9 +654,9 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
             <div style={{ position: 'relative', flex: '1 1 320px', maxWidth: 520 }}>
               <span style={{
                 position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)',
-                color: T.textMuted, width: 16, height: 16, display: 'grid', placeItems: 'center',
+                color: T.textMuted, display: 'grid', placeItems: 'center',
               }}>
-                <I.Search />
+                <Icon name="search" size={16} />
               </span>
               <input
                 type="text"
@@ -777,10 +779,10 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                 fontFamily: T.font, cursor: 'pointer',
               }}
             >
-              <option value="id_asc">Sort: ID ↑</option>
-              <option value="id_desc">Sort: ID ↓</option>
-              <option value="name_asc">Sort: Name A→Z</option>
-              <option value="name_desc">Sort: Name Z→A</option>
+              <option value="id_asc">Sort: ID <Icon name="north" size={14} /></option>
+              <option value="id_desc">Sort: ID <Icon name="south" size={14} /></option>
+              <option value="name_asc">Sort: Name A<Icon name="arrow_forward" size={14} />Z</option>
+              <option value="name_desc">Sort: Name Z<Icon name="arrow_forward" size={14} />A</option>
               <option value="role">Sort: Role</option>
             </select>
           </div>
@@ -793,7 +795,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
             overflow: 'hidden',
             boxShadow: T.shadow.xs,
           }}>
-            <div style={{ overflowX: 'auto' }}>
+            <div className="vd-table-wrap" style={{ overflowX: "auto" }}>
               <table className="tbl" style={{ minWidth: 820 }}>
                 <thead>
                   <tr>
@@ -822,9 +824,9 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                               marginLeft: 8, padding: '2px 9px',
                               borderRadius: T.radius.pill,
                               fontSize: 9.5, fontWeight: 800, letterSpacing: 0.4,
-                              background: u.admin_archetype === 'super' ? '#EDE9FE' : '#F1F5F9',
-                              color: u.admin_archetype === 'super' ? '#6D28D9' : '#64748B',
-                              border: `1px solid ${u.admin_archetype === 'super' ? '#DDD6FE' : '#E2E8F0'}`,
+                              background: u.admin_archetype === 'super' ? '#EDE9FE' : T.sage50,
+                              color: u.admin_archetype === 'super' ? '#6D28D9' : T.textMuted,
+                              border: `1px solid ${u.admin_archetype === 'super' ? '#DDD6FE' : T.borderSoft}`,
                             }}
                             title={
                               u.admin_archetype === 'super'
@@ -832,7 +834,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                                 : `Limited Admin — ${(u.admin_permissions || []).join(', ')}`
                             }
                           >
-                            {u.admin_archetype === 'super' ? '⭐ SUPER' : `⚙ LIMITED · ${u.admin_permissions?.length ?? 0}`}
+                            {u.admin_archetype === 'super' ? 'SUPER' : `LIMITED · ${u.admin_permissions?.length ?? 0}`}
                           </span>
                         )}
                       </td>
@@ -842,7 +844,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                           padding: '4px 12px', borderRadius: T.radius.pill,
                           fontSize: 11, fontWeight: 700,
                           background: u.status === 'Active' ? T.successSoft : '#F5EFE9',
-                          color: u.status === 'Active' ? T.success : '#8C6826',
+                          color: u.status === 'Active' ? T.success : T.warning,
                         }}>
                           <span style={{ fontSize: 7 }}>●</span>
                           {u.status}
@@ -863,7 +865,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                               display: 'inline-flex', alignItems: 'center', gap: 5,
                             }}
                           >
-                            🔒 View
+                            <Icon name="lock" size={14} /> View
                           </button>
                         ) : (
                           <button
@@ -916,35 +918,21 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       {activeTab === 'audit' && !can('AUDIT_VIEW') && (<NoPermissionPanel required="AUDIT_VIEW" />)}
       {activeTab === 'audit' && can('AUDIT_VIEW') && (
         <div>
-          {/* Sub-tabs */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+          {/* Sub-tabs — clean pill toggle */}
+          <div className="vd-subtabs" style={{ marginBottom: 20 }}>
             <button
               type="button"
+              className={`vd-subtab${auditSubTab === 'phi' ? ' is-active' : ''}`}
               onClick={() => setAuditSubTab('phi')}
-              style={{
-                padding: '9px 18px', borderRadius: T.radius.pill,
-                border: `1px solid ${auditSubTab === 'phi' ? T.primary : T.border}`,
-                background: auditSubTab === 'phi' ? T.primary : T.surface,
-                color: auditSubTab === 'phi' ? '#fff' : T.textSub,
-                fontSize: 13, fontWeight: 700, cursor: 'pointer',
-                fontFamily: T.font,
-              }}
             >
-              👁️ PHI access
+              <Icon name="visibility" size={14} /> PHI access
             </button>
             <button
               type="button"
+              className={`vd-subtab${auditSubTab === 'mutations' ? ' is-active' : ''}`}
               onClick={() => setAuditSubTab('mutations')}
-              style={{
-                padding: '9px 18px', borderRadius: T.radius.pill,
-                border: `1px solid ${auditSubTab === 'mutations' ? T.primary : T.border}`,
-                background: auditSubTab === 'mutations' ? T.primary : T.surface,
-                color: auditSubTab === 'mutations' ? '#fff' : T.textSub,
-                fontSize: 13, fontWeight: 700, cursor: 'pointer',
-                fontFamily: T.font,
-              }}
             >
-              ✓ SHA-256 mutation ledger
+              <Icon name="check" size={14} /> SHA-256 mutation ledger
             </button>
           </div>
 
@@ -990,7 +978,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                         style={{ ...inputStyle, width: 'auto', padding: '8px 16px', borderRadius: T.radius.pill, fontSize: 12, fontWeight: 700 }}>
                   <option value="desc">Newest first</option>
                   <option value="asc">Oldest first</option>
-                  <option value="patient_asc">Patient A→Z</option>
+                  <option value="patient_asc">Patient A<Icon name="arrow_forward" size={14} />Z</option>
                 </select>
 
                 <span style={{ alignSelf: 'center', fontSize: 12, color: T.textSub, fontWeight: 700 }}>
@@ -1034,7 +1022,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     No PHI read access events matched your filter.
                   </div>
                 ) : (
-                  <div style={{ overflowX: 'auto' }}>
+                  <div className="vd-table-wrap" style={{ overflowX: "auto" }}>
                     <table className="tbl" style={{ minWidth: 900 }}>
                       <thead>
                         <tr>
@@ -1162,7 +1150,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     No mutation audit logs matched your filter.
                   </div>
                 ) : (
-                  <div style={{ overflowX: 'auto' }}>
+                  <div className="vd-table-wrap" style={{ overflowX: "auto" }}>
                     <table className="tbl" style={{ minWidth: 820 }}>
                       <thead>
                         <tr>
@@ -1429,7 +1417,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   cursor: sweeping ? 'not-allowed' : 'pointer',
                 }}
               >
-                🧹 {sweeping ? 'Executing sweep…' : 'Enforce retention sweep'}
+                <Icon name="cleaning_services" size={14} /> {sweeping ? 'Executing sweep…' : 'Enforce retention sweep'}
               </button>
             </div>
           </div>
@@ -1530,7 +1518,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         display: 'inline-flex', alignItems: 'center', gap: 6,
                       }}>
-                        {isAudit ? '🔒' : '📋'} {t.tableName}
+                        {isAudit ? '' : ''} {t.tableName}
                       </span>
                     </button>
                   );
@@ -1626,7 +1614,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                             borderBottom: `1px solid ${T.border}`,
                             whiteSpace: 'nowrap',
                           }}>
-                            {col.columnKey === 'PRI' && <span style={{ color: T.warning, marginRight: 4 }}>🔑</span>}
+                            {col.columnKey === 'PRI' && <span style={{ color: T.warning, marginRight: 4 }}><Icon name="key" size={14} /></span>}
                             {col.columnName}
                             <div style={{ fontSize: 9.5, color: T.textMuted, fontWeight: 500, textTransform: 'none', letterSpacing: 0, marginTop: 2 }}>
                               {col.dataType}
@@ -1680,7 +1668,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                                       background: T.primaryTint, padding: '2px 8px',
                                       borderRadius: T.radius.xs,
                                     }}>
-                                      🔒 AES-256
+                                      <Icon name="lock" size={14} /> AES-256
                                     </span>
                                   ) : val === null || val === undefined ? (
                                     <span style={{ color: T.textFaint, fontStyle: 'italic' }}>NULL</span>
@@ -1767,7 +1755,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                 type="button"
                 onClick={() => setDbRowModal(null)}
                 style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: T.textSub }}
-              >✕</button>
+              ><Icon name="close" size={14} /></button>
             </div>
             <p style={{ fontSize: 12.5, color: T.textSub, margin: '0 0 18px' }}>
               valetudo_healthlink / {selectedDbTable} · {dbRowModal.isNew ? 'Insert new record' : 'Update existing record'}
@@ -1781,7 +1769,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
               fontSize: 12.5, color: T.warning, lineHeight: 1.5,
               marginBottom: 20,
             }}>
-              <strong>⚠️ Direct database change.</strong> Committing writes directly to this system record.
+              <strong><Icon name="warning" size={14} /> Direct database change.</strong> Committing writes directly to this system record.
               Check field types and values carefully. Credentials are not available in this editor.
             </div>
 
@@ -1800,7 +1788,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                         marginBottom: 6,
                       }}>
                         <span>
-                          {isPK && <span style={{ color: T.warning, marginRight: 4 }}>🔑</span>}
+                          {isPK && <span style={{ color: T.warning, marginRight: 4 }}><Icon name="key" size={14} /></span>}
                           {col.columnName}
                         </span>
                         <span style={{ fontSize: 10, color: T.textMuted, fontFamily: T.mono, fontWeight: 500 }}>
@@ -1838,7 +1826,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   Cancel
                 </button>
                 <button type="submit" style={btnPrimary}>
-                  💾 Commit to database
+                  <Icon name="save" size={14} /> Commit to database
                 </button>
               </div>
             </form>
@@ -1875,10 +1863,10 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     marginTop: 16, padding: '12px 16px',
                     borderRadius: T.radius.md,
                     background: '#FFFBEB', border: '1px solid #FDE68A',
-                    fontSize: 12.5, color: '#92400E', lineHeight: 1.55,
+                    fontSize: 12.5, color: T.warning, lineHeight: 1.55,
                     display: 'flex', gap: 8, alignItems: 'flex-start',
                   }}>
-                    <span style={{ fontSize: 15, lineHeight: 1.3 }}>🔒</span>
+                    <span style={{ fontSize: 15, lineHeight: 1.3 }}><Icon name="lock" size={14} /></span>
                     <span>
                       <b>Administrator account — read-only view.</b> Only a Super Admin can
                       modify administrator accounts, change admin roles, edit admin
@@ -1977,12 +1965,12 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       </select>
                       {viewingAsLimited && editingUser.role !== 'ADMIN' && (
                         <div style={{ fontSize: 11, color: T.textMuted, marginTop: 5, fontStyle: 'italic' }}>
-                          🔒 Only a Super Admin can assign the ADMIN role.
+                          <Icon name="lock" size={14} /> Only a Super Admin can assign the ADMIN role.
                         </div>
                       )}
                       {editingSelfAdminLocked && (
                         <div style={{ fontSize: 11, color: T.textMuted, marginTop: 5, fontStyle: 'italic' }}>
-                          🔒 Administrator roles can only be changed by a Super Admin.
+                          <Icon name="lock" size={14} /> Administrator roles can only be changed by a Super Admin.
                         </div>
                       )}
                     </div>
@@ -2001,7 +1989,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       </select>
                       {editingSelfAdminLocked && (
                         <div style={{ fontSize: 11, color: T.textMuted, marginTop: 5, fontStyle: 'italic' }}>
-                          🔒 Your own admin account status is managed by a Super Admin.
+                          <Icon name="lock" size={14} /> Your own admin account status is managed by a Super Admin.
                         </div>
                       )}
                     </div>
@@ -2106,7 +2094,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 10, flexWrap: 'wrap' }}>
                         <span style={{ fontSize: 12.5, fontWeight: 800, color: '#6D28D9' }}>
-                          🛡 Admin archetype &amp; permissions
+                          <Icon name="shield" size={14} /> Admin archetype &amp; permissions
                         </span>
                         {editingUser.id === myPerms.userId && (
                           <span style={{ fontSize: 10.5, color: '#5B21B6', fontStyle: 'italic' }}>
@@ -2138,7 +2126,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                               }}
                               title={!myPerms.is_super ? 'Only a Super Admin can assign the SUPER_ADMIN archetype' : undefined}
                             >
-                              🛡 Super Admin · full access
+                              <Icon name="shield" size={14} /> Super Admin · full access
                             </button>
                             <button
                               type="button"
@@ -2157,7 +2145,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                                 whiteSpace: 'nowrap',
                               }}
                             >
-                              ⚙ Limited Admin · choose permissions
+                              <Icon name="settings" size={14} /> Limited Admin · choose permissions
                             </button>
                           </div>
 
@@ -2211,7 +2199,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                         </>
                       ) : (
                         <p style={{ fontSize: 12, color: '#5B21B6', margin: 0, lineHeight: 1.55 }}>
-                          🔒 Only a Super Admin can modify administrator permissions
+                          <Icon name="lock" size={14} /> Only a Super Admin can modify administrator permissions
                           {editingUser.admin_archetype === 'super'
                             ? ' — this is a full-access administrator.'
                             : '.'}
@@ -2280,19 +2268,19 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   )}
 
                   {/* Admin password override panel */}
-                  {/* 💉 SECTION: VACCINATION / IMMUNIZATION RECORDS */}
+                  {/* <Icon name="vaccines" size={14} /> SECTION: VACCINATION / IMMUNIZATION RECORDS */}
                   <div style={{
-                    background: '#F0FDFA',
+                    background: T.tonalTealBg,
                     padding: 16,
                     borderRadius: T.radius.md,
                     border: '1px solid #99F6E4',
                     marginBottom: 16,
                   }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                      <span style={{ fontSize: 13, fontWeight: 800, color: '#0F766E' }}>
-                        💉 Vaccination & Immunization History
+                      <span style={{ fontSize: 13, fontWeight: 800, color: T.tonalTealFg }}>
+                        <Icon name="vaccines" size={14} /> Vaccination & Immunization History
                       </span>
-                      <span style={{ fontSize: 11.5, color: '#475569', fontWeight: 600 }}>
+                      <span style={{ fontSize: 11.5, color: T.textSub, fontWeight: 600 }}>
                         {adminUserVaccines.length} vaccine(s) on file
                       </span>
                     </div>
@@ -2300,7 +2288,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     {/* Badges List */}
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
                       {adminUserVaccines.length === 0 ? (
-                        <span style={{ fontSize: 12, color: '#64748B', fontStyle: 'italic' }}>
+                        <span style={{ fontSize: 12, color: T.textMuted, fontStyle: 'italic' }}>
                           No immunization records on file. Type a vaccine below to add.
                         </span>
                       ) : (
@@ -2311,7 +2299,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                               padding: '4px 12px',
                               borderRadius: 20,
                               background: '#CCFBF1',
-                              color: '#0F766E',
+                              color: T.tonalTealFg,
                               fontSize: 11.5,
                               fontWeight: 700,
                               border: '1px solid #99F6E4',
@@ -2320,13 +2308,13 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                               gap: 6,
                             }}
                           >
-                            ✓ {v}
+                            <Icon name="check" size={14} /> {v}
                             <button
                               type="button"
                               onClick={() => handleAdminRemoveVaccine(v)}
-                              style={{ background: 'none', border: 'none', color: '#DC2626', cursor: 'pointer', fontWeight: 900, padding: 0, fontSize: 12 }}
+                              style={{ background: 'none', border: 'none', color: T.danger, cursor: 'pointer', fontWeight: 900, padding: 0, fontSize: 12 }}
                             >
-                              ✕
+                              <Icon name="close" size={14} />
                             </button>
                           </span>
                         ))
@@ -2351,7 +2339,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       <button
                         type="button"
                         onClick={() => handleAdminAddVaccine(adminNewVaccine)}
-                        style={{ ...btnGhost, padding: '7px 16px', fontSize: 12.5, fontWeight: 700, color: '#0F766E', borderColor: '#99F6E4' }}
+                        style={{ ...btnGhost, padding: '7px 16px', fontSize: 12.5, fontWeight: 700, color: T.tonalTealFg, borderColor: '#9FD9CB' }}
                       >
                         + Add Vaccine
                       </button>
@@ -2372,10 +2360,10 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                         fontSize: 13, fontWeight: 800, color: '#6D28D9',
                         marginBottom: 6,
                       }}>
-                        🔑 Password admin override
+                        <Icon name="key" size={14} /> Password admin override
                       </div>
                       <p style={{ fontSize: 12, color: '#5B21B6', margin: 0, lineHeight: 1.55 }}>
-                        🔒 Only a Super Admin can override an administrator password.
+                        <Icon name="lock" size={14} /> Only a Super Admin can override an administrator password.
                         {editingSelf
                           ? ' To change your own password, use the Change password screen after closing this window.'
                           : ' Ask a Super Admin if this administrator is locked out.'}
@@ -2393,7 +2381,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       fontSize: 13, fontWeight: 800, color: '#6D28D9',
                       marginBottom: 6,
                     }}>
-                      🔑 Password admin override
+                      <Icon name="key" size={14} /> Password admin override
                     </div>
                     <p style={{ fontSize: 12, color: '#5B21B6', margin: '0 0 12px', lineHeight: 1.5 }}>
                       Reset this user's credentials separately from their profile.
@@ -2420,7 +2408,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                         onClick={handleAdminResetPassword}
                         style={{
                           padding: '0 18px', borderRadius: T.radius.pill,
-                          background: '#7C3AED', color: '#fff',
+                          background: T.tonalLilacFg, color: '#fff',
                           border: 'none', fontWeight: 700, fontSize: 12.5,
                           cursor: 'pointer', fontFamily: T.font,
                         }}

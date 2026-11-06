@@ -62,15 +62,24 @@ export default function SignatureEnrollment({ onClose }: { onClose?: () => void 
   };
 
   return (
-    <div style={{ ...cardStyle, padding: 24, maxWidth: 640 }}>
+    <div style={{ ...cardStyle, padding: 28, maxWidth: 640, borderRadius: T.radius.xl, boxShadow: T.shadow.sm }}>
       <p style={sectionTitle}>My signature</p>
 
       {current && !drawing && (
         <>
-          <div style={{ margin: '16px 0', padding: 16, background: T.surfaceMuted, borderRadius: T.radius.md, border: `1px solid ${T.border}` }}>
+          <div style={{
+            margin: '18px 0',
+            padding: 24,
+            background: T.surfaceMuted,
+            borderRadius: T.radius.lg,
+            border: `1px solid ${T.borderSoft}`,
+            display: 'grid',
+            placeItems: 'center',
+            minHeight: 130,
+          }}>
             <img src={current} alt="Current signature" style={{ maxHeight: 90, maxWidth: '100%' }} />
           </div>
-          <p style={{ fontSize: 12, color: T.textSub, margin: '0 0 16px' }}>
+          <p style={{ fontSize: 12, color: T.textSub, margin: '0 0 18px', lineHeight: T.lh.normal }}>
             {updatedAt ? `Last updated ${new Date(updatedAt).toLocaleString()}. ` : ''}
             Documents you already issued keep the signature they were signed with.
           </p>
@@ -83,7 +92,7 @@ export default function SignatureEnrollment({ onClose }: { onClose?: () => void 
 
       {drawing && (
         <>
-          <p style={{ fontSize: 13, color: T.textSub, margin: '12px 0' }}>
+          <p style={{ fontSize: 13, color: T.textSub, margin: '14px 0 12px', lineHeight: T.lh.normal }}>
             Sign with your stylus or finger. It is saved as a transparent image and stamped on the prescriptions and clearances you issue.
           </p>
           <SignaturePad ref={padRef} onChange={setEmpty} />

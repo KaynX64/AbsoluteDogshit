@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { T } from '../theme';
+import Icon from './Icon';
 import { SEVERITY_CONFIG, type DrugInteraction } from '../services/interactionService';
 
 interface InteractionWarningProps {
@@ -35,30 +36,33 @@ export default function InteractionWarning({
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          padding: '10px 16px',
+          padding: '12px 18px',
           background: blocking ? T.danger : T.warning,
           color: '#FFFFFF',
         }}
       >
-        <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.3 }}>
+        <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.3, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           {blocking
-            ? '🚫 CONTRAINDICATED — Cannot issue this prescription'
-            : `⚠️ ${interactions.length} Drug Interaction${interactions.length > 1 ? 's' : ''} Detected`}
+            ? (<><Icon name="block" size={18} fill /> CONTRAINDICATED — Cannot issue this prescription</>)
+            : (<><Icon name="warning" size={18} fill /> {interactions.length} Drug Interaction{interactions.length > 1 ? 's' : ''} Detected</>)}
         </span>
         {onDismiss && !blocking && (
           <button
             type="button"
             onClick={onDismiss}
             style={{
-              background: 'rgba(255,255,255,0.2)',
-              border: 'none',
+              background: 'rgba(255,255,255,0.20)',
+              border: '1px solid rgba(255,255,255,0.30)',
               color: '#fff',
-              borderRadius: 4,
-              padding: '2px 8px',
+              borderRadius: T.radius.pill,
+              padding: '4px 12px',
               fontSize: 11,
               cursor: 'pointer',
               fontWeight: 700,
+              transition: `background ${T.durBase} ${T.ease}`,
             }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.32)')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.20)')}
           >
             Dismiss
           </button>
@@ -95,7 +99,7 @@ export default function InteractionWarning({
                     color: cfg.color,
                   }}
                 >
-                  {cfg.icon} {interaction.medicine_a.name} ↔{' '}
+                  <Icon name={cfg.icon} size={16} fill /> {interaction.medicine_a.name} ↔{' '}
                   {interaction.medicine_b.name}
                 </span>
                 <span

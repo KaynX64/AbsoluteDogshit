@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { T, inputStyle, btnPrimary, btnGhost } from '../theme';
 import { API_BASE_URL } from '../config/api';
+import Icon from './Icon';
 
 interface CreateUserModalProps {
   isOpen: boolean;
@@ -135,7 +136,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
           }
         }
       } catch (_) {
-        /* Offline / server hiccup → fallback catalog + optimistic defaults */
+        /* Offline / server hiccup <Icon name="arrow_forward" size={14} /> fallback catalog + optimistic defaults */
       }
     })();
   }, [isOpen]);
@@ -210,11 +211,11 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create user account.');
-      setFeedback({ text: '✅ ' + data.message, isError: false });
+      setFeedback({ text: '' + data.message, isError: false });
       onCreated();
       setTimeout(() => { onClose(); }, 900);
     } catch (err: any) {
-      setFeedback({ text: '❌ ' + err.message, isError: true });
+      setFeedback({ text: '' + err.message, isError: true });
     } finally {
       setIsSaving(false);
     }
@@ -254,7 +255,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
             onClick={onClose}
             style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: T.textSub }}
             aria-label="Close"
-          >✕</button>
+          ><Icon name="close" size={14} /></button>
         </div>
 
         <form onSubmit={handleSubmit}>
@@ -311,7 +312,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
                 style={{ ...btnGhost, padding: '10px 14px', fontSize: 12 }}
                 title={showPassword ? 'Hide password' : 'Show password'}
               >
-                {showPassword ? '🙈' : '👁'}
+                {showPassword ? '' : ''}
               </button>
               <button
                 type="button"
@@ -319,7 +320,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
                 style={{ ...btnGhost, padding: '10px 14px', fontSize: 12 }}
                 title="Generate a strong random password"
               >
-                🔄
+                <Icon name="refresh" size={14} />
               </button>
             </div>
             <div style={{ fontSize: 11, color: T.textMuted, marginTop: 6, fontStyle: 'italic' }}>
@@ -349,7 +350,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
               </select>
               {!callerIsSuper && (
                 <div style={{ fontSize: 11, color: T.textMuted, marginTop: 5, fontStyle: 'italic' }}>
-                  🔒 Only a Super Admin can create administrator accounts.
+                  <Icon name="lock" size={14} /> Only a Super Admin can create administrator accounts.
                 </div>
               )}
             </div>
@@ -506,7 +507,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
                   }}
                   title={!callerIsSuper ? 'Only a Super Admin can create another Super Admin' : undefined}
                 >
-                  🛡 Super Admin · full access
+                  <Icon name="shield" size={14} /> Super Admin · full access
                 </button>
                 <button
                   type="button"
@@ -525,7 +526,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  ⚙ Limited Admin · choose permissions
+                  <Icon name="settings" size={14} /> Limited Admin · choose permissions
                 </button>
               </div>
 
@@ -630,7 +631,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
               }}
               disabled={isSaving}
             >
-              {isSaving ? 'Creating account…' : '✓ Create account'}
+              {isSaving ? 'Creating account…' : 'Create account'}
             </button>
           </div>
         </form>
