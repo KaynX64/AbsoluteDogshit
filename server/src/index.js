@@ -188,24 +188,28 @@ io.use(async (socket, next) => {
 
 io.on('connection', (socket) => {
   const userEmail = socket.user?.email || 'Authenticated User';
-  const roles = socket.user?.roles || [];
+  const userId = socket.user?.user_id;
   console.log(`⚡ [Socket.IO ${isHttps ? 'WSS' : 'WS'}] Client connected: ${socket.id} (${userEmail})`);
 
-  const authorizedRoles = ['EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'];
-  if (roles.some((r) => authorizedRoles.includes(r))) {
-    socket.join('responders');
-    console.log(`🛡️ [Socket.IO] Socket ${socket.id} joined 'responders' room`);
+  // ── Qualified Responder: per-user delivery rooms ─────────────────
+  // EVERY authenticated socket joins its own user:<id> room. SOS alerts and
+  // responder flag changes are emitted to these rooms — never to a shared
+  // role room — because room membership would go stale (role edits,
+  // suspensions, DB Studio edits) while the flag is always resolved live
+  // from the database at dispatch time.
+  if (userId) {
+    socket.join(`user:${userId}`);
   }
 
-  // Explicit registration listener for mobile responders (role-verified)
+  // Legacy 'responders' room registration from older mobile builds. The
+  // server no longer maintains that room (alerts are delivered per user
+  // above), so this is kept purely as a harmless acknowledgement — an old
+  // build emitting join:responders still receives every alert in its own
+  // user room and never errors.
   socket.on('join:responders', () => {
-    const userRoles = socket.user?.roles || [];
-    if (userRoles.some((r) => authorizedRoles.includes(r))) {
-      socket.join('responders');
-      console.log(`🛡️ [Socket.IO] Socket ${socket.id} (${socket.user?.email}) joined 'responders' room`);
-    } else {
-      console.warn(`⚠️ [Socket.IO] Socket ${socket.id} (${socket.user?.email}) denied entry to 'responders' room: insufficient privileges.`);
-    }
+    console.log(
+      `🛡️ [Socket.IO] Legacy join:responders acknowledged for ${socket.id} (${userEmail}) — delivery now targets user:${userId}`
+    );
   });
 
   socket.on('disconnect', (reason) => {
@@ -227,7 +231,7 @@ app.use('/api/appointments', appointmentRoutes(io));
 app.use('/api/emergency', emergencyRouter(io));
 app.use('/api/inventory', inventoryRoutes(io));
 app.use('/api/documents', documentRoutes(io));
-app.use('/api/admin', adminRoutes);
+app.use('/api/admin', adminRoutes(io));
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/interactions', interactionsRoutes);

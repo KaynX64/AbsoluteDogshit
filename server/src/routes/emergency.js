@@ -3,11 +3,16 @@ import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { decrypt } from '../utils/cryptoVault.js';
-import { requireRoles } from '../middleware/rbac.js';
-import { sendPushToRoles } from '../utils/fcmNotifier.js';
+import { sendPushToUsers } from '../utils/fcmNotifier.js';
 import { logAudit } from '../utils/auditLogger.js';
 import { redis, isRedisActive, invalidateCache } from '../utils/redisClient.js';
 import { SOS_LIMIT } from '../config/limits.js';
+import {
+  requireResponderAccess,
+  redactForTier,
+  getResponderAudience,
+  roleLabelFor,
+} from '../utils/responderAccess.js';
 
 // ── Rate Limiter Middleware para sa SOS ─────────────────────────────
 function sosRateLimitKey(userIdOrIp) {
@@ -145,12 +150,14 @@ export default function emergencyRouter(io) {
       }
 
       // Fetch user demographic & health indicators for responder payload
+      // (NON_TEACHING joined so the fix to roleLabel/identifier covers
+      // support staff; the patient identity itself is never redacted.)
       const [details] = await pool.query(
         `SELECT u.user_id, u.first_name, u.last_name, u.phone, u.email,
                 COALESCE(r.code, 'STUDENT') AS primary_role,
                 COALESCE(r.name, 'Student Patient') AS role_name,
-                COALESCE(sp.student_no, st.license_no, fp.position, 'PSU Member') AS identifier_no,
-                COALESCE(sp.course, st.department, fp.department, 'PSU Lingayen') AS affiliation,
+                COALESCE(sp.student_no, fp.faculty_no, st.license_no, ntp.employee_no, 'PSU Member') AS identifier_no,
+                COALESCE(sp.course, fp.department, st.department, ntp.department, 'PSU Lingayen') AS affiliation,
                 hp.blood_type, hp.allergies, hp.chronic_conditions,
                 hp.emergency_contact_name, hp.emergency_contact_phone
          FROM USERS u
@@ -159,6 +166,7 @@ export default function emergencyRouter(io) {
          LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
          LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
          LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
+         LEFT JOIN NON_TEACHING_PROFILES ntp ON u.user_id = ntp.user_id
          LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
          WHERE u.user_id = ?
          LIMIT 1`,
@@ -169,13 +177,9 @@ export default function emergencyRouter(io) {
       const decryptedAllergies = decrypt(patientInfo.allergies) || 'None listed';
       const decryptedConditions = decrypt(patientInfo.chronic_conditions) || 'None listed';
 
-      let roleLabel = 'Student';
-      if (patientInfo.primary_role === 'ADMIN') roleLabel = 'System Administrator';
-      else if (patientInfo.primary_role === 'DOCTOR') roleLabel = 'Campus Physician';
-      else if (patientInfo.primary_role === 'DENTIST') roleLabel = 'Campus Dentist';
-      else if (patientInfo.primary_role === 'NURSE') roleLabel = 'Clinic Nurse';
-      else if (patientInfo.primary_role === 'FACULTY') roleLabel = 'Faculty / Staff';
-      else if (patientInfo.primary_role === 'EMERGENCY_RESPONDER') roleLabel = 'Emergency Responder';
+      // Server-side roleLabel (shared with /active via responderAccess.js) —
+      // covers STUDENT and NON_TEACHING, which the old inline map missed.
+      const roleLabel = roleLabelFor(patientInfo.primary_role);
 
       const alertPayload = {
         alertId,
@@ -198,20 +202,44 @@ export default function emergencyRouter(io) {
         createdAt: new Date().toISOString(),
       };
 
-      // 1. Dispatch Firebase Cloud Messaging (FCM) background push
-      sendPushToRoles(['EMERGENCY_RESPONDER', 'NURSE', 'DOCTOR', 'ADMIN'], {
-        title: `🚨 EMERGENCY SOS: ${alertPayload.patientName}`,
-        body: `Location: ${formattedAddress} | Blood: ${alertPayload.bloodType} | Allergies: ${alertPayload.allergies}`,
-        data: { alertId: String(alertId), type: 'EMERGENCY_SOS' },
-      }).catch((err) => console.error('[FCM SOS Push Error]:', err.message));
+      // 1. Resolve the live audience (flag OR legacy role, sender excluded,
+      //    suspended/soft-deleted accounts dropped). Each recipient is then
+      //    served a payload tiered for their access level.
+      const audience = await getResponderAudience({ excludeUserId: userId });
 
-      // 2. Broadcast via WebSockets (Socket.IO) strictly to authorized clinical responders
+      // 2. Dispatch Firebase Cloud Messaging (FCM) background push.
+      //    Lock-screen privacy: the push carries the ADDRESS only — no
+      //    medical details and no victim name for any recipient tier.
+      sendPushToUsers(
+        audience.map((r) => r.userId),
+        {
+          title: `🚨 EMERGENCY SOS at ${formattedAddress}`,
+          body: 'A campus member triggered an SOS. Open the app for details and dispatch.',
+          data: {
+            alertId: String(alertId),
+            type: 'EMERGENCY_SOS',
+            latitude: String(lat),
+            longitude: String(lng),
+          },
+        }
+      ).catch((err) => console.error('[FCM SOS Push Error]:', err.message));
+
+      // 3. Broadcast via WebSockets (Socket.IO) to each recipient's own
+      //    per-user room (user:<id>), with the medical details redacted for
+      //    community (non-clinical) responders. Per-user rooms — never a
+      //    shared role room — so suspensions, flag revocations and role
+      //    edits take effect immediately without stale room membership.
       if (io) {
-        io.to('responders').emit('emergency:new_alert', alertPayload);
+        for (const recipient of audience) {
+          io.to(`user:${recipient.userId}`).emit(
+            'emergency:new_alert',
+            redactForTier(alertPayload, recipient.tier)
+          );
+        }
       }
 
       res.status(201).json({
-        message: 'Emergency alert dispatched to PSU Clinic responders.',
+        message: 'Emergency alert dispatched to campus responders.',
         alertId,
         formattedAddress,
       });
@@ -224,14 +252,15 @@ export default function emergencyRouter(io) {
   // ===========================================================================
   // 2. GET /api/emergency/active - Retrieve Active Alerts
   // ===========================================================================
-  router.get('/active', authenticateToken, requireRoles('EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'), async (req, res) => {
+  router.get('/active', authenticateToken, requireResponderAccess, async (req, res) => {
     try {
+      const tier = req.responderTier;
       const [alerts] = await pool.query(
         `SELECT a.alert_id, a.user_id, a.latitude, a.longitude, a.status, a.created_at, a.notes,
                 u.first_name, u.last_name, u.phone,
                 COALESCE(r.code, 'STUDENT') AS primary_role,
-                COALESCE(sp.student_no, st.license_no, fp.position, 'PSU Member') AS identifier_no,
-                COALESCE(sp.course, st.department, fp.department, 'PSU Lingayen') AS affiliation,
+                COALESCE(sp.student_no, fp.faculty_no, st.license_no, ntp.employee_no, 'PSU Member') AS identifier_no,
+                COALESCE(sp.course, fp.department, st.department, ntp.department, 'PSU Lingayen') AS affiliation,
                 hp.blood_type, hp.allergies
          FROM EMERGENCY_ALERTS a
          JOIN USERS u ON a.user_id = u.user_id
@@ -240,17 +269,37 @@ export default function emergencyRouter(io) {
          LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
          LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
          LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
+         LEFT JOIN NON_TEACHING_PROFILES ntp ON u.user_id = ntp.user_id
          LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
          WHERE a.status IN ('triggered', 'acknowledged', 'dispatched')
          ORDER BY a.created_at DESC`
       );
 
-      const decryptedAlerts = alerts.map((a) => ({
-        ...a,
-        studentNo: a.identifier_no,
-        course: a.affiliation,
-        allergies: decrypt(a.allergies) || 'None',
-      }));
+      const decryptedAlerts = alerts.map((a) => {
+        // Tier the API the same way the socket broadcast is tiered, so the
+        // REST path can never bypass the medical-detail redaction.
+        if (tier === 'community') {
+          const row = { ...a };
+          // Strip every medical-detail column for community responders.
+          delete row.blood_type;
+          delete row.allergies;
+          return {
+            ...row,
+            studentNo: a.identifier_no,
+            course: a.affiliation,
+            roleLabel: roleLabelFor(a.primary_role),
+            medicalDetailsRedacted: true,
+          };
+        }
+        return {
+          ...a,
+          studentNo: a.identifier_no,
+          course: a.affiliation,
+          roleLabel: roleLabelFor(a.primary_role),
+          allergies: decrypt(a.allergies) || 'None',
+          medicalDetailsRedacted: false,
+        };
+      });
 
       res.json(decryptedAlerts);
     } catch (error) {
@@ -262,14 +311,24 @@ export default function emergencyRouter(io) {
   // ===========================================================================
   // 3. PATCH /api/emergency/:alertId/status - Update Status & Sync Queue
   // ===========================================================================
-  router.patch('/:alertId/status', authenticateToken, requireRoles('EMERGENCY_RESPONDER', 'DOCTOR', 'NURSE', 'ADMIN'), async (req, res) => {
+  router.patch('/:alertId/status', authenticateToken, requireResponderAccess, async (req, res) => {
     try {
       const { alertId } = req.params;
       const { status } = req.body;
       const responderId = req.user.user_id;
+      const tier = req.responderTier;
 
       if (!['acknowledged', 'dispatched', 'resolved', 'false_alarm'].includes(status)) {
         return res.status(400).json({ error: 'Invalid status update.' });
+      }
+
+      // Community responders may acknowledge and dispatch; closing an
+      // incident (resolved / false_alarm) is a clinical judgement call.
+      if (tier === 'community' && (status === 'resolved' || status === 'false_alarm')) {
+        return res.status(403).json({
+          error: 'Only clinical responders may resolve an alert or mark it a false alarm.',
+          code: 'CLINICAL_ACTION_REQUIRED',
+        });
       }
 
       const connection = await pool.getConnection();
@@ -296,6 +355,22 @@ export default function emergencyRouter(io) {
           params
         );
 
+        // Status changes are part of the R.A. 10173 record — they were not
+        // audited before. No PHI in the entry.
+        await logAudit(connection, {
+          userId: responderId,
+          action: 'UPDATE',
+          table: 'EMERGENCY_ALERTS',
+          recordId: Number(alertId),
+          oldValue: null,
+          newValue: {
+            operation: 'SOS_STATUS_CHANGE',
+            status,
+            responderTier: tier,
+          },
+          ipAddress: req.ip,
+        });
+
         await connection.commit();
         await invalidateCache('queue:*');
       } catch (err) {
@@ -306,7 +381,16 @@ export default function emergencyRouter(io) {
       }
 
       if (io) {
-        io.to('responders').emit('emergency:status_change', { alertId: Number(alertId), status, responderId });
+        // Live audience (flag OR legacy role) — emit to each recipient's own
+        // user room so a phone mid-session drops the alert instantly.
+        const audience = await getResponderAudience({}).catch(() => []);
+        for (const recipient of audience) {
+          io.to(`user:${recipient.userId}`).emit('emergency:status_change', {
+            alertId: Number(alertId),
+            status,
+            responderId,
+          });
+        }
         io.emit('queue:updated');
       }
 

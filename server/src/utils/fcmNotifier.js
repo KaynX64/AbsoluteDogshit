@@ -68,6 +68,33 @@ export async function sendPushToRoles(roleCodes = [], { title, body, data = {} }
   }
 }
 
+/**
+ * Send push notification to a list of concrete user ids — the delivery path
+ * for the qualified-responder SOS audience (flag OR legacy role, resolved
+ * live at dispatch time). Tokens are chunked in batches of 500: that is the
+ * FCM sendEachForMulticast ceiling, and unchunked lists would silently drop
+ * every token past the 500th.
+ */
+export async function sendPushToUsers(userIds = [], { title, body, data = {} }) {
+  try {
+    if (!Array.isArray(userIds) || userIds.length === 0) return;
+    const [rows] = await pool.query(
+      'SELECT fcm_token FROM DEVICE_TOKENS WHERE user_id IN (?)',
+      [userIds]
+    );
+
+    if (rows.length === 0) return;
+    const tokens = rows.map((r) => r.fcm_token);
+
+    const FCM_MULTICAST_LIMIT = 500;
+    for (let i = 0; i < tokens.length; i += FCM_MULTICAST_LIMIT) {
+      await sendMulticastNotification(tokens.slice(i, i + FCM_MULTICAST_LIMIT), { title, body, data });
+    }
+  } catch (err) {
+    console.error('[FCM] Error sending push to users:', err.message);
+  }
+}
+
 async function sendMulticastNotification(tokens, { title, body, data }) {
   if (!isFcmInitialized || !firebaseApp) {
     console.log(`📡 [FCM Simulation] To ${tokens.length} devices | Title: "${title}" | Body: "${body}"`);

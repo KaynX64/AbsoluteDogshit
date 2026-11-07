@@ -130,6 +130,10 @@ export default function AdminConsole({
   const [editHealthLoading, setEditHealthLoading] = useState(false);
   const [editHealthExists, setEditHealthExists] = useState(false);
   const [editAccountMeta, setEditAccountMeta] = useState<any | null>(null);
+  /* Qualified Responder: snapshot of the flag/note as loaded from the
+     server — diffs against it decide whether the save flow must call the
+     dedicated label endpoint after the main profile PUT. */
+  const [editQrOriginal, setEditQrOriginal] = useState<{ flag: boolean; note: string } | null>(null);
   /* Database Studio state */
   const [dbTablesList, setDbTablesList] = useState<any[]>([]);
   const [selectedDbTable, setSelectedDbTable] = useState<string>('USERS');
@@ -154,6 +158,7 @@ export default function AdminConsole({
   /* Filters & sorting */
   const [userRoleFilter, setUserRoleFilter] = useState<string>('ALL');
   const [userStatusFilter, setUserStatusFilter] = useState<'ALL' | 'Active' | 'Suspended'>('ALL');
+  const [userQrOnly, setUserQrOnly] = useState(false);
   const [userSortKey, setUserSortKey] = useState<'id_asc' | 'id_desc' | 'name_asc' | 'name_desc' | 'role'>('id_asc');
 
   const [phiSearchTerm, setPhiSearchTerm] = useState<string>('');
@@ -340,7 +345,8 @@ export default function AdminConsole({
         (u.license_no || '').toLowerCase().includes(searchTerm.toLowerCase());
       const matchesRole = userRoleFilter === 'ALL' || u.role === userRoleFilter;
       const matchesStatus = userStatusFilter === 'ALL' || u.status === userStatusFilter;
-      return matchesSearch && matchesRole && matchesStatus;
+      const matchesQr = !userQrOnly || u.is_qualified_responder === true || u.is_qualified_responder === 1;
+      return matchesSearch && matchesRole && matchesStatus && matchesQr;
     })
     .sort((a, b) => {
       switch (userSortKey) {
@@ -405,6 +411,15 @@ export default function AdminConsole({
       department: u.department || '',
       position: u.position || '',
       is_active: u.status === 'Active' || u.is_active === 1 || u.is_active === true,
+      // Qualified Responder (account property, shown on the Basic tab).
+      is_qualified_responder: u.is_qualified_responder === true || u.is_qualified_responder === 1,
+      qualified_responder_since: u.qualified_responder_since || null,
+      qualified_responder_note: (u.qualified_responder_note || ''),
+      sos_via_role: u.sos_via_role === true || u.sos_via_role === 1,
+    });
+    setEditQrOriginal({
+      flag: u.is_qualified_responder === true || u.is_qualified_responder === 1,
+      note: (u.qualified_responder_note || '').trim(),
     });
     setAdminPasswordInput('');
     setModalFeedback(null);
@@ -587,6 +602,38 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
        body: JSON.stringify({ immunizations: adminUserVaccines }),
      });
+
+        /* Sync the Qualified Responder label (dedicated endpoint guarded by
+           RESPONDERS_MANAGE). Reported separately — a failure here must never
+           roll back the profile save (partial success, like permissions). */
+        let qrWarning: string | null = null;
+        const qrNoteNow = (editingUser.qualified_responder_note || '').trim();
+        const qrFlagChanged = editQrOriginal ? editQrOriginal.flag !== Boolean(editingUser.is_qualified_responder) : false;
+        const qrNoteChanged = editQrOriginal ? editQrOriginal.note !== qrNoteNow : false;
+        if (editQrOriginal && (qrFlagChanged || qrNoteChanged)) {
+          try {
+            const qrRes = await fetch(`${API_BASE_URL}/api/admin/users/${editingUser.id}/qualified-responder`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: JSON.stringify({
+                is_qualified_responder: Boolean(editingUser.is_qualified_responder),
+                // Note is only meaningful while the flag is ON; sending it
+                // while ON keeps/edits it, and the server clears it on OFF.
+                note: editingUser.is_qualified_responder ? qrNoteNow : undefined,
+              }),
+            });
+            const qrData = await qrRes.json().catch(() => ({}));
+            if (!qrRes.ok) {
+              qrWarning = qrData.error || 'The Qualified Responder label was not changed.';
+              setModalFeedback({ text: 'Profile saved, but the Qualified Responder label failed: ' + qrWarning, isError: true });
+            } else {
+              setEditQrOriginal({ flag: Boolean(editingUser.is_qualified_responder), note: qrNoteNow });
+            }
+          } catch (qrErr: any) {
+            qrWarning = qrErr.message;
+            setModalFeedback({ text: 'Profile saved, but the Qualified Responder label sync failed: ' + qrErr.message, isError: true });
+          }
+        }
         /* Sync admin archetype permissions (dedicated endpoint; the server
            enforces self-edit and super-only guards). Only Super Admins may
            modify administrator permission sets (adjusted feature). */
@@ -619,7 +666,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
         fetchUsers();
         // Refresh the Advanced editor (BMI / versions) if it was in use.
         if (editHealthLoaded) fetchEditHealthProfile(Number(editingUser.id));
-        if (!permWarning) setTimeout(() => setEditingUser(null), 1200);
+        if (!permWarning && !qrWarning) setTimeout(() => setEditingUser(null), 1200);
       } else {
         setModalFeedback({ text: '' + (data.error || 'Failed to update profile.'), isError: true });
       }
@@ -925,6 +972,25 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
               );
             })}
 
+            {/* Qualified Responder filter chip (flag only — accounts that
+                receive SOS through their role get an in-modal hint instead). */}
+            <button
+              type="button"
+              onClick={() => setUserQrOnly((v) => !v)}
+              title="Show only accounts labelled Qualified Responder (role-independent SOS label)"
+              style={{
+                padding: '5px 12px', borderRadius: T.radius.pill,
+                fontSize: 11.5, fontWeight: 700,
+                border: `1px solid ${userQrOnly ? '#C2410C' : T.border}`,
+                background: userQrOnly ? '#FFF7ED' : T.surface,
+                color: userQrOnly ? '#C2410C' : T.textSub,
+                cursor: 'pointer', fontFamily: T.font,
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+              }}
+            >
+              <Icon name="emergency" size={14} /> Qualified responders
+            </button>
+
             <select
               value={userSortKey}
               onChange={(e) => setUserSortKey(e.target.value as any)}
@@ -974,6 +1040,25 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       <td style={{ color: T.textSub }}>{u.email}</td>
                       <td>
                         <span style={rolePill(u.role)}>{u.role}</span>
+                        {(u.is_qualified_responder === true || u.is_qualified_responder === 1) && (
+                          <span
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 4,
+                              marginLeft: 8, padding: '2px 9px',
+                              borderRadius: T.radius.pill,
+                              fontSize: 9.5, fontWeight: 800, letterSpacing: 0.4,
+                              background: '#FFF7ED', color: '#C2410C',
+                              border: '1px solid #FED7AA',
+                            }}
+                            title={
+                              `Qualified Responder (independent SOS label)${
+                                u.qualified_responder_since ? ` · since ${u.qualified_responder_since}` : ''
+                              }${u.qualified_responder_note ? ` · ${u.qualified_responder_note}` : ''}`
+                            }
+                          >
+                            <Icon name="emergency" size={14} /> QUALIFIED RESPONDER
+                          </span>
+                        )}
                         {u.role === 'ADMIN' && u.admin_archetype && (
                           <span
                             style={{
@@ -2485,6 +2570,89 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       </div>
                     </div>
                   )}
+
+                  {/* ── QUALIFIED RESPONDER — account property, every role ──
+                      Not a health field: it lives on the Basic tab for every
+                      role. The flag is ADDITIVE: accounts that already
+                      receive SOS through their role keep it when off. */}
+                  <div style={{
+                    marginTop: 24, marginBottom: 20, padding: 16,
+                    borderRadius: T.radius.md,
+                    background: '#FFF7ED', border: '1px solid #FED7AA',
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 800, color: '#C2410C' }}>
+                        <Icon name="emergency" size={14} /> Emergency response · Qualified Responder
+                      </span>
+                      <label
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 8,
+                          cursor: (can('RESPONDERS_MANAGE') && !(editingUser.role === 'ADMIN' && !myPerms.is_super))
+                            ? 'pointer' : 'not-allowed',
+                          opacity: (can('RESPONDERS_MANAGE') && !(editingUser.role === 'ADMIN' && !myPerms.is_super)) ? 1 : 0.6,
+                          fontWeight: 700, fontSize: 12.5, color: T.text,
+                        }}
+                        title={
+                          !can('RESPONDERS_MANAGE')
+                            ? 'Requires the RESPONDERS_MANAGE permission (ask a Super Admin).'
+                            : (editingUser.role === 'ADMIN' && !myPerms.is_super)
+                              ? 'Only a Super Admin may change this label on an administrator account.'
+                              : 'Label this account a Qualified Responder — it will receive Emergency SOS alarms on any role.'
+                        }
+                      >
+                        <input
+                          type="checkbox"
+                          checked={Boolean(editingUser.is_qualified_responder)}
+                          disabled={!can('RESPONDERS_MANAGE') || (editingUser.role === 'ADMIN' && !myPerms.is_super)}
+                          onChange={(e) => setEditingUser({ ...editingUser, is_qualified_responder: e.target.checked })}
+                          style={{ width: 16, height: 16, accentColor: '#C2410C' }}
+                        />
+                        Qualified Responder
+                      </label>
+                    </div>
+
+                    <p style={{ fontSize: 11.5, color: T.textSub, margin: '0 0 12px', lineHeight: 1.55 }}>
+                      Role-independent SOS label. A labelled account receives Emergency SOS
+                      alarms and can act on them — whatever its role is.{' '}
+                      {Boolean(editingUser.sos_via_role) && (
+                        <b style={{ color: '#9A3412' }}>
+                          This account also receives SOS through its {editingUser.role} role —
+                          turning the label off will NOT stop role-based alerts (change the role instead).
+                        </b>
+                      )}
+                    </p>
+
+                    {Boolean(editingUser.is_qualified_responder) && (
+                      <>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 14 }}>
+                          <div>
+                            <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
+                              Note (max 150 chars)
+                            </label>
+                            <input
+                              style={inputStyle}
+                              maxLength={150}
+                              placeholder="e.g. First-aid certified, campus volunteer responder"
+                              value={editingUser.qualified_responder_note || ''}
+                              disabled={!can('RESPONDERS_MANAGE') || (editingUser.role === 'ADMIN' && !myPerms.is_super)}
+                              onChange={(e) => setEditingUser({ ...editingUser, qualified_responder_note: e.target.value })}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
+                              Qualified since
+                            </label>
+                            <input
+                              style={{ ...inputStyle, background: '#FFFDF9' }}
+                              readOnly
+                              value={editingUser.qualified_responder_since || '—'}
+                              title="Read-only: set automatically when the label was granted"
+                            />
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
 
                   {/* ── ADVANCED: Health record — every HEALTH_PROFILES column ── */}
                   {editMode === 'advanced' && (

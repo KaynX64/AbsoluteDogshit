@@ -20,6 +20,7 @@ router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
     // Join identity with role tables (Student, Staff, Faculty, Non-Teaching, Admin)
     const [userRows] = await pool.query(
       `SELECT u.user_id, u.email, u.first_name, u.last_name, u.phone,
+              u.is_qualified_responder,
               COALESCE(r.code, 'STUDENT') AS primary_role,
               COALESCE(r.name, 'Student Patient') AS role_name,
               sp.student_no, sp.course, sp.year_level,
@@ -49,6 +50,10 @@ router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
     if (userRows.length === 0) {
       return res.status(404).json({ error: 'User not found.' });
     }
+
+    // UI hint only — the flag is a display/UX switch. Authorization for SOS
+    // routes is always resolved live (requireResponderAccess reads the DB).
+    userRows[0].is_qualified_responder = Boolean(userRows[0].is_qualified_responder);
 
     // Fetch clinical profile from HEALTH_PROFILES
     const [healthRows] = await pool.query(
@@ -217,6 +222,12 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
 
   if (Object.prototype.hasOwnProperty.call(req.body, 'date_of_birth')) {
     return res.status(403).json({ error: 'Date of birth can only be updated by clinic staff.' });
+  }
+
+  // The Qualified Responder label is an administrative credential decision —
+  // self-service must never flip it (PUT /users/:id/qualified-responder only).
+  if (Object.prototype.hasOwnProperty.call(req.body, 'is_qualified_responder')) {
+    return res.status(403).json({ error: 'The Qualified Responder label can only be changed by an administrator.' });
   }
 
   const connection = await pool.getConnection();

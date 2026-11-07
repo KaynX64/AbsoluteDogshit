@@ -19,17 +19,17 @@ Flat folder: one component per file, header comment `// desktop/src/components/<
 ```
 App.tsx ─ NURSE→NurseConsole · DOCTOR/DENTIST→DoctorConsole · ADMIN→AdminConsole · EMERGENCY_RESPONDER→ResponderConsole
 NurseConsole    → QrIntakeScanner (L1104) · InventoryManager (L410, inventory view)
-DoctorConsole   → AnalyticsDashboard (L1341) · PrescriptionGenerator (L2507) · SignatureEnrollment (L4263) · embedded odontogram (L2079)
-AdminConsole    → CreateUserModal (L1927) · ServerPingMonitor (L1450) · AnalyticsDashboard (analytics tab L1590)
+DoctorConsole   → AnalyticsDashboard (L1341) · PrescriptionGenerator (L2507) · SignatureEnrollment (L4263) · EmergencyAlertBanner (SOS banner, mounted for DOCTOR+DENTIST after the signature warning L1273) · embedded odontogram (L2079)
+AdminConsole    → CreateUserModal (L1958) · ServerPingMonitor (L1450) · AnalyticsDashboard (analytics tab L1590)
 PrescriptionGenerator → InteractionWarning (L829)
 SignatureEnrollment   → SignaturePad
 ```
 
-**Not mounted (don't build on them):** `EmergencyAlertBanner.tsx` (orphaned — SOS banners live in NurseConsole L926 + ResponderConsole), `DentalChart.tsx` (DoctorConsole embeds its own chart at L2079), `VaccinationInputter.tsx` (**0 bytes, empty, unreferenced — delete or implement**).
+**Not mounted (don't build on them):** `DentalChart.tsx` (DoctorConsole embeds its own chart at L2079), `VaccinationInputter.tsx` (**0 bytes, empty, unreferenced — delete or implement**). `EmergencyAlertBanner.tsx` IS now mounted (DoctorConsole) — it self-hides via 403 on `/api/emergency/active` for accounts the server does not consider responders.
 
 ## Consoles
 
-### DoctorConsole.tsx — 4,270 lines / 160 KB / 58 useState. Consultations, EMR, e-Rx, clearances, immunizations, analytics
+### DoctorConsole.tsx — 4,366 lines. Consultations, EMR, e-Rx, clearances, immunizations, analytics
 - Exports: `ToothCondition` L13, `ToothRecord` L21, `DoctorViewMode` L27 (`'active'|'scheduled'|'history'|'archive'|'analytics'`), component L178.
 - Sockets L351-374: `appointment:booked`, `appointment:status_changed`, `queue:updated`, `appointment:cancelled`.
 - Queue & consult: `fetchAppointments` L308 (`GET /api/appointments/today?filter=active|history|scheduled` L312-314), `handleConflict` L376, `selectPatient` L407, `handleStartConsultation` L557 (status → in-progress L562), `handleFinishConsultation` L588 (complete L643 + EMR + attachments upload L662).
@@ -40,11 +40,12 @@ SignatureEnrollment   → SignaturePad
 - BMI: consult form computes `bmi`/`bmiCategory` client-side from height/weight; header also shows appointment-supplied `bmi`/`bmi_category`.
 - Render anchors: page header L1172 · queue grid L1198 · analytics L1341 · archive/EMR directory L1344 · active/scheduled/history lists L1703 · labs & attachment preview L1997 · interactive odontogram L2079 · rx history modal L3085 · clearance history modal L3308 · EMR history modal L3500 · signature enroll L4239.
 
-### AdminConsole.tsx — 2,868 lines / 145 KB / 50 useState. Users, audit, telemetry, analytics, DB Studio
+### AdminConsole.tsx — 3,045 lines. Users, audit, telemetry, analytics, DB Studio
 - Exports: `AdminTab` L83 (`'users'|'audit'|'telemetry'|'analytics'|'db'`), component L92. Props `activeTab`/`onTabChange` (App.tsx).
 - Permission gate: `fetchMyPermissions` L179 (`GET /api/admin/my-permissions`) → `can(code)` L214; every tab renders `NoPermissionPanel` without its code (`USERS_MANAGE`, `AUDIT_VIEW`, `TELEMETRY_VIEW`/`RETENTION_MANAGE`, `ANALYTICS_VIEW`, `DATABASE_MANAGE`).
-- Users tab L805: list `fetchUsers` L168, edit modal `handleOpenEditModal` L393, save profile L514 (identity + sub-profile + immunizations + optional `health_profile`), reset password L632.
-- Edit modal has a **Basic/Advanced switch** (toggle L2076): Basic = the everyday fields. Advanced lazily fetches `GET /api/admin/users/:id/health-profile` (`fetchEditHealthProfile` L447, switch handler L492) and renders EVERY HEALTH_PROFILES column — sex, date of birth, blood type, height/weight, live BMI preview (generated column, read-only), encrypted allergies/chronic-conditions textareas, emergency contacts (section L2481) — plus read-only account/signature metadata (L2592). `health_profile` is only sent on save when Advanced was loaded; Basic saves never touch the health record.
+- Users tab L805: list `fetchUsers` L174 (now also returns `is_qualified_responder`, `qualified_responder_since`, `qualified_responder_note`, `sos_via_role`), edit modal `handleOpenEditModal` L400, save profile L530 (identity + sub-profile + immunizations + optional `health_profile`), reset password L680. Filter chips include a Qualified-Responders toggle (`userQrOnly`).
+- Edit modal has a **Basic/Advanced switch** (toggle L2076): Basic = the everyday fields. Advanced lazily fetches `GET /api/admin/users/:id/health-profile` (`fetchEditHealthProfile` L463, switch handler L508) and renders EVERY HEALTH_PROFILES column — sex, date of birth, blood type, height/weight, live BMI preview (generated column, read-only), encrypted allergies/chronic-conditions textareas, emergency contacts (section L2481) — plus read-only account/signature metadata (L2592). `health_profile` is only sent on save when Advanced was loaded; Basic saves never touch the health record.
+- **Qualified Responder section (Basic tab, every role) L2574**: toggle + note (≤150) + read-only since-date. Disabled without `RESPONDERS_MANAGE`, or for ADMIN targets unless the caller is a Super Admin. `sos_via_role` renders an "also receives SOS through role X" hint. On save, flag/note diffs (snapshot `editQrOriginal` L136) call `PUT /api/admin/users/:id/qualified-responder` as a separate partial-success step (`qrWarning`), exactly like permissions.
 - Audit tab: mutation logs L240, PHI access logs L252, retention L264, sweep `handleExecuteSweep` L284 (`POST /api/privacy/retention/sweep`).
 - Telemetry tab: telemetry L274. Analytics tab L1590 → `AnalyticsDashboard`. DB Studio tab L1595: tables L660/L679, save row L710, delete row L751 (writes to arbitrary tables — `DATABASE_MANAGE` protected; keep it that way).
 ### NurseConsole.tsx — 1,520 lines / 52 KB / 17 useState. Triage queue, expected, intake, live metrics
@@ -76,8 +77,9 @@ SignatureEnrollment   → SignaturePad
 ### AnalyticsDashboard.tsx — 1,349 lines / 42 KB. Read-only dashboards + exports
 - `GET /api/analytics/summary` L594 (`fetchAnalytics` L590); exports: xlsx L610, PDF L630, excel L650, server-rendered PDF L670.
 - `SvgVerticalBarChart` L267 (`niceAxisStep` L258): adaptive top-diagnoses chart — renders EVERY distinct diagnosis the server returns (the dashboard endpoint no longer slices to a top-5). Slot-width tiers (92/28/22/16 px per bar), label tiers (horizontal → -45° → -90° with every-kth thinning above 90 bars), value pills only when bars ≥ 24 px, `<title>` tooltips always, nice integer y-axis (≤ 6 gridlines), and the card scrolls sideways once the canvas exceeds 900 px.
-### CreateUserModal.tsx — 642 lines / 28 KB / 25 useState
-- Permission catalog L118, submit L156 → `POST /api/admin/users` L186. `togglePerm` L150.
+### CreateUserModal.tsx — 726 lines. Create account (+ optional Qualified Responder label)
+- Permission catalog L118, submit L164 → `POST /api/admin/users` L186 (returns `userId`). `togglePerm` L150.
+- Qualified Responder section L511 (shown only when `callerCanQr` L84 — Super Admin or `RESPONDERS_MANAGE`): checkbox + note; on success it calls `PUT /api/admin/users/:userId/qualified-responder` L228 as a second step and reports its failure separately (partial success).
 
 ### SignatureEnrollment.tsx — 118 lines. Doctor signature enroll/renew
 - Status L23, image L27, save L46 (`/api/signature/me*`). Uses `SignaturePad`.

@@ -58,10 +58,17 @@ CREATE TABLE `USERS` (
   `last_name` VARCHAR(100) NOT NULL,
   `phone` VARCHAR(20) NULL,
   `is_active` BOOLEAN NOT NULL DEFAULT TRUE,
+  -- Qualified Responder: role-independent flag. ADDITIVE to the role-based
+  -- SOS audience — EMERGENCY_RESPONDER/NURSE/DOCTOR/ADMIN keep receiving
+  -- alerts with the flag off; role changes never touch these columns.
+  `is_qualified_responder` TINYINT(1) NOT NULL DEFAULT 0,
+  `qualified_responder_since` TIMESTAMP NULL DEFAULT NULL,
+  `qualified_responder_note` VARCHAR(150) NULL,
   `version` INT NOT NULL DEFAULT 1,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY `idx_users_qualified_responder` (`is_qualified_responder`)
 ) ENGINE=InnoDB;
 
 -- 2. ROLES
@@ -577,6 +584,7 @@ INSERT INTO `ADMIN_PERMISSIONS` (`code`, `name`, `description`, `sort_order`) VA
 ('AUDIT_VIEW',        'View audit & PHI logs',     'Read-only access to the audit ledger and PHI access log', 20),
 ('TELEMETRY_VIEW',    'View system health',        'Service telemetry, uptime and health metrics',          30),
 ('RETENTION_MANAGE',  'Data retention governance', 'Retention status and statutory R.A. 10173 sweeps',       40),
+('RESPONDERS_MANAGE', 'Manage qualified responders', 'Label any account a Qualified Responder: SOS alarms on any role, tiered alert payloads (reduced medical detail for non-clinical responders). Grant together with USERS_MANAGE — the toggle lives in the Users tab.', 45),
 ('ANALYTICS_VIEW',    'View analytics',            'Epidemiological analytics and campus health reports',   50),
 ('DATABASE_MANAGE',   'Database Studio',           'Inspect and maintain raw system records',               60);
 
@@ -616,6 +624,20 @@ INSERT INTO `FACULTY_PROFILES` (`user_id`, `faculty_no`, `department`, `position
 -- NON_TEACHING_PROFILES
 INSERT INTO `NON_TEACHING_PROFILES` (`user_id`, `employee_no`, `department`, `position`) VALUES
 (8, 'PSU-NT-2024-0187', 'Campus Maintenance & Facilities', 'Utility Worker');
+
+-- QUALIFIED RESPONDER demo flags (fresh installs only).
+-- Seeded demo responder #4 (Denver Cerezo) keeps the flag so the migration
+-- backfill story is visible; demo student #5 (Daniella Movida) is flagged
+-- WITHOUT any clinical role — the flagship case: a student who receives
+-- SOS alarms with the community (reduced-medical-detail) tier.
+UPDATE `USERS` SET `is_qualified_responder` = 1,
+       `qualified_responder_since` = '2026-01-05 08:00:00',
+       `qualified_responder_note` = 'Campus quick-response personnel (seed)'
+ WHERE `user_id` = 4;
+UPDATE `USERS` SET `is_qualified_responder` = 1,
+       `qualified_responder_since` = '2026-02-02 09:30:00',
+       `qualified_responder_note` = 'Trained volunteer responder — seed demo (student)'
+ WHERE `user_id` = 5;
 
 -- STAFF_PROFILES (clinical + admin)
 -- admin_no is populated ONLY for the ADMIN role; NULL for the rest.

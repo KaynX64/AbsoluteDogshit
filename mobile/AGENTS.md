@@ -10,8 +10,9 @@ Flutter (Dart SDK ^3.13). Key packages: `http`, `flutter_secure_storage` (token 
 
 - `main.dart` — bootstrap, theme, auth gate / navigation.
 - `screens/` — `splash_screen`, `login_screen`, `patient_portal_screen` (~115 KB — search, don't read whole), `consultation_scheduler_screen`, `documents_viewer_screen` (verified PDF stream), `responder_screen` (SOS console), `edit_profile_screen`, `change_password_screen`.
-- `services/` — `connectivity_service` (offline detection), `emergency_alert_service` (SOS + geolocation), `offline_sos_service` (queues SOS while offline).
-- `widgets/` — `session_timeout_listener`, `valetudo_logo`.
+- `services/` — `connectivity_service` (offline detection), `emergency_alert_service` (SOS + geolocation + Qualified Responder flag handling), `offline_sos_service` (queues SOS while offline).
+- `widgets/` — `session_timeout_listener` (logout releases the FCM token + stops the responder listener), `valetudo_logo`, `sos_alert_actions` (shared SOS status-change path: `updateSosAlertStatus()` + `SosAlertActions` row; community responders get acknowledge/dispatch only).
+- **Qualified Responder** (`USERS.is_qualified_responder`, any role): login + splash store the flag in `user_data`; a flagged patient-side account runs `EmergencyAlertService().startResponderListener()` while PatientPortalScreen is open (flag-gated, role routing unchanged — EMERGENCY_RESPONDER accounts still land on ResponderScreen). `responder:status_changed` (socket) and `syncQualifiedResponderFlag()` (on resume) apply flag changes mid-session; `_storedUserIsResponderRoute()` guards ResponderScreen-routed accounts. Logout paths (portal L744, responder screen, session timeout) send `fcm_token` in the logout body so the server drops the device's push registration.
 - `utils/responsive.dart` — breakpoints.
 
 ## Platform folders are GENERATED: android/, ios/, linux/, macos/, windows/, web/

@@ -77,6 +77,12 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
   const [callerIsSuper, setCallerIsSuper] = useState(true);
   const [callerPermCodes, setCallerPermCodes] = useState<string[]>([]);
 
+  // Qualified Responder: label at create time (only shown when the creator
+  // may manage it — Super Admin or RESPONDERS_MANAGE holder).
+  const [qualifiedResponder, setQualifiedResponder] = useState(false);
+  const [qrNote, setQrNote] = useState('');
+  const callerCanQr = callerIsSuper || callerPermCodes.includes('RESPONDERS_MANAGE');
+
   const [isSaving, setIsSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ text: string; isError: boolean } | null>(null);
 
@@ -106,6 +112,8 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
     setPermCatalog(ADMIN_PERMISSION_CATALOG);
     setCallerIsSuper(true);
     setCallerPermCodes([]);
+    setQualifiedResponder(false);
+    setQrNote('');
     setFeedback(null);
     setIsSaving(false);
 
@@ -212,6 +220,35 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create user account.');
       setFeedback({ text: '' + data.message, isError: false });
+
+      // Second step: label the new account a Qualified Responder. POST /users
+      // returns the new id; the dedicated endpoint applies the flag. A failure
+      // here is reported separately — the account itself was created fine.
+      const newUserId = data.userId;
+      if (qualifiedResponder && callerCanQr && typeof newUserId === 'number') {
+        try {
+          const qrRes = await fetch(`${API_BASE_URL}/api/admin/users/${newUserId}/qualified-responder`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({
+              is_qualified_responder: true,
+              note: qrNote.trim() || undefined,
+            }),
+          });
+          if (!qrRes.ok) {
+            const qrData = await qrRes.json().catch(() => ({}));
+            setFeedback({
+              text: `Account created, but the Qualified Responder label failed: ${qrData.error || qrRes.status}`,
+              isError: true,
+            });
+          }
+        } catch (qrErr: any) {
+          setFeedback({
+            text: `Account created, but the Qualified Responder label failed: ${qrErr.message}`,
+            isError: true,
+          });
+        }
+      }
       onCreated();
       setTimeout(() => { onClose(); }, 900);
     } catch (err: any) {
@@ -467,6 +504,54 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
                 <input style={inputStyle} value={department} placeholder="PSU Lingayen Clinic"
                        onChange={(e) => setDepartment(e.target.value)} />
               </div>
+            </div>
+          )}
+
+          {/* ── Qualified Responder (only when the creator may manage it) ── */}
+          {callerCanQr && (
+            <div style={{
+              marginTop: 20, padding: 16,
+              borderRadius: T.radius.md,
+              background: '#FFF7ED', border: '1px solid #FED7AA',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ fontSize: 12.5, fontWeight: 800, color: '#C2410C' }}>
+                    <Icon name="emergency" size={14} /> Emergency response
+                  </div>
+                  <p style={{ fontSize: 11.5, color: T.textSub, margin: '4px 0 0', lineHeight: 1.5, maxWidth: 420 }}>
+                    Label this account a Qualified Responder: it will receive Emergency SOS
+                    alarms and act on them, whatever its role is.
+                  </p>
+                </div>
+                <label
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    cursor: 'pointer', fontWeight: 700, fontSize: 12.5, color: T.text,
+                  }}
+                  title="Role-independent SOS label (changeable later from the profile editor)"
+                >
+                  <input
+                    type="checkbox"
+                    checked={qualifiedResponder}
+                    onChange={(e) => setQualifiedResponder(e.target.checked)}
+                    style={{ width: 16, height: 16, accentColor: '#C2410C' }}
+                  />
+                  Qualified Responder
+                </label>
+              </div>
+              {qualifiedResponder && (
+                <div style={{ marginTop: 12 }}>
+                  <label style={fieldLabel}>Note (max 150 chars)</label>
+                  <input
+                    style={inputStyle}
+                    maxLength={150}
+                    placeholder="e.g. First-aid certified, campus volunteer responder"
+                    value={qrNote}
+                    onChange={(e) => setQrNote(e.target.value)}
+                  />
+                </div>
+              )}
             </div>
           )}
 

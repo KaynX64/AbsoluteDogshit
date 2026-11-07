@@ -252,6 +252,9 @@ export async function loginUser(req, res) {
         last_name: user.last_name,
         roles: roleCodes,
         permissions: adminPermissions,
+        // UI hint ONLY — never used for authorization. SOS access is always
+        // resolved live from the database (the 24h JWT would go stale).
+        is_qualified_responder: Boolean(user.is_qualified_responder),
       },
     });
   } catch (error) {
@@ -547,6 +550,23 @@ export async function logoutUser(req, res) {
         ? `token:blacklist:${user.jti}`
         : `token:blacklist:${token}`;
       await redis.set(blacklistKey, 'revoked_logout', 'EX', remainingSeconds);
+    }
+
+    // ── Logout must release the device's FCM token ─────────────────────
+    // Optional fcm_token in the body (backward compatible when absent —
+    // older clients simply keep their push registration). Deleting the row
+    // stops push delivery to a device the user has signed out of; without
+    // it a handed-down phone would keep receiving SOS pushes forever.
+    const { fcm_token } = req.body || {};
+    if (fcm_token && typeof fcm_token === 'string' && fcm_token.trim()) {
+      try {
+        await pool.query('DELETE FROM DEVICE_TOKENS WHERE user_id = ? AND fcm_token = ?', [
+          user.user_id,
+          fcm_token.trim(),
+        ]);
+      } catch (tokErr) {
+        console.error('[Logout Token Cleanup Warning]:', tokErr.message);
+      }
     }
 
     // Record session termination to R.A. 10173 Audit Ledger

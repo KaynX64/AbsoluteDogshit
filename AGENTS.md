@@ -19,7 +19,8 @@ Root `package.json` only pins shared tooling (concurrently, wait-on, electron). 
 - All clients → `https://<host>:5000/api/...` (self-signed TLS) + Socket.IO (WSS) on the same port.
 - Auth: JWT, 24 h, carries `roles[]` + `jti`; logout/revocation via Redis denylist `token:blacklist:<jti>`.
 - Roles (seeded in `server/schema.sql`): `STUDENT`, `FACULTY`, `NON_TEACHING`, `NURSE`, `DOCTOR`, `DENTIST`, `EMERGENCY_RESPONDER`, `ADMIN`. A user may hold several.
-- Realtime events (server → clients): `emergency:new_alert`, `emergency:status_change`, `queue:updated`, `appointment:booked`, `appointment:cancelled`, `appointment:status_changed`, `prescription:status_changed`. Privileged listeners join room `responders`.
+- Realtime events (server → clients): `emergency:new_alert`, `emergency:status_change`, `responder:status_changed`, `queue:updated`, `appointment:booked`, `appointment:cancelled`, `appointment:status_changed`, `prescription:status_changed`. Every authenticated socket joins its own `user:<id>` room (delivery is per user, never per role); `join:responders` from old mobile builds is only acknowledged.
+- Qualified Responder: `USERS.is_qualified_responder` is a role-independent SOS label (any role can be flagged). It is ADDITIVE to the legacy role-based audience (`EMERGENCY_RESPONDER`/`NURSE`/`DOCTOR`/`ADMIN` keep receiving alerts with the flag off). Non-clinical flagged users get a reduced alert payload (no medical details, `medicalDetailsRedacted: true`). Admins need the `RESPONDERS_MANAGE` permission code to change it.
 
 ## Bootstrap a dev machine (order matters)
 

@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import PrescriptionGenerator from './PrescriptionGenerator';
 import { io } from 'socket.io-client';
 import AnalyticsDashboard from './AnalyticsDashboard';
+import EmergencyAlertBanner from './EmergencyAlertBanner';
 import { queueOfflineMutation } from '../services/offlineSync';
 import { T, btnPrimary, btnGhost, inputStyle } from '../theme';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
@@ -1268,6 +1269,13 @@ const loadPatientTimeline = async (patient: any) => {
           </button>
         </div>
       )}
+
+      {/* ── ACTIVE SOS BANNER (Doctor & Dentist console) ─────────────
+          Mounted for the whole console — DENTIST shares it (App.tsx routes
+          both roles here). Delivery is decided server-side: an unlabelled
+          DENTIST gets 403 on /active and the banner renders nothing, while
+          a labelled one receives the full clinical payload. */}
+      <EmergencyAlertBanner />
 
       {/* ── Queue grid (hidden on analytics/archive) ────────── */}
       {viewMode !== 'analytics' && viewMode !== 'archive' && (

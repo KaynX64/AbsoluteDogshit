@@ -14,10 +14,10 @@ CORS allow-list → security headers (HSTS, nosniff, X-Frame-Options DENY, XSS, 
 | `profile.js` | `/api/profile` | user & health profiles |
 | `healthPass.js` | `/api/health-pass` | medical clearances & QR health passes |
 | `appointments.js` | `/api/appointments` | booking, queue, no-shows; emits `appointment:*`, `queue:updated` |
-| `emergency.js` | `/api/emergency` | SOS lifecycle; emits `emergency:*` to room `responders` |
+| `emergency.js` | `/api/emergency` | SOS lifecycle; audience = Qualified Responder flag OR legacy role (`EMERGENCY_RESPONDER`/`NURSE`/`DOCTOR`/`ADMIN`), resolved live per user. Emits `emergency:*` tiered per recipient to `user:<id>` rooms; community responders get a reduced payload (no medical details) and may only acknowledge/dispatch |
 | `inventory.js` | `/api/inventory` | medicines, batches, inventory logs |
 | `documents.js` | `/api/documents` | EMR docs & attachments, signed one-time download tokens, public `GET /verify/:qrToken` |
-| `admin.js` | `/api/admin` | user administration, granular admin permissions, advanced health-profile editor (GET `/users/:id/health-profile`, `health_profile` object on PUT `/users/:id`) |
+| `admin.js` | `/api/admin` | user administration, granular admin permissions, advanced health-profile editor (GET `/users/:id/health-profile`, `health_profile` object on PUT `/users/:id`), PUT `/users/:id/qualified-responder` (RESPONDERS_MANAGE; Super Admin only for ADMIN targets; emits `responder:status_changed`) |
 | `analytics.js` | `/api/analytics` | dashboard aggregates |
 | `sync.js` | `/api/sync` | offline-client sync ingestion |
 | `interactions.js` | `/api/interactions` | drug-interaction warnings |

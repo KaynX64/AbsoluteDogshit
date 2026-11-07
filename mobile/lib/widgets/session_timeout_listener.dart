@@ -1,10 +1,12 @@
 // mobile/lib/widgets/session_timeout_listener.dart
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../config/api_config.dart';
 import '../screens/login_screen.dart';
 import '../utils/responsive.dart';
+import '../services/emergency_alert_service.dart';
 
 class SessionTimeoutListener extends StatefulWidget {
   final Widget child;
@@ -47,12 +49,24 @@ class _SessionTimeoutListenerState extends State<SessionTimeoutListener> {
   }
 
   Future<void> _handleTimeout() async {
+    // Stop the SOS listener first: a timed-out session must not keep the
+    // alarm/foreground service alive.
+    if (EmergencyAlertService().isResponderActive) {
+      EmergencyAlertService().stopResponderListener();
+    }
     final token = await _storage.read(key: 'jwt_token');
     if (token != null) {
       try {
+        // Release this device's FCM token so the timed-out phone stops
+        // receiving SOS pushes.
+        final fcmToken = await EmergencyAlertService().currentFcmToken();
         await ApiConfig.client.post(
           Uri.parse('${ApiConfig.baseUrl}/api/auth/logout'),
-          headers: {'Authorization': 'Bearer $token'},
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+          body: jsonEncode({'fcm_token': fcmToken}),
         );
       } catch (_) {}
     }

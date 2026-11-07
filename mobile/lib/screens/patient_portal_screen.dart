@@ -141,7 +141,8 @@ class PatientPortalScreen extends StatefulWidget {
   State<PatientPortalScreen> createState() => _PatientPortalScreenState();
 }
 
-class _PatientPortalScreenState extends State<PatientPortalScreen> {
+class _PatientPortalScreenState extends State<PatientPortalScreen>
+    with WidgetsBindingObserver {
   int _currentIndex = 0;
   final _storage = const FlutterSecureStorage();
 
@@ -165,6 +166,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   bool _isDispatchingSOS = false;
   String _sosStatusMessage = '';
 
+  /// Qualified Responder flag (snapshot at open; refreshed on resume via
+  /// EmergencyAlertService().syncQualifiedResponderFlag()).
+  bool _isQualifiedResponder = false;
+
   /// Role-aware display strings, recomputed on every build from the
   /// currently loaded profile. Cheap enough — no caching needed.
   _PatientIdentity get _identity =>
@@ -173,12 +178,23 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   @override
   void initState() {
     super.initState();
+    _isQualifiedResponder = widget.user['is_qualified_responder'] == true;
     _checkPrivacyConsent();
     _fetchQRPass();
     _fetchProfile();
     _fetchActiveQueueTicket();
     _initQueueSocket();
     ConnectivityService().addListener(_onConnectivityChanged);
+
+    // Qualified Responder: a flagged patient-side account (any role —
+    // student, faculty, non-teaching, nurse, doctor, dentist, admin…) runs
+    // the SOS listener while this portal is open. Role routing itself is
+    // unchanged: EMERGENCY_RESPONDER accounts still land on ResponderScreen.
+    if (_isQualifiedResponder) {
+      EmergencyAlertService().startResponderListener();
+    }
+
+    WidgetsBinding.instance.addObserver(this);
 
     _queuePollingTimer = Timer.periodic(
       const Duration(seconds: 30),
@@ -187,12 +203,30 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Re-check the flag whenever the app resumes: the Admin Console can
+    // grant or revoke it while the phone is backgrounded.
+    if (state == AppLifecycleState.resumed) {
+      EmergencyAlertService().syncQualifiedResponderFlag().then((flag) {
+        if (flag != null && mounted && flag != _isQualifiedResponder) {
+          setState(() => _isQualifiedResponder = flag);
+        }
+      });
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     ConnectivityService().removeListener(_onConnectivityChanged);
     _queuePollingTimer?.cancel();
     _holdTimer?.cancel();
     _holdProgressNotifier.dispose();
     _socket?.disconnect();
+    // Listener only runs while the portal is open (flag-gated).
+    if (EmergencyAlertService().isResponderActive) {
+      EmergencyAlertService().stopResponderListener();
+    }
     super.dispose();
   }
 
@@ -711,11 +745,21 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     final token = await _storage.read(key: 'jwt_token');
     if (token != null) {
       try {
+        // Release this device's FCM token so a signed-out phone stops
+        // receiving SOS pushes (backward compatible when null).
+        final fcmToken = await EmergencyAlertService().currentFcmToken();
         await ApiConfig.client.post(
           Uri.parse('${ApiConfig.baseUrl}/api/auth/logout'),
-          headers: {'Authorization': 'Bearer $token'},
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+          body: jsonEncode({'fcm_token': fcmToken}),
         );
       } catch (_) {}
+    }
+    if (EmergencyAlertService().isResponderActive) {
+      EmergencyAlertService().stopResponderListener();
     }
     await _storage.delete(key: 'jwt_token');
     await _storage.delete(key: 'user_data');
@@ -801,6 +845,38 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                   ),
                   Row(
                     children: [
+                      if (_isQualifiedResponder)
+                        Container(
+                          margin: const EdgeInsets.only(right: 8),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: rs.w(10),
+                            vertical: rs.h(6),
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFF7ED),
+                            border: Border.all(color: const Color(0xFFFED7AA)),
+                            borderRadius: BorderRadius.circular(rs.r(999)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.health_and_safety_rounded,
+                                size: rs.w(14).clamp(12.0, 16.0),
+                                color: const Color(0xFFC2410C),
+                              ),
+                              SizedBox(width: rs.w(4)),
+                              Text(
+                                'Qualified Responder',
+                                style: TextStyle(
+                                  fontSize: rs.sp(10.5),
+                                  fontWeight: FontWeight.w800,
+                                  color: const Color(0xFFC2410C),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       Container(
                         width: rs.w(36).clamp(32.0, 42.0),
                         height: rs.w(36).clamp(32.0, 42.0),

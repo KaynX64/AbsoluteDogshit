@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../config/api_config.dart';
 import '../utils/responsive.dart';
 import '../widgets/valetudo_logo.dart';
+import '../widgets/sos_alert_actions.dart';
 import '../services/emergency_alert_service.dart';
 import 'login_screen.dart';
 import 'change_password_screen.dart';
@@ -100,21 +101,14 @@ class _ResponderScreenState extends State<ResponderScreen> {
       }
     });
 
-    final token = await _storage.read(key: 'jwt_token');
-    try {
-      await ApiConfig.client.patch(
-        Uri.parse('${ApiConfig.baseUrl}/api/emergency/$alertId/status'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({'status': status}),
-      );
-    } catch (e) {
+    // Shared status-change path (mobile/lib/widgets/sos_alert_actions.dart)
+    // — the same helper the SOS alarm dialog uses.
+    final ok = await updateSosAlertStatus(alertId, status);
+    if (!ok) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Update failed: $e'),
+          const SnackBar(
+            content: Text('Update failed. Check your connection.'),
             backgroundColor: primaryCrimson,
           ),
         );
@@ -231,9 +225,17 @@ class _ResponderScreenState extends State<ResponderScreen> {
                         final token = await _storage.read(key: 'jwt_token');
                         if (token != null) {
                           try {
+                            // Release this device's FCM token so the signed-out
+                            // phone stops receiving SOS pushes.
+                            final fcmToken =
+                                await EmergencyAlertService().currentFcmToken();
                             await ApiConfig.client.post(
                               Uri.parse('${ApiConfig.baseUrl}/api/auth/logout'),
-                              headers: {'Authorization': 'Bearer $token'},
+                              headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': 'Bearer $token',
+                              },
+                              body: jsonEncode({'fcm_token': fcmToken}),
                             );
                           } catch (_) {}
                         }

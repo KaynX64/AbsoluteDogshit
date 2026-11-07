@@ -14,19 +14,26 @@ interface EmergencyAlert {
   roleLabel?: string;
   studentNo: string;
   course: string;
-  bloodType: string;
-  allergies: string;
-  chronicConditions: string;
-  emergencyContact: string;
+  bloodType?: string;
+  allergies?: string;
+  chronicConditions?: string;
+  emergencyContact?: string;
   latitude: number;
   longitude: number;
   googleMapsUrl: string;
   status: string;
   createdAt: string;
+  // Server tiering: true when the recipient's responder level is not allowed
+  // to see medical details (community / non-clinical responders).
+  medicalDetailsRedacted?: boolean;
 }
 
 export default function EmergencyAlertBanner() {
   const [alerts, setAlerts] = useState<EmergencyAlert[]>([]);
+  // 403 on /active means this account is not an active qualified responder —
+  // an unlabelled dentist or a revoked flagged account. Render nothing then:
+  // delivery rules are decided server-side, never guessed client-side.
+  const [authorized, setAuthorized] = useState(true);
 
   // Synthesize an audible emergency alert chime using Web Audio API
   const playEmergencyAlarm = () => {
@@ -44,7 +51,11 @@ export default function EmergencyAlertBanner() {
   };
 
   useEffect(() => {
-    // 1. Fetch initial active alerts from DB
+    let cancelled = false;
+
+    // 1. Fetch initial active alerts from DB.
+    // roleLabel comes from the SERVER (same map as the mobile payload) —
+    // the banner no longer maintains its own role mapping.
     const fetchActiveAlerts = async () => {
       const token = localStorage.getItem('valetudo_token');
       if (!token) return;
@@ -52,45 +63,43 @@ export default function EmergencyAlertBanner() {
         const res = await fetch(`${API_BASE_URL}/api/emergency/active`, {
           headers: { Authorization: `Bearer ${token}` },
         });
+        if (res.status === 403) {
+          if (!cancelled) setAuthorized(false);
+          return;
+        }
         const data = await res.json();
-        if (Array.isArray(data)) {
-          const mapped: EmergencyAlert[] = data.map((a: any) => {
-            let roleLabel = 'Student';
-            if (a.primary_role === 'ADMIN') roleLabel = 'System Administrator';
-            else if (a.primary_role === 'DOCTOR') roleLabel = 'Campus Physician';
-            else if (a.primary_role === 'DENTIST') roleLabel = 'Campus Dentist';
-            else if (a.primary_role === 'NURSE') roleLabel = 'Clinic Nurse';
-            else if (a.primary_role === 'FACULTY') roleLabel = 'Faculty / Staff';
-            else if (a.primary_role === 'EMERGENCY_RESPONDER') roleLabel = 'Emergency Responder';
-
-            return {
+        if (Array.isArray(data) && !cancelled) {
+          setAlerts(
+            data.map((a: any) => ({
               alertId: a.alert_id,
               userId: a.user_id,
               patientName: `${a.first_name} ${a.last_name}`,
               phone: a.phone,
               role: a.primary_role,
-              roleLabel: roleLabel,
+              roleLabel: a.roleLabel || a.primary_role,
               studentNo: a.studentNo || a.identifier_no || 'Verified',
               course: a.course || a.affiliation || 'PSU Lingayen',
-              bloodType: a.blood_type || 'Unknown',
-              allergies: a.allergies || 'None',
-              chronicConditions: 'N/A',
-              emergencyContact: 'Check Profile',
+              bloodType: a.blood_type ?? undefined,
+              allergies: a.allergies ?? undefined,
+              chronicConditions: undefined,
+              emergencyContact: undefined,
               latitude: Number(a.latitude),
               longitude: Number(a.longitude),
               googleMapsUrl: `https://www.google.com/maps?q=${a.latitude},${a.longitude}`,
               status: a.status,
               createdAt: a.created_at,
-            };
-          });
-          setAlerts(mapped);
+              medicalDetailsRedacted: a.medicalDetailsRedacted === true,
+            }))
+          );
         }
       } catch (_) {}
     };
 
     fetchActiveAlerts();
 
-    // 2. Connect Socket.IO with token authentication
+    // 2. Connect Socket.IO with token authentication. The server places this
+    // socket in its per-user room (user:<id>); alerts arrive tiered for the
+    // account's responder level.
     const token = localStorage.getItem('valetudo_token');
     const socket: Socket = io(SOCKET_URL, {
       auth: { token },
@@ -109,11 +118,13 @@ export default function EmergencyAlertBanner() {
       console.log('[EmergencyAlertBanner] New SOS received in real-time:', newAlert);
       playEmergencyAlarm();
 
-      // Trigger native OS system tray notification
+      // Trigger native OS system tray notification. Lock-screen privacy: the
+      // OS notification carries the location only — no medical details and no
+      // blood/allergy data for ANY recipient tier.
       if ((window as any).electronAPI?.showNotification) {
         (window as any).electronAPI.showNotification({
           title: `SOS: ${newAlert.patientName} (${newAlert.roleLabel || 'PSU Member'})`,
-          body: `Location: ${newAlert.latitude.toFixed(5)}, ${newAlert.longitude.toFixed(5)}. Blood: ${newAlert.bloodType}. Allergies: ${newAlert.allergies}`,
+          body: `Location: ${newAlert.formattedAddress || `${Number(newAlert.latitude).toFixed(5)}, ${Number(newAlert.longitude).toFixed(5)}`}. Open the console for details.`,
         });
       }
 
@@ -130,6 +141,7 @@ export default function EmergencyAlertBanner() {
     });
 
     return () => {
+      cancelled = true;
       socket.disconnect();
     };
   }, []);
@@ -156,7 +168,7 @@ export default function EmergencyAlertBanner() {
     if ((window as any).electronAPI?.showNotification) {
       (window as any).electronAPI.showNotification({
         title: 'Valetudo HealthLink — SOS Alert Test',
-        body: 'Daniella Movida (BSIT) reported a medical emergency at PSU Lingayen Library. Allergies: Penicillin.',
+        body: 'Daniella Movida (BSIT) reported a medical emergency at PSU Lingayen Library.',
       });
     } else {
       alert('electronAPI.showNotification not detected. Ensure preload.cjs is configured.');
@@ -188,6 +200,9 @@ export default function EmergencyAlertBanner() {
     }
   };
 
+  // Not an active qualified responder (server said 403) — render nothing.
+  if (!authorized) return null;
+
   return (
     <div style={{ marginBottom: 20 }}>
       {/* TEST TRIGGER TOOLBAR */}
@@ -213,86 +228,108 @@ export default function EmergencyAlertBanner() {
       </div>
 
       {/* ACTIVE EMERGENCY ALERTS BANNER */}
-      {alerts.map((alert) => (
-        <div key={alert.alertId} className="ea-alert">
-          <div className="ea-alert-head">
-            <h3 className="ea-alert-title">
-              <Icon name="emergency" size={22} fill tone="danger" />
-              ACTIVE SOS ALERT: {alert.patientName} ({alert.roleLabel || alert.studentNo || 'Campus Personnel'})
-            </h3>
-            <span className="ea-status-pill">
-              Status: {alert.status}
-            </span>
-          </div>
-
-          <div className="ea-grid">
-            <div>
-              <b>Contact:</b> {alert.phone || 'N/A'}<br />
-              <b>Blood Type:</b> {alert.bloodType}
-            </div>
-            <div>
-              <b>Allergies:</b>{' '}
-              <span style={{ color: T.danger, fontWeight: 700 }}>
-                {alert.allergies}
+      {alerts.map((alert) => {
+        const redacted = alert.medicalDetailsRedacted === true;
+        return (
+          <div key={alert.alertId} className="ea-alert">
+            <div className="ea-alert-head">
+              <h3 className="ea-alert-title">
+                <Icon name="emergency" size={22} fill tone="danger" />
+                ACTIVE SOS ALERT: {alert.patientName} ({alert.roleLabel || alert.studentNo || 'Campus Personnel'})
+              </h3>
+              <span className="ea-status-pill">
+                Status: {alert.status}
               </span>
-              <br />
-              <b>Role / Unit:</b> {alert.roleLabel || alert.course || 'PSU Personnel'}
             </div>
-            <div>
-              <b>Emergency Contact:</b><br />
-              {alert.emergencyContact}
-            </div>
-            <div>
-              <b>GPS Coordinates:</b><br />
-              <code style={{ fontFamily: T.mono, fontSize: 12, color: T.textSub }}>
-                {alert.latitude.toFixed(6)}, {alert.longitude.toFixed(6)}
-              </code>
-              <div style={{ marginTop: 4, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                <a
-                  href={alert.googleMapsUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                >
-                  <Icon name="location_on" size={14} /> Open in Google Maps
-                </a>
+
+            <div className="ea-grid">
+              <div>
+                <b>Contact:</b> {alert.phone || 'N/A'}<br />
+                <b>Role / Unit:</b> {alert.roleLabel || alert.course || 'PSU Personnel'}
+              </div>
+              <div>
+                {redacted ? (
+                  <>
+                    <b>Medical details:</b>{' '}
+                    <span style={{ color: T.warning, fontWeight: 700 }}>
+                      Not shared at your responder level
+                    </span>
+                    <br />
+                    <span style={{ fontSize: 11, color: T.textMuted }}>
+                      Reduced payload for non-clinical responders (R.A. 10173).
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <b>Blood Type:</b> {alert.bloodType || 'Unknown'}
+                    <br />
+                    <b>Allergies:</b>{' '}
+                    <span style={{ color: T.danger, fontWeight: 700 }}>
+                      {alert.allergies || 'None'}
+                    </span>
+                  </>
+                )}
+              </div>
+              <div>
+                <b>Emergency Contact:</b><br />
+                {redacted ? (
+                  <span style={{ color: T.textMuted }}>Not shared at your responder level</span>
+                ) : (
+                  (alert.emergencyContact || 'Check Profile')
+                )}
+              </div>
+              <div>
+                <b>GPS Coordinates:</b><br />
+                <code style={{ fontFamily: T.mono, fontSize: 12, color: T.textSub }}>
+                  {Number(alert.latitude).toFixed(6)}, {Number(alert.longitude).toFixed(6)}
+                </code>
+                <div style={{ marginTop: 4, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <a
+                    href={alert.googleMapsUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                  >
+                    <Icon name="location_on" size={14} /> Open in Google Maps
+                  </a>
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Action dispatch buttons */}
-          <div className="ea-actions">
-            {alert.status === 'triggered' && (
+            {/* Action dispatch buttons */}
+            <div className="ea-actions">
+              {alert.status === 'triggered' && (
+                <button
+                  className="ea-action ea-action-ack"
+                  onClick={() => updateStatus(alert.alertId, 'acknowledged')}
+                >
+                  Acknowledge Alert
+                </button>
+              )}
+              {alert.status !== 'dispatched' && (
+                <button
+                  className="ea-action ea-action-dispatch"
+                  onClick={() => updateStatus(alert.alertId, 'dispatched')}
+                >
+                  Dispatch Response Team
+                </button>
+              )}
               <button
-                className="ea-action ea-action-ack"
-                onClick={() => updateStatus(alert.alertId, 'acknowledged')}
+                className="ea-action ea-action-resolve"
+                onClick={() => updateStatus(alert.alertId, 'resolved')}
               >
-                Acknowledge Alert
+                Mark Resolved
               </button>
-            )}
-            {alert.status !== 'dispatched' && (
               <button
-                className="ea-action ea-action-dispatch"
-                onClick={() => updateStatus(alert.alertId, 'dispatched')}
+                className="ea-action ea-action-false"
+                onClick={() => updateStatus(alert.alertId, 'false_alarm')}
               >
-                Dispatch Response Team
+                False Alarm
               </button>
-            )}
-            <button
-              className="ea-action ea-action-resolve"
-              onClick={() => updateStatus(alert.alertId, 'resolved')}
-            >
-              Mark Resolved
-            </button>
-            <button
-              className="ea-action ea-action-false"
-              onClick={() => updateStatus(alert.alertId, 'false_alarm')}
-            >
-              False Alarm
-            </button>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

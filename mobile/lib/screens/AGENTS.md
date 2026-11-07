@@ -22,9 +22,10 @@ One screen per file: public `XxxScreen` (stateless) + private `_XxxScreenState` 
 - **Queue**: `_initQueueSocket` L447 (socket `queue:updated` L458 → refetch), `_fetchActiveQueueTicket` L464 (`GET /api/appointments/queue/my`), active-queue card L1759.
 - **QR health pass**: `_fetchQRPass` L495 (`GET /api/health-pass/token`).
 - **Profile**: `_fetchProfile` L510 (`GET /api/profile/me`), profile tab L2328.
-- **SOS**: hold-to-trigger button `_startHold` L557 (progress `ValueNotifier` L163, `_sosConsent` gate), `_triggerEmergencySOS` L597 (`POST /api/emergency/sos` L640), confirmation dialog L669; offline SOS queueing `_replayQueuedSosEvents` L208 (replayed on reconnect).
+- **SOS**: hold-to-trigger button `_startHold` L591 (progress `ValueNotifier` L163, `_sosConsent` gate), `_triggerEmergencySOS` L631 (`POST /api/emergency/sos` L673), confirmation dialog L703; offline SOS queueing `_replayQueuedSosEvents` L208 (replayed on reconnect).
+- **Qualified Responder** (flag from login/splash, stored in `user_data`): `_isQualifiedResponder` L171 drives (1) the header chip (build L848), (2) `startResponderListener()` on entry L193, stop on dispose L227 / sign-out. `WidgetsBindingObserver` didChangeAppLifecycleState L206 re-checks via `EmergencyAlertService().syncQualifiedResponderFlag()` on resume and refreshes the chip.
 - **Offline**: `_onConnectivityChanged` L203, banner L853, call-button L2285, SMS-button L2305.
-- Sign out L710 (`POST /api/auth/logout`). Tabs: overview L1070 · SOS L1860 · profile L2328; bottom nav L886, SOS nav item L1014.
+- Sign out L744 (`POST /api/auth/logout` with `fcm_token` body so the server releases the device push). Tabs: overview L1070 · SOS L1860 · profile L2328; bottom nav L886, SOS nav item L1014.
 
 ### consultation_scheduler_screen.dart — 1,694 lines / 56 KB. Booking + history (2 tabs)
 - Data: `_fetchDoctors` L427 (`GET /api/appointments/doctors`), `_fetchAvailableSlots` L453 (`GET /api/appointments/slots?doctorId=&date=`), `_fetchMyAppointments` L482, `_submitBooking` L500 (POST), `_cancelAppointment` L616 (`PATCH /api/appointments/:id/cancel`).
@@ -38,8 +39,8 @@ One screen per file: public `XxxScreen` (stateless) + private `_XxxScreenState` 
 - Lists: prescriptions L918 · clearances L1126 · diagnostics L1327; modals: prescription L174, clearance certificate L529.
 
 ### responder_screen.dart — 771 lines / 26 KB. SOS dispatch console
-- `_fetchActiveAlerts` L55 (`GET /api/emergency/active`), `_updateAlertStatus` L90 (`PATCH /api/emergency/$id/status`), Google Maps deep-link L126, sign out L235, alert card L405, stat pills L730.
-- No screen-level socket — live pushes arrive via FCM through `lib/services/emergency_alert_service.dart` (its socket listens for `emergency:new_alert`); the screen polls/refreshes.
+- `_fetchActiveAlerts` L55 (`GET /api/emergency/active`), `_updateAlertStatus` L91 (delegates to shared `updateSosAlertStatus()` — `lib/widgets/sos_alert_actions.dart`), Google Maps deep-link L126, sign out L223 (logout body sends `fcm_token`), alert card L405, stat pills L730.
+- No screen-level socket — live pushes arrive via FCM through `lib/services/emergency_alert_service.dart` (its socket listens for `emergency:new_alert` and `responder:status_changed`); the screen polls/refreshes. The screen owns the listener lifecycle for EMERGENCY_RESPONDER-route accounts (start L36 / stop L48; the service's flag-change handler deliberately skips those accounts).
 
 ### change_password_screen.dart — 607 lines / 19 KB
 - Client-side strength mirror `_evaluateStrength` L50 (keep in sync with server `passwordPolicy`); submit L117 (`PUT /api/auth/change-password`); requirements panel `_PasswordRequirementsPanel` L537.

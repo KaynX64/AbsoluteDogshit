@@ -34,6 +34,20 @@ export const pool = mysql.createPool({
  */
 export async function runAutoMigrations() {
   try {
+    // ── Qualified Responder flag: one-time legacy backfill marker ─────────
+    // Existing EMERGENCY_RESPONDER accounts are flagged on the FIRST boot
+    // that introduces the column. The marker must be resolved BEFORE the
+    // column-creation loop below adds the column — running the backfill on
+    // every boot would silently re-flag anyone an admin later revoked.
+    let qrBackfillNeeded = false;
+    try {
+      const [qrCol] = await pool.query(
+        `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'USERS' AND COLUMN_NAME = 'is_qualified_responder'`
+      );
+      qrBackfillNeeded = qrCol.length === 0;
+    } catch (_) {}
+
     const columnsToCheck = [
       { table: 'PRESCRIPTIONS', column: 'signature_metadata', type: 'JSON NULL' },
       { table: 'PRESCRIPTIONS', column: 'pdf_s3_key', type: 'VARCHAR(500) NULL' },
@@ -64,6 +78,11 @@ export async function runAutoMigrations() {
           END
         ) STORED`,
       },
+      // Qualified Responder flag (role-independent, additive to the legacy
+      // role-based SOS audience). Column list mirrors schema.sql.
+      { table: 'USERS', column: 'is_qualified_responder', type: "TINYINT(1) NOT NULL DEFAULT 0" },
+      { table: 'USERS', column: 'qualified_responder_since', type: 'TIMESTAMP NULL DEFAULT NULL' },
+      { table: 'USERS', column: 'qualified_responder_note', type: "VARCHAR(150) NULL" },
     ];
 
     for (const item of columnsToCheck) {
@@ -85,6 +104,46 @@ export async function runAutoMigrations() {
     );
     if (inventoryLogIndex.length === 0) {
       await pool.query('ALTER TABLE INVENTORY_LOGS ADD INDEX idx_inv_rx_item (prescription_item_id)');
+    }
+
+    // ── Qualified Responder: flag lookup index (audience query hot path) ──
+    try {
+      const [qrIndex] = await pool.query(
+        `SELECT INDEX_NAME FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'USERS' AND INDEX_NAME = 'idx_users_qualified_responder'`
+      );
+      if (qrIndex.length === 0) {
+        await pool.query('ALTER TABLE USERS ADD INDEX idx_users_qualified_responder (is_qualified_responder)');
+        console.log('📦 [Auto-Migration] Added USERS.idx_users_qualified_responder');
+      }
+    } catch (qrIdxErr) {
+      console.warn('⚠️ [Auto-Migration] USERS qualified-responder index warning:', qrIdxErr.message);
+    }
+
+    // ── Qualified Responder: one-time legacy backfill ────────────────────
+    // Runs only on the boot that introduced the column (marker resolved at
+    // the top of this function). Flags every live EMERGENCY_RESPONDER
+    // account so no recipient loses alerts after this release.
+    if (qrBackfillNeeded) {
+      try {
+        const [backfill] = await pool.query(
+          `UPDATE USERS u
+           SET u.is_qualified_responder = 1,
+               u.qualified_responder_since = CURRENT_TIMESTAMP,
+               u.qualified_responder_note = 'Migrated from EMERGENCY_RESPONDER role'
+           WHERE u.is_qualified_responder = 0
+             AND EXISTS (
+               SELECT 1 FROM USER_ROLES ur
+               INNER JOIN ROLES r ON ur.role_id = r.role_id
+               WHERE ur.user_id = u.user_id AND r.code = 'EMERGENCY_RESPONDER'
+             )`
+        );
+        if (backfill.affectedRows > 0) {
+          console.log(`📦 [Auto-Migration] Qualified Responder one-time backfill: flagged ${backfill.affectedRows} legacy EMERGENCY_RESPONDER account(s)`);
+        }
+      } catch (qrErr) {
+        console.warn('⚠️ [Auto-Migration] Qualified Responder backfill warning:', qrErr.message);
+      }
     }
 
     const [inventoryLogForeignKey] = await pool.query(
@@ -186,6 +245,7 @@ export async function runAutoMigrations() {
         ('AUDIT_VIEW',        'View audit & PHI logs',     'Read-only access to the audit ledger and PHI access log', 20),
         ('TELEMETRY_VIEW',    'View system health',        'Service telemetry, uptime and health metrics',          30),
         ('RETENTION_MANAGE',  'Data retention governance', 'Retention status and statutory R.A. 10173 sweeps',       40),
+        ('RESPONDERS_MANAGE', 'Manage qualified responders', 'Label any account a Qualified Responder: SOS alarms on any role, tiered alert payloads (reduced medical detail for non-clinical responders). Grant together with USERS_MANAGE — the toggle lives in the Users tab.', 45),
         ('ANALYTICS_VIEW',    'View analytics',            'Epidemiological analytics and campus health reports',   50),
         ('DATABASE_MANAGE',   'Database Studio',           'Inspect and maintain raw system records',               60)
       `);
@@ -197,4 +257,8 @@ export async function runAutoMigrations() {
   } catch (err) {
     console.warn('⚠️ [Auto-Migration Warning]:', err.message);
   }
+
+  // Terminal marker — lets operators (and the verification harness) know
+  // the whole pass finished, since /api/ping answers before migrations run.
+  console.log('📦 [Auto-Migration] Pass complete');
 }
