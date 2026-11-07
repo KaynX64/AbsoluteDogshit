@@ -97,6 +97,7 @@ export default function documentRoutes(io) {
 
       // ── Aggregate requested quantities per medicine (formulary items only) ─
       const requestedByMedicine = {};
+      const formularyDispenseLines = [];
       for (const item of formularyItems) {
         const medId = Number(item.medicine_id);
         const qty = parseInt(item.quantity_prescribed, 10) || parseInt(item.quantity_dispensed, 10) || parseInt(item.quantity, 10) || 1;
@@ -104,6 +105,11 @@ export default function documentRoutes(io) {
           throw new Error(`Quantity prescribed for all formulary items must be a positive integer.`);
         }
         requestedByMedicine[medId] = (requestedByMedicine[medId] || 0) + qty;
+        formularyDispenseLines.push({
+          medicine_id: medId,
+          quantity_to_link: qty,
+          prescription_item_id: null,
+        });
       }
       for (const item of outsideItems) {
         // Advisory quantity for an external-pharmacy purchase (not deducted).
@@ -292,13 +298,13 @@ export default function documentRoutes(io) {
       const prescriptionId = headerResult.insertId;
 
       // ── Persist prescription line items ─────────────────────────────────────
-      for (const item of formularyItems) {
+      for (const [index, item] of formularyItems.entries()) {
         const qtyPrescribed = parseInt(item.quantity_prescribed, 10) || parseInt(item.quantity_dispensed, 10) || parseInt(item.quantity, 10) || 1;
         const qtyDispensed = item.quantity_dispensed !== undefined && item.quantity_dispensed !== null
           ? parseInt(item.quantity_dispensed, 10)
           : qtyPrescribed;
 
-        await connection.query(
+        const [itemResult] = await connection.query(
           `INSERT INTO PRESCRIPTION_ITEMS 
            (prescription_id, medicine_id, dosage, frequency, route, duration_days, quantity_prescribed, quantity_dispensed, instructions)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -314,6 +320,8 @@ export default function documentRoutes(io) {
             encrypt(item.instructions || 'Take after meals'),
           ]
         );
+        formularyDispenseLines[index].prescription_item_id = itemResult.insertId;
+        formularyDispenseLines[index].quantity_to_link = qtyPrescribed;
       }
       for (const item of outsideItems) {
         const qtyPrescribed = parseInt(item.quantity_prescribed, 10) || parseInt(item.quantity_dispensed, 10) || parseInt(item.quantity, 10) || 1;
@@ -343,17 +351,36 @@ export default function documentRoutes(io) {
           [d.new_qty, d.batch_id]
         );
 
-        await connection.query(
-          `INSERT INTO INVENTORY_LOGS 
-           (batch_id, quantity_change, transaction_type, reason, performed_by)
-           VALUES (?, ?, 'dispense', ?, ?)`,
-          [
-            d.batch_id,
-            -d.deducted_qty,
-            `Automated FEFO dispense for Prescription #${prescriptionId} (${d.medicine_name}, Lot ${d.batch_no})`,
-            doctorUserId,
-          ]
-        );
+        let qtyToLink = d.deducted_qty;
+        const itemAllocations = [];
+        for (const line of formularyDispenseLines) {
+          if (line.medicine_id !== Number(d.medicine_id) || line.quantity_to_link <= 0) continue;
+          const itemQty = Math.min(line.quantity_to_link, qtyToLink);
+          if (itemQty > 0) {
+            itemAllocations.push({ prescription_item_id: line.prescription_item_id, quantity: itemQty });
+            line.quantity_to_link -= itemQty;
+            qtyToLink -= itemQty;
+          }
+          if (qtyToLink === 0) break;
+        }
+        if (qtyToLink !== 0 || itemAllocations.some((allocation) => !allocation.prescription_item_id)) {
+          throw new Error('Unable to link inventory deduction to its prescription item.');
+        }
+
+        for (const allocation of itemAllocations) {
+          await connection.query(
+            `INSERT INTO INVENTORY_LOGS
+             (batch_id, prescription_item_id, quantity_change, transaction_type, reason, performed_by)
+             VALUES (?, ?, ?, 'dispense', ?, ?)`,
+            [
+              d.batch_id,
+              allocation.prescription_item_id,
+              -allocation.quantity,
+              `Automated FEFO dispense for Prescription #${prescriptionId} (${d.medicine_name}, Lot ${d.batch_no})`,
+              doctorUserId,
+            ]
+          );
+        }
 
         await logAudit(connection, {
           userId: doctorUserId,
@@ -369,6 +396,9 @@ export default function documentRoutes(io) {
           },
           ipAddress: req.ip,
         });
+      }
+      if (formularyDispenseLines.some((line) => line.quantity_to_link !== 0)) {
+        throw new Error('Prescription item quantities do not match the planned inventory deductions.');
       }
 
       // ── Log severe-but-not-blocking interactions (physician override trail) ─
@@ -661,13 +691,23 @@ export default function documentRoutes(io) {
 
         // ── Trace & restore deducted stock batches ───────────────────────────
         const [dispenseLogs] = await connection.query(
-          `SELECT log_id, batch_id, ABS(quantity_change) AS qty_dispensed
-           FROM INVENTORY_LOGS
-           WHERE transaction_type = 'dispense'
-             AND reason LIKE ?
+          `SELECT l.log_id, l.batch_id, l.prescription_item_id,
+                  ABS(l.quantity_change) AS qty_dispensed
+           FROM INVENTORY_LOGS l
+           WHERE l.transaction_type = 'dispense'
+             AND (
+               l.prescription_item_id IN (
+                 SELECT item_id FROM PRESCRIPTION_ITEMS WHERE prescription_id = ?
+               )
+               OR (
+                 l.prescription_item_id IS NULL
+                 AND l.reason LIKE ?
+               )
+             )
            FOR UPDATE`,
-          [`%Prescription #${prescriptionId}%`]
+          [prescriptionId, `Automated FEFO dispense for Prescription #${prescriptionId} (%`]
         );
+        const restoredBatchCount = new Set(dispenseLogs.map((log) => Number(log.batch_id))).size;
 
         for (const log of dispenseLogs) {
           const [batchRows] = await connection.query(
@@ -685,10 +725,12 @@ export default function documentRoutes(io) {
             );
 
             await connection.query(
-              `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
-               VALUES (?, ?, 'return', ?, ?)`,
+              `INSERT INTO INVENTORY_LOGS
+               (batch_id, prescription_item_id, quantity_change, transaction_type, reason, performed_by)
+               VALUES (?, ?, ?, 'return', ?, ?)`,
               [
                 log.batch_id,
+                log.prescription_item_id,
                 log.qty_dispensed,
                 `Restored stock from cancelled Prescription #${prescriptionId}`,
                 req.user.user_id,
@@ -722,7 +764,7 @@ export default function documentRoutes(io) {
             reason: reason || 'Cancelled by practitioner',
             cancelled_by_role: req.user.roles[0],
             cancelled_at: new Date().toISOString(),
-            restored_batches_count: dispenseLogs.length,
+            restored_batches_count: restoredBatchCount,
           },
           ipAddress: req.ip,
         });
@@ -734,7 +776,7 @@ export default function documentRoutes(io) {
         }
 
         res.json({
-          message: `Prescription cancelled successfully and ${dispenseLogs.length} medication batch(es) returned to inventory stock.`,
+          message: `Prescription cancelled successfully and stock was returned from ${restoredBatchCount} medication batch(es).`,
           prescriptionId,
           status: 'cancelled',
         });

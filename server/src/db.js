@@ -44,6 +44,7 @@ export async function runAutoMigrations() {
       // stocked in the infirmary formulary (medicine_id is NULL for these).
       { table: 'PRESCRIPTION_ITEMS', column: 'outside_name', type: "VARCHAR(200) NULL COMMENT 'Free-text drug name for outside (non-formulary) items'" },
       { table: 'PRESCRIPTION_ITEMS', column: 'quantity_prescribed', type: "INT NOT NULL DEFAULT 1 COMMENT 'Quantity prescribed by clinician'" },
+      { table: 'INVENTORY_LOGS', column: 'prescription_item_id', type: 'BIGINT NULL' },
       { table: 'MEDICAL_CLEARANCES', column: 'pdf_s3_key', type: 'VARCHAR(500) NULL' },
       { table: 'MEDICAL_CLEARANCES', column: 'version', type: 'INT NOT NULL DEFAULT 1' },
       { table: 'MEDICAL_CLEARANCES', column: 'deleted_at', type: 'TIMESTAMP NULL DEFAULT NULL' },
@@ -76,6 +77,29 @@ export async function runAutoMigrations() {
         await pool.query(`ALTER TABLE \`${item.table}\` ADD COLUMN \`${item.column}\` ${item.type}`);
         console.log(`📦 [Auto-Migration] Added missing column ${item.table}.${item.column}`);
       }
+    }
+
+    const [inventoryLogIndex] = await pool.query(
+      `SELECT INDEX_NAME FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'INVENTORY_LOGS' AND INDEX_NAME = 'idx_inv_rx_item'`
+    );
+    if (inventoryLogIndex.length === 0) {
+      await pool.query('ALTER TABLE INVENTORY_LOGS ADD INDEX idx_inv_rx_item (prescription_item_id)');
+    }
+
+    const [inventoryLogForeignKey] = await pool.query(
+      `SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'INVENTORY_LOGS'
+         AND CONSTRAINT_NAME = 'fk_inv_rx_item'`
+    );
+    if (inventoryLogForeignKey.length === 0) {
+      await pool.query(
+        `ALTER TABLE INVENTORY_LOGS
+         ADD CONSTRAINT fk_inv_rx_item
+         FOREIGN KEY (prescription_item_id) REFERENCES PRESCRIPTION_ITEMS (item_id)
+         ON DELETE SET NULL`
+      );
+      console.log('📦 [Auto-Migration] Linked inventory logs to prescription items');
     }
 
     // ── Backfill PRESCRIPTIONS.expires_at for legacy rows without an expiry ──

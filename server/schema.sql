@@ -380,11 +380,13 @@ CREATE TABLE `DRUG_INTERACTIONS` (
 CREATE TABLE `INVENTORY_LOGS` (
   `log_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `batch_id` BIGINT NOT NULL,
+  `prescription_item_id` BIGINT NULL,
   `quantity_change` INT NOT NULL COMMENT 'Positive for stock-in, negative for dispense',
   `transaction_type` ENUM('receive', 'dispense', 'return', 'dispose', 'adjust', 'recall') NOT NULL,
   `reason` TEXT NULL,
   `performed_by` BIGINT NOT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_inv_rx_item` (`prescription_item_id`),
   CONSTRAINT `fk_inv_batch` FOREIGN KEY (`batch_id`) REFERENCES `MEDICINE_BATCHES` (`batch_id`),
   CONSTRAINT `fk_inv_user` FOREIGN KEY (`performed_by`) REFERENCES `USERS` (`user_id`)
 ) ENGINE=InnoDB;
@@ -430,6 +432,11 @@ CREATE TABLE `PRESCRIPTION_ITEMS` (
   CONSTRAINT `fk_rx_item_parent` FOREIGN KEY (`prescription_id`) REFERENCES `PRESCRIPTIONS` (`prescription_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_rx_item_medicine` FOREIGN KEY (`medicine_id`) REFERENCES `MEDICINES` (`medicine_id`)
 ) ENGINE=InnoDB;
+
+ALTER TABLE `INVENTORY_LOGS`
+  ADD CONSTRAINT `fk_inv_rx_item`
+  FOREIGN KEY (`prescription_item_id`) REFERENCES `PRESCRIPTION_ITEMS` (`item_id`)
+  ON DELETE SET NULL;
 
 -- 23. MEDICAL_CLEARANCES
 CREATE TABLE `MEDICAL_CLEARANCES` (
@@ -623,14 +630,14 @@ INSERT INTO `STAFF_PROFILES` (`user_id`, `admin_no`, `license_no`, `specialty`, 
 INSERT INTO `HEALTH_PROFILES`
 (`user_id`, `blood_type`, `allergies`, `chronic_conditions`,
  `emergency_contact_name`, `emergency_contact_phone`,
- `height`, `weight`, `immunization_history`)
+ `date_of_birth`, `height`, `weight`, `immunization_history`)
 VALUES
 (5, 'O+', 'Penicillin', 'Mild Asthma',  'Maria Movida',   '09299876543',
- 162.50, 54.00, JSON_ARRAY()),
+ '2004-06-15', 162.50, 54.00, JSON_ARRAY()),
 (7, 'A+', 'None',       'Hypertension', 'Liza Bautista',  '09299876544',
- 172.00, 78.00, JSON_ARRAY()),
+ '1982-03-20', 172.00, 78.00, JSON_ARRAY()),
 (8, 'B+', 'None',       'None',         'Josefa Domingo', '09299876545',
- 168.00, 71.00, JSON_ARRAY());
+ '1989-11-05', 168.00, 71.00, JSON_ARRAY());
 
 -- CONSENT_RECORDS — R.A. 10173 (required for patient-side mobile access)
 INSERT INTO `CONSENT_RECORDS` (`user_id`, `consent_type`, `is_granted`, `ip_address`) VALUES

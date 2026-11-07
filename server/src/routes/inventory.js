@@ -112,7 +112,8 @@ export default function inventoryRoutes(io) {
   router.get('/logs', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
     try {
       const [logs] = await pool.query(
-        `SELECT l.log_id, l.batch_id, l.quantity_change, l.transaction_type, l.reason, l.created_at,
+        `SELECT l.log_id, l.batch_id, l.prescription_item_id, pi.prescription_id,
+                l.quantity_change, l.transaction_type, l.reason, l.created_at,
                 b.batch_no, b.expiry_date,
                 m.name AS medicine_name, m.generic_name, m.strength, m.form,
                 CONCAT(u.first_name, ' ', u.last_name) AS performed_by_name,
@@ -121,6 +122,7 @@ export default function inventoryRoutes(io) {
          JOIN MEDICINE_BATCHES b ON l.batch_id = b.batch_id
          JOIN MEDICINES m ON b.medicine_id = m.medicine_id
          JOIN USERS u ON l.performed_by = u.user_id
+         LEFT JOIN PRESCRIPTION_ITEMS pi ON pi.item_id = l.prescription_item_id
          ORDER BY l.log_id DESC
          LIMIT 100`
       );

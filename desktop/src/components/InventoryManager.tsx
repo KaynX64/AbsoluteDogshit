@@ -1226,7 +1226,14 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                           <div style={{ fontWeight: 700, color: T.text }}>{l.performed_by_name}</div>
                           <div style={{ fontSize: 10.5, color: T.textMuted }}>{l.performed_by_email}</div>
                         </td>
-                        <td style={{ color: T.textSub }}>{l.reason}</td>
+                        <td style={{ color: T.textSub }}>
+                          <div>{l.reason}</div>
+                          {l.prescription_id && l.prescription_item_id && (
+                            <div style={{ marginTop: 3, fontSize: 10.5, color: T.info, fontWeight: 700 }}>
+                              Prescription #{l.prescription_id} · Item #{l.prescription_item_id}
+                            </div>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
