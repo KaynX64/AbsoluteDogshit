@@ -18,6 +18,7 @@ Flat folder: one component per file, header comment `// desktop/src/components/<
 
 ```
 App.tsx ─ NURSE→NurseConsole · DOCTOR/DENTIST→DoctorConsole · ADMIN→AdminConsole · EMERGENCY_RESPONDER→ResponderConsole
+         └─ IncidentReportModal (mounted once for EVERY console view, App.tsx L785 — post-resolution documentation popup; server routes to the specific desktop window that resolved the alert)
 NurseConsole    → QrIntakeScanner (L1104) · InventoryManager (L410, inventory view)
 DoctorConsole   → AnalyticsDashboard (L1341) · PrescriptionGenerator (L2507) · SignatureEnrollment (L4263) · EmergencyAlertBanner (SOS banner, mounted for DOCTOR+DENTIST after the signature warning L1273) · embedded odontogram (L2079)
 AdminConsole    → CreateUserModal (L1958) · ServerPingMonitor (L1450) · AnalyticsDashboard (analytics tab L1590)
@@ -58,6 +59,12 @@ SignatureEnrollment   → SignaturePad
 ### ResponderConsole.tsx — 490 lines / 20 KB. SOS list & dispatch
 - Poll `fetchAlerts` L28 (`GET /api/emergency/active`) + sockets `emergency:new_alert` L53, `emergency:status_change` L64. Alarm `playEmergencyAlarm` L13 (WebAudio).
 - `updateStatus` L84 (`PATCH /api/emergency/:id/status`), test hooks L109/L121 (`POST /api/emergency/sos`), `statusStyle` L143.
+
+### IncidentReportModal.tsx — 563 lines. Post-resolution incident documentation popup
+- Mounted once by App.tsx for every console view. Opens only on `emergency:incident_report_required`, which the server sends to the specific desktop window that resolved the incident; historical pending alerts do not auto-open when a console starts.
+- Pre-fill `useEffect` L98 (`GET /api/emergency/:alertId/incident-report`) — patient name / ID number / contact number / role come from the server; `resolvedAt` defaults to the stored resolution timestamp (editable `datetime-local`).
+- Submit `submitReport` L233 (`POST /api/emergency/:alertId/incident-report`; 409 `REPORT_ALREADY_FILED` = another console won, popup dismisses). Socket `emergency:incident_reported` (L189) dismisses this console's popup when someone else files first. "Skip for now" dismisses for the session only.
+- Queue behavior: popups arriving while a form is open are queued and shown one by one (`openFor` L85 / `closePopup` L212).
 
 ## Feature components
 

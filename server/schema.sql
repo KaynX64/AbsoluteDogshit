@@ -16,6 +16,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS `LOCAL_SYNC_LOGS`;
 DROP TABLE IF EXISTS `PHI_ACCESS_LOGS`;
 DROP TABLE IF EXISTS `AUDIT_LOGS`;
+DROP TABLE IF EXISTS `INCIDENT_REPORTS`;
 DROP TABLE IF EXISTS `EMERGENCY_ALERTS`;
 DROP TABLE IF EXISTS `MEDICAL_CLEARANCES`;
 DROP TABLE IF EXISTS `PRESCRIPTION_ITEMS`;
@@ -488,11 +489,30 @@ CREATE TABLE `EMERGENCY_ALERTS` (
   CONSTRAINT `fk_ea_responder` FOREIGN KEY (`assigned_responder_id`) REFERENCES `USERS` (`user_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
+-- 25. INCIDENT_REPORTS
+-- Post-resolution documentation typed by a console operator after ANY responder
+-- closes an SOS as resolved. Identity fields (name, ID number, contact number)
+-- are pre-fetched live from the patient's profile rows; only the narrative,
+-- treatment notes and the confirmed resolution timestamp are typed here.
+CREATE TABLE `INCIDENT_REPORTS` (
+  `report_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `alert_id` BIGINT NOT NULL UNIQUE,
+  `patient_user_id` BIGINT NOT NULL,
+  `resolved_at` DATETIME NOT NULL,
+  `incident_details` TEXT NOT NULL,
+  `treatment_notes` TEXT NULL,
+  `documented_by` BIGINT NOT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT `fk_ir_alert` FOREIGN KEY (`alert_id`) REFERENCES `EMERGENCY_ALERTS` (`alert_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_ir_patient` FOREIGN KEY (`patient_user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_ir_author` FOREIGN KEY (`documented_by`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 -- =============================================================================
 -- MODULE 5: SECURITY, COMPLIANCE (RA 10173) & OFFLINE SYNC
 -- =============================================================================
 
--- 25. AUDIT_LOGS
+-- 26. AUDIT_LOGS
 CREATE TABLE `AUDIT_LOGS` (
   `audit_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `user_id` BIGINT NULL DEFAULT NULL,
@@ -509,7 +529,7 @@ CREATE TABLE `AUDIT_LOGS` (
   CONSTRAINT `fk_al_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
--- 26. PHI_ACCESS_LOGS
+-- 27. PHI_ACCESS_LOGS
 CREATE TABLE `PHI_ACCESS_LOGS` (
   `access_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `user_id` BIGINT NOT NULL COMMENT 'Practitioner viewing record',
@@ -523,7 +543,7 @@ CREATE TABLE `PHI_ACCESS_LOGS` (
   CONSTRAINT `fk_phi_patient` FOREIGN KEY (`patient_user_id`) REFERENCES `USERS` (`user_id`)
 ) ENGINE=InnoDB;
 
--- 27. LOCAL_SYNC_LOGS
+-- 28. LOCAL_SYNC_LOGS
 CREATE TABLE `LOCAL_SYNC_LOGS` (
   `sync_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `client_mutation_id` VARCHAR(36) NOT NULL UNIQUE COMMENT 'UUID idempotency token',

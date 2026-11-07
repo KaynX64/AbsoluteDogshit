@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
+import { CLIENT_INSTANCE_ID } from '../services/clientInstance';
 import { T } from '../theme';
 import Icon from './Icon';
 
@@ -153,6 +154,7 @@ export default function EmergencyAlertBanner() {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
+          'X-Client-Instance-Id': CLIENT_INSTANCE_ID,
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ status }),

@@ -189,6 +189,7 @@ io.use(async (socket, next) => {
 io.on('connection', (socket) => {
   const userEmail = socket.user?.email || 'Authenticated User';
   const userId = socket.user?.user_id;
+  const clientInstanceId = socket.handshake.auth?.clientInstanceId;
   console.log(`⚡ [Socket.IO ${isHttps ? 'WSS' : 'WS'}] Client connected: ${socket.id} (${userEmail})`);
 
   // ── Qualified Responder: per-user delivery rooms ─────────────────
@@ -196,9 +197,17 @@ io.on('connection', (socket) => {
   // responder flag changes are emitted to these rooms — never to a shared
   // role room — because room membership would go stale (role edits,
   // suspensions, DB Studio edits) while the flag is always resolved live
-  // from the database at dispatch time.
+  // from the database at dispatch time. Desktop sockets also join a
+  // per-window room so actions such as incident documentation can target
+  // only the renderer that initiated them.
   if (userId) {
     socket.join(`user:${userId}`);
+    if (
+      typeof clientInstanceId === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clientInstanceId)
+    ) {
+      socket.join(`desktop:${userId}:${clientInstanceId}`);
+    }
   }
 
   // Legacy 'responders' room registration from older mobile builds. The

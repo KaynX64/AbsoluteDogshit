@@ -79,6 +79,11 @@ class EmergencyAlertService {
   bool _isResponderActive = false;
   int? _lastAlertIdProcessed;
 
+  // Live SOS dialog bookkeeping — lets the socket listener close the exact
+  // dialog (and stop its alarm) when ANY responder closes the incident.
+  BuildContext? _sosDialogContext;
+  int? _sosDialogAlertId;
+
   /// Read-only view for screens that drive the listener lifecycle.
   bool get isResponderActive => _isResponderActive;
 
@@ -368,6 +373,26 @@ class EmergencyAlertService {
         triggerEmergencyBroadcast(alertMap);
       });
 
+      // ANY responder (this device included) closed an incident → the alarm
+      // on this phone must stop and the SOS dialog for that alert must go.
+      // Without this, "False alarm" worked only on the device that pressed
+      // it while every other responder's phone kept ringing.
+      _socket!.on('emergency:status_change', (data) {
+        if (data is! Map) return;
+        final alertId = data['alertId'] ?? data['alert_id'];
+        final status = data['status'];
+        if (status != 'resolved' && status != 'false_alarm') return;
+
+        if (_sosDialogAlertId != null && '$_sosDialogAlertId' == '$alertId') {
+          stopAlarmSound();
+          _cancelEmergencyNotification();
+          _closeSosDialog();
+        } else if ('$_lastAlertIdProcessed' == '$alertId') {
+          stopAlarmSound();
+          _cancelEmergencyNotification();
+        }
+      });
+
       // Qualified Responder flag toggled from the Admin Console mid-session:
       // start or stop listening WITHOUT a re-login. The server emits this to
       // the user's own room, so it only ever reaches the affected account.
@@ -622,7 +647,29 @@ class EmergencyAlertService {
     } catch (_) {}
   }
 
-  Future<void> triggerEmergencyBroadcast(Map<String, dynamic> alertData) async {
+  /// Remove the persistent SOS notification (id 999) from the tray once the
+  /// incident it advertised is closed.
+  Future<void> _cancelEmergencyNotification() async {
+    try {
+      await _localNotifications.cancel(999);
+    } catch (_) {}
+  }
+
+  /// Close the live SOS dialog (if any) from outside the dialog itself —
+  /// used by the socket listener when another responder closes the incident.
+  void _closeSosDialog() {
+    final ctx = _sosDialogContext;
+    _sosDialogContext = null;
+    _sosDialogAlertId = null;
+    if (ctx != null && ctx.mounted) {
+      Navigator.of(ctx).pop();
+    }
+  }
+
+  Future<void> triggerEmergencyBroadcast(
+    Map<String, dynamic> alertData, {
+    void Function(String status)? onStatusChanged,
+  }) async {
     playAlarmSound();
 
     final patientName = alertData['patientName'] ??
@@ -632,12 +679,16 @@ class EmergencyAlertService {
 
     // Server tiering: community (non-clinical) responders receive a reduced
     // payload — medical details are stripped before they ever reach us.
+    // Closing actions are NOT tiered: any responder may resolve / flag a
+    // false alarm, so those buttons stay for every tier.
     final redacted = alertData['medicalDetailsRedacted'] == true;
     final bloodType = alertData['bloodType'] ?? alertData['blood_type'];
     final allergies = alertData['allergies'];
     final lat = double.tryParse(alertData['latitude'].toString()) ?? 0.0;
     final lng = double.tryParse(alertData['longitude'].toString()) ?? 0.0;
     final googleMapsUrl = alertData['googleMapsUrl'] ?? 'https://www.google.com/maps?q=$lat,$lng';
+    final rawAlertId = alertData['alertId'] ?? alertData['alert_id'];
+    final alertId = rawAlertId is int ? rawAlertId : int.tryParse('$rawAlertId') ?? 0;
 
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'emergency_sos_channel_v4',
@@ -672,6 +723,11 @@ class EmergencyAlertService {
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
+        // Track the live dialog so the socket listener can close it when
+        // another responder resolves / false-alarms this alert.
+        _sosDialogContext = ctx;
+        _sosDialogAlertId = alertId;
+
         return AlertDialog(
           backgroundColor: const Color(0xFF7F1D1D),
           shape: RoundedRectangleBorder(
@@ -779,6 +835,9 @@ class EmergencyAlertService {
                     minimumSize: const Size.fromHeight(42),
                   ),
                   onPressed: () async {
+                    // Navigating to the scene stops the siren — the incident
+                    // itself stays open and actionable from the alert list.
+                    stopAlarmSound();
                     final uri = Uri.parse(googleMapsUrl);
                     if (await canLaunchUrl(uri)) {
                       await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -790,13 +849,25 @@ class EmergencyAlertService {
                 const SizedBox(height: 12),
 
                 // Shared status actions (responder_screen / dialog parity).
-                // Community responders get acknowledge + dispatch only.
+                // ANY responder tier may close the incident — the buttons
+                // are shown regardless of medical-detail redaction.
                 SosAlertActions(
-                  alertId: (alertData['alertId'] ?? alertData['alert_id']) is int
-                      ? (alertData['alertId'] ?? alertData['alert_id'])
-                      : int.tryParse('${alertData['alertId'] ?? alertData['alert_id']}') ?? 0,
+                  alertId: alertId,
                   status: '${alertData['status'] ?? 'triggered'}',
-                  showClinicalActions: !redacted,
+                  onChanged: (status) {
+                    stopAlarmSound();
+                    // Closing the incident dismisses the SOS dialog on this
+                    // device too — the alarm must not outlive the incident.
+                    if (status == 'resolved' || status == 'false_alarm') {
+                      _cancelEmergencyNotification();
+                      if (ctx.mounted) {
+                        Navigator.of(ctx).pop();
+                      }
+                      _sosDialogContext = null;
+                      _sosDialogAlertId = null;
+                    }
+                    onStatusChanged?.call(status);
+                  },
                 ),
                 const SizedBox(height: 10),
 
@@ -809,6 +880,8 @@ class EmergencyAlertService {
                   ),
                   onPressed: () {
                     stopAlarmSound();
+                    _sosDialogContext = null;
+                    _sosDialogAlertId = null;
                     if (ctx.mounted) {
                       Navigator.pop(ctx);
                     }

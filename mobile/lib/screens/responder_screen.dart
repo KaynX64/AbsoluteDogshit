@@ -77,7 +77,19 @@ class _ResponderScreenState extends State<ResponderScreen> {
           if (triggeredAlert != null &&
               _lastAlertAlarmedId != triggeredAlert['alert_id']) {
             _lastAlertAlarmedId = triggeredAlert['alert_id'];
-            EmergencyAlertService().triggerEmergencyBroadcast(triggeredAlert);
+            // Status changes made inside the SOS dialog (acknowledge /
+            // dispatch / resolve / false alarm) refresh this list too.
+            EmergencyAlertService().triggerEmergencyBroadcast(
+              Map<String, dynamic>.from(triggeredAlert),
+              onStatusChanged: (status) {
+                if (status == 'resolved' || status == 'false_alarm') {
+                  setState(() =>
+                      _activeAlerts.removeWhere((a) => a['alert_id'] == triggeredAlert['alert_id']));
+                } else {
+                  _fetchActiveAlerts(silent: true);
+                }
+              },
+            );
           }
         }
       }
@@ -103,12 +115,18 @@ class _ResponderScreenState extends State<ResponderScreen> {
 
     // Shared status-change path (mobile/lib/widgets/sos_alert_actions.dart)
     // — the same helper the SOS alarm dialog uses.
-    final ok = await updateSosAlertStatus(alertId, status);
-    if (!ok) {
+    final result = await updateSosAlertStatus(alertId, status);
+    if (result['ok'] != true) {
+      // Another responder closed this incident first — our local removal
+      // above already matches the server, nothing to report.
+      final current = result['currentStatus'];
+      if (current == 'resolved' || current == 'false_alarm') {
+        return;
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Update failed. Check your connection.'),
+          SnackBar(
+            content: Text('${result['error'] ?? 'Update failed. Check your connection.'}'),
             backgroundColor: primaryCrimson,
           ),
         );
@@ -118,6 +136,10 @@ class _ResponderScreenState extends State<ResponderScreen> {
   }
 
   Future<void> _openGoogleMaps(double lat, double lng) async {
+    // Navigating to the scene stops the siren — the incident stays open and
+    // actionable in the list when the responder returns to the app.
+    EmergencyAlertService().stopAlarmSound();
+
     if (lat == 0.0 && lng == 0.0) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

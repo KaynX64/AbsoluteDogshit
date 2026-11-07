@@ -38,9 +38,9 @@ One screen per file: public `XxxScreen` (stateless) + private `_XxxScreenState` 
 - Embedded QR verification view (for scanned docs): L177 and L532 (`GET /api/documents/verify/$qrToken`).
 - Lists: prescriptions L918 · clearances L1126 · diagnostics L1327; modals: prescription L174, clearance certificate L529.
 
-### responder_screen.dart — 771 lines / 26 KB. SOS dispatch console
-- `_fetchActiveAlerts` L55 (`GET /api/emergency/active`), `_updateAlertStatus` L91 (delegates to shared `updateSosAlertStatus()` — `lib/widgets/sos_alert_actions.dart`), Google Maps deep-link L126, sign out L223 (logout body sends `fcm_token`), alert card L405, stat pills L730.
-- No screen-level socket — live pushes arrive via FCM through `lib/services/emergency_alert_service.dart` (its socket listens for `emergency:new_alert` and `responder:status_changed`); the screen polls/refreshes. The screen owns the listener lifecycle for EMERGENCY_RESPONDER-route accounts (start L36 / stop L48; the service's flag-change handler deliberately skips those accounts).
+### responder_screen.dart — 794 lines / 26 KB. SOS dispatch console
+- `_fetchActiveAlerts` L56 (`GET /api/emergency/active`), `_updateAlertStatus` L103 (delegates to shared `updateSosAlertStatus()` — `lib/widgets/sos_alert_actions.dart`; surfaces the server's 409 message, treats "already closed elsewhere" as success), Google Maps deep-link L138 (stops the alarm first), SOS dialog broadcast L82 (passes `onStatusChanged` so list actions made in the dialog refresh the screen), sign out ~L248 (logout body sends `fcm_token`), alert card L429, stat pills L754.
+- No screen-level socket — live pushes arrive via FCM through `lib/services/emergency_alert_service.dart` (its socket listens for `emergency:new_alert`, `emergency:status_change` and `responder:status_changed`); the screen polls/refreshes. The screen owns the listener lifecycle for EMERGENCY_RESPONDER-route accounts (start L41 / stop L52; the service's flag-change handler deliberately skips those accounts).
 
 ### change_password_screen.dart — 607 lines / 19 KB
 - Client-side strength mirror `_evaluateStrength` L50 (keep in sync with server `passwordPolicy`); submit L117 (`PUT /api/auth/change-password`); requirements panel `_PasswordRequirementsPanel` L537.

@@ -7,7 +7,7 @@ One file per `/api/<name>` area. Exports: `appointments emergency inventory docu
 | appointments.js | booking, queue, no-show, rules | ~1.6k |
 | admin.js | users, roles, admin permissions | ~1.3k |
 | inventory.js | medicines, batches, logs | |
-| emergency.js | SOS alerts, responders (Socket.IO + FCM) | |
+| emergency.js | SOS alerts, responders (Socket.IO + FCM); incident reports (~700 lines — status PATCH L314, pending L444, report GET/POST L492/L575) | |
 | analytics.js | stats/export (uses `utils/analyticsStats.js`) | |
 | healthPass.js | dynamic QR health pass (HMAC) | |
 | profile.js | user/health profile | |

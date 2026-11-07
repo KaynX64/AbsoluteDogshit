@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
 import { T, btnPrimary, btnGhost } from '../theme';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
+import { CLIENT_INSTANCE_ID } from '../services/clientInstance';
 import Icon from './Icon';
 
 export default function ResponderConsole() {
@@ -96,7 +97,11 @@ export default function ResponderConsole() {
     try {
       await fetch(`${API_BASE_URL}/api/emergency/${alertId}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Client-Instance-Id': CLIENT_INSTANCE_ID,
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ status }),
       });
       fetchAlerts(true);

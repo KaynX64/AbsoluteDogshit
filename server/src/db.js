@@ -254,6 +254,33 @@ export async function runAutoMigrations() {
       console.warn('⚠️ [Auto-Migration] Admin permission tables warning:', permErr.message);
     }
 
+    // ── Incident reports: post-resolution documentation ──────────────────
+    // One report per SOS alert (UNIQUE alert_id), filed from the desktop
+    // console popup after ANY responder closes the incident as resolved.
+    // Identity fields are pre-fetched live at popup time — only the
+    // narrative, treatment notes and confirmed resolution time are stored.
+    // Mirrors schema.sql (25. INCIDENT_REPORTS).
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS INCIDENT_REPORTS (
+          report_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+          alert_id BIGINT NOT NULL UNIQUE,
+          patient_user_id BIGINT NOT NULL,
+          resolved_at DATETIME NOT NULL,
+          incident_details TEXT NOT NULL,
+          treatment_notes TEXT NULL,
+          documented_by BIGINT NOT NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT fk_ir_alert FOREIGN KEY (alert_id) REFERENCES EMERGENCY_ALERTS (alert_id) ON DELETE CASCADE,
+          CONSTRAINT fk_ir_patient FOREIGN KEY (patient_user_id) REFERENCES USERS (user_id) ON DELETE CASCADE,
+          CONSTRAINT fk_ir_author FOREIGN KEY (documented_by) REFERENCES USERS (user_id) ON DELETE CASCADE
+        ) ENGINE=InnoDB
+      `);
+      console.log('📦 [Auto-Migration] INCIDENT_REPORTS table verified');
+    } catch (irErr) {
+      console.warn('⚠️ [Auto-Migration] INCIDENT_REPORTS table warning:', irErr.message);
+    }
+
   } catch (err) {
     console.warn('⚠️ [Auto-Migration Warning]:', err.message);
   }

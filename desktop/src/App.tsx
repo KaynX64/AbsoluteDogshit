@@ -15,6 +15,7 @@ import { API_BASE_URL } from './config/api';
 import PasswordStrengthIndicator, { evaluatePassword } from './components/PasswordStrengthIndicator';
 import { T, btnPrimary, btnSubtle } from './theme';
 import Icon from './components/Icon';
+import IncidentReportModal from './components/IncidentReportModal';
 import valetudoLogo from './assets/valetudo_logo.png';
 
 
@@ -777,6 +778,11 @@ const handleChangePassword = async (e: React.FormEvent) => {
           {activeRoleView === 'EMERGENCY_RESPONDER' && <ResponderConsole />}
         </main>
       </div>
+
+      {/* Post-resolution incident documentation popup. Server-driven: it
+          only appears for accounts in the live responder audience, on any
+          console view, whenever ANY responder closes an SOS as resolved. */}
+      <IncidentReportModal />
 
       {showPasswordModal && (
         <div className="modal-backdrop" onClick={() => setShowPasswordModal(false)}>
