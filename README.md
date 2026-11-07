@@ -6,7 +6,7 @@
 >
 > **Documentation snapshot:** `Stage1` branch at `c8651d1ea88a438a5cc078c6613c11e35515e5c5` (2026-11-07 16:13:32 UTC). This README supersedes the 3,170-byte `AGENTS.md Pack` note currently stored as `Stage1/README.md`.
 
-A **Palawan State University campus clinic management system**: appointments and queueing, EMR, e-prescriptions, dental charts, medicine inventory, emergency SOS, incident reporting, health passes and QR document verification. Philippine **R.A. 10173 (Data Privacy Act of 2012)** is a design constraint — treat any row containing patient data as PHI.
+A **State University campus clinic management system**: appointments and queueing, EMR, e-prescriptions, dental charts, medicine inventory, emergency SOS, incident reporting, health passes and QR document verification. Philippine **R.A. 10173 (Data Privacy Act of 2012)** is a design constraint — treat any row containing patient data as PHI.
 
 It is a monorepo with **three deployables** and **no npm workspaces, no root scripts and no submodules**. Each module installs and runs from its own folder; the root `package.json` only pins shared tooling (`concurrently`, `wait-on`, `electron`). `server/` owns all business logic and is the sole database owner.
 
