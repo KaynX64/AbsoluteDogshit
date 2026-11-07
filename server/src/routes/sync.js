@@ -34,7 +34,8 @@ router.get('/bootstrap', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'DEN
       `SELECT u.user_id, u.first_name, u.last_name, u.email, u.phone, 
               COALESCE(sp.student_no, st.license_no, fp.position, 'PSU Member') AS student_no, 
               COALESCE(sp.course, st.department, fp.department, 'PSU Lingayen') AS course, 
-              sp.year_level, hp.blood_type, hp.allergies, hp.chronic_conditions 
+              sp.year_level, hp.blood_type, hp.allergies, hp.chronic_conditions,
+              hp.sex, hp.date_of_birth 
        FROM USERS u 
        LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id 
        LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id 
@@ -170,6 +171,15 @@ router.post('/replay', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NUR
             vitals,
             dental_chart,
           } = payload;
+
+          const userRoles = req.user.roles || [];
+          if (
+            payload.vitals !== undefined &&
+            !userRoles.includes('ADMIN') &&
+            (userRoles.includes('DOCTOR') || userRoles.includes('DENTIST'))
+          ) {
+            throw new Error('Doctors and dentists cannot record patient vitals.');
+          }
 
           // Check if appointment was already processed while this PC was offline
           if (appointment_id) {

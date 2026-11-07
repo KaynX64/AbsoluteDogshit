@@ -38,6 +38,9 @@ interface PrescriptionGeneratorProps {
     student_no: string;
     course: string;
     allergies: string;
+    date_of_birth?: string | null;
+    age?: number | null;
+    sex?: 'MALE' | 'FEMALE' | null;
   };
   initialNotes?: string;
   isArchived?: boolean;
@@ -279,6 +282,7 @@ function FormularySelect({
 export default function PrescriptionGenerator({
   patientUserId,
   appointmentId,
+  verifiedPatient,
   initialNotes,
   isArchived = false,
   onPrescriptionIssued,
@@ -290,6 +294,7 @@ export default function PrescriptionGenerator({
   const [rxDosage, setRxDosage] = useState('500mg');
   const [rxFrequency, setRxFrequency] = useState('');
   const [rxDurationDays, setRxDurationDays] = useState('5');
+  const [rxValidityDays, setRxValidityDays] = useState('30');
   const [rxQuantity, setRxQuantity] = useState('10');
   const [rxInstructions, setRxInstructions] = useState('');
   const [doctorNotes, setDoctorNotes] = useState(() =>
@@ -297,6 +302,11 @@ export default function PrescriptionGenerator({
   );
   const [isSaving, setIsSaving] = useState(false);
   const [showIssueConfirmation, setShowIssueConfirmation] = useState(false);
+
+  const getExpiresAtDate = (daysStr: string) => {
+    const days = Math.max(1, Math.min(180, Number(daysStr) || 30));
+    return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  };
 
   /* ── Outside-drug mode state ──────────────────────────────────── */
   const [rxMode, setRxMode] = useState<'formulary' | 'outside'>('formulary');
@@ -428,6 +438,7 @@ export default function PrescriptionGenerator({
           body: JSON.stringify({
             patient_user_id: patientUserId,
             appointment_id: appointmentId,
+            expires_at: getExpiresAtDate(rxValidityDays),
             notes: doctorNotes.trim() || DEFAULT_DOCTOR_NOTES,
             items: [
               {
@@ -437,7 +448,8 @@ export default function PrescriptionGenerator({
                 frequency: rxFrequency.trim() || DEFAULT_FREQUENCY,
                 route: 'Oral',
                 duration_days: Number(rxDurationDays) || 3,
-                quantity_dispensed: outsideQty,
+                quantity_prescribed: outsideQty,
+                quantity_dispensed: 0,
                 instructions: rxInstructions.trim() || DEFAULT_INSTRUCTIONS,
               },
             ],
@@ -515,6 +527,7 @@ export default function PrescriptionGenerator({
         body: JSON.stringify({
           patient_user_id: patientUserId,
           appointment_id: appointmentId,
+          expires_at: getExpiresAtDate(rxValidityDays),
           notes: doctorNotes.trim() || DEFAULT_DOCTOR_NOTES,
           items: [
             {
@@ -523,6 +536,7 @@ export default function PrescriptionGenerator({
               frequency: rxFrequency.trim() || DEFAULT_FREQUENCY,
               route: 'Oral',
               duration_days: Number(rxDurationDays) || 3,
+              quantity_prescribed: Number(rxQuantity) || 10,
               quantity_dispensed: Number(rxQuantity) || 10,
               instructions: rxInstructions.trim() || DEFAULT_INSTRUCTIONS,
             },
@@ -584,6 +598,50 @@ export default function PrescriptionGenerator({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* ── Verified Patient Demographic / Clinical Safety Bar ── */}
+      {verifiedPatient && (
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: 12,
+            padding: '8px 12px',
+            background: T.sage100,
+            border: `1px solid ${T.border}`,
+            borderRadius: T.radius.md,
+            fontSize: 12,
+            color: T.textDark,
+          }}
+        >
+          <span>
+            <b>Patient:</b> {verifiedPatient.first_name} {verifiedPatient.last_name}
+          </span>
+          {verifiedPatient.student_no && (
+            <span>
+              <b style={{ color: T.textSub }}>ID:</b> {verifiedPatient.student_no}
+            </span>
+          )}
+          {(verifiedPatient.date_of_birth || verifiedPatient.age != null) && (
+            <span>
+              <b style={{ color: T.textSub }}>DOB / Age:</b>{' '}
+              {verifiedPatient.date_of_birth || ''}
+              {verifiedPatient.age != null ? ` (${verifiedPatient.age} yrs)` : ''}
+            </span>
+          )}
+          {verifiedPatient.sex && (
+            <span>
+              <b style={{ color: T.textSub }}>Sex:</b> {verifiedPatient.sex}
+            </span>
+          )}
+          {verifiedPatient.allergies && verifiedPatient.allergies !== 'None' && (
+            <span style={{ color: T.danger, fontWeight: 700 }}>
+              ⚠ Allergies: {verifiedPatient.allergies}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* ── Medication source: infirmary formulary vs outside pharmacy ── */}
       <div
         style={{
@@ -660,7 +718,7 @@ export default function PrescriptionGenerator({
             onChange={(e) => setRxDosage(e.target.value)}
           />
         </Field>
-        <Field label={rxMode === 'outside' ? 'Quantity to purchase' : 'Quantity to dispense'}>
+        <Field label={rxMode === 'outside' ? 'Quantity to purchase (prescribed)' : 'Quantity prescribed (dispensed)'}>
           <input
             type="number"
             min="1"
@@ -694,7 +752,7 @@ export default function PrescriptionGenerator({
         </Field>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
         <Field label="Frequency">
           <input
             style={inputStyle}
@@ -713,6 +771,21 @@ export default function PrescriptionGenerator({
             value={rxDurationDays}
             onChange={(e) => setRxDurationDays(e.target.value)}
           />
+        </Field>
+        <Field label="Prescription validity">
+          <select
+            style={{ ...inputStyle, cursor: isArchived ? 'not-allowed' : 'pointer' }}
+            disabled={isArchived}
+            value={rxValidityDays}
+            onChange={(e) => setRxValidityDays(e.target.value)}
+          >
+            <option value="7">7 days (1 week)</option>
+            <option value="14">14 days (2 weeks)</option>
+            <option value="30">30 days (1 month)</option>
+            <option value="60">60 days (2 months)</option>
+            <option value="90">90 days (3 months)</option>
+            <option value="180">180 days (6 months)</option>
+          </select>
         </Field>
       </div>
 

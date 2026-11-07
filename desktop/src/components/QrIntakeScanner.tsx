@@ -36,12 +36,34 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
   const [walkInSuccess, setWalkInSuccess] = useState<string | null>(null);
   const [isRegisteringWalkIn, setIsRegisteringWalkIn] = useState(false);
 
-  const [bp, setBp] = useState('120/80');
-  const [temp, setTemp] = useState('36.6');
-  const [pulse, setPulse] = useState('78');
+  const [bp, setBp] = useState('');
+  const [temp, setTemp] = useState('');
+  const [pulse, setPulse] = useState('');
+  const [spo2, setSpo2] = useState('');
+  const [respRate, setRespRate] = useState('');
+  const [sex, setSex] = useState('');
   const [height, setHeight] = useState('');
   const [weight, setWeight] = useState('');
   const [lastVerifiedAt, setLastVerifiedAt] = useState<string>('');
+  const heightMeters = Number(height) / 100;
+  const weightKg = Number(weight);
+  const bmi =
+    Number.isFinite(heightMeters) &&
+    Number.isFinite(weightKg) &&
+    heightMeters > 0 &&
+    weightKg > 0
+      ? weightKg / (heightMeters * heightMeters)
+      : null;
+  const bmiCategory =
+    bmi === null
+      ? null
+      : bmi < 18.5
+        ? 'Underweight'
+        : bmi < 25
+          ? 'Normal'
+          : bmi < 30
+            ? 'Overweight'
+            : 'Obese';
 
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState('');
@@ -106,6 +128,9 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
     setCheckInSuccess(null);
     setWalkInSuccess(null);
     setActiveTicket(null);
+    setSex('');
+    setHeight('');
+    setWeight('');
 
     const jwt = localStorage.getItem('valetudo_token');
     try {
@@ -117,6 +142,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
       const data = await res.json();
       if (res.ok && data.verified) {
         setVerifiedPatient(data.patient);
+        setSex(data.patient?.sex || '');
         onPatientVerified(data.patient, tokenToVerify.trim());
         setScanStatus('Patient identity verified.');
         setHeight(data.patient?.height ? String(data.patient.height) : '');
@@ -163,11 +189,13 @@ try {
           chronic_conditions: app.chronic_conditions,
           height: app.height,
           weight: app.weight,
+          sex: app.sex,
         });
         setPendingAppointment(app);
         setScanStatus(`Patient record located: ${app.first_name} ${app.last_name}`);
         setHeight(app.height ? String(app.height) : '');
         setWeight(app.weight ? String(app.weight) : '');
+        setSex(app.sex || '');
         setLastVerifiedAt(app.health_profile_updated_at || '');
         await checkActiveTicket(app.user_id);
       } else {
@@ -180,6 +208,9 @@ try {
           const offlineMatches = await window.electronAPI.offlineSearchPatients(searchQuery.trim());
           if (offlineMatches.length > 0) {
             const p = offlineMatches[0];
+            setSex('');
+            setHeight('');
+            setWeight('');
             setVerifiedPatient({
               user_id: p.user_id,
               first_name: p.first_name,
@@ -191,6 +222,7 @@ try {
               chronic_conditions: p.chronic_conditions,
               height: null,
               weight: null,
+              sex: null,
             });
             setPendingAppointment(null); // Offline walk-in mode
             setScanStatus(`[Offline Cache] Patient located: ${p.first_name} ${p.last_name} (${p.student_no})`);
@@ -216,6 +248,7 @@ try {
         if (data[0]?.health_profile_updated_at) setLastVerifiedAt(data[0].health_profile_updated_at);
         if (data[0]?.height && !height) setHeight(String(data[0].height));
         if (data[0]?.weight && !weight) setWeight(String(data[0].weight));
+        if (data[0]?.sex) setSex(data[0].sex);
       } else {
         setPendingAppointment(null);
       }
@@ -233,6 +266,9 @@ try {
           blood_pressure: bp,
           temperature: temp,
           pulse: pulse,
+          spo2: spo2 || null,
+          resp_rate: respRate || null,
+          sex: sex || null,
           height: height || null,
           weight: weight || null,
         }),
@@ -271,7 +307,8 @@ try {
         body: JSON.stringify({
           patient_user_id: verifiedPatient.user_id,
           visit_type: 'Walk-in Consultation',
-          notes: `Walk-in triage vitals · BP ${bp}, Temp ${temp}°C, Pulse ${pulse} bpm`,
+          notes: `Walk-in triage vitals · Sex ${sex || '—'}, BP ${bp}, Temp ${temp}°C, Pulse ${pulse} bpm, SpO2 ${spo2 || '—'}%, Resp ${respRate || '—'} cpm`,
+          sex: sex || null,
           vitals: {
             height: height || null,
             weight: weight || null,
@@ -865,6 +902,16 @@ try {
                 value: verifiedPatient.weight ? `${verifiedPatient.weight} kg` : '—',
                 color: C.text,
               },
+              {
+                label: 'Sex',
+                value: sex || 'Not recorded',
+                color: C.text,
+              },
+              {
+                label: 'BMI',
+                value: bmi === null ? '—' : `${bmi.toFixed(1)} · ${bmiCategory}`,
+                color: C.text,
+              },
             ].map((item) => (
               <div key={item.label}>
                 <div
@@ -1091,10 +1138,33 @@ try {
                   >
                     Triage vitals
                   </div>
+                  <label style={{ display: 'block', marginBottom: 10, fontSize: 10.5, color: C.textSub, fontWeight: 600 }}>
+                    Patient sex
+                    <select
+                      value={sex}
+                      onChange={(e) => setSex(e.target.value)}
+                      style={{
+                        display: 'block',
+                        width: '100%',
+                        boxSizing: 'border-box',
+                        marginTop: 4,
+                        padding: '8px 10px',
+                        color: C.text,
+                        background: C.surface,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 8,
+                        fontFamily: 'inherit',
+                      }}
+                    >
+                      <option value="">Not recorded</option>
+                      <option value="MALE">MALE</option>
+                      <option value="FEMALE">FEMALE</option>
+                    </select>
+                  </label>
                   <div
                     style={{
                       display: 'grid',
-                      gridTemplateColumns: 'repeat(5, 1fr)',
+                      gridTemplateColumns: 'repeat(4, 1fr)',
                       gap: 8,
                       marginBottom: 14,
                     }}
@@ -1103,6 +1173,8 @@ try {
                       { label: 'Blood pressure', value: bp, set: setBp, placeholder: '120/80' },
                       { label: 'Temp (°C)', value: temp, set: setTemp, placeholder: '36.6' },
                       { label: 'Pulse (bpm)', value: pulse, set: setPulse, placeholder: '78' },
+                      { label: 'SpO₂ (%)', value: spo2, set: setSpo2, placeholder: '98' },
+                      { label: 'Resp (cpm)', value: respRate, set: setRespRate, placeholder: '18' },
                       { label: 'Height (cm)', value: height, set: setHeight, placeholder: '162.5' },
                       { label: 'Weight (kg)', value: weight, set: setWeight, placeholder: '54.0' },
                     ].map((f) => (
@@ -1138,6 +1210,11 @@ try {
                         />
                       </div>
                     ))}
+                  </div>
+                  <div style={{ marginTop: 10, fontSize: 12, color: C.textSub }}>
+                    Calculated BMI: <strong style={{ color: C.text }}>
+                      {bmi === null ? 'Enter height and weight' : `${bmi.toFixed(1)} (${bmiCategory})`}
+                    </strong>
                   </div>
                 </>
               )}
@@ -1247,10 +1324,33 @@ try {
                   >
                     Triage vitals
                   </div>
+                  <label style={{ display: 'block', marginBottom: 10, fontSize: 10.5, color: C.textSub, fontWeight: 600 }}>
+                    Patient sex
+                    <select
+                      value={sex}
+                      onChange={(e) => setSex(e.target.value)}
+                      style={{
+                        display: 'block',
+                        width: '100%',
+                        boxSizing: 'border-box',
+                        marginTop: 4,
+                        padding: '8px 10px',
+                        color: C.text,
+                        background: C.surface,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 8,
+                        fontFamily: 'inherit',
+                      }}
+                    >
+                      <option value="">Not recorded</option>
+                      <option value="MALE">MALE</option>
+                      <option value="FEMALE">FEMALE</option>
+                    </select>
+                  </label>
                   <div
                     style={{
                       display: 'grid',
-                      gridTemplateColumns: 'repeat(5, 1fr)',
+                      gridTemplateColumns: 'repeat(4, 1fr)',
                       gap: 8,
                       marginBottom: 14,
                     }}
@@ -1259,6 +1359,8 @@ try {
                       { label: 'Blood pressure', value: bp, set: setBp, placeholder: '120/80' },
                       { label: 'Temp (°C)', value: temp, set: setTemp, placeholder: '36.6' },
                       { label: 'Pulse (bpm)', value: pulse, set: setPulse, placeholder: '78' },
+                      { label: 'SpO₂ (%)', value: spo2, set: setSpo2, placeholder: '98' },
+                      { label: 'Resp (cpm)', value: respRate, set: setRespRate, placeholder: '18' },
                       { label: 'Height (cm)', value: height, set: setHeight, placeholder: '162.5' },
                       { label: 'Weight (kg)', value: weight, set: setWeight, placeholder: '54.0' },
                     ].map((f) => (
@@ -1294,6 +1396,11 @@ try {
                         />
                       </div>
                     ))}
+                  </div>
+                  <div style={{ marginTop: 10, fontSize: 12, color: C.textSub }}>
+                    Calculated BMI: <strong style={{ color: C.text }}>
+                      {bmi === null ? 'Enter height and weight' : `${bmi.toFixed(1)} (${bmiCategory})`}
+                    </strong>
                   </div>
 
                   <button

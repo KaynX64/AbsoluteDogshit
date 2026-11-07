@@ -342,7 +342,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                             style: TextStyle(fontSize: rs.sp(12), color: textSub),
                           ),
                           Text(
-                            "Duration: ${it['duration_days'] ?? 3} days (Qty: ${it['quantity_dispensed'] ?? 10} pcs)",
+                            "Duration: ${it['duration_days'] ?? 3} days (Qty: ${it['quantity_prescribed'] ?? it['quantity_dispensed'] ?? 10} pcs)",
                             style: TextStyle(fontSize: rs.sp(11.5), color: textSub),
                           ),
                           if (it['is_outside'] == true)
@@ -432,6 +432,15 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                               "Issued: ${_formatDate(rx['issued_at'])}",
                               style: TextStyle(fontSize: rs.sp(11), color: textSub),
                             ),
+                            if (rx['expires_at'] != null)
+                              Text(
+                                "Valid until: ${_formatDate(rx['expires_at'])}",
+                                style: TextStyle(
+                                  fontSize: rs.sp(11),
+                                  fontWeight: FontWeight.w600,
+                                  color: textSub,
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -1054,7 +1063,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                       SizedBox(width: rs.w(6)),
                       Expanded(
                         child: Text(
-                          "Issued ${_formatDate(rx['issued_at'])}",
+                          rx['expires_at'] != null
+                              ? "Issued ${_formatDate(rx['issued_at'])} · Valid until ${_formatDate(rx['expires_at'])}"
+                              : "Issued ${_formatDate(rx['issued_at'])}",
                           style: TextStyle(fontSize: rs.sp(12), color: textSub),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,

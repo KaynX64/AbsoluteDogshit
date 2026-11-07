@@ -51,6 +51,11 @@ interface AppointmentItem {
   chronic_conditions: string;
   height: number;
   weight: number;
+  sex?: 'MALE' | 'FEMALE' | null;
+  date_of_birth?: string | null;
+  age?: number | null;
+  bmi?: number | null;
+  bmi_category?: string | null;
   health_profile_updated_at?: string;
   queue_ticket?: string;
   queue_status?: string;
@@ -233,12 +238,12 @@ export default function DoctorConsole({
   const [forceShowDentalChart, setForceShowDentalChart] = useState(false);
 
   /* ── Vitals state ──────────────────────────────────────────── */
-  const [bpSystolic, setBpSystolic] = useState('120');
-  const [bpDiastolic, setBpDiastolic] = useState('80');
-  const [temperature, setTemperature] = useState('36.6');
-  const [pulseRate, setPulseRate] = useState('75');
-  const [spo2, setSpo2] = useState('98');
-  const [respRate, setRespRate] = useState('18');
+  const [bpSystolic, setBpSystolic] = useState('');
+  const [bpDiastolic, setBpDiastolic] = useState('');
+  const [temperature, setTemperature] = useState('');
+  const [pulseRate, setPulseRate] = useState('');
+  const [spo2, setSpo2] = useState('');
+  const [respRate, setRespRate] = useState('');
   const [height, setHeight] = useState('');
   const [weight, setWeight] = useState('');
 
@@ -417,6 +422,12 @@ export default function DoctorConsole({
     );
     setClinicalNotes(app.past_clinical_notes || '');
     setEncounterConfirmation(null);
+    setBpSystolic('');
+    setBpDiastolic('');
+    setTemperature('');
+    setPulseRate('');
+    setSpo2('');
+    setRespRate('');
     setHeight(app.height ? String(app.height) : '');
     setWeight(app.weight ? String(app.weight) : '');
     setAttachedFile(null);
@@ -438,6 +449,14 @@ export default function DoctorConsole({
       if (tempMatch) setTemperature(tempMatch[1]);
       const pulseMatch = app.notes.match(/Pulse:\s*(\d+)/);
       if (pulseMatch) setPulseRate(pulseMatch[1]);
+      const spo2Match = app.notes.match(/SpO2:\s*([0-9.]+|—)/i);
+      if (spo2Match) setSpo2(spo2Match[1] === '—' ? '' : spo2Match[1]);
+      const respRateMatch = app.notes.match(/Resp:\s*([0-9.]+|—)/i);
+      if (respRateMatch) setRespRate(respRateMatch[1] === '—' ? '' : respRateMatch[1]);
+      const heightMatch = app.notes.match(/Height:\s*([0-9.]+|—)/);
+      if (heightMatch) setHeight(heightMatch[1] === '—' ? '' : heightMatch[1]);
+      const weightMatch = app.notes.match(/Weight:\s*([0-9.]+|—)/);
+      if (weightMatch) setWeight(weightMatch[1] === '—' ? '' : weightMatch[1]);
     }
 
     fetchActivePatientAttachments(app.patient_id);
@@ -599,16 +618,6 @@ export default function DoctorConsole({
       notes: clinicalNotes,
       dental_chart:
         isDentist && chartedTeeth.length > 0 ? dentalChartData : undefined,
-      vitals: {
-        systolic_bp: bpSystolic,
-        diastolic_bp: bpDiastolic,
-        temperature,
-        pulse: pulseRate,
-        spo2,
-        resp_rate: respRate,
-        height,
-        weight,
-      },
     };
 
     if (!navigator.onLine) {
@@ -1815,6 +1824,22 @@ const loadPatientTimeline = async (patient: any) => {
                     <b style={{ color: T.textSub }}>W:</b>{' '}
                     {selectedApp.weight ? `${selectedApp.weight} kg` : '—'}
                   </span>
+                  <span>
+                    <b style={{ color: T.textSub }}>Sex:</b>{' '}
+                    {selectedApp.sex || 'Not recorded'}
+                  </span>
+                  <span>
+                    <b style={{ color: T.textSub }}>DOB / Age:</b>{' '}
+                    {selectedApp.date_of_birth
+                      ? `${selectedApp.date_of_birth}${selectedApp.age != null ? ` (${selectedApp.age} yrs)` : ''}`
+                      : 'Not recorded'}
+                  </span>
+                  <span>
+                    <b style={{ color: T.textSub }}>BMI:</b>{' '}
+                    {selectedApp.bmi
+                      ? `${selectedApp.bmi} · ${selectedApp.bmi_category || ''}`
+                      : 'Not available'}
+                  </span>
                   {selectedApp.health_profile_updated_at && (
                     <span style={{ color: T.textMuted, fontStyle: 'italic' }}>
                       Last verified:{' '}
@@ -2489,6 +2514,9 @@ const loadPatientTimeline = async (patient: any) => {
                     student_no: selectedApp?.student_no || '22-LN-0123',
                     course: selectedApp?.course || 'BS Information Technology',
                     allergies: selectedApp?.allergies || 'None',
+                    date_of_birth: selectedApp?.date_of_birth,
+                    age: selectedApp?.age,
+                    sex: selectedApp?.sex,
                   }}
                   initialNotes={selectedApp?.past_dietary_notes}
                   isArchived={isArchivedMode}
@@ -2749,7 +2777,7 @@ const loadPatientTimeline = async (patient: any) => {
                       marginBottom: 10,
                     }}
                   >
-                    Encounter vitals
+                    Nurse-recorded vitals (read-only)
                   </div>
 
                   <div
@@ -2760,23 +2788,29 @@ const loadPatientTimeline = async (patient: any) => {
                     }}
                   >
                     {[
-                      { label: 'BP systolic', value: bpSystolic, set: setBpSystolic },
-                      { label: 'BP diastolic', value: bpDiastolic, set: setBpDiastolic },
-                      { label: 'Temp (°C)', value: temperature, set: setTemperature },
-                      { label: 'Pulse bpm', value: pulseRate, set: setPulseRate },
-                      { label: 'SpO₂ %', value: spo2, set: setSpo2 },
-                      { label: 'Resp cpm', value: respRate, set: setRespRate },
+                      { label: 'BP systolic', value: bpSystolic },
+                      { label: 'BP diastolic', value: bpDiastolic },
+                      { label: 'Temp (°C)', value: temperature },
+                      { label: 'Pulse bpm', value: pulseRate },
+                      { label: 'SpO₂ %', value: spo2 },
+                      { label: 'Resp cpm', value: respRate },
                       {
                         label: 'Height cm',
                         value: height,
-                        set: setHeight,
-                        placeholder: '162.5',
                       },
                       {
                         label: 'Weight kg',
                         value: weight,
-                        set: setWeight,
-                        placeholder: '54.0',
+                      },
+                      {
+                        label: 'Patient sex',
+                        value: selectedApp?.sex || '',
+                      },
+                      {
+                        label: 'BMI',
+                        value: selectedApp?.bmi
+                          ? `${selectedApp.bmi} · ${selectedApp.bmi_category || ''}`
+                          : '',
                       },
                     ].map((f) => (
                       <div key={f.label}>
@@ -2789,19 +2823,23 @@ const loadPatientTimeline = async (patient: any) => {
                         >
                           {f.label}
                         </label>
-                        <input
+                        <output
+                          aria-label={`${f.label}, read only`}
                           style={{
-                            ...inputStyle,
+                            display: 'block',
+                            boxSizing: 'border-box',
+                            width: '100%',
                             marginTop: 4,
                             padding: '8px 10px',
                             fontSize: 13,
+                            color: f.value ? T.text : T.textSub,
+                            background: T.sage100,
+                            border: `1px solid ${T.borderSoft}`,
+                            borderRadius: T.radius.md,
                           }}
-                          disabled={isArchivedMode}
-                          readOnly={isArchivedMode}
-                          placeholder={f.placeholder}
-                          value={f.value}
-                          onChange={(e) => f.set(e.target.value)}
-                        />
+                        >
+                          {f.value || 'Not recorded'}
+                        </output>
                       </div>
                     ))}
                   </div>
@@ -3160,6 +3198,11 @@ const loadPatientTimeline = async (patient: any) => {
                           <span style={{ color: T.textSub, fontWeight: 600 }}>
                             · Rx #{rx.prescription_id}
                           </span>
+                          {rx.expires_at && (
+                            <span style={{ color: T.textMuted, fontSize: 11, fontWeight: 500, marginLeft: 8 }}>
+                              (Expires: {new Date(rx.expires_at).toLocaleDateString()})
+                            </span>
+                          )}
                         </b>
                         <span
                           style={{
@@ -3212,7 +3255,8 @@ const loadPatientTimeline = async (patient: any) => {
                           )}
                           <div style={{ color: T.textSub, marginTop: 2 }}>
                             {it.dosage} · {it.frequency} · {it.route} · {it.duration_days}{' '}
-                            day(s) · qty {it.quantity_dispensed}
+                            day(s) · qty: {it.quantity_prescribed ?? it.quantity_dispensed}
+                            {it.is_outside ? ' (prescribed)' : it.quantity_dispensed ? ` (dispensed: ${it.quantity_dispensed})` : ''}
                           </div>
                           {it.instructions && (
                             <div style={{ color: T.textSub, marginTop: 2 }}>

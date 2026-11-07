@@ -1512,7 +1512,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                         ),
                       ],
                     ),
-                    SizedBox(height: rs.h(16)),
                     Row(
                       children: [
                         Container(
@@ -2340,6 +2339,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     final u = _profileData?['user'] ?? widget.user;
     final identity = _identity;
     final maxContentWidth = rs.isTablet ? 560.0 : double.infinity;
+    final bmi = double.tryParse('${hp['bmi'] ?? ''}');
+    final bmiCategory = hp['bmi_category']?.toString();
 
     List<String> immunizations = [];
     final rawImm = hp['immunization_history'];
@@ -2509,6 +2510,85 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                         fontWeight: FontWeight.w800,
                         color: const Color(0xFF191C1A),
                       ),
+                    ),
+                    SizedBox(height: rs.h(16)),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Date of Birth / Age',
+                                style: TextStyle(fontSize: rs.sp(11.5), color: textSub),
+                              ),
+                              SizedBox(height: rs.h(4)),
+                              Text(
+                                hp['date_of_birth'] != null
+                                    ? "${hp['date_of_birth'].toString().split('T')[0]}${hp['age'] != null ? ' (${hp['age']} yrs)' : ''}"
+                                    : 'Not recorded',
+                                style: TextStyle(
+                                  fontSize: rs.sp(14),
+                                  fontWeight: FontWeight.w600,
+                                  color: const Color(0xFF191C1A),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: rs.h(12)),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Sex',
+                                style: TextStyle(fontSize: rs.sp(11.5), color: textSub),
+                              ),
+                              SizedBox(height: rs.h(4)),
+                              Text(
+                                hp['sex'] ?? 'Not recorded',
+                                style: TextStyle(
+                                  fontSize: rs.sp(14),
+                                  fontWeight: FontWeight.w600,
+                                  color: const Color(0xFF191C1A),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'BMI',
+                                style: TextStyle(fontSize: rs.sp(11.5), color: textSub),
+                              ),
+                              SizedBox(height: rs.h(4)),
+                              Text(
+                                bmi != null && bmi > 0
+                                    ? '${bmi.toStringAsFixed(1)}${bmiCategory == null ? '' : ' · $bmiCategory'}'
+                                    : 'Not available',
+                                style: TextStyle(
+                                  fontSize: rs.sp(14),
+                                  fontWeight: FontWeight.w600,
+                                  color: const Color(0xFF191C1A),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: rs.h(6)),
+                    Text(
+                      'Adult BMI ranges are the same for MALE and FEMALE.',
+                      style: TextStyle(fontSize: rs.sp(11), color: textSub),
                     ),
                     SizedBox(height: rs.h(16)),
                     Row(

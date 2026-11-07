@@ -181,8 +181,17 @@ CREATE TABLE `HEALTH_PROFILES` (
   `immunization_history` JSON NULL,
   `emergency_contact_name` VARCHAR(150) NULL,
   `emergency_contact_phone` VARCHAR(20) NULL,
+  `sex` ENUM('MALE', 'FEMALE') NULL,
+  `date_of_birth` DATE NULL,
   `height` DECIMAL(5,2) NULL COMMENT 'Height in cm',
   `weight` DECIMAL(5,2) NULL COMMENT 'Weight in kg',
+  `bmi` DECIMAL(6,2) GENERATED ALWAYS AS (
+    CASE
+      WHEN `height` > 0 AND `weight` > 0
+      THEN ROUND(`weight` / POW(`height` / 100, 2), 2)
+      ELSE NULL
+    END
+  ) STORED,
   `version` INT NOT NULL DEFAULT 1,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -387,6 +396,7 @@ CREATE TABLE `PRESCRIPTIONS` (
   `patient_user_id` BIGINT NOT NULL,
   `doctor_user_id` BIGINT NOT NULL,
   `issued_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `expires_at` DATE NOT NULL,
   `status` ENUM('active', 'dispensed', 'expired', 'cancelled') NOT NULL DEFAULT 'active',
   `notes` TEXT NULL,
   `qr_token` VARCHAR(255) NOT NULL UNIQUE COMMENT 'Signed reference: UUID + HMAC',
@@ -395,6 +405,7 @@ CREATE TABLE `PRESCRIPTIONS` (
   `version` INT NOT NULL DEFAULT 1,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   INDEX `idx_rx_patient` (`patient_user_id`, `issued_at`),
+  INDEX `idx_rx_expires` (`expires_at`),
   INDEX `idx_rx_status` (`status`),
   CONSTRAINT `fk_rx_emr` FOREIGN KEY (`emr_id`) REFERENCES `EMR_RECORDS` (`emr_id`),
   CONSTRAINT `fk_rx_patient` FOREIGN KEY (`patient_user_id`) REFERENCES `USERS` (`user_id`),
@@ -411,7 +422,8 @@ CREATE TABLE `PRESCRIPTION_ITEMS` (
   `frequency` VARCHAR(100) NOT NULL,
   `route` VARCHAR(50) NOT NULL DEFAULT 'Oral',
   `duration_days` INT NOT NULL,
-  `quantity_dispensed` INT NOT NULL DEFAULT 0,
+  `quantity_prescribed` INT NOT NULL DEFAULT 1 COMMENT 'Quantity prescribed by clinician',
+  `quantity_dispensed` INT NOT NULL DEFAULT 0 COMMENT 'Quantity actually dispensed by the infirmary (0 for outside drugs)',
   `instructions` TEXT NULL,
   `version` INT NOT NULL DEFAULT 1,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,

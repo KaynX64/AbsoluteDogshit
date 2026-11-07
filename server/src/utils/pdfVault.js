@@ -147,6 +147,7 @@ export async function renderPrescriptionPDF(rx) {
     notes,
     qr_token,
     issued_at,
+    expires_at,
     verification_url,
   } = rx;
 
@@ -161,6 +162,14 @@ export async function renderPrescriptionPDF(rx) {
   drawInfoRow(doc, 'Patient Name:',         `${patient.first_name} ${patient.last_name}`);
   drawInfoRow(doc, 'Student / ID No:',      patient.student_no || 'N/A');
   drawInfoRow(doc, 'Course / Affiliation:', patient.course || 'PSU Lingayen');
+  if (patient.date_of_birth || patient.age != null) {
+    const dobStr = patient.date_of_birth ? new Date(patient.date_of_birth).toLocaleDateString('en-PH') : null;
+    const ageStr = patient.age != null ? `${patient.age} yrs old` : null;
+    const dobAge = [dobStr, ageStr].filter(Boolean).join(' · ');
+    drawInfoRow(doc, 'DOB / Age:', `${dobAge}${patient.sex ? ` · Sex: ${patient.sex}` : ''}`);
+  } else if (patient.sex) {
+    drawInfoRow(doc, 'Sex:', patient.sex);
+  }
   drawInfoRow(doc, 'Blood Type:',           patient.blood_type || 'Unknown');
   drawInfoRow(
     doc,
@@ -173,7 +182,10 @@ export async function renderPrescriptionPDF(rx) {
   drawInfoRow(doc, 'Prescribed By:', signer.name);
   drawInfoRow(doc, 'Designation:',   signer.designation);
   drawInfoRow(doc, 'PRC License:',   signer.license_no);
-  drawInfoRow(doc, 'Issued:',              new Date(issued_at).toLocaleString('en-PH'));
+  drawInfoRow(doc, 'Issued:',        new Date(issued_at).toLocaleString('en-PH'));
+  if (expires_at) {
+    drawInfoRow(doc, 'Valid Until:', new Date(expires_at).toLocaleDateString('en-PH'));
+  }
 
   // Rx glyph — ASCII-safe "Rx" because U+211E ("℞") is not part of the
   // standard 14 PDF fonts and would render as a blank box / .notdef marker.
@@ -276,9 +288,9 @@ export async function renderPrescriptionPDF(rx) {
 
     // 4. Draw dosage / duration / qty — all top-aligned with the brand name.
     doc.font('Helvetica').fontSize(9.5).fillColor(TEXT_DARK);
-    doc.text(it.dosage || '—',                  col2X, rowTop, { width: colDoseW });
-    doc.text(`${it.duration_days || '—'} d`,    col3X, rowTop, { width: colDurW  });
-    doc.text(`${it.quantity_dispensed || '—'}`, col4X, rowTop, { width: colQtyW  });
+    doc.text(it.dosage || '—',                                    col2X, rowTop, { width: colDoseW });
+    doc.text(`${it.duration_days || '—'} d`,                      col3X, rowTop, { width: colDurW  });
+    doc.text(`${it.quantity_prescribed ?? it.quantity_dispensed ?? '—'}`, col4X, rowTop, { width: colQtyW  });
 
     // 5. Draw the sig line — italic, full table width, below the name block.
     doc.font('Helvetica-Oblique').fontSize(9).fillColor(TEXT_SUB)

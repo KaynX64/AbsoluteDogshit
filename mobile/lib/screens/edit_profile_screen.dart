@@ -27,6 +27,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late TextEditingController _phoneController;
   late TextEditingController _emContactNameController;
   late TextEditingController _emContactPhoneController;
+  String? _sex;
+  String? _dob;
 
   bool _isSaving = false;
 
@@ -46,6 +48,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         TextEditingController(text: hp['emergency_contact_name'] ?? '');
     _emContactPhoneController =
         TextEditingController(text: hp['emergency_contact_phone'] ?? '');
+    _sex = hp['sex'] as String?;
+    final rawDob = hp['date_of_birth'];
+    _dob = rawDob != null ? rawDob.toString().split('T')[0] : null;
   }
 
   @override
@@ -66,6 +71,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       'phone': _phoneController.text.trim(),
       'emergency_contact_name': _emContactNameController.text.trim(),
       'emergency_contact_phone': _emContactPhoneController.text.trim(),
+      'sex': _sex,
+      'date_of_birth': _dob,
     };
 
     try {
@@ -192,7 +199,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   ),
                   SizedBox(height: rs.h(6)),
                   Text(
-                    'Edit contact details.',
+                    'Edit your profile details.',
                     style: TextStyle(
                       fontSize: rs.sp(30),
                       fontWeight: FontWeight.w800,
@@ -202,10 +209,75 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   ),
                   SizedBox(height: rs.h(4)),
                   Text(
-                    'Keep your personal and emergency contacts updated.',
+                    'Keep your sex and personal and emergency contacts updated.',
                     style: TextStyle(fontSize: rs.sp(14), color: textSub),
                   ),
                   SizedBox(height: rs.h(24)),
+
+                  Text(
+                    'Sex',
+                    style: TextStyle(
+                      fontSize: rs.sp(13),
+                      fontWeight: FontWeight.w700,
+                      color: textMain,
+                    ),
+                  ),
+                  SizedBox(height: rs.h(8)),
+                  DropdownButtonFormField<String>(
+                    initialValue: _sex,
+                    decoration: _pillInputDecoration(
+                      rs: rs,
+                      hint: 'Select sex',
+                      icon: Icons.person_outline,
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'MALE', child: Text('MALE')),
+                      DropdownMenuItem(value: 'FEMALE', child: Text('FEMALE')),
+                    ],
+                    onChanged: (value) => setState(() => _sex = value),
+                  ),
+                  SizedBox(height: rs.h(20)),
+
+                  Text(
+                    'Date of Birth',
+                    style: TextStyle(
+                      fontSize: rs.sp(13),
+                      fontWeight: FontWeight.w700,
+                      color: textMain,
+                    ),
+                  ),
+                  SizedBox(height: rs.h(8)),
+                  InkWell(
+                    onTap: () async {
+                      final now = DateTime.now();
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: _dob != null ? (DateTime.tryParse(_dob!) ?? DateTime(2000)) : DateTime(2000),
+                        firstDate: DateTime(1920),
+                        lastDate: now,
+                      );
+                      if (picked != null) {
+                        setState(() {
+                          _dob = "${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}";
+                        });
+                      }
+                    },
+                    child: InputDecorator(
+                      decoration: _pillInputDecoration(
+                        rs: rs,
+                        hint: 'Select Date of Birth',
+                        icon: Icons.cake_outlined,
+                      ),
+                      child: Text(
+                        _dob ?? 'Select Date of Birth',
+                        style: TextStyle(
+                          fontSize: rs.sp(14),
+                          color: _dob != null ? textMain : textSub,
+                        ),
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: rs.h(20)),
 
                   // Infirmary Note
                   Container(
@@ -321,7 +393,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                               ),
                             )
                           : Text(
-                              'Save contact changes',
+                              'Save profile changes',
                               style: TextStyle(
                                 fontSize: rs.sp(15),
                                 fontWeight: FontWeight.w700,

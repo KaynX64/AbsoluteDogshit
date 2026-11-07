@@ -46,7 +46,7 @@ export default function documentRoutes(io) {
   // =============================================================================
 
   router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST'), async (req, res) => {
-    const { emr_id, patient_user_id, items, notes, appointment_id } = req.body;
+    const { emr_id, patient_user_id, items, notes, appointment_id, expires_at } = req.body;
     const doctorUserId = req.user.user_id;
 
     if (!patient_user_id || !Array.isArray(items) || items.length === 0) {
@@ -86,6 +86,7 @@ export default function documentRoutes(io) {
       const signer = await assertValidSigner(connection, doctorUserId);
       await assertValidPatient(connection, patient_user_id, doctorUserId);
       await assertAppointmentInQueue(connection, appointment_id, patient_user_id, doctorUserId);
+      const expDate = resolveExpiryDate(expires_at, 30, 180);
       const [[sg]] = await connection.query(
         'SELECT signature_s3_key, signature_sha256 FROM STAFF_PROFILES WHERE user_id = ?',
         [doctorUserId]
@@ -98,15 +99,15 @@ export default function documentRoutes(io) {
       const requestedByMedicine = {};
       for (const item of formularyItems) {
         const medId = Number(item.medicine_id);
-        const qty = parseInt(item.quantity_dispensed, 10) || parseInt(item.quantity, 10) || 1;
+        const qty = parseInt(item.quantity_prescribed, 10) || parseInt(item.quantity_dispensed, 10) || parseInt(item.quantity, 10) || 1;
         if (isNaN(qty) || qty <= 0) {
-          throw new Error(`Quantity dispensed for all prescribed items must be a positive integer.`);
+          throw new Error(`Quantity prescribed for all formulary items must be a positive integer.`);
         }
         requestedByMedicine[medId] = (requestedByMedicine[medId] || 0) + qty;
       }
       for (const item of outsideItems) {
         // Advisory quantity for an external-pharmacy purchase (not deducted).
-        const qty = parseInt(item.quantity_dispensed, 10) || parseInt(item.quantity, 10) || 1;
+        const qty = parseInt(item.quantity_prescribed, 10) || parseInt(item.quantity_dispensed, 10) || parseInt(item.quantity, 10) || 1;
         if (isNaN(qty) || qty <= 0) {
           throw new Error(`Quantity for outside drug "${item.outside_drug_name}" must be a positive integer.`);
         }
@@ -268,18 +269,20 @@ export default function documentRoutes(io) {
           expiry_date: d.expiry_date,
           quantity: d.deducted_qty,
         })),
+        expires_at: expDate,
       };
 
       const encryptedNotes = encrypt(notes || '');
 
       const [headerResult] = await connection.query(
         `INSERT INTO PRESCRIPTIONS 
-         (emr_id, patient_user_id, doctor_user_id, status, notes, qr_token, signature_metadata)
-         VALUES (?, ?, ?, 'active', ?, ?, ?)`,
+         (emr_id, patient_user_id, doctor_user_id, status, expires_at, notes, qr_token, signature_metadata)
+         VALUES (?, ?, ?, 'active', ?, ?, ?, ?)`,
         [
           targetEmrId,
           patient_user_id,
           doctorUserId,
+          expDate,
           encryptedNotes,
           qrToken,
           JSON.stringify(signatureMetadata),
@@ -290,10 +293,15 @@ export default function documentRoutes(io) {
 
       // ── Persist prescription line items ─────────────────────────────────────
       for (const item of formularyItems) {
+        const qtyPrescribed = parseInt(item.quantity_prescribed, 10) || parseInt(item.quantity_dispensed, 10) || parseInt(item.quantity, 10) || 1;
+        const qtyDispensed = item.quantity_dispensed !== undefined && item.quantity_dispensed !== null
+          ? parseInt(item.quantity_dispensed, 10)
+          : qtyPrescribed;
+
         await connection.query(
           `INSERT INTO PRESCRIPTION_ITEMS 
-           (prescription_id, medicine_id, dosage, frequency, route, duration_days, quantity_dispensed, instructions)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           (prescription_id, medicine_id, dosage, frequency, route, duration_days, quantity_prescribed, quantity_dispensed, instructions)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             prescriptionId,
             item.medicine_id,
@@ -301,18 +309,19 @@ export default function documentRoutes(io) {
             item.frequency || 'Every 6 hours',
             item.route || 'Oral',
             item.duration_days || 3,
-            item.quantity_dispensed || 10,
+            qtyPrescribed,
+            qtyDispensed,
             encrypt(item.instructions || 'Take after meals'),
           ]
         );
       }
       for (const item of outsideItems) {
-        // Outside drug: medicine_id stays NULL; the free-text name is stored in
-        // outside_name. No inventory rows are touched for these items.
+        const qtyPrescribed = parseInt(item.quantity_prescribed, 10) || parseInt(item.quantity_dispensed, 10) || parseInt(item.quantity, 10) || 1;
+        // Outside drug: medicine_id stays NULL; quantity_dispensed is 0 because the infirmary does NOT dispense it.
         await connection.query(
           `INSERT INTO PRESCRIPTION_ITEMS 
-           (prescription_id, medicine_id, outside_name, dosage, frequency, route, duration_days, quantity_dispensed, instructions)
-           VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+           (prescription_id, medicine_id, outside_name, dosage, frequency, route, duration_days, quantity_prescribed, quantity_dispensed, instructions)
+           VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             prescriptionId,
             item.outside_drug_name,
@@ -320,7 +329,8 @@ export default function documentRoutes(io) {
             item.frequency || 'As needed',
             item.route || 'Oral',
             item.duration_days || 3,
-            item.quantity_dispensed || 1,
+            qtyPrescribed,
+            0,
             encrypt(item.instructions || 'Purchase from an external pharmacy and take as directed'),
           ]
         );
@@ -463,7 +473,7 @@ export default function documentRoutes(io) {
       const userId = req.user.user_id;
 
       const [rows] = await pool.query(
-        `SELECT p.prescription_id, p.emr_id, p.issued_at, p.status, p.notes, p.qr_token,
+        `SELECT p.prescription_id, p.emr_id, p.issued_at, p.expires_at, p.status, p.notes, p.qr_token,
                 p.signature_metadata, p.pdf_s3_key,
                 doc.first_name AS doctor_first_name, doc.last_name AS doctor_last_name,
                 COALESCE(sp.license_no, 'Not on file') AS doctor_license,
@@ -478,6 +488,7 @@ export default function documentRoutes(io) {
                     'frequency', pi.frequency,
                     'route', pi.route,
                     'duration_days', pi.duration_days,
+                    'quantity_prescribed', pi.quantity_prescribed,
                     'quantity_dispensed', pi.quantity_dispensed,
                     'instructions', pi.instructions
                   )
@@ -529,7 +540,7 @@ export default function documentRoutes(io) {
 
       try {
         const [rows] = await pool.query(
-          `SELECT p.prescription_id, p.emr_id, p.issued_at, p.status, p.notes, p.pdf_s3_key,
+          `SELECT p.prescription_id, p.emr_id, p.issued_at, p.expires_at, p.status, p.notes, p.pdf_s3_key,
                   JSON_ARRAYAGG(
                     JSON_OBJECT(
                       'item_id', pi.item_id,
@@ -540,6 +551,7 @@ export default function documentRoutes(io) {
                       'frequency', pi.frequency,
                       'route', pi.route,
                       'duration_days', pi.duration_days,
+                      'quantity_prescribed', pi.quantity_prescribed,
                       'quantity_dispensed', pi.quantity_dispensed,
                       'instructions', pi.instructions
                     )
@@ -561,6 +573,7 @@ export default function documentRoutes(io) {
             prescription_id: rx.prescription_id,
             emr_id: rx.emr_id,
             issued_at: rx.issued_at,
+            expires_at: rx.expires_at,
             status: rx.status,
             notes: decrypt(rx.notes),
             pdfAvailable: Boolean(rx.pdf_s3_key),
@@ -1165,7 +1178,7 @@ export default function documentRoutes(io) {
       // 2. Check if token is a Prescription
       // PUBLIC view = authenticity only. No medications, dosages, notes, student no., or course.
       const [prescriptions] = await pool.query(
-        `SELECT p.status, p.issued_at, p.signature_metadata,
+        `SELECT p.status, p.issued_at, p.expires_at, p.signature_metadata,
                 u.first_name AS patient_first_name, u.last_name AS patient_last_name,
                 doc.first_name AS doc_first_name, doc.last_name AS doc_last_name,
                 staff.license_no AS doc_license
@@ -1180,7 +1193,8 @@ export default function documentRoutes(io) {
       if (prescriptions.length > 0) {
         const p = prescriptions[0];
         const isCancelled = p.status === 'cancelled';
-        const isValid = !isCancelled && (p.status === 'active' || p.status === 'dispensed');
+        const isExpired = p.status === 'expired' || (p.expires_at && new Date(p.expires_at) < new Date());
+        const isValid = !isCancelled && !isExpired && (p.status === 'active' || p.status === 'dispensed');
 
         if (acceptsHtml) {
           const verifyHtml = getVerifyHtmlPath();
@@ -1191,12 +1205,13 @@ export default function documentRoutes(io) {
           valid: isValid,
           verified: isValid,
           type: 'PRESCRIPTION',
-          status: p.status,
+          status: isCancelled ? 'cancelled' : isExpired ? 'expired' : p.status,
           patient: maskPatientName(p.patient_first_name, p.patient_last_name),
           studentNo: 'N/A',   // placeholder so existing verify.html does not break
           course: 'N/A',      // placeholder so existing verify.html does not break
           issuedBy: formatIssuedBy(p.doc_first_name, p.doc_last_name, p.doc_license, parseMetadata(p.signature_metadata).signer_role),
           issuedAt: p.issued_at,
+          expiresAt: p.expires_at,
           notes: null,
           items: [],
           metadata: pickPublicSignature(parseMetadata(p.signature_metadata)),
@@ -1319,14 +1334,17 @@ export default function documentRoutes(io) {
 
         // 2. Prescription
         const [prescriptions] = await pool.query(
-          `SELECT p.prescription_id, p.patient_user_id, p.status, p.issued_at, p.notes,
+          `SELECT p.prescription_id, p.patient_user_id, p.status, p.issued_at, p.expires_at, p.notes,
                   p.signature_metadata,
                   u.first_name AS patient_first_name, u.last_name AS patient_last_name,
+                  hp.sex, hp.date_of_birth,
+                  TIMESTAMPDIFF(YEAR, hp.date_of_birth, CURDATE()) AS age,
                   sp.student_no, sp.course,
                   doc.first_name AS doc_first_name, doc.last_name AS doc_last_name,
                   staff.license_no AS doc_license
            FROM PRESCRIPTIONS p
            JOIN USERS u ON p.patient_user_id = u.user_id
+           LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
            LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
            JOIN USERS doc ON p.doctor_user_id = doc.user_id
            LEFT JOIN STAFF_PROFILES staff ON doc.user_id = staff.user_id
@@ -1336,11 +1354,13 @@ export default function documentRoutes(io) {
 
         if (prescriptions.length > 0) {
           const p = prescriptions[0];
-          const isValid = p.status === 'active' || p.status === 'dispensed';
+          const isCancelled = p.status === 'cancelled';
+          const isExpired = p.status === 'expired' || (p.expires_at && new Date(p.expires_at) < new Date());
+          const isValid = !isCancelled && !isExpired && (p.status === 'active' || p.status === 'dispensed');
 
           const [items] = await pool.query(
             `SELECT pi.dosage, pi.frequency, pi.route, pi.duration_days,
-                    pi.quantity_dispensed, pi.instructions,
+                    pi.quantity_prescribed, pi.quantity_dispensed, pi.instructions,
                     COALESCE(m.name, pi.outside_name) AS medicine_name,
                     m.generic_name,
                     (pi.medicine_id IS NULL) AS is_outside
@@ -1362,12 +1382,16 @@ export default function documentRoutes(io) {
           return res.json({
             valid: isValid,
             type: 'PRESCRIPTION',
-            status: p.status,
+            status: isCancelled ? 'cancelled' : isExpired ? 'expired' : p.status,
             patient: `${p.patient_first_name} ${p.patient_last_name}`,
+            dateOfBirth: p.date_of_birth,
+            age: p.age,
+            sex: p.sex,
             studentNo: p.student_no || 'N/A',
             course: p.course || 'N/A',
             issuedBy: formatIssuedBy(p.doc_first_name, p.doc_last_name, p.doc_license, parseMetadata(p.signature_metadata).signer_role),
             issuedAt: p.issued_at,
+            expiresAt: p.expires_at,
             notes: decrypt(p.notes),
             items: items.map((it) => ({ ...it, instructions: decrypt(it.instructions) })),
             metadata: parseMetadata(p.signature_metadata),

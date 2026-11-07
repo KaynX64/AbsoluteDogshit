@@ -37,17 +37,32 @@ export async function runAutoMigrations() {
     const columnsToCheck = [
       { table: 'PRESCRIPTIONS', column: 'signature_metadata', type: 'JSON NULL' },
       { table: 'PRESCRIPTIONS', column: 'pdf_s3_key', type: 'VARCHAR(500) NULL' },
+      { table: 'PRESCRIPTIONS', column: 'expires_at', type: 'DATE NULL' },
       { table: 'PRESCRIPTIONS', column: 'version', type: 'INT NOT NULL DEFAULT 1' },
       { table: 'PRESCRIPTIONS', column: 'deleted_at', type: 'TIMESTAMP NULL DEFAULT NULL' },
       // Outside-drug prescriptions: free-text medication name for items not
       // stocked in the infirmary formulary (medicine_id is NULL for these).
       { table: 'PRESCRIPTION_ITEMS', column: 'outside_name', type: "VARCHAR(200) NULL COMMENT 'Free-text drug name for outside (non-formulary) items'" },
+      { table: 'PRESCRIPTION_ITEMS', column: 'quantity_prescribed', type: "INT NOT NULL DEFAULT 1 COMMENT 'Quantity prescribed by clinician'" },
       { table: 'MEDICAL_CLEARANCES', column: 'pdf_s3_key', type: 'VARCHAR(500) NULL' },
       { table: 'MEDICAL_CLEARANCES', column: 'version', type: 'INT NOT NULL DEFAULT 1' },
       { table: 'MEDICAL_CLEARANCES', column: 'deleted_at', type: 'TIMESTAMP NULL DEFAULT NULL' },
       { table: 'STAFF_PROFILES', column: 'signature_s3_key', type: 'VARCHAR(500) NULL' },
       { table: 'STAFF_PROFILES', column: 'signature_sha256', type: 'CHAR(64) NULL' },
       { table: 'STAFF_PROFILES', column: 'signature_updated_at', type: 'TIMESTAMP NULL DEFAULT NULL' },
+      { table: 'HEALTH_PROFILES', column: 'sex', type: "ENUM('MALE', 'FEMALE') NULL" },
+      { table: 'HEALTH_PROFILES', column: 'date_of_birth', type: 'DATE NULL' },
+      {
+        table: 'HEALTH_PROFILES',
+        column: 'bmi',
+        type: `DECIMAL(6,2) GENERATED ALWAYS AS (
+          CASE
+            WHEN height > 0 AND weight > 0
+            THEN ROUND(weight / POW(height / 100, 2), 2)
+            ELSE NULL
+          END
+        ) STORED`,
+      },
     ];
 
     for (const item of columnsToCheck) {
@@ -62,6 +77,20 @@ export async function runAutoMigrations() {
         console.log(`📦 [Auto-Migration] Added missing column ${item.table}.${item.column}`);
       }
     }
+
+    // ── Backfill PRESCRIPTIONS.expires_at for legacy rows without an expiry ──
+    try {
+      await pool.query(
+        'UPDATE PRESCRIPTIONS SET expires_at = DATE(DATE_ADD(issued_at, INTERVAL 30 DAY)) WHERE expires_at IS NULL'
+      );
+    } catch (_) {}
+
+    // ── Backfill PRESCRIPTION_ITEMS.quantity_prescribed from quantity_dispensed ──
+    try {
+      await pool.query(
+        'UPDATE PRESCRIPTION_ITEMS SET quantity_prescribed = quantity_dispensed WHERE (quantity_prescribed IS NULL OR quantity_prescribed = 1) AND quantity_dispensed > 1'
+      );
+    } catch (_) {}
 
     // ── Allow PRESCRIPTION_ITEMS.medicine_id to be NULL (outside drugs) ─────
     // Outside prescriptions reference no formulary medicine, so the column

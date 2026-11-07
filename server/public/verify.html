@@ -532,6 +532,8 @@
     function renderPrescription(doc, token) {
       const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(window.location.href)}`;
       const items = doc.items || [];
+      const isExpired = doc.status === 'expired' || (doc.expiresAt && new Date(doc.expiresAt) < new Date());
+      const isCancelled = doc.status === 'cancelled';
 
       let itemsRows = '';
       if (items.length > 0) {
@@ -540,7 +542,7 @@
             <td><b>${it.medicine_name || 'Prescribed Med'}</b><br><small style="color:var(--text-sub);">${it.generic_name || ''}</small></td>
             <td><b>${it.dosage || '500mg'}</b></td>
             <td>${it.instructions || 'Take as directed'}<br><small style="color:var(--text-sub);">${it.frequency || 'Daily'} • ${it.duration_days || 3} days</small></td>
-            <td><b>${it.quantity_dispensed || 10} pcs</b></td>
+            <td><b>${it.quantity_prescribed || it.quantity_dispensed || 10} pcs</b></td>
           </tr>
         `).join('');
       } else {
@@ -556,8 +558,8 @@
         </div>
 
         <div class="status-badge-wrap">
-          <span class="status-badge verified">
-            VERIFIED CLINICAL PRESCRIPTION (℞)
+          <span class="status-badge ${isCancelled ? 'expired' : isExpired ? 'expired' : 'verified'}">
+            ${isCancelled ? 'CANCELLED CLINICAL PRESCRIPTION' : isExpired ? 'EXPIRED CLINICAL PRESCRIPTION (℞)' : 'VERIFIED CLINICAL PRESCRIPTION (℞)'}
           </span>
         </div>
 
@@ -578,6 +580,20 @@
             <span class="data-label">Date Prescribed:</span>
             <span class="data-value">${formatDate(doc.issuedAt)}</span>
           </div>
+          ${doc.expiresAt ? `
+          <div class="data-row">
+            <span class="data-label">Valid Until:</span>
+            <span class="data-value" style="color: ${isExpired ? 'var(--crimson)' : 'var(--emerald)'}; font-weight: 700;">${formatDate(doc.expiresAt)}</span>
+          </div>` : ''}
+          ${doc.dateOfBirth || doc.age != null ? `
+          <div class="data-row">
+            <span class="data-label">DOB / Age:</span>
+            <span class="data-value">${doc.dateOfBirth ? formatDate(doc.dateOfBirth) : ''}${doc.age != null ? ` (${doc.age} yrs old)` : ''}${doc.sex ? ` · ${doc.sex}` : ''}</span>
+          </div>` : doc.sex ? `
+          <div class="data-row">
+            <span class="data-label">Sex:</span>
+            <span class="data-value">${doc.sex}</span>
+          </div>` : ''}
           ${doc.notes ? `
           <div class="data-row">
             <span class="data-label">Physician Notes:</span>

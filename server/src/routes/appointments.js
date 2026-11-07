@@ -20,6 +20,7 @@ import {
 } from '../config/appointmentRules.js';
 import { BOOKING_LIMIT } from '../config/limits.js';
 import { validateDentalChart } from '../utils/dentalValidator.js';
+import { getBmiCategory } from '../utils/bmi.js';
 import { SignerError, assertAppointmentInQueue } from '../utils/signatory.js';
 
 // Odontogram helpers
@@ -601,7 +602,8 @@ export default function appointmentRoutes(io) {
                 COALESCE(sp.student_no, st.license_no, fp.position, 'PSU Member') AS student_no,
                 COALESCE(sp.course, st.department, fp.department, 'PSU Lingayen') AS course,
                 hp.blood_type, hp.allergies, hp.chronic_conditions,
-                hp.height, hp.weight, hp.updated_at AS health_profile_updated_at,
+                hp.sex, hp.date_of_birth, TIMESTAMPDIFF(YEAR, hp.date_of_birth, CURDATE()) AS age,
+                hp.height, hp.weight, hp.bmi, hp.updated_at AS health_profile_updated_at,
                 CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS queue_ticket,
                 q.status AS queue_status,
                 emr.chief_complaint AS past_chief_complaint,
@@ -631,6 +633,7 @@ export default function appointmentRoutes(io) {
         ...app,
         allergies: decrypt(app.allergies) || 'None reported',
         chronic_conditions: decrypt(app.chronic_conditions) || 'None reported',
+        bmi_category: getBmiCategory(app.bmi),
         past_chief_complaint: decrypt(app.past_chief_complaint) || '',
         past_diagnosis: decrypt(app.past_diagnosis) || '',
         past_treatment: stripLegacyOdontogram(decrypt(app.past_treatment)),
@@ -933,7 +936,8 @@ export default function appointmentRoutes(io) {
                 COALESCE(sp.student_no, 'N/A') AS student_no,
                 COALESCE(sp.course, 'PSU Lingayen') AS course,
                 hp.blood_type, hp.allergies, hp.chronic_conditions,
-                hp.height, hp.weight, hp.updated_at AS health_profile_updated_at,
+                hp.sex, hp.date_of_birth, TIMESTAMPDIFF(YEAR, hp.date_of_birth, CURDATE()) AS age,
+                hp.height, hp.weight, hp.bmi, hp.updated_at AS health_profile_updated_at,
                 doc.last_name AS doc_last_name
          FROM APPOINTMENTS a
          JOIN USERS u ON a.patient_user_id = u.user_id
@@ -952,6 +956,7 @@ export default function appointmentRoutes(io) {
         ...app,
         allergies: decrypt(app.allergies) || 'None reported',
         chronic_conditions: decrypt(app.chronic_conditions) || 'None reported',
+        bmi_category: getBmiCategory(app.bmi),
       }));
 
       res.json(decrypted);
@@ -964,9 +969,20 @@ export default function appointmentRoutes(io) {
   // ===========================================================================
   // NURSE QR INTAKE CHECK-IN
   // ===========================================================================
-  router.post('/:id/checkin', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
+  router.post('/:id/checkin', authenticateToken, requireRoles('NURSE', 'ADMIN'), async (req, res) => {
     const appointmentId = Number(req.params.id);
-    const { blood_pressure, temperature, pulse, height, weight } = req.body;
+    const { blood_pressure, temperature, pulse, spo2, resp_rate, sex, date_of_birth, height, weight } = req.body;
+
+    if (sex !== undefined && sex !== null && !['MALE', 'FEMALE'].includes(sex)) {
+      return res.status(400).json({ error: 'sex must be MALE or FEMALE.' });
+    }
+
+    if (date_of_birth !== undefined && date_of_birth !== null && date_of_birth !== '') {
+      const dobDate = new Date(date_of_birth);
+      if (isNaN(dobDate.getTime()) || dobDate > new Date()) {
+        return res.status(400).json({ error: 'date_of_birth must be a valid date in the past.' });
+      }
+    }
 
     const connection = await pool.getConnection();
     try {
@@ -1015,7 +1031,7 @@ export default function appointmentRoutes(io) {
         [app.patient_user_id, appointmentId, nextNum]
       );
 
-      const triageNote = `[TRIAGE VITALS] BP: ${blood_pressure || '120/80'}, Temp: ${temperature || '36.6'}°C, Pulse: ${pulse || '75'} bpm, Height: ${height || '—'} cm, Weight: ${weight || '—'} kg\n`;
+      const triageNote = `[TRIAGE VITALS] BP: ${blood_pressure || '120/80'}, Temp: ${temperature || '36.6'}°C, Pulse: ${pulse || '75'} bpm, SpO2: ${spo2 || '—'}%, Resp: ${resp_rate || '—'} cpm, Height: ${height || '—'} cm, Weight: ${weight || '—'} kg\n`;
       const combinedNotes = triageNote + (app.notes || '');
 
       await connection.query(
@@ -1023,7 +1039,7 @@ export default function appointmentRoutes(io) {
         [combinedNotes, appointmentId]
       );
 
-      if (height || weight) {
+      if (sex || date_of_birth || height || weight) {
         const [hpRows] = await connection.query(
           'SELECT profile_id FROM HEALTH_PROFILES WHERE user_id = ?',
           [app.patient_user_id]
@@ -1031,16 +1047,18 @@ export default function appointmentRoutes(io) {
         if (hpRows.length > 0) {
           await connection.query(
             `UPDATE HEALTH_PROFILES
-             SET height = COALESCE(?, height),
+             SET sex = COALESCE(?, sex),
+                 date_of_birth = COALESCE(?, date_of_birth),
+                 height = COALESCE(?, height),
                  weight = COALESCE(?, weight),
                  updated_at = CURRENT_TIMESTAMP
              WHERE user_id = ?`,
-            [height ? Number(height) : null, weight ? Number(weight) : null, app.patient_user_id]
+            [sex || null, date_of_birth || null, height ? Number(height) : null, weight ? Number(weight) : null, app.patient_user_id]
           );
         } else {
           await connection.query(
-            `INSERT INTO HEALTH_PROFILES (user_id, height, weight) VALUES (?, ?, ?)`,
-            [app.patient_user_id, height ? Number(height) : null, weight ? Number(weight) : null]
+            `INSERT INTO HEALTH_PROFILES (user_id, sex, date_of_birth, height, weight) VALUES (?, ?, ?, ?, ?)`,
+            [app.patient_user_id, sex || null, date_of_birth || null, height ? Number(height) : null, weight ? Number(weight) : null]
           );
         }
       }
@@ -1056,6 +1074,7 @@ export default function appointmentRoutes(io) {
           queue_number: nextNum,
           height: height || null,
           weight: weight || null,
+          sex: sex || null,
         },
         ipAddress: req.ip,
       });
@@ -1089,7 +1108,26 @@ export default function appointmentRoutes(io) {
   // 6.1 POST /api/appointments/walk-in
   // ===========================================================================
   router.post('/walk-in', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
-    const { patient_user_id, visit_type, notes, vitals } = req.body;
+    const { patient_user_id, visit_type, notes, vitals, sex, date_of_birth } = req.body;
+
+    const userRoles = req.user.roles || [];
+    if (
+      (vitals !== undefined || sex !== undefined) &&
+      !userRoles.includes('ADMIN') &&
+      (userRoles.includes('DOCTOR') || userRoles.includes('DENTIST'))
+    ) {
+      return res.status(403).json({ error: 'Doctors and dentists cannot record patient vitals.' });
+    }
+    if (sex !== undefined && sex !== null && !['MALE', 'FEMALE'].includes(sex)) {
+      return res.status(400).json({ error: 'sex must be MALE or FEMALE.' });
+    }
+    if (date_of_birth !== undefined && date_of_birth !== null && date_of_birth !== '') {
+      const dobDate = new Date(date_of_birth);
+      if (isNaN(dobDate.getTime()) || dobDate > new Date()) {
+        return res.status(400).json({ error: 'date_of_birth must be a valid date in the past.' });
+      }
+    }
+    const patientVitals = vitals && typeof vitals === 'object' ? vitals : {};
 
     if (!patient_user_id) {
       return res.status(400).json({ error: 'patient_user_id is required.' });
@@ -1134,7 +1172,7 @@ export default function appointmentRoutes(io) {
         [patient_user_id, nextNum]
       );
 
-      if (vitals && (vitals.height || vitals.weight)) {
+      if (sex || date_of_birth || patientVitals.height || patientVitals.weight) {
         const [hpRows] = await connection.query(
           'SELECT profile_id FROM HEALTH_PROFILES WHERE user_id = ?',
           [patient_user_id]
@@ -1143,23 +1181,29 @@ export default function appointmentRoutes(io) {
         if (hpRows.length > 0) {
           await connection.query(
             `UPDATE HEALTH_PROFILES
-             SET height = COALESCE(?, height),
+             SET sex = COALESCE(?, sex),
+                 date_of_birth = COALESCE(?, date_of_birth),
+                 height = COALESCE(?, height),
                  weight = COALESCE(?, weight),
                  updated_at = CURRENT_TIMESTAMP
              WHERE user_id = ?`,
             [
-              vitals.height ? Number(vitals.height) : null,
-              vitals.weight ? Number(vitals.weight) : null,
+              sex || null,
+              date_of_birth || null,
+              patientVitals.height ? Number(patientVitals.height) : null,
+              patientVitals.weight ? Number(patientVitals.weight) : null,
               patient_user_id,
             ]
           );
         } else {
           await connection.query(
-            'INSERT INTO HEALTH_PROFILES (user_id, height, weight) VALUES (?, ?, ?)',
+            'INSERT INTO HEALTH_PROFILES (user_id, sex, date_of_birth, height, weight) VALUES (?, ?, ?, ?, ?)',
             [
               patient_user_id,
-              vitals.height ? Number(vitals.height) : null,
-              vitals.weight ? Number(vitals.weight) : null,
+              sex || null,
+              date_of_birth || null,
+              patientVitals.height ? Number(patientVitals.height) : null,
+              patientVitals.weight ? Number(patientVitals.weight) : null,
             ]
           );
         }
@@ -1177,7 +1221,7 @@ export default function appointmentRoutes(io) {
           queue_number: nextNum,
           visit_type: visit_type || 'Walk-in Consultation',
           notes: notes || null,
-          vitals_recorded: Boolean(vitals),
+          vitals_recorded: Boolean(vitals || sex),
         },
         ipAddress: req.ip,
       });
@@ -1341,6 +1385,15 @@ export default function appointmentRoutes(io) {
       vitals,
       dental_chart,
     } = req.body;
+
+    const userRoles = req.user.roles || [];
+    if (
+      vitals !== undefined &&
+      !userRoles.includes('ADMIN') &&
+      (userRoles.includes('DOCTOR') || userRoles.includes('DENTIST'))
+    ) {
+      return res.status(403).json({ error: 'Doctors and dentists cannot record patient vitals.' });
+    }
 
     if (!diagnosis || !chief_complaint) {
       return res.status(400).json({ error: 'Chief complaint and diagnosis are required.' });

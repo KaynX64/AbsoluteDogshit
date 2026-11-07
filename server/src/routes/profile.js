@@ -8,6 +8,7 @@ import { requirePrivacyConsent } from '../middleware/consent.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
 import { SignerError, assertAppointmentInQueue } from '../utils/signatory.js';
+import { getBmiCategory } from '../utils/bmi.js';
 
 const router = express.Router();
 
@@ -52,7 +53,9 @@ router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
     // Fetch clinical profile from HEALTH_PROFILES
     const [healthRows] = await pool.query(
       `SELECT profile_id, blood_type, allergies, chronic_conditions, immunization_history,
-              emergency_contact_name, emergency_contact_phone, height, weight, updated_at
+              emergency_contact_name, emergency_contact_phone, sex, date_of_birth,
+              TIMESTAMPDIFF(YEAR, date_of_birth, CURDATE()) AS age,
+              height, weight, bmi, updated_at
        FROM HEALTH_PROFILES
        WHERE user_id = ? AND deleted_at IS NULL`,
       [userId]
@@ -63,6 +66,7 @@ router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
     if (healthProfile) {
       healthProfile.allergies = decrypt(healthProfile.allergies) || '';
       healthProfile.chronic_conditions = decrypt(healthProfile.chronic_conditions) || '';
+      healthProfile.bmi_category = getBmiCategory(healthProfile.bmi);
     }
 
     res.json({
@@ -203,9 +207,22 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
     chronic_conditions,
     emergency_contact_name,
     emergency_contact_phone,
+    sex,
+    date_of_birth,
     height,
     weight,
   } = req.body;
+
+  if (sex !== undefined && sex !== null && !['MALE', 'FEMALE'].includes(sex)) {
+    return res.status(400).json({ error: 'sex must be MALE or FEMALE.' });
+  }
+
+  if (date_of_birth !== undefined && date_of_birth !== null && date_of_birth !== '') {
+    const dobDate = new Date(date_of_birth);
+    if (isNaN(dobDate.getTime()) || dobDate > new Date()) {
+      return res.status(400).json({ error: 'date_of_birth must be a valid date in the past.' });
+    }
+  }
 
   const connection = await pool.getConnection();
 
@@ -234,6 +251,8 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
       const updatedConditions = chronic_conditions !== undefined ? encrypt(chronic_conditions) : old.chronic_conditions;
       const updatedEmName = emergency_contact_name !== undefined ? emergency_contact_name : old.emergency_contact_name;
       const updatedEmPhone = emergency_contact_phone !== undefined ? emergency_contact_phone : old.emergency_contact_phone;
+      const updatedSex = sex !== undefined ? sex : old.sex;
+      const updatedDob = date_of_birth !== undefined ? (date_of_birth || null) : old.date_of_birth;
       const updatedHeight = height !== undefined ? height : old.height;
       const updatedWeight = weight !== undefined ? weight : old.weight;
 
@@ -241,15 +260,15 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
         `UPDATE HEALTH_PROFILES
          SET blood_type = ?, allergies = ?, chronic_conditions = ?,
              emergency_contact_name = ?, emergency_contact_phone = ?,
-             height = ?, weight = ?, version = version + 1
+             sex = ?, date_of_birth = ?, height = ?, weight = ?, version = version + 1
          WHERE user_id = ?`,
-        [updatedBlood, updatedAllergies, updatedConditions, updatedEmName, updatedEmPhone, updatedHeight, updatedWeight, userId]
+        [updatedBlood, updatedAllergies, updatedConditions, updatedEmName, updatedEmPhone, updatedSex, updatedDob, updatedHeight, updatedWeight, userId]
       );
     } else {
       const [result] = await connection.query(
         `INSERT INTO HEALTH_PROFILES
-         (user_id, blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, height, weight)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         (user_id, blood_type, allergies, chronic_conditions, emergency_contact_name, emergency_contact_phone, sex, date_of_birth, height, weight)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           userId,
           blood_type || null,
@@ -257,6 +276,8 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
           chronic_conditions ? encrypt(chronic_conditions) : null,
           emergency_contact_name || null,
           emergency_contact_phone || null,
+          sex || null,
+          date_of_birth || null,
           height || null,
           weight || null,
         ]
@@ -270,7 +291,7 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
       table: 'HEALTH_PROFILES',
       recordId,
       oldValue: null,
-      newValue: { blood_type, height, weight, emergency_contact_name, encrypted: true },
+      newValue: { blood_type, sex, date_of_birth, height, weight, emergency_contact_name, encrypted: true },
       ipAddress: req.ip,
     });
 
