@@ -2,14 +2,14 @@
 
 Flat folder: one component per file, header comment `// desktop/src/components/<Name>.tsx`. All line anchors below are for commit **b7556cb** — after edits, re-derive with `rg -n "<symbol>" <File>.tsx` instead of trusting stale numbers.
 
-**Never open a file >1k lines whole.** Use the anchors: read a ±40-line window around the line you need.
+**Never open a file >1k lines whole.** Use the anchors: read a ±40-line window around the line you need. For the full picture of any monolith, start from `CODESLICE.md` (this directory) — a slim index routing to per-monolith slice maps in `codeslice/` (Mounted-by / API-surface / socket / state header + machine-verified line-range slices with rg-able anchors). Where a sub-MD disagrees with the L-numbers below, the sub-MD is fresher.
 
 ## Universal patterns (copy these; don't invent variants)
 
 - Auth: `const token = localStorage.getItem('valetudo_token')` → `headers: { Authorization: \`Bearer ${token}\` }`. App.tsx sets the key at login (L575) and clears both `valetudo_token` + `token` at logout (L125-126).
 - Base URL: `import { API_BASE_URL, SOCKET_URL } from '../config/api'` — never hardcode a host.
 - HTTP: plain `fetch()` with manual `res.ok` / status-code checks; JSON via `JSON.stringify`. No axios, no react-query.
-- Sockets: each realtime component opens its **own** `io(SOCKET_URL, { auth: { token } })` inside a `useEffect` and disconnects on cleanup (canonical pattern: DoctorConsole L351-374). The incident-report modal also sends `clientInstanceId` from `services/clientInstance.ts`; status actions that can open that modal send the same ID in `X-Client-Instance-Id`. Keep these values aligned so only the initiating desktop window receives its popup. New client-side event names need a matching server `io.emit(...)` in `server/src/routes/*` or `utils/reminderWorker.js`.
+- Sockets: each realtime component opens its **own** `io(SOCKET_URL, { auth: { token } })` inside a `useEffect` and disconnects on cleanup (canonical pattern: DoctorConsole L351-374). New client-side event names need a matching server `io.emit(...)` in `server/src/routes/*` or `utils/reminderWorker.js`.
 - Icons: `<Icon name tone />` only — the name registry is `IconNames` (Icon.tsx L124). Add new glyphs there, not inline SVG.
 - Styling: inline `style` objects + tokens from `../theme`; `index.css` (~48 KB) is globals only.
 - Role-gated UI here is cosmetic — the server enforces RBAC on every route. Never treat client checks as security.
@@ -26,11 +26,14 @@ PrescriptionGenerator → InteractionWarning (L829)
 SignatureEnrollment   → SignaturePad
 ```
 
+- Shell slice maps (indexed in `CODESLICE.md`): `App.tsx` → `codeslice/DT-09-App.md` · `electron/main.cjs` → `codeslice/DT-13-ElectronMain.md`.
+
 **Not mounted (don't build on them):** `DentalChart.tsx` (DoctorConsole embeds its own chart at L2079), `VaccinationInputter.tsx` (**0 bytes, empty, unreferenced — delete or implement**). `EmergencyAlertBanner.tsx` IS now mounted (DoctorConsole) — it self-hides via 403 on `/api/emergency/active` for accounts the server does not consider responders.
 
 ## Consoles
 
 ### DoctorConsole.tsx — 4,366 lines. Consultations, EMR, e-Rx, clearances, immunizations, analytics
+- **Slice map:** `codeslice/DT-01-DoctorConsole.md` (68 slices, verified @ 93b4172).
 - Exports: `ToothCondition` L13, `ToothRecord` L21, `DoctorViewMode` L27 (`'active'|'scheduled'|'history'|'archive'|'analytics'`), component L178.
 - Sockets L351-374: `appointment:booked`, `appointment:status_changed`, `queue:updated`, `appointment:cancelled`.
 - Queue & consult: `fetchAppointments` L308 (`GET /api/appointments/today?filter=active|history|scheduled` L312-314), `handleConflict` L376, `selectPatient` L407, `handleStartConsultation` L557 (status → in-progress L562), `handleFinishConsultation` L588 (complete L643 + EMR + attachments upload L662).
@@ -42,6 +45,7 @@ SignatureEnrollment   → SignaturePad
 - Render anchors: page header L1172 · queue grid L1198 · analytics L1341 · archive/EMR directory L1344 · active/scheduled/history lists L1703 · labs & attachment preview L1997 · interactive odontogram L2079 · rx history modal L3085 · clearance history modal L3308 · EMR history modal L3500 · signature enroll L4239.
 
 ### AdminConsole.tsx — 3,045 lines. Users, audit, telemetry, analytics, DB Studio
+- **Slice map:** `codeslice/DT-02-AdminConsole.md` (59 slices, verified @ 93b4172).
 - Exports: `AdminTab` L83 (`'users'|'audit'|'telemetry'|'analytics'|'db'`), component L92. Props `activeTab`/`onTabChange` (App.tsx).
 - Permission gate: `fetchMyPermissions` L179 (`GET /api/admin/my-permissions`) → `can(code)` L214; every tab renders `NoPermissionPanel` without its code (`USERS_MANAGE`, `AUDIT_VIEW`, `TELEMETRY_VIEW`/`RETENTION_MANAGE`, `ANALYTICS_VIEW`, `DATABASE_MANAGE`).
 - Users tab L805: list `fetchUsers` L174 (now also returns `is_qualified_responder`, `qualified_responder_since`, `qualified_responder_note`, `sos_via_role`), edit modal `handleOpenEditModal` L400, save profile L530 (identity + sub-profile + immunizations + optional `health_profile`), reset password L680. Filter chips include a Qualified-Responders toggle (`userQrOnly`).
@@ -50,6 +54,7 @@ SignatureEnrollment   → SignaturePad
 - Audit tab: mutation logs L240, PHI access logs L252, retention L264, sweep `handleExecuteSweep` L284 (`POST /api/privacy/retention/sweep`).
 - Telemetry tab: telemetry L274. Analytics tab L1590 → `AnalyticsDashboard`. DB Studio tab L1595: tables L660/L679, save row L710, delete row L751 (writes to arbitrary tables — `DATABASE_MANAGE` protected; keep it that way).
 ### NurseConsole.tsx — 1,520 lines / 52 KB / 17 useState. Triage queue, expected, intake, live metrics
+- **Slice map:** `codeslice/DT-03-NurseConsole.md` (34 slices, verified @ 93b4172).
 - Exports: `NurseViewMode` L72 (`'triage'|'expected'|'inventory'`), component L79. App.tsx owns the mode (L486; tab bar L164-166) — `viewMode` prop is controlled, falls back to internal state.
 - Live stat row: queue L144 (`GET /api/appointments/queue/today`), active SOS count L160, no-shows today L214, inventory metrics L227 (`GET /api/inventory/dashboard-summary`), expected today L249.
 - Sockets L270-311: `queue:updated`, `emergency:new_alert`, `emergency:status_change`, `inventory:updated`, `appointment:status_changed`, `appointment:booked` — each triggers a targeted refetch.
@@ -57,39 +62,47 @@ SignatureEnrollment   → SignaturePad
 - Views: `inventory` → renders `InventoryManager` L410; `expected` L413; SOS panel L926; `QrIntakeScanner` embedded L1104.
 
 ### ResponderConsole.tsx — 490 lines / 20 KB. SOS list & dispatch
+- **Slice map:** `codeslice/DT-12-ResponderConsole.md` (15 slices, verified @ 93b4172).
 - Poll `fetchAlerts` L28 (`GET /api/emergency/active`) + sockets `emergency:new_alert` L53, `emergency:status_change` L64. Alarm `playEmergencyAlarm` L13 (WebAudio).
 - `updateStatus` L84 (`PATCH /api/emergency/:id/status`), test hooks L109/L121 (`POST /api/emergency/sos`), `statusStyle` L143.
 
 ### IncidentReportModal.tsx — 563 lines. Post-resolution incident documentation popup
+- **Slice map:** `codeslice/DT-11-IncidentReportModal.md` (18 slices, verified @ 93b4172).
 - Mounted once by App.tsx for every console view. Opens only on `emergency:incident_report_required`, which the server sends to the specific desktop window that resolved the incident; historical pending alerts do not auto-open when a console starts.
 - Pre-fill `useEffect` L98 (`GET /api/emergency/:alertId/incident-report`) — patient name / ID number / contact number / role come from the server; `resolvedAt` defaults to the stored resolution timestamp (editable `datetime-local`).
 - Submit `submitReport` L233 (`POST /api/emergency/:alertId/incident-report`; 409 `REPORT_ALREADY_FILED` = another console won, popup dismisses). Socket `emergency:incident_reported` (L189) dismisses this console's popup when someone else files first. "Skip for now" dismisses for the session only.
 - Queue behavior: popups arriving while a form is open are queued and shown one by one (`openFor` L85 / `closePopup` L212).
 
-### IncidentRecords.tsx — archived incident reports
-- Mounted from AdminConsole's Incidents tab. The View modal is rendered with `createPortal(..., document.body)` so the overlay covers the sticky top bar and escapes the animated `.app-content` stacking context. Preserve this portal if adjusting modal layout.
-
 ## Feature components
 
 ### InventoryManager.tsx — 1,456 lines / 60 KB / 32 useState. Stock movements & medicine CRUD
+- **Slice map:** `codeslice/DT-04-InventoryManager.md` (34 slices, verified @ 93b4172).
 - Loads: batches L105, medicines L115, reorder-suggestions + expiring-soon L129, movement logs L141. Socket `inventory:updated` L160 → refetch (server emits it on every deduct/receive/adjust).
 - Barcode: `processScannedCode` L179, `handleBarcodeSubmit` L250. Movements: deduct L270, receive L306, adjust L338. CRUD: create medicine L386, delete L444 (`DELETE /api/inventory/medicines/:id`).
 
 ### QrIntakeScanner.tsx — 1,437 lines / 50 KB / 21 useState. Patient intake
+- **Slice map:** `codeslice/DT-05-QrIntakeScanner.md` (26 slices, verified @ 93b4172).
 - Props: `onPatientVerified(patient, token)` — hands verified patients to NurseConsole.
 - Flow: active-ticket check L102 → health-pass verify L123 (`POST /api/health-pass/verify`) → manual search L165 (`/api/appointments/lookup`) → appointment check L239 → confirm arrival L258 (checkin) → walk-in register L297.
 - Camera via jsQR: `startCamera` L338, `tickScan` L371, QR image upload L395.
 
 ### PrescriptionGenerator.tsx — 1,063 lines / 36 KB / 18 useState. e-Prescription form
+- **Slice map:** `codeslice/DT-07-PrescriptionGenerator.md` (28 slices, verified @ 93b4172).
 - Props: `patientUserId`, `appointmentId?`, `verifiedPatient {first_name,last_name,student_no,course,allergies,date_of_birth?,age?,sex?}`, `initialNotes?`, `isArchived?`, `onPrescriptionIssued?`, `onPrescriptionError?`.
 - Medicine catalog L332 (`GET /api/inventory/medicines`); `handleSelectMedicine` L383 auto-fills dosage from `strength`; `rxMode` `inventory|outside` (L392) — outside mode dosage defaults to "As per packaging"; expiry `getExpiresAtDate` L306; save+print L404 → `POST /api/documents/prescriptions` L435. Drug-interaction banner via `InteractionWarning` L829.
 
 ### AnalyticsDashboard.tsx — 1,349 lines / 42 KB. Read-only dashboards + exports
+- **Slice map:** `codeslice/DT-06-AnalyticsDashboard.md` (30 slices, verified @ 93b4172).
 - `GET /api/analytics/summary` L594 (`fetchAnalytics` L590); exports: xlsx L610, PDF L630, excel L650, server-rendered PDF L670.
 - `SvgVerticalBarChart` L267 (`niceAxisStep` L258): adaptive top-diagnoses chart — renders EVERY distinct diagnosis the server returns (the dashboard endpoint no longer slices to a top-5). Slot-width tiers (92/28/22/16 px per bar), label tiers (horizontal → -45° → -90° with every-kth thinning above 90 bars), value pills only when bars ≥ 24 px, `<title>` tooltips always, nice integer y-axis (≤ 6 gridlines), and the card scrolls sideways once the canvas exceeds 900 px.
 ### CreateUserModal.tsx — 726 lines. Create account (+ optional Qualified Responder label)
+- **Slice map:** `codeslice/DT-10-CreateUserModal.md` (21 slices, verified @ 93b4172).
 - Permission catalog L118, submit L164 → `POST /api/admin/users` L186 (returns `userId`). `togglePerm` L150.
 - Qualified Responder section L511 (shown only when `callerCanQr` L84 — Super Admin or `RESPONDERS_MANAGE`): checkbox + note; on success it calls `PUT /api/admin/users/:userId/qualified-responder` L228 as a second step and reports its failure separately (partial success).
+
+### IncidentRecords.tsx — 1,001 lines. Admin incident-record archive
+- Mounted by AdminConsole (incidents tab). Searchable list of documented SOS incidents with server-side PDF preview, save, and print (MinIO archive).
+- **Slice map:** `codeslice/DT-08-IncidentRecords.md` (22 slices, verified @ 93b4172).
 
 ### SignatureEnrollment.tsx — 118 lines. Doctor signature enroll/renew
 - Status L23, image L27, save L46 (`/api/signature/me*`). Uses `SignaturePad`.

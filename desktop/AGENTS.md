@@ -19,7 +19,7 @@ Electron 44 (main process = CommonJS `.cjs`) + Vite 6 + React 19 + TypeScript 5.
 
 - `App.tsx` — session/auth shell, role → console routing.
 - `components/` — role consoles: `AdminConsole`, `DoctorConsole`, `NurseConsole`, `ResponderConsole`; feature widgets: `PrescriptionGenerator`, `DentalChart`, `SignaturePad`, `SignatureEnrollment`, `QrIntakeScanner`, `InventoryManager`, `AnalyticsDashboard`, `EmergencyAlertBanner`, `InteractionWarning`, `ServerPingMonitor`, `CreateUserModal`, `PasswordStrengthIndicator`, `Icon`, `IncidentReportModal`, `IncidentRecords`.
-- `services/` — `offlineSync.ts` (offline queue + flush), `interactionService.ts`, `clientInstance.ts` (stable per-renderer ID used for per-window Socket.IO routing).
+- `services/` — `offlineSync.ts` (offline queue + flush), `interactionService.ts`.
 - `hooks/` — `useServerPing` (polls `GET /api/ping`), `useBookingBadge`.
 - `theme/` — `tokens.css` design tokens, `index.ts`.
 - `config/api.ts` — the single source of `API_BASE_URL` / `SOCKET_URL`.
@@ -32,5 +32,6 @@ Electron 44 (main process = CommonJS `.cjs`) + Vite 6 + React 19 + TypeScript 5.
 ## Efficiency
 
 - Consoles are huge single files — never read one whole; `rg` the symbol/section, then open a ±40-line window: `DoctorConsole.tsx` ~154 KB · `AdminConsole.tsx` ~124 KB · `InventoryManager.tsx` ~54 KB · `NurseConsole.tsx` ~51 KB · `QrIntakeScanner.tsx` ~46 KB · `index.css` ~48 KB.
+- The component slice map routes you precisely: `src/components/CODESLICE.md` (index) → `src/components/codeslice/<ID>-<Name>.md` per console — verified line-range slices plus an API-surface / socket / state header. `App.tsx` and `electron/main.cjs` are mapped there too (DT-09 / DT-13).
 - Never read `dist/`, `release/`, or lockfiles.
 - If the packaged app shows TLS/cert errors talking to `https://localhost:5000`, suspect `apiBaseUrl` (loopback check in main), not the renderer code.
