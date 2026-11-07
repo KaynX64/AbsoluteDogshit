@@ -28,7 +28,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late TextEditingController _emContactNameController;
   late TextEditingController _emContactPhoneController;
   String? _sex;
-  String? _dob;
 
   bool _isSaving = false;
 
@@ -49,8 +48,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _emContactPhoneController =
         TextEditingController(text: hp['emergency_contact_phone'] ?? '');
     _sex = hp['sex'] as String?;
-    final rawDob = hp['date_of_birth'];
-    _dob = rawDob != null ? rawDob.toString().split('T')[0] : null;
   }
 
   @override
@@ -72,7 +69,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       'emergency_contact_name': _emContactNameController.text.trim(),
       'emergency_contact_phone': _emContactPhoneController.text.trim(),
       'sex': _sex,
-      'date_of_birth': _dob,
     };
 
     try {
@@ -156,6 +152,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Widget build(BuildContext context) {
     final rs = Rs.of(context);
     final maxContentWidth = rs.isTablet ? 560.0 : double.infinity;
+    final healthProfile = widget.healthProfile ?? {};
+    final rawDob = healthProfile['date_of_birth'];
+    final dob = rawDob == null ? null : rawDob.toString().split('T')[0];
+    final age = healthProfile['age'];
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7F9F6),
@@ -239,7 +239,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   SizedBox(height: rs.h(20)),
 
                   Text(
-                    'Date of Birth',
+                    'Date of Birth (read-only)',
                     style: TextStyle(
                       fontSize: rs.sp(13),
                       fontWeight: FontWeight.w700,
@@ -247,33 +247,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     ),
                   ),
                   SizedBox(height: rs.h(8)),
-                  InkWell(
-                    onTap: () async {
-                      final now = DateTime.now();
-                      final picked = await showDatePicker(
-                        context: context,
-                        initialDate: _dob != null ? (DateTime.tryParse(_dob!) ?? DateTime(2000)) : DateTime(2000),
-                        firstDate: DateTime(1920),
-                        lastDate: now,
-                      );
-                      if (picked != null) {
-                        setState(() {
-                          _dob = "${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}";
-                        });
-                      }
-                    },
-                    child: InputDecorator(
-                      decoration: _pillInputDecoration(
-                        rs: rs,
-                        hint: 'Select Date of Birth',
-                        icon: Icons.cake_outlined,
-                      ),
-                      child: Text(
-                        _dob ?? 'Select Date of Birth',
-                        style: TextStyle(
-                          fontSize: rs.sp(14),
-                          color: _dob != null ? textMain : textSub,
-                        ),
+                  InputDecorator(
+                    decoration: _pillInputDecoration(
+                      rs: rs,
+                      hint: 'Not recorded in clinic database',
+                      icon: Icons.cake_outlined,
+                    ),
+                    child: Text(
+                      dob == null
+                          ? 'Not recorded in clinic database'
+                          : '$dob${age == null ? '' : ' ($age yrs)'}',
+                      style: TextStyle(
+                        fontSize: rs.sp(14),
+                        color: dob != null ? textMain : textSub,
                       ),
                     ),
                   ),

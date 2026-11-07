@@ -412,6 +412,17 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       });
       return;
     }
+    // Guard: a Limited archetype with zero permissions would be stored as an
+    // empty grant set, which the server treats as a LEGACY FULL admin — the
+    // exact opposite of the operator's intent. Block it client-side (the
+    // server rejects the empty set too).
+    if (editingUser.role === 'ADMIN' && editAdminArchetype === 'limited' && editAdminPerms.length === 0) {
+      setModalFeedback({
+        text: 'Select at least one permission for the Limited Admin archetype (an empty set means full access).',
+        isError: true,
+      });
+      return;
+    }
     setIsSavingUser(true);
     setModalFeedback(null);
     const token = localStorage.getItem('valetudo_token');

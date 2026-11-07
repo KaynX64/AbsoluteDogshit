@@ -23,6 +23,7 @@ import {
   shouldBumpVersion,
 } from '../utils/dbStudioGuard.js';
 import { isRedisActive } from '../utils/redisClient.js';
+import { evaluatePasswordStrength } from '../utils/passwordPolicy.js';
 import bcrypt from 'bcryptjs';
 
 const router = express.Router();
@@ -99,13 +100,16 @@ async function requireSuperAdminCaller(req) {
   return caller;
 }
 
-/** Current role code of a user (null when the user holds no role row). */
+/** Current role code of a user (null when the user holds no role row).
+ *  Multi-role safe: ADMIN wins over any secondary role so admin-lifecycle
+ *  guards can never be sidestepped by a stray extra USER_ROLES row. */
 async function getUserRoleCode(connection, userId) {
   const [rows] = await connection.query(
     `SELECT r.code FROM USER_ROLES ur INNER JOIN ROLES r ON ur.role_id = r.role_id
      WHERE ur.user_id = ?`,
     [userId]
   );
+  if (rows.some((r) => r.code === 'ADMIN')) return 'ADMIN';
   return rows.length > 0 ? rows[0].code : null;
 }
 
@@ -269,7 +273,7 @@ router.patch('/users/:id/role', requirePermission('USERS_MANAGE'), async (req, r
       await requireSuperAdminCaller(req);
     }
 
-    if (['DOCTOR', 'DENTIST'].includes(role_code)) {
+    if (['DOCTOR', 'DENTIST', 'NURSE'].includes(role_code)) {
       const [lic] = await connection.query(
         'SELECT license_no FROM STAFF_PROFILES WHERE user_id = ?',
         [targetUserId]
@@ -351,6 +355,20 @@ router.put('/users/:id', requirePermission('USERS_MANAGE'), async (req, res) => 
       throw new Error('Email address is already in use by another account.');
     }
 
+    // ── Fix: partial-update safety for is_active ──────────────────────
+    // Previously `is_active ? 1 : 0` treated an OMITTED field as "suspend",
+    // silently deactivating accounts (and letting a limited admin bypass
+    // the self-suspend guard). Resolve the next value up front: an omitted
+    // field keeps the account's current status.
+    const [currentRows] = await connection.query(
+      'SELECT is_active FROM USERS WHERE user_id = ? AND deleted_at IS NULL',
+      [targetUserId]
+    );
+    if (currentRows.length === 0) {
+      throw fail('User not found.', 404);
+    }
+    const nextActive = is_active === undefined ? (currentRows[0].is_active ? 1 : 0) : (is_active ? 1 : 0);
+
     // 2. Update core USERS identity record
     await connection.query(
       `UPDATE USERS 
@@ -361,7 +379,7 @@ router.put('/users/:id', requirePermission('USERS_MANAGE'), async (req, res) => 
         last_name.trim(),
         email.trim(),
         phone ? phone.trim() : null,
-        is_active ? 1 : 0,
+        nextActive,
         targetUserId,
       ]
     );
@@ -380,11 +398,13 @@ router.put('/users/:id', requirePermission('USERS_MANAGE'), async (req, res) => 
       }
       // Self-management is limited to profile fields: a limited admin may
       // not change their own role (which would clear/alter grants) nor
-      // suspend their own administrator account.
+      // suspend their own administrator account. nextActive covers both an
+      // explicit false/0 and the omitted-field case (which now resolves to
+      // the current status instead of silently deactivating).
       if (role_code && role_code !== 'ADMIN') {
         throw fail('You cannot change the role of your own administrator account. Ask a Super Admin.', 403);
       }
-      if (is_active === false || is_active === 0) {
+      if (nextActive === 0) {
         throw fail('You cannot suspend your own administrator account.', 403);
       }
     }
@@ -396,12 +416,39 @@ router.put('/users/:id', requirePermission('USERS_MANAGE'), async (req, res) => 
 
     if (role_code) {
       const [roleRows] = await connection.query('SELECT role_id FROM ROLES WHERE code = ?', [role_code]);
-      if (roleRows.length > 0) {
-        await connection.query('DELETE FROM USER_ROLES WHERE user_id = ?', [targetUserId]);
-        await connection.query('INSERT INTO USER_ROLES (user_id, role_id) VALUES (?, ?)', [
-          targetUserId,
-          roleRows[0].role_id,
-        ]);
+      if (roleRows.length === 0) {
+        // Fix: previously an unknown role_code was silently skipped — the
+        // request answered "updated successfully" while the role (and the
+        // sub-profile block below) never changed. Reject it like POST /users.
+        throw fail(`Invalid role code: ${role_code}`, 400);
+      }
+      await connection.query('DELETE FROM USER_ROLES WHERE user_id = ?', [targetUserId]);
+      await connection.query('INSERT INTO USER_ROLES (user_id, role_id) VALUES (?, ?)', [
+        targetUserId,
+        roleRows[0].role_id,
+      ]);
+
+      // ── Fix: clean stale sub-profile rows on role CHANGE ───────────
+      // Switching STUDENT → FACULTY used to leave the old STUDENT_PROFILES
+      // row behind, so the users list and edit modal showed data from BOTH
+      // profiles. Keep only the table the NEW role owns.
+      if (role_code !== previousRole) {
+        const subTableOf = {
+          STUDENT: 'STUDENT_PROFILES',
+          FACULTY: 'FACULTY_PROFILES',
+          NON_TEACHING: 'NON_TEACHING_PROFILES',
+          DOCTOR: 'STAFF_PROFILES',
+          DENTIST: 'STAFF_PROFILES',
+          NURSE: 'STAFF_PROFILES',
+          EMERGENCY_RESPONDER: 'STAFF_PROFILES',
+          ADMIN: 'STAFF_PROFILES',
+        };
+        const keep = subTableOf[role_code];
+        for (const t of ['STUDENT_PROFILES', 'STAFF_PROFILES', 'FACULTY_PROFILES', 'NON_TEACHING_PROFILES']) {
+          if (t !== keep) {
+            await connection.query(`DELETE FROM ${t} WHERE user_id = ?`, [targetUserId]);
+          }
+        }
       }
 
       // ── Admin-archetype permission transitions (mirrors PATCH :id/role) ──
@@ -520,8 +567,14 @@ router.post('/users/:id/reset-password', requirePermission('USERS_MANAGE'), asyn
   const targetUserId = Number(req.params.id);
   const { newPassword } = req.body;
 
-  if (!newPassword || newPassword.length < 8) {
+  if (!newPassword || String(newPassword).length < 8) {
     return res.status(400).json({ error: 'New password must be at least 8 characters long.' });
+  }
+
+  // ── Server-side password policy (aligned with PUT /api/auth/change-password) ──
+  const pwStrength = evaluatePasswordStrength(String(newPassword), {});
+  if (!pwStrength.isValid) {
+    return res.status(400).json({ error: pwStrength.issues.join(' ') });
   }
 
   const connection = await pool.getConnection();
@@ -547,7 +600,10 @@ router.post('/users/:id/reset-password', requirePermission('USERS_MANAGE'), asyn
     // that peer's permissions.) Limited admins may still reset the
     // passwords of REGULAR user accounts.
     const callerPerms = await resolveAdminPermissions(req.user.user_id);
-    if (targetRows[0].role_code === 'ADMIN' && !callerPerms.isSuper) {
+    // Multi-role safe: ANY held ADMIN role makes the target an administrator
+    // (previously only the first joined role row was inspected).
+    const targetIsAdmin = targetRows.some((row) => row.role_code === 'ADMIN');
+    if (targetIsAdmin && !callerPerms.isSuper) {
       return res.status(403).json({
         error: 'Only a Super Admin can override an administrator password.',
       });
@@ -613,6 +669,19 @@ router.post('/users', requirePermission('USERS_MANAGE'), async (req, res) => {
     return res.status(400).json({ error: 'Password must be at least 8 characters long.' });
   }
 
+  // ── Server-side password policy (aligned with PUT /api/auth/change-password) ──
+  // Admin-created accounts previously only needed 8 characters, while a
+  // user changing their OWN password had to pass the full policy. PHI
+  // accounts should not end up weaker because an admin created them.
+  const strength = evaluatePasswordStrength(String(password), {
+    email: String(email).trim(),
+    firstName: String(first_name).trim(),
+    lastName: String(last_name).trim(),
+  });
+  if (!strength.isValid) {
+    return res.status(400).json({ error: strength.issues.join(' ') });
+  }
+
   // ── Admin-lifecycle guard (adjusted manage-user-account feature) ──
   // Creating administrator accounts — super or limited — is a Super Admin
   // privilege. Limited admins may still create every REGULAR role account.
@@ -621,6 +690,14 @@ router.post('/users', requirePermission('USERS_MANAGE'), async (req, res) => {
     if (!callerPerms.isSuper) {
       return res.status(403).json({
         error: 'Only a Super Admin can create administrator accounts.',
+      });
+    }
+    // Same empty-set footgun as PUT /users/:id/permissions: [] would be
+    // stored as no-grant rows == legacy full super admin.
+    if (Array.isArray(admin_permissions) && admin_permissions.length === 0) {
+      return res.status(400).json({
+        error:
+          'admin_permissions cannot be empty — an empty grant set is indistinguishable from a legacy full-access admin. Grant SUPER_ADMIN or at least one limited permission.',
       });
     }
   }
@@ -785,6 +862,19 @@ router.put('/users/:id/permissions', requirePermission('USERS_MANAGE'), async (r
     return res.status(400).json({ error: 'admin_permissions must be an array of permission codes.' });
   }
 
+  // ── Fix: empty-set footgun ──────────────────────────────────────────
+  // An explicit [] used to be stored as "no grant rows", which the RBAC
+  // resolver treats as LEGACY FULL SUPER ADMIN. An operator intending to
+  // strip all permissions silently granted the account everything instead.
+  // Reject the empty set: to neutralise an admin, demote the role or grant
+  // the least-privileged code instead.
+  if (admin_permissions.length === 0) {
+    return res.status(400).json({
+      error:
+        'admin_permissions cannot be empty — an empty grant set is indistinguishable from a legacy full-access admin. Demote the account role instead, or grant the least-privileged permission.',
+    });
+  }
+
   // Guard: an admin may never modify their own permissions (prevents both
   // self-lockout and self-escalation).
   if (targetUserId === Number(req.user.user_id)) {
@@ -795,14 +885,14 @@ router.put('/users/:id/permissions', requirePermission('USERS_MANAGE'), async (r
   try {
     await connection.beginTransaction();
 
-    // Target must hold the ADMIN role
+    // Target must hold the ADMIN role (multi-role safe: ANY ADMIN role
+    // row qualifies — previously only the first joined row was inspected).
     const [targetRoleRows] = await connection.query(
       `SELECT r.code FROM USER_ROLES ur INNER JOIN ROLES r ON ur.role_id = r.role_id
        WHERE ur.user_id = ?`,
       [targetUserId]
     );
-    const targetRole = targetRoleRows.length > 0 ? targetRoleRows[0].code : null;
-    if (targetRole !== 'ADMIN') {
+    if (!targetRoleRows.some((r) => r.code === 'ADMIN')) {
       throw new Error('Permissions can only be assigned to ADMIN role accounts.');
     }
 
