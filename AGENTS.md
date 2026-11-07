@@ -1,46 +1,66 @@
-# Valetudo HealthLink — root
-PSU Lingayen Campus EMR / consultation / SOS system. Handles PHI (R.A. 10173). Monorepo, 3 apps:
+# AGENTS.md — Valetudo HealthLink
 
-| Dir | Stack | Details |
-|---|---|---|
-| `server/` | Node ESM, Express 5, MySQL 8, Redis, MinIO(S3), Socket.IO, FCM | `server/AGENTS.md` |
-| `desktop/` | Electron + React 19 + Vite 6 + TS (clinic workstation, offline SQLite) | `desktop/AGENTS.md` |
-| `mobile/` | Flutter (Dart ^3.13) patient app + responder screen | `mobile/AGENTS.md` |
+Campus clinic management system (Palawan State University): appointments & queueing, EMR, e-prescriptions, dental charts, medicine inventory, emergency SOS, health passes, QR document verification. Philippine RA 10173 (Data Privacy Act) is a design constraint — treat any row containing patient data as PHI.
 
-Root `package.json`: devDeps only (concurrently, electron, wait-on). No scripts.
+Monorepo with three deployables. No npm workspaces, no root scripts, no submodules — each module installs and runs from its own folder.
 
-## Token rules (follow first)
-1. Open only the dir you are editing + its `AGENTS.md`. Do not scan the repo.
-2. Never `cat` files >300 lines. Use `grep -n` then read a line range. Biggest:
-   `DoctorConsole.tsx` 4.2k, `patient_portal_screen.dart` 2.9k, `AdminConsole.tsx` 2.6k, `desktop/src/index.css` 2k,
-   `routes/documents.js` 1.8k, `consultation_scheduler_screen.dart` 1.7k, `routes/appointments.js` 1.6k,
-   `documents_viewer_screen.dart` 1.6k, `routes/admin.js` 1.3k, `schema.sql` 633.
-3. Edit with small diffs/snippets. Do not rewrite whole files unless asked.
-4. Don't re-explain code back. Answer with the change + file:line.
+| Path | Stack | Role | Port |
+|---|---|---|---|
+| `server/` | Node ESM, Express 5, mysql2, Socket.IO, Redis, MinIO | REST + WSS API; all business logic; sole DB owner | 5000 (HTTPS) |
+| `desktop/` | Electron 44, Vite 6, React 19, TypeScript | Clinic-staff console, Windows NSIS exe | 5173 (dev only) |
+| `mobile/` | Flutter / Dart ≥ 3.13 | Patient & responder app (Android primarily) | — |
+| `docker-compose.yml` | MySQL 8, Redis 7, MinIO | Local infra | 3307 / 6379 / 9000–9001 |
+| `server/schema.sql` | MySQL DDL | 29-table schema, source of truth | — |
 
-## Never read / edit (generated, binary, or noise)
-`node_modules/ dist/ release/ build/ .dart_tool/` · `*.lock`, `package-lock.json`, `pubspec.lock` · `repomix-output.xml` · `.gitignore.backup`
-· `mobile/{android,ios,linux,macos,windows,web}/` (platform scaffolding; only touch for permissions, package id, icons, Firebase)
-· images/icons/`*.ogg` · `*.pbxproj`, `*.cmake`, `.postman/`, `postman/` · `.gitkeep`
+Root `package.json` only pins shared tooling (concurrently, wait-on, electron). Read the module's own `AGENTS.md` before working in that module.
 
-## Infra (docker-compose.yml)
-MySQL 8 → `127.0.0.1:3307`, Redis 7 → `127.0.0.1:6379` (password), MinIO → `127.0.0.1:9000` (console `9001`). Loopback only (SEC-12) — keep it.
-Secrets live in compose / `server/.env`. Never print, log, commit, or echo them in answers.
+## How the parts talk
 
-## Cross-app contracts
-- API base `https://localhost:5000` (self-signed TLS; server refuses plain HTTP). Desktop: `desktop/app-config.json`. Mobile: `mobile/lib/config/api_config.dart`.
-- Auth: JWT Bearer. Roles: `ADMIN DOCTOR DENTIST NURSE EMERGENCY_RESPONDER` + patient roles (see `ROLES` in `server/schema.sql`).
-- Realtime: Socket.IO, JWT-authenticated; staff/responders join room `responders` (SOS alerts).
-- Offline: desktop queues mutations (`client_mutation_id`, `table_name`, `record_uuid`, `action`, `payload`) → `POST /api/sync`. Mobile has offline SOS queue.
+- All clients → `https://<host>:5000/api/...` (self-signed TLS) + Socket.IO (WSS) on the same port.
+- Auth: JWT, 24 h, carries `roles[]` + `jti`; logout/revocation via Redis denylist `token:blacklist:<jti>`.
+- Roles (seeded in `server/schema.sql`): `STUDENT`, `FACULTY`, `NON_TEACHING`, `NURSE`, `DOCTOR`, `DENTIST`, `EMERGENCY_RESPONDER`, `ADMIN`. A user may hold several.
+- Realtime events (server → clients): `emergency:new_alert`, `emergency:status_change`, `queue:updated`, `appointment:booked`, `appointment:cancelled`, `appointment:status_changed`, `prescription:status_changed`. Privileged listeners join room `responders`.
 
-## Hard rules (PHI/security)
-- PHI fields: encrypt with `utils/cryptoVault.js`; never log PHI; use `logAudit` (writes) and `logPhiAccess` (reads).
-- Every route: auth + `requireRoles(...)`; patient-data routes also `requirePrivacyConsent`.
-- Schema change = edit `server/schema.sql` AND `runAutoMigrations()` in `server/src/db.js`.
-- New env var = add to `server/.env.example` (+ `src/config/limits.js` if a rate limit).
-- Don't weaken CORS allow-list, CSP, TLS, rate limits, or loopback bindings.
+## Bootstrap a dev machine (order matters)
 
-## Conventions
-- Files start with a path comment, e.g. `// server/src/routes/x.js`.
-- Server: ESM, `.js` extension in imports. Desktop: TS strict, no new deps without asking. Mobile: `flutter_lints`.
-- Prefer existing helpers/components over new ones. Match surrounding style.
+1. `docker compose up -d` — MySQL is host-mapped **3307→3306**; compose only creates `root` (password `rootpassword`, DB `valetudo_healthlink`); `.env.example` expects user `valetudo_app` — grant it or use root.
+2. `cp server/.env.example server/.env`; fill `ENCRYPTION_KEY`, `JWT_SECRET`, `ENCRYPTION_SALT`, `DB_PASSWORD`; locally `REDIS_PASSWORD=valetudo_redis_secret_password_2026`, S3 keys `minioadmin` / `minioadminpassword`.
+3. Create the TLS cert (server refuses to boot without it; Vite dev reuses it):
+   `openssl req -x509 -newkey rsa:2048 -nodes -days 365 -keyout server/certs/key.pem -out server/certs/cert.pem -subj "/CN=valetudo" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"` — append `,IP:<LAN-IP>` to the SAN list when other devices must reach the API.
+4. `cd server && npm install && npm run dev` — schema auto-migrates at boot.
+5. `cd desktop && npm install && npm run dev`.
+6. Mobile: set the API host in `mobile/lib/config/api_config.dart` first (see `mobile/AGENTS.md`).
+
+## Command cheat sheet
+
+| Module | Install | Run dev | Build | Test |
+|---|---|---|---|---|
+| server | `npm install` | `npm run dev` (nodemon) | — (`npm start` = run prod) | `node --test tests/<name>.test.js` |
+| desktop | `npm install` | `npm run dev` | `npm run build`; `npm run dist` → NSIS exe in `release/` | — |
+| mobile | `flutter pub get` | `flutter run` | `flutter build apk --release` | `flutter test` |
+
+## Read before touching cross-module config
+
+- **Desktop API URL is build-time.** `desktop/src/config/api.ts` imports `app-config.json`; Vite bakes `apiBaseUrl` into the renderer bundle. Editing `app-config.json` in a packaged exe only affects main-process checks, NOT where renderer requests go. Repoint a built exe ⇒ edit `app-config.json` → `npm run dist` again.
+- Mobile API URL is hardcoded in `mobile/lib/config/api_config.dart` (Android uses the LAN IP; the Android emulator needs `10.0.2.2`).
+- Server CORS is an allow-list (SEC-10): defaults cover the Vite dev origins + the packaged `file://` build (origin `null`); extend via `CORS_ALLOWED_ORIGINS` env. Non-browser clients (Flutter, curl) send no `Origin` and always pass.
+- `PUBLIC_API_BASE_URL` (server `.env`) is the URL baked into generated PDFs/QR codes — it must be reachable from whatever device scans them.
+
+## Security invariants — audit findings SEC-01…14 are remediated on this branch; do not regress
+
+- TLS is mandatory: no `server/certs/{cert,key}.pem` ⇒ the API process exits. Plaintext only behind explicit `ALLOW_INSECURE_HTTP=true`.
+- Never widen CORS to `cors()` allow-all — that was the vulnerability.
+- Never log PHI or credentials; keep using the `phiLogger` / `auditLogger` patterns.
+- Privileged routes keep `requireRoles(...)` / `requirePermission(...)`; PHI reads keep `requirePrivacyConsent`.
+- Secrets come only from `server/.env` via `utils/secrets.js` (boot fails when crypto keys are missing). No hardcoded credentials.
+- `server/serviceAccountKey.json` (Firebase) and `mobile/android/app/google-services.json` are gitignored on purpose — never commit or paste their contents.
+- Electron `certificate-error` handler bypasses self-signed errors only for (a) dev builds on local/Vite URLs, (b) packaged builds when `apiBaseUrl` is a loopback host and the URL is same-origin. Keep it that way.
+- Never commit key material of any kind; `server/certs/` is gitignored.
+
+## Token-efficiency rules
+
+- **Never read** (zero value, huge cost): any `package-lock.json`, `bun.lock`, `mobile/pubspec.lock`, `node_modules/**`, `desktop/dist/**`, `desktop/release/**`, `.git/**`, and `mobile/{android,ios,linux,macos,windows,web}/**` (generated — `mobile/AGENTS.md` lists the few editable exceptions).
+- **Large files — search, don't read whole.** `rg` the symbol, then read a ±40-line window:
+  `desktop/src/components/DoctorConsole.tsx` ~154 KB · `AdminConsole.tsx` ~124 KB · `InventoryManager.tsx` ~54 KB · `NurseConsole.tsx` ~51 KB · `desktop/src/index.css` ~48 KB · `QrIntakeScanner.tsx` ~46 KB · `mobile/lib/screens/patient_portal_screen.dart` ~115 KB · `server/src/routes/documents.js` ~64 KB · `appointments.js` ~60 KB · `admin.js` ~49 KB.
+- Task routing: auth/session ⇒ `server/src/auth.js`; an endpoint's behavior ⇒ `server/src/routes/<name>.js` (+ map in `server/AGENTS.md`); desktop UI ⇒ `desktop/src/components/`; Electron window/TLS/updater ⇒ `desktop/electron/main.cjs`; mobile screen ⇒ `mobile/lib/screens/`; infra/env ⇒ `server/.env.example` + `docker-compose.yml`.
+- Conventions: `server/` is ESM-only (`"type":"module"` — never `require`); Electron main is CJS (`.cjs`); renderer is TypeScript; mobile is Dart; MySQL table names are UPPERCASE.

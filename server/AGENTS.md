@@ -1,33 +1,65 @@
-# server/ — Node ESM API (`valetudo-backend`)
-Express 5 · MySQL (mysql2 pool) · Redis (ioredis) · MinIO via AWS S3 SDK · Socket.IO · Firebase Admin (FCM) · pdfkit · exceljs · nodemailer · multer.
+# server/AGENTS.md — Express API (Node, ESM)
 
-## Commands (run in `server/`)
-- `npm install` · `npm run dev` (nodemon) · `npm start`
-- Tests (Node built-in runner): `node --test tests/<name>.test.js`
-  (`analyticsStats`, `cryptoVault`, `dbStudioGuard`, `reencrypt`)
-- Needs: `cp .env.example .env` and fill; `certs/cert.pem` + `certs/key.pem` (else server exits — no plain HTTP).
-- Infra first: `docker compose up -d` from repo root.
-- `JWT_SECRET`, `ENCRYPTION_KEY` are mandatory (≥32 chars, checked in `utils/secrets.js`).
+`"type":"module"` — use `import` everywhere, including scripts and tests. Entry: `src/index.js` (`npm run dev` = nodemon, `npm start` = plain node). One HTTPS server carries both REST and Socket.IO.
 
-## Map
-- `src/index.js` — boot: CORS allow-list, security headers/CSP, Socket.IO auth (+Redis token-revocation check), route mounting, `startReminderScheduler(io)`, `runAutoMigrations()`.
-- `src/auth.js` — `loginUser`, `authenticateToken`, `changePassword`, `logoutUser`, `loginRateLimit`, attachment download tokens.
-- `src/db.js` — `pool`, `runAutoMigrations()`.
-- `src/routes/` → `routes/AGENTS.md` · `src/utils/` → `utils/AGENTS.md`
-- `src/middleware/` — `rbac.js` (`requireRoles`, `requirePermission(code)`, admin permission codes), `consent.js` (`requirePrivacyConsent`).
-- `src/config/` — `limits.js` (rate limits, env-overridable), `appointmentRules.js`.
-- `schema.sql` — tables: USERS ROLES USER_ROLES ADMIN_PERMISSIONS USER_ADMIN_PERMISSIONS STUDENT/FACULTY/NON_TEACHING/STAFF_PROFILES DEVICE_TOKENS HEALTH_PROFILES CONSENT_RECORDS APPOINTMENTS QUEUE EMR_RECORDS EMR_ATTACHMENTS DENTAL_CHARTS VITAL_SIGNS MEDICINES MEDICINE_BATCHES DRUG_INTERACTIONS INVENTORY_LOGS PRESCRIPTIONS PRESCRIPTION_ITEMS MEDICAL_CLEARANCES EMERGENCY_ALERTS AUDIT_LOGS PHI_ACCESS_LOGS LOCAL_SYNC_LOGS. Grep `CREATE TABLE X` instead of reading it all.
-- `public/verify.html` — public QR document-verify page (CSP-restricted; inline script).
-- `scripts/encrypt-plaintext-health-profiles.js` — one-off migration to encrypt old rows.
-- `.postman/`, `postman/` — ignore. `valetudo_healthlink` (extensionless, purpose unclear) — don't open unless asked.
+## Boot pipeline (src/index.js)
 
-## Mount table (`/api/…`)
-`auth/*` (in index.js) · `privacy` · `profile` · `health-pass` · `appointments(io)` · `emergency(io)` · `inventory(io)` · `documents(io)` · `admin` · `analytics` · `sync` · `interactions` · `signature` · `ping`
-`(io)` = route file exports a factory `(io) => router`; others export a router.
+CORS allow-list → security headers (HSTS, nosniff, X-Frame-Options DENY, XSS, Referrer-Policy) → `express.json()` → routes → `https.createServer` from `../certs/{cert,key}.pem` (**process exits if certs are missing**, unless `ALLOW_INSECURE_HTTP=true`) → Socket.IO `io` (exported) → `listen(PORT=5000)` → async boot: `initRedis` → `ensureBucketExists` (MinIO bucket `valetudo-attachments`) → `runAutoMigrations` → `logActiveLimits` → `startReminderScheduler(io)`.
 
-## Rules
-- Add endpoint: edit one `routes/*.js`; mount new file in `index.js`. Don't create parallel routers.
-- Always parameterized SQL (`?`). Use transactions for multi-write ops; pass the connection to `logAudit`.
-- Rate limits: `config/limits.js` + env keys (`LOGIN_/SOS_/BOOKING_/VERIFY_RATE_LIMIT_{MAX,WINDOW}`, `NOSHOW_GRACE_MINUTES`).
-- Redis optional at runtime (`isRedisActive()`): code must degrade gracefully.
-- Comments tagged `SEC-nn` / `S-nn` / `B-nn` refer to audit items — keep them when editing nearby.
+## Route map — src/routes/*.js (all mounted under /api in index.js)
+
+| File | Mount | Owns |
+|---|---|---|
+| `privacy.js` | `/api/privacy` | consent records & privacy requests |
+| `profile.js` | `/api/profile` | user & health profiles |
+| `healthPass.js` | `/api/health-pass` | medical clearances & QR health passes |
+| `appointments.js` | `/api/appointments` | booking, queue, no-shows; emits `appointment:*`, `queue:updated` |
+| `emergency.js` | `/api/emergency` | SOS lifecycle; emits `emergency:*` to room `responders` |
+| `inventory.js` | `/api/inventory` | medicines, batches, inventory logs |
+| `documents.js` | `/api/documents` | EMR docs & attachments, signed one-time download tokens, public `GET /verify/:qrToken` |
+| `admin.js` | `/api/admin` | user administration, granular admin permissions |
+| `analytics.js` | `/api/analytics` | dashboard aggregates |
+| `sync.js` | `/api/sync` | offline-client sync ingestion |
+| `interactions.js` | `/api/interactions` | drug-interaction warnings |
+| `signature.js` | `/api/signature` | signature enrollment / verification |
+
+Not in `routes/`: auth endpoints are wired directly in `index.js` — `POST /api/auth/login` (rate-limited), `POST /api/auth/logout`, `PUT /api/auth/change-password`; plus `GET /api/ping` (unauthenticated, DB-free liveness probe used by the desktop ping monitor). `public/verify.html` is the QR-landing page (same-origin fetch, needs no CORS entry).
+
+Routers that emit realtime events receive `io` as a factory argument: `appointmentRoutes(io)` pattern — keep it.
+
+## Middleware — src/middleware/
+
+- `rbac.js` — `requireRoles(...codes)`, `requirePermission(code)` (granular ADMIN perms), `resolveAdminPermissions(userId)`.
+- `consent.js` — `requirePrivacyConsent`: RA 10173 gate in front of PHI reads.
+
+## Auth model — src/auth.js
+
+- Login: bcrypt `compare` with a `DUMMY_HASH` timing equalizer (unknown user ⇒ identical latency), MySQL role join, JWT `{sub, email, roles, jti}`, `expiresIn: '24h'`.
+- Logout: writes `token:blacklist:<jti>` to Redis; the Socket.IO handshake checks the same denylist.
+- Documents use separate short-lived **download tokens** (`DOWNLOAD_TOKEN_TTL_SECONDS`), single-use, replay-checked in Redis.
+
+## Utils — src/utils/*.js
+
+`secrets.js` env validation (boot-fatal when crypto keys missing) · `cryptoVault.js` AES field encryption · `redisClient.js` (`initRedis`, `isRedisActive()`) · `s3Vault.js` MinIO/S3 · `phiLogger.js` + `auditLogger.js` structured logging (no PHI) · `documentService.js` / `signatory.js` / `signatureVault.js` / `pdfVault.js` document chain · `mailer.js` nodemailer SMTP · `interactionChecker.js` drug interactions · `reminderWorker.js` scheduler: reminders + auto no-show after `NOSHOW_GRACE_MINUTES`, emits `appointment:status_changed`, `prescription:status_changed`, `queue:updated` · `fcmNotifier.js` Firebase push · `passwordPolicy.js` · `dentalValidator.js` · `analyticsStats.js` · `dbStudioGuard.js`.
+
+## Database — src/db.js + schema.sql
+
+- mysql2 pool; `runAutoMigrations()` runs at boot and is additive — never destructive.
+- `schema.sql` is the source of truth: 29 tables, UPPERCASE names. Groups: identity (`USERS`, `ROLES`, `USER_ROLES`, `ADMIN_PERMISSIONS`, `USER_ADMIN_PERMISSIONS`), profiles (`STUDENT_`, `FACULTY_`, `NON_TEACHING_`, `STAFF_PROFILES`, `HEALTH_PROFILES`, `DEVICE_TOKENS`), consent (`CONSENT_RECORDS`), care flow (`APPOINTMENTS`, `QUEUE`, `EMR_RECORDS`, `EMR_ATTACHMENTS`, `DENTAL_CHARTS`, `VITAL_SIGNS`, `MEDICAL_CLEARANCES`), pharmacy (`MEDICINES`, `MEDICINE_BATCHES`, `DRUG_INTERACTIONS`, `INVENTORY_LOGS`, `PRESCRIPTIONS`, `PRESCRIPTION_ITEMS`), safety (`EMERGENCY_ALERTS`), audit (`AUDIT_LOGS`, `PHI_ACCESS_LOGS`, `LOCAL_SYNC_LOGS`).
+- Role seed rows (ids 1–8) live at the bottom of `schema.sql`.
+
+## Env — copy `.env.example` → `.env` (never commit it)
+
+Crypto: `ENCRYPTION_KEY`, `JWT_SECRET`, `ENCRYPTION_SALT` (required) · DB: host 127.0.0.1, port **3307** (host-mapped) · Redis (password required with the repo compose) · MinIO/S3 endpoint 127.0.0.1:9000 · SMTP · `PUBLIC_API_BASE_URL` (baked into PDFs/QR) · rate limits `LOGIN_/SOS_/BOOKING_/VERIFY_RATE_LIMIT_{MAX,WINDOW}` · `NOSHOW_GRACE_MINUTES` · `CORS_ALLOWED_ORIGINS` (comma-separated override).
+
+## Tests & scripts
+
+`node --test tests/<file>.test.js` from `server/` — available: `cryptoVault`, `analyticsStats`, `dbStudioGuard`, `reencrypt`. The cryptoVault suite spawns isolated child processes so a real `.env` is never loaded; the other suites inject safe default keys/salts before importing. `scripts/encrypt-plaintext-health-profiles.js` is a one-off tool for encrypting legacy plaintext rows.
+
+## Do not regress (remediated audit findings live in this code)
+
+CORS allow-list only · TLS mandatory · timing-equalized login · jti denylist on logout & socket handshake · RBAC on every privileged route · consent gate before PHI · no PHI/credentials in logs · match the existing hardened patterns when adding endpoints.
+
+## Efficiency
+
+Never read `package-lock.json`. `routes/documents.js` (~64 KB), `appointments.js` (~60 KB) and `admin.js` (~49 KB) are large — `rg` the endpoint, then read a narrow window.
