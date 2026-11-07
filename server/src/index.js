@@ -64,11 +64,21 @@ if (process.env.TRUST_PROXY === 'true') {
 // app, curl, service integrations — send no Origin header and are
 // unaffected. The public verify.html page is served by this same
 // origin and needs no cross-origin entry.
-const ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ||
-  'https://localhost:5173,https://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:5173,null')
+const DEFAULT_ALLOWED_ORIGINS = [
+  'https://localhost:5173',
+  'https://127.0.0.1:5173',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'file://',
+  'null',
+];
+const CONFIGURED_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS || '')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
+const ALLOWED_ORIGINS = [
+  ...new Set([...DEFAULT_ALLOWED_ORIGINS, ...CONFIGURED_ALLOWED_ORIGINS]),
+];
 
 function isOriginAllowed(origin) {
   return ALLOWED_ORIGINS.includes(origin);

@@ -62,6 +62,7 @@ export async function runAutoMigrations() {
       { table: 'MEDICAL_CLEARANCES', column: 'pdf_s3_key', type: 'VARCHAR(500) NULL' },
       { table: 'MEDICAL_CLEARANCES', column: 'version', type: 'INT NOT NULL DEFAULT 1' },
       { table: 'MEDICAL_CLEARANCES', column: 'deleted_at', type: 'TIMESTAMP NULL DEFAULT NULL' },
+      { table: 'INCIDENT_REPORTS', column: 'pdf_s3_key', type: 'VARCHAR(500) NULL' },
       { table: 'STAFF_PROFILES', column: 'signature_s3_key', type: 'VARCHAR(500) NULL' },
       { table: 'STAFF_PROFILES', column: 'signature_sha256', type: 'CHAR(64) NULL' },
       { table: 'STAFF_PROFILES', column: 'signature_updated_at', type: 'TIMESTAMP NULL DEFAULT NULL' },

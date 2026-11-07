@@ -19,6 +19,7 @@ import { uploadToS3, getFromS3, getBufferFromS3 } from '../utils/s3Vault.js';
 import {
   generateAndStorePrescriptionPDF,
   generateAndStoreClearancePDF,
+  generateAndStoreIncidentReportPDF,
 } from '../utils/documentService.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
 import { JWT_SECRET } from '../utils/secrets.js';
@@ -1837,6 +1838,59 @@ export default function documentRoutes(io) {
     } catch (err) {
       console.error('[Clearance PDF Download Error]:', err);
       res.status(500).json({ error: 'Failed to retrieve clearance PDF.' });
+    }
+  });
+
+  // GET /api/documents/incident-reports/:id/pdf
+  router.get('/incident-reports/:id/pdf', authenticateToken, async (req, res) => {
+    const reportId = Number(req.params.id);
+    if (!reportId) return res.status(400).json({ error: 'Invalid incident report id.' });
+
+    try {
+      const [rows] = await pool.query(
+        'SELECT report_id, alert_id, patient_user_id, documented_by, pdf_s3_key FROM INCIDENT_REPORTS WHERE report_id = ?',
+        [reportId]
+      );
+      if (rows.length === 0) return res.status(404).json({ error: 'Incident report not found.' });
+      const report = rows[0];
+
+      const roles = req.user.roles || [];
+      const isOwner = Number(req.user.user_id) === Number(report.patient_user_id);
+      const isAdmin = roles.includes('ADMIN');
+
+      if (!isOwner && !isAdmin) {
+        return res.status(403).json({ error: 'Not authorized to access this document.' });
+      }
+
+      let key = report.pdf_s3_key;
+      if (!key) {
+        key = await generateAndStoreIncidentReportPDF(reportId);
+        if (!key) {
+          return res.status(503).json({
+            error: 'Document is being generated. Please try again shortly.',
+            retryAfterSeconds: 5,
+          });
+        }
+      }
+
+      const buffer = await getBufferFromS3(key);
+
+      logPhiAccess({
+        viewerUserId: req.user.user_id,
+        patientUserId: report.patient_user_id,
+        table: 'INCIDENT_REPORTS',
+        recordId: reportId,
+        purpose: 'Incident Report PDF download / view',
+        ipAddress: req.ip,
+      });
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="incident-report-${reportId}.pdf"`);
+      res.setHeader('Content-Length', String(buffer.length));
+      res.send(buffer);
+    } catch (err) {
+      console.error('[Incident Report PDF Download Error]:', err);
+      res.status(500).json({ error: 'Failed to retrieve incident report PDF.' });
     }
   });
 

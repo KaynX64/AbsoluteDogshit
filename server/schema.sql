@@ -503,6 +503,7 @@ CREATE TABLE `INCIDENT_REPORTS` (
   `treatment_notes` TEXT NULL,
   `documented_by` BIGINT NOT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `pdf_s3_key` VARCHAR(500) NULL COMMENT 'MinIO S3 key for incident report PDF',
   CONSTRAINT `fk_ir_alert` FOREIGN KEY (`alert_id`) REFERENCES `EMERGENCY_ALERTS` (`alert_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_ir_patient` FOREIGN KEY (`patient_user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_ir_author` FOREIGN KEY (`documented_by`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE

@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import AnalyticsDashboard from './AnalyticsDashboard';
+import IncidentRecords from './IncidentRecords';
 import CreateUserModal from './CreateUserModal';
 import { T, rolePill, inputStyle, btnPrimary, btnGhost } from '../theme';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
@@ -81,7 +82,7 @@ function NoPermissionPanel({ required }: { required: string }) {
   );
 }
 
-export type AdminTab = 'users' | 'audit' | 'telemetry' | 'analytics' | 'db';
+export type AdminTab = 'users' | 'audit' | 'telemetry' | 'analytics' | 'incidents' | 'db';
 
 interface AdminConsoleProps {
   /** Optional controlled active tab — if provided, the sidebar drives the tab. */
@@ -836,6 +837,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           {activeTab === 'audit' && 'Privacy & audit'}
           {activeTab === 'telemetry' && 'System health & retention'}
           {activeTab === 'analytics' && 'Health analytics'}
+          {activeTab === 'incidents' && 'Incident records'}
           {activeTab === 'db' && 'Database Studio'}
         </h1>
         <p className="vd-page-head-sub">
@@ -843,6 +845,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           {activeTab === 'audit' && 'Trace access and changes to clinic information with read-only audit records.'}
           {activeTab === 'telemetry' && 'Service telemetry and clinical data lifecycle governance, in one place.'}
           {activeTab === 'analytics' && 'Campus illness trajectories, seasonal spike monitoring & health reports.'}
+          {activeTab === 'incidents' && 'Official documentation and MinIO-archived PDF records of resolved emergency incidents.'}
           {activeTab === 'db' && 'Inspect and maintain system records · valetudo_healthlink'}
         </p>
       </div>
@@ -1674,6 +1677,11 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       {/* ═══════════════════════════════════════════════════════════ */}
       {activeTab === 'analytics' && !can('ANALYTICS_VIEW') && (<NoPermissionPanel required="ANALYTICS_VIEW" />)}
       {activeTab === 'analytics' && can('ANALYTICS_VIEW') && <AnalyticsDashboard />}
+
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* TAB: INCIDENT RECORDS                                       */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {activeTab === 'incidents' && <IncidentRecords />}
 
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: DATABASE STUDIO                                      */}

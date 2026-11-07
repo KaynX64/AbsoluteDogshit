@@ -18,7 +18,7 @@ Electron 44 (main process = CommonJS `.cjs`) + Vite 6 + React 19 + TypeScript 5.
 ## Renderer map — src/
 
 - `App.tsx` — session/auth shell, role → console routing.
-- `components/` — role consoles: `AdminConsole`, `DoctorConsole`, `NurseConsole`, `ResponderConsole`; feature widgets: `PrescriptionGenerator`, `DentalChart`, `SignaturePad`, `SignatureEnrollment`, `QrIntakeScanner`, `InventoryManager`, `AnalyticsDashboard`, `EmergencyAlertBanner`, `InteractionWarning`, `ServerPingMonitor`, `CreateUserModal`, `PasswordStrengthIndicator`, `Icon`.
+- `components/` — role consoles: `AdminConsole`, `DoctorConsole`, `NurseConsole`, `ResponderConsole`; feature widgets: `PrescriptionGenerator`, `DentalChart`, `SignaturePad`, `SignatureEnrollment`, `QrIntakeScanner`, `InventoryManager`, `AnalyticsDashboard`, `EmergencyAlertBanner`, `InteractionWarning`, `ServerPingMonitor`, `CreateUserModal`, `PasswordStrengthIndicator`, `Icon`, `IncidentReportModal`, `IncidentRecords`.
 - `services/` — `offlineSync.ts` (offline queue + flush), `interactionService.ts`.
 - `hooks/` — `useServerPing` (polls `GET /api/ping`), `useBookingBadge`.
 - `theme/` — `tokens.css` design tokens, `index.ts`.

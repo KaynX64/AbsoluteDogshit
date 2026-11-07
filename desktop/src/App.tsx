@@ -159,29 +159,30 @@ function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, b
       { key: 'audit',     label: 'Privacy & audit',  icon: 'shield_lock' },
       { key: 'telemetry', label: 'System health',    icon: 'dns' },
       { key: 'analytics', label: 'Health analytics', icon: 'monitoring' },
+      { key: 'incidents', label: 'Incident Records', icon: 'assignment' },
       { key: 'db',        label: 'Database Studio',  icon: 'database' },
     ],
     NURSE: [
-      { key: 'triage',    label: 'Triage',     icon: 'local_hospital' },
-      { key: 'expected',  label: 'Expected',   icon: 'monitor_heart' },
-      { key: 'inventory', label: 'Inventory',  icon: 'medication' },
+      { key: 'triage',    label: 'Triage',           icon: 'local_hospital' },
+      { key: 'expected',  label: 'Expected',         icon: 'monitor_heart' },
+      { key: 'inventory', label: 'Inventory',        icon: 'medication' },
     ],
     DOCTOR: [
-      { key: 'active',    label: 'Queue',      icon: 'stethoscope' },
-      { key: 'scheduled', label: 'Bookings',   icon: 'event' },
-      { key: 'history',   label: 'History',    icon: 'history' },
-      { key: 'archive',   label: 'EMR',        icon: 'folder_shared' },
-      { key: 'analytics', label: 'Analytics',  icon: 'monitoring' },
+      { key: 'active',    label: 'Queue',            icon: 'stethoscope' },
+      { key: 'scheduled', label: 'Bookings',         icon: 'event' },
+      { key: 'history',   label: 'History',          icon: 'history' },
+      { key: 'archive',   label: 'EMR',              icon: 'folder_shared' },
+      { key: 'analytics', label: 'Analytics',        icon: 'monitoring' },
     ],
     DENTIST: [
-      { key: 'active',    label: 'Queue',      icon: 'stethoscope' },
-      { key: 'scheduled', label: 'Bookings',   icon: 'event' },
-      { key: 'history',   label: 'History',    icon: 'history' },
-      { key: 'archive',   label: 'EMR',        icon: 'folder_shared' },
-      { key: 'analytics', label: 'Analytics',  icon: 'monitoring' },
+      { key: 'active',    label: 'Queue',            icon: 'stethoscope' },
+      { key: 'scheduled', label: 'Bookings',         icon: 'event' },
+      { key: 'history',   label: 'History',          icon: 'history' },
+      { key: 'archive',   label: 'EMR',              icon: 'folder_shared' },
+      { key: 'analytics', label: 'Analytics',        icon: 'monitoring' },
     ],
     EMERGENCY_RESPONDER: [
-      { key: 'dispatch',  label: 'Dispatch',   icon: 'emergency' },
+      { key: 'dispatch',  label: 'Dispatch',         icon: 'emergency' },
     ],
   };
 
@@ -480,7 +481,7 @@ export default function App() {
   const [activeRoleView, setActiveRoleView] = useState<string>('');
 
   /* ── Workspace state (driven by sidebar) ─────────────────────── */
-  const [adminTab, setAdminTab] = useState<'users' | 'audit' | 'telemetry' | 'analytics' | 'db'>('users');
+  const [adminTab, setAdminTab] = useState<'users' | 'audit' | 'telemetry' | 'analytics' | 'incidents' | 'db'>('users');
   const [doctorViewMode, setDoctorViewMode] = useState<
     'active' | 'scheduled' | 'history' | 'archive' | 'analytics'
   >('active');
@@ -698,7 +699,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
             : (activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST')
             ? (key) => setDoctorViewMode(key as typeof doctorViewMode)
             : activeRoleView === 'NURSE'
-            ? (key) => setNurseViewMode(key as 'triage' | 'expected' | 'inventory')
+            ? (key) => setNurseViewMode(key as typeof nurseViewMode)
             : undefined
         }
       />

@@ -169,8 +169,11 @@ for (const app of upcoming) {
     // ── Nightly PDF backfill (Feature 8) ─────────────────────────────
   setInterval(async () => {
     try {
-      const { generateAndStorePrescriptionPDF, generateAndStoreClearancePDF } =
-        await import('./documentService.js');
+      const {
+        generateAndStorePrescriptionPDF,
+        generateAndStoreClearancePDF,
+        generateAndStoreIncidentReportPDF,
+      } = await import('./documentService.js');
 
       const [missingRx] = await pool.query(
         `SELECT prescription_id FROM PRESCRIPTIONS
@@ -188,6 +191,15 @@ for (const app of upcoming) {
       );
       for (const clr of missingClr) {
         await generateAndStoreClearancePDF(clr.clearance_id);
+      }
+
+      const [missingReports] = await pool.query(
+        `SELECT report_id FROM INCIDENT_REPORTS
+         WHERE pdf_s3_key IS NULL
+         ORDER BY report_id DESC LIMIT 20`
+      );
+      for (const ir of missingReports) {
+        await generateAndStoreIncidentReportPDF(ir.report_id);
       }
     } catch (err) {
       console.error('[PDF Backfill Worker Error]:', err.message);
