@@ -249,8 +249,21 @@ function SvgLineChart({
 }
 
 /* ================================================================= */
-/* VERTICAL BAR CHART — Material You                                  */
+/* VERTICAL BAR CHART — Material You · adapts to any bar count        */
 /* ================================================================= */
+
+/** Smallest "nice" tick step (1/2/5 ladder) that keeps ≤5 gridline
+ *  divisions above the data maximum — the axis always ends on a round
+ *  number with no wasted headroom, like a proper charting library. */
+function niceAxisStep(rawMax: number): number {
+  if (rawMax <= 5) return 1;
+  const steps = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000];
+  for (const s of steps) {
+    if (rawMax / s <= 5) return s;
+  }
+  return 5000;
+}
+
 function SvgVerticalBarChart({ data }: { data: DiagnosisItem[] }) {
   if (!data || data.length === 0) {
     return (
@@ -270,116 +283,187 @@ function SvgVerticalBarChart({ data }: { data: DiagnosisItem[] }) {
     );
   }
 
-  const width = 900;
+  const n = data.length;
+
+  /* ── Adaptive geometry ──────────────────────────────────────────
+     EVERY distinct diagnosis in the database gets its own bar (the
+     server no longer slices to a top-5). The slot width per category
+     adapts to the category count; when the slots no longer fit the
+     card's natural width the canvas widens and the card scrolls
+     horizontally instead of crushing the bars into slivers. */
+  const CARD_W = 900;
   const height = 300;
   const padLeft = 56;
-  const padRight = 40;
-  const padTop = 50;
-  const padBottom = 90;
+  const padRight = 24;
+  const padTop = 40;
+  const padBottom = 100;
 
-  const maxCount = Math.max(...data.map((d) => d.count), 1);
-  const maxVal = Math.max(Math.ceil(maxCount * 1.4), 2);
+  const minSlot = n <= 9 ? 92 : n <= 32 ? 28 : n <= 80 ? 22 : 16;
+  const width = Math.max(CARD_W, padLeft + padRight + n * minSlot);
   const chartW = width - padLeft - padRight;
   const chartH = height - padTop - padBottom;
-  const colSlot = chartW / data.length;
-  const barWidth = Math.min(colSlot * 0.42, 72);
+  const slot = chartW / n;
+  const barWidth = Math.min(Math.max(slot * 0.62, 3), 72);
+  const scrolls = width > CARD_W;
+
+  /* ── Y axis: round ticks, zero baseline ───────────────────────── */
+  const rawMax = Math.max(...data.map((d) => d.count), 1);
+  const step = niceAxisStep(rawMax);
+  const maxVal = Math.max(Math.ceil(rawMax / step) * step, 1);
+  const ticks: number[] = [];
+  for (let v = 0; v <= maxVal; v += step) ticks.push(v);
+  const y0 = padTop + chartH;
+  const yOf = (v: number) => padTop + chartH * (1 - v / maxVal);
+
+  /* ── X labels adapt to the available slot width ─────────────────
+     wide slots  → horizontal labels under each bar
+     mid slots   → 45° labels (classic dense-category layout)
+     thin slots  → vertical labels, thinned out every k-th bar when
+                   the category count explodes; full text always
+                   remains in the hover tooltip. */
+  const showValuePill = barWidth >= 24;
+  const labelEvery = n > 90 ? Math.ceil(n / 60) : 1;
+  let labelAngle = 0;
+  let labelAnchor: 'middle' | 'end' = 'middle';
+  let labelMaxChars = 12;
+  if (slot >= 92) {
+    labelMaxChars = Math.max(8, Math.floor((slot - 10) / 6.3));
+  } else if (slot >= 26) {
+    labelAngle = -45;
+    labelAnchor = 'end';
+    labelMaxChars = Math.max(6, Math.floor(Math.min(112, slot * 1.3) / 6.0));
+  } else {
+    labelAngle = -90;
+    labelAnchor = 'end';
+    labelMaxChars = 12;
+  }
+  const truncate = (s: string) =>
+    s.length > labelMaxChars ? `${s.slice(0, Math.max(1, labelMaxChars - 1))}…` : s;
 
   return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      style={{ width: '100%', height: 'auto', minHeight: 240, overflow: 'visible' }}
-    >
-      <defs>
-        <linearGradient id="barVertGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#4A7A5E" />
-          <stop offset="100%" stopColor="#1F4A34" />
-        </linearGradient>
-      </defs>
+    <div>
+      <div style={{ overflowX: scrolls ? 'auto' : 'visible', paddingBottom: scrolls ? 6 : 0 }}>
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          style={{
+            width: scrolls ? width : '100%',
+            minWidth: scrolls ? width : 280,
+            height: 'auto',
+            minHeight: 240,
+            display: 'block',
+            overflow: 'visible',
+          }}
+        >
+          <defs>
+            <linearGradient id="barVertGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#4A7A5E" />
+              <stop offset="100%" stopColor="#1F4A34" />
+            </linearGradient>
+          </defs>
 
-      {/* Guides */}
-      {[0, 0.5, 1].map((ratio, i) => {
-        const y = padTop + chartH * (1 - ratio);
-        const val = Math.round(ratio * maxVal);
-        return (
-          <g key={i}>
-            <line
-              x1={padLeft}
-              y1={y}
-              x2={width - padRight}
-              y2={y}
-              stroke="#E8EDE6"
-              strokeWidth="1"
-              strokeDasharray="2 6"
-              strokeLinecap="round"
-            />
-            <text
-              x={padLeft - 14}
-              y={y + 4}
-              textAnchor="end"
-              fontSize="11"
-              fontWeight="600"
-              fill="#9AA79B"
-            >
-              {val}
-            </text>
-          </g>
-        );
-      })}
-
-      {data.map((item, idx) => {
-        const x = padLeft + idx * colSlot + (colSlot - barWidth) / 2;
-        const bHeight = Math.max((item.count / maxVal) * chartH, 20);
-        const y = height - padBottom - bHeight;
-
-        return (
-          <g key={idx}>
-            <rect
-              className="my-bar-rect"
-              x={x}
-              y={y}
-              width={barWidth}
-              height={bHeight}
-              rx="16"
-              fill="url(#barVertGrad)"
-              style={{ animationDelay: `${idx * 80}ms` }}
-            />
-            <g transform={`translate(${x + barWidth / 2}, ${y - 14})`}>
-              <rect
-                x="-16"
-                y="-14"
-                width="32"
-                height="22"
-                rx="11"
-                fill="#D7E8D2"
+          {/* Y-axis gridlines, tick labels and zero baseline */}
+          {ticks.map((v) => (
+            <g key={v}>
+              <line
+                x1={padLeft}
+                y1={yOf(v)}
+                x2={width - padRight}
+                y2={yOf(v)}
+                stroke={v === 0 ? '#CBD5CC' : '#E8EDE6'}
+                strokeWidth={v === 0 ? 1.5 : 1}
+                strokeDasharray={v === 0 ? undefined : '2 6'}
+                strokeLinecap="round"
               />
               <text
-                x="0"
-                y="3"
-                textAnchor="middle"
-                fontSize="12"
-                fontWeight="800"
-                fill="#264D36"
+                x={padLeft - 14}
+                y={yOf(v) + 4}
+                textAnchor="end"
+                fontSize="11"
+                fontWeight="600"
+                fill="#9AA79B"
               >
-                {item.count}
+                {v}
               </text>
             </g>
-            <text
-              x={x + barWidth / 2}
-              y={height - padBottom + 22}
-              transform={`rotate(-22, ${x + barWidth / 2}, ${height - padBottom + 22})`}
-              textAnchor="end"
-              fontSize="11.5"
-              fontWeight="600"
-              fill="#5A635B"
-            >
-              {item.diagnosis.length > 26
-                ? `${item.diagnosis.substring(0, 24)}…`
-                : item.diagnosis}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
+          ))}
+
+          {/* Left axis spine */}
+          <line
+            x1={padLeft}
+            y1={padTop - 6}
+            x2={padLeft}
+            y2={y0}
+            stroke="#CBD5CC"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+
+          {data.map((item, idx) => {
+            const x = padLeft + idx * slot + (slot - barWidth) / 2;
+            const bHeight = Math.max((item.count / maxVal) * chartH, item.count > 0 ? 3 : 0);
+            const y = y0 - bHeight;
+            const cx = x + barWidth / 2;
+            const pillW = Math.max(32, String(item.count).length * 9 + 14);
+
+            return (
+              <g key={idx}>
+                <title>{`${item.diagnosis} — ${item.count} case${item.count === 1 ? '' : 's'}`}</title>
+                <rect
+                  className="my-bar-rect"
+                  x={x}
+                  y={y}
+                  width={barWidth}
+                  height={bHeight}
+                  rx={Math.min(14, barWidth / 2)}
+                  fill="url(#barVertGrad)"
+                  style={{ animationDelay: `${Math.min(idx * 80, 1600)}ms` }}
+                />
+                {showValuePill && (
+                  <g transform={`translate(${cx}, ${y - 14})`}>
+                    <rect x={-pillW / 2} y="-14" width={pillW} height="22" rx="11" fill="#D7E8D2" />
+                    <text x="0" y="3" textAnchor="middle" fontSize="12" fontWeight="800" fill="#264D36">
+                      {item.count}
+                    </text>
+                  </g>
+                )}
+                {idx % labelEvery === 0 && (
+                  <text
+                    x={cx}
+                    y={labelAngle === 0 ? y0 + 20 : y0 + 16}
+                    transform={labelAngle !== 0 ? `rotate(${labelAngle}, ${cx}, ${y0 + 16})` : undefined}
+                    textAnchor={labelAnchor}
+                    fontSize={labelAngle === -90 ? 10.5 : 11.5}
+                    fontWeight="600"
+                    fill="#5A635B"
+                  >
+                    {truncate(item.diagnosis)}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginTop: 8,
+          gap: 10,
+          flexWrap: 'wrap',
+        }}
+      >
+        <span style={{ fontSize: 11.5, color: T.textMuted, fontWeight: 600 }}>
+          {n} distinct diagnosis{n === 1 ? '' : 'es'} · every category in the database
+        </span>
+        {scrolls && (
+          <span style={{ fontSize: 11.5, color: T.textMuted, fontStyle: 'italic' }}>
+            scroll sideways to see all bars
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 

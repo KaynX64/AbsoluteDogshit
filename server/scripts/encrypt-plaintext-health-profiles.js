@@ -13,7 +13,7 @@
 //  - every new ciphertext is decrypted and compared before it is written
 //  - never prints patient data, only row ids and counts
 import { pool } from '../src/db.js';
-import { encrypt, decrypt, ACTIVE_VERSION } from '../src/utils/cryptoVault.js';
+import { encrypt, decrypt } from '../src/utils/cryptoVault.js';
 
 const APPLY = process.argv.includes('--apply');
 const TABLE = 'HEALTH_PROFILES';
@@ -21,10 +21,9 @@ const PK = 'profile_id';
 const COLUMNS = ['allergies', 'chronic_conditions'];
 const BATCH = 200;
 
-if (ACTIVE_VERSION !== 'v2') {
-  console.error('ENCRYPTION_SALT is not set, so new data would be written as enc:v1. Set it first.');
-  process.exit(1);
-}
+// cryptoVault is v2-only and fails closed at import time when ENCRYPTION_SALT
+// is missing (the old ACTIVE_VERSION guard is obsolete — reaching this line
+// already proves a valid salt is configured).
 
 console.log(APPLY ? '== APPLY MODE: rows will be rewritten ==' : '== DRY RUN: nothing will be written ==');
 

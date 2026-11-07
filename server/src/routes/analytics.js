@@ -103,7 +103,10 @@ router.get('/summary', async (req, res) => {
     }
 
     // 7. Top Diagnoses (In-Memory AES-256 Decrypted Aggregation)
-    const topDiagnoses = (await getDiagnosisCounts()).slice(0, 5);
+    // Full distinct list — the desktop bar chart renders every diagnosis in
+    // the database (countDiagnoses itself caps the output at MAX_DISTINCT=500
+    // and the result is cached). Exports keep their own tighter slices.
+    const topDiagnoses = await getDiagnosisCounts();
 
     // 8. Consultation Volume per Department
     const [deptBreakdown] = await pool.query(

@@ -17,7 +17,7 @@ CORS allow-list → security headers (HSTS, nosniff, X-Frame-Options DENY, XSS, 
 | `emergency.js` | `/api/emergency` | SOS lifecycle; emits `emergency:*` to room `responders` |
 | `inventory.js` | `/api/inventory` | medicines, batches, inventory logs |
 | `documents.js` | `/api/documents` | EMR docs & attachments, signed one-time download tokens, public `GET /verify/:qrToken` |
-| `admin.js` | `/api/admin` | user administration, granular admin permissions |
+| `admin.js` | `/api/admin` | user administration, granular admin permissions, advanced health-profile editor (GET `/users/:id/health-profile`, `health_profile` object on PUT `/users/:id`) |
 | `analytics.js` | `/api/analytics` | dashboard aggregates |
 | `sync.js` | `/api/sync` | offline-client sync ingestion |
 | `interactions.js` | `/api/interactions` | drug-interaction warnings |
@@ -54,7 +54,7 @@ Crypto: `ENCRYPTION_KEY`, `JWT_SECRET`, `ENCRYPTION_SALT` (required) · DB: host
 
 ## Tests & scripts
 
-`node --test tests/<file>.test.js` from `server/` — available: `cryptoVault`, `analyticsStats`, `dbStudioGuard`, `reencrypt`. The cryptoVault suite spawns isolated child processes so a real `.env` is never loaded; the other suites inject safe default keys/salts before importing. `scripts/encrypt-plaintext-health-profiles.js` is a one-off tool for encrypting legacy plaintext rows.
+`node --test tests/<file>.test.js` from `server/` — available: `cryptoVault` (12), `analyticsStats` (4), `dbStudioGuard` (35), `bmi` (2), `signatory` (2). The cryptoVault suite spawns isolated child processes so a real `.env` is never loaded; the other suites inject a throwaway ENCRYPTION_KEY + ENCRYPTION_SALT before importing (analyticsStats also sets a dummy DB_PASSWORD — mysql2 pools connect lazily, so no MySQL is touched). `reencrypt.test.js` was removed with its module (the v1→v2 migration is complete; the vault is v2-only). `scripts/encrypt-plaintext-health-profiles.js` is a one-off tool for encrypting legacy plaintext rows.
 
 ## Do not regress (remediated audit findings live in this code)
 
@@ -62,4 +62,4 @@ CORS allow-list only · TLS mandatory · timing-equalized login · jti denylist 
 
 ## Efficiency
 
-Never read `package-lock.json`. `routes/documents.js` (~64 KB), `appointments.js` (~60 KB) and `admin.js` (~49 KB) are large — `rg` the endpoint, then read a narrow window.
+Never read `package-lock.json`. `routes/documents.js` (~64 KB), `appointments.js` (~60 KB) and `admin.js` (~67 KB) are large — `rg` the endpoint, then read a narrow window.

@@ -279,7 +279,7 @@ function TopBar({
   // Format current time in PHT for the sync-status pill
   const now = new Date();
   const timeStr = now.toLocaleTimeString('en-PH', {
-    hour: '2-digit', minute: '2-digit', hour12: false,
+    hour: '2-digit', minute: '2-digit', hour12: true,
     timeZone: 'Asia/Shanghai',
   });
 

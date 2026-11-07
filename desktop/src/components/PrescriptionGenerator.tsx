@@ -625,7 +625,7 @@ export default function PrescriptionGenerator({
             border: `1px solid ${T.border}`,
             borderRadius: T.radius.md,
             fontSize: 12,
-            color: T.textDark,
+            color: T.ink,
           }}
         >
           <span>

@@ -20,7 +20,7 @@ Flat folder: one component per file, header comment `// desktop/src/components/<
 App.tsx ─ NURSE→NurseConsole · DOCTOR/DENTIST→DoctorConsole · ADMIN→AdminConsole · EMERGENCY_RESPONDER→ResponderConsole
 NurseConsole    → QrIntakeScanner (L1104) · InventoryManager (L410, inventory view)
 DoctorConsole   → AnalyticsDashboard (L1341) · PrescriptionGenerator (L2507) · SignatureEnrollment (L4263) · embedded odontogram (L2079)
-AdminConsole    → CreateUserModal (L1786) · ServerPingMonitor (L1309) · AnalyticsDashboard (analytics tab L1449)
+AdminConsole    → CreateUserModal (L1927) · ServerPingMonitor (L1450) · AnalyticsDashboard (analytics tab L1590)
 PrescriptionGenerator → InteractionWarning (L829)
 SignatureEnrollment   → SignaturePad
 ```
@@ -40,13 +40,13 @@ SignatureEnrollment   → SignaturePad
 - BMI: consult form computes `bmi`/`bmiCategory` client-side from height/weight; header also shows appointment-supplied `bmi`/`bmi_category`.
 - Render anchors: page header L1172 · queue grid L1198 · analytics L1341 · archive/EMR directory L1344 · active/scheduled/history lists L1703 · labs & attachment preview L1997 · interactive odontogram L2079 · rx history modal L3085 · clearance history modal L3308 · EMR history modal L3500 · signature enroll L4239.
 
-### AdminConsole.tsx — 2,556 lines / 126 KB / 43 useState. Users, audit, telemetry, analytics, DB Studio
-- Exports: `AdminTab` L59 (`'users'|'audit'|'telemetry'|'analytics'|'db'`), component L68. Props `activeTab`/`onTabChange` (App.tsx L482, L775).
-- Permission gate: `fetchMyPermissions` L145 (`GET /api/admin/my-permissions`) → `can(code)` L180; every tab renders `NoPermissionPanel` without its code (`USERS_MANAGE`, `AUDIT_VIEW`, `TELEMETRY_VIEW`/`RETENTION_MANAGE`, `ANALYTICS_VIEW`, `DATABASE_MANAGE`).
-- Users tab L665: list L134, edit modal L348, save profile L403 (incl. immunizations add/remove L393/L400), reset password L491, delete L419.
-- Audit tab L934: mutation logs L195, PHI access logs L207, retention status L219, retention sweep `handleExecuteSweep` L239 (`POST /api/privacy/retention/sweep`).
-- Telemetry tab L1229: telemetry L229-232. Analytics tab L1449 → `AnalyticsDashboard`. DB Studio tab L1455: tables L519/L522, rows L533/L586, save row L569, delete row L610 (writes to arbitrary tables — `DATABASE_MANAGE` protected; keep it that way).
-
+### AdminConsole.tsx — 2,868 lines / 145 KB / 50 useState. Users, audit, telemetry, analytics, DB Studio
+- Exports: `AdminTab` L83 (`'users'|'audit'|'telemetry'|'analytics'|'db'`), component L92. Props `activeTab`/`onTabChange` (App.tsx).
+- Permission gate: `fetchMyPermissions` L179 (`GET /api/admin/my-permissions`) → `can(code)` L214; every tab renders `NoPermissionPanel` without its code (`USERS_MANAGE`, `AUDIT_VIEW`, `TELEMETRY_VIEW`/`RETENTION_MANAGE`, `ANALYTICS_VIEW`, `DATABASE_MANAGE`).
+- Users tab L805: list `fetchUsers` L168, edit modal `handleOpenEditModal` L393, save profile L514 (identity + sub-profile + immunizations + optional `health_profile`), reset password L632.
+- Edit modal has a **Basic/Advanced switch** (toggle L2076): Basic = the everyday fields. Advanced lazily fetches `GET /api/admin/users/:id/health-profile` (`fetchEditHealthProfile` L447, switch handler L492) and renders EVERY HEALTH_PROFILES column — sex, date of birth, blood type, height/weight, live BMI preview (generated column, read-only), encrypted allergies/chronic-conditions textareas, emergency contacts (section L2481) — plus read-only account/signature metadata (L2592). `health_profile` is only sent on save when Advanced was loaded; Basic saves never touch the health record.
+- Audit tab: mutation logs L240, PHI access logs L252, retention L264, sweep `handleExecuteSweep` L284 (`POST /api/privacy/retention/sweep`).
+- Telemetry tab: telemetry L274. Analytics tab L1590 → `AnalyticsDashboard`. DB Studio tab L1595: tables L660/L679, save row L710, delete row L751 (writes to arbitrary tables — `DATABASE_MANAGE` protected; keep it that way).
 ### NurseConsole.tsx — 1,520 lines / 52 KB / 17 useState. Triage queue, expected, intake, live metrics
 - Exports: `NurseViewMode` L72 (`'triage'|'expected'|'inventory'`), component L79. App.tsx owns the mode (L486; tab bar L164-166) — `viewMode` prop is controlled, falls back to internal state.
 - Live stat row: queue L144 (`GET /api/appointments/queue/today`), active SOS count L160, no-shows today L214, inventory metrics L227 (`GET /api/inventory/dashboard-summary`), expected today L249.
@@ -73,9 +73,9 @@ SignatureEnrollment   → SignaturePad
 - Props: `patientUserId`, `appointmentId?`, `verifiedPatient {first_name,last_name,student_no,course,allergies,date_of_birth?,age?,sex?}`, `initialNotes?`, `isArchived?`, `onPrescriptionIssued?`, `onPrescriptionError?`.
 - Medicine catalog L332 (`GET /api/inventory/medicines`); `handleSelectMedicine` L383 auto-fills dosage from `strength`; `rxMode` `inventory|outside` (L392) — outside mode dosage defaults to "As per packaging"; expiry `getExpiresAtDate` L306; save+print L404 → `POST /api/documents/prescriptions` L435. Drug-interaction banner via `InteractionWarning` L829.
 
-### AnalyticsDashboard.tsx — 1,266 lines / 37 KB. Read-only dashboards + exports
-- `GET /api/analytics/summary` L510; exports: xlsx L523, PDF L543, excel L563, server-rendered PDF L583.
-
+### AnalyticsDashboard.tsx — 1,349 lines / 42 KB. Read-only dashboards + exports
+- `GET /api/analytics/summary` L594 (`fetchAnalytics` L590); exports: xlsx L610, PDF L630, excel L650, server-rendered PDF L670.
+- `SvgVerticalBarChart` L267 (`niceAxisStep` L258): adaptive top-diagnoses chart — renders EVERY distinct diagnosis the server returns (the dashboard endpoint no longer slices to a top-5). Slot-width tiers (92/28/22/16 px per bar), label tiers (horizontal → -45° → -90° with every-kth thinning above 90 bars), value pills only when bars ≥ 24 px, `<title>` tooltips always, nice integer y-axis (≤ 6 gridlines), and the card scrolls sideways once the canvas exceeds 900 px.
 ### CreateUserModal.tsx — 642 lines / 28 KB / 25 useState
 - Permission catalog L118, submit L156 → `POST /api/admin/users` L186. `togglePerm` L150.
 

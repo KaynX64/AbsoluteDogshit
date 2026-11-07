@@ -1,5 +1,6 @@
 // desktop/src/components/AdminConsole.tsx
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import AnalyticsDashboard from './AnalyticsDashboard';
 import CreateUserModal from './CreateUserModal';
 import { T, rolePill, inputStyle, btnPrimary, btnGhost } from '../theme';
@@ -23,6 +24,30 @@ const I = {
   Chevron: () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>),
   Check: () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>),
 };
+
+/* ── Advanced profile editor (Basic / Advanced modes) ─────────────────────────
+   Shared styles + the segmented-toggle button style. Basic mode keeps
+   the everyday fields; Advanced exposes every editable schema column. */
+const advLabel: React.CSSProperties = {
+  fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6,
+};
+const advTextarea: React.CSSProperties = {
+  ...inputStyle, minHeight: 64, resize: 'vertical', lineHeight: 1.5,
+};
+const modeBtnStyle = (active: boolean): React.CSSProperties => ({
+  flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+  padding: '9px 12px',
+  border: `1px solid ${active ? T.primary : 'transparent'}`,
+  borderRadius: T.radius.pill,
+  background: active ? '#FFFFFF' : 'transparent',
+  color: active ? T.primary : T.textSub,
+  fontWeight: active ? 800 : 600,
+  fontSize: 12.5, fontFamily: T.font,
+  cursor: 'pointer',
+  boxShadow: active ? T.shadow.xs : 'none',
+  transition: 'all 120ms ease',
+  whiteSpace: 'nowrap',
+});
 
 /* ── No-permission notice — rendered only for LIMITED admin archetypes.
       Full/super admins never see this panel (unchanged legacy behaviour). ── */
@@ -95,6 +120,16 @@ export default function AdminConsole({
 // ── Admin Vaccination History State ──────────────────────────────────────────
   const [adminUserVaccines, setAdminUserVaccines] = useState<string[]>([]);
   const [adminNewVaccine, setAdminNewVaccine] = useState('');
+
+  /* ── Advanced profile editor state (Basic / Advanced modes) ──────────────────
+     editHealth holds the decrypted HEALTH_PROFILES form values; it is
+     lazily fetched the first time the operator switches to Advanced. */
+  const [editMode, setEditMode] = useState<'basic' | 'advanced'>('basic');
+  const [editHealth, setEditHealth] = useState<any | null>(null);
+  const [editHealthLoaded, setEditHealthLoaded] = useState(false);
+  const [editHealthLoading, setEditHealthLoading] = useState(false);
+  const [editHealthExists, setEditHealthExists] = useState(false);
+  const [editAccountMeta, setEditAccountMeta] = useState<any | null>(null);
   /* Database Studio state */
   const [dbTablesList, setDbTablesList] = useState<any[]>([]);
   const [selectedDbTable, setSelectedDbTable] = useState<string>('USERS');
@@ -191,6 +226,17 @@ export default function AdminConsole({
   const editingAdminTarget = Boolean(editingUser && editingUser.role === 'ADMIN');
   const editingProtectedAdmin = viewingAsLimited && editingAdminTarget && !editingSelf;
   const editingSelfAdminLocked = viewingAsLimited && editingAdminTarget && editingSelf;
+
+  /* Advanced editor: live BMI preview (the server-side generated column
+     remains authoritative — this mirrors ROUND(weight / POW(height/100, 2), 2)). */
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const previewBmi = (() => {
+    if (!editHealth) return null;
+    const h = Number(editHealth.height);
+    const w = Number(editHealth.weight);
+    if (!Number.isFinite(h) || !Number.isFinite(w) || h <= 0 || w <= 0) return null;
+    return (w / Math.pow(h / 100, 2)).toFixed(2);
+  })();
 
   const fetchMutationLogs = async () => {
     setLoadingLogs(true);
@@ -362,6 +408,13 @@ export default function AdminConsole({
     });
     setAdminPasswordInput('');
     setModalFeedback(null);
+    /* Advanced editor: every open starts fresh in Basic mode. */
+    setEditMode('basic');
+    setEditHealth(null);
+    setEditHealthLoaded(false);
+    setEditHealthLoading(false);
+    setEditHealthExists(false);
+    setEditAccountMeta(null);
     fetchUserVaccinesForAdmin(u.id);
 
     /* Seed the admin-archetype editor state from the target's current grants. */
@@ -387,6 +440,65 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       }
     } catch (_) {
       setAdminUserVaccines([]);
+    }
+  };
+
+  /* ── Advanced editor: lazily load the decrypted health record + account
+     metadata the first time the operator switches to Advanced mode. */
+  const fetchEditHealthProfile = async (userId: number) => {
+    setEditHealthLoading(true);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/users/${userId}/health-profile`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setEditHealthExists(Boolean(data.health_profile));
+        setEditHealth(
+          data.health_profile
+            ? {
+                blood_type: data.health_profile.blood_type || '',
+                allergies: data.health_profile.allergies || '',
+                chronic_conditions: data.health_profile.chronic_conditions || '',
+                emergency_contact_name: data.health_profile.emergency_contact_name || '',
+                emergency_contact_phone: data.health_profile.emergency_contact_phone || '',
+                sex: data.health_profile.sex || '',
+                date_of_birth: data.health_profile.date_of_birth || '',
+                height: data.health_profile.height ?? '',
+                weight: data.health_profile.weight ?? '',
+                bmi: data.health_profile.bmi ?? null,
+                hp_version: data.health_profile.hp_version ?? null,
+                hp_updated_at: data.health_profile.hp_updated_at || null,
+              }
+            : {
+                blood_type: '', allergies: '', chronic_conditions: '',
+                emergency_contact_name: '', emergency_contact_phone: '',
+                sex: '', date_of_birth: '', height: '', weight: '',
+                bmi: null, hp_version: null, hp_updated_at: null,
+              }
+        );
+        setEditAccountMeta({ account: data.account, staff_signature: data.staff_signature });
+        setEditHealthLoaded(true);
+      } else {
+        setModalFeedback({ text: data.error || 'Failed to load the health record.', isError: true });
+      }
+    } catch (err: any) {
+      setModalFeedback({ text: 'Network error while loading the health record: ' + err.message, isError: true });
+    } finally {
+      setEditHealthLoading(false);
+    }
+  };
+
+  const handleEditModeSwitch = (mode: 'basic' | 'advanced') => {
+    setEditMode(mode);
+    // Limited admins cannot read another administrator's health record
+    // (the server 403s) — keep the section as a read-only notice.
+    if (
+      mode === 'advanced' && editingUser && !editHealthLoaded && !editHealthLoading &&
+      !editingProtectedAdmin
+    ) {
+      fetchEditHealthProfile(Number(editingUser.id));
     }
   };
 
@@ -425,6 +537,22 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
     }
     setIsSavingUser(true);
     setModalFeedback(null);
+    // Advanced editor: only send health_profile once the health section has
+    // been loaded (Basic mode / never-visited Advanced → the server leaves
+    // the health record completely untouched).
+    const healthPayload = editHealthLoaded && editHealth
+      ? {
+          blood_type: editHealth.blood_type || null,
+          allergies: (editHealth.allergies || '').trim() || null,
+          chronic_conditions: (editHealth.chronic_conditions || '').trim() || null,
+          emergency_contact_name: (editHealth.emergency_contact_name || '').trim() || null,
+          emergency_contact_phone: (editHealth.emergency_contact_phone || '').trim() || null,
+          sex: editHealth.sex || null,
+          date_of_birth: editHealth.date_of_birth || null,
+          height: editHealth.height ? Number(editHealth.height) : null,
+          weight: editHealth.weight ? Number(editHealth.weight) : null,
+        }
+      : null;
     const token = localStorage.getItem('valetudo_token');
     try {
           const res = await fetch(`${API_BASE_URL}/api/admin/users/${editingUser.id}`, {
@@ -447,6 +575,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           specialty: editingUser.specialty,
           department: editingUser.department,
           position: editingUser.position,
+          ...(healthPayload ? { health_profile: healthPayload } : {}),
         }),
       });
       const data = await res.json();
@@ -488,6 +617,8 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           }
         }
         fetchUsers();
+        // Refresh the Advanced editor (BMI / versions) if it was in use.
+        if (editHealthLoaded) fetchEditHealthProfile(Number(editingUser.id));
         if (!permWarning) setTimeout(() => setEditingUser(null), 1200);
       } else {
         setModalFeedback({ text: '' + (data.error || 'Failed to update profile.'), isError: true });
@@ -1896,16 +2027,23 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* MODAL: USER PROFILE EDIT                                   */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      {editingUser && (
-        <div className="modal-backdrop" onClick={() => setEditingUser(null)}>
+      {editingUser && createPortal(
+        <div className="modal-backdrop admin-profile-editor-backdrop" onClick={() => setEditingUser(null)}>
           <div
-            className="modal-card"
-            style={{ maxWidth: 980, padding: 0, overflow: 'hidden' }}
+            className="modal-card admin-profile-editor"
+            style={{
+              width: 'min(1180px, calc(100vw - 40px))',
+              maxWidth: 1180,
+              height: 'min(90vh, 900px)',
+              maxHeight: 'min(90vh, 900px)',
+              padding: 0,
+              overflow: 'hidden',
+            }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ display: 'grid', gridTemplateColumns: '1.7fr 1fr' }}>
+            <div className="admin-profile-editor__layout" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.7fr) minmax(260px, 1fr)', height: '100%' }}>
               {/* LEFT: form */}
-              <div style={{ padding: '28px 32px', maxHeight: '90vh', overflowY: 'auto' }}>
+              <div className="admin-profile-editor__form-pane" style={{ padding: '28px 32px', minHeight: 0, overflowY: 'auto' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
                   <div>
                     <h2 style={{ fontSize: 24, fontWeight: 800, color: T.text, margin: 0, letterSpacing: -0.5 }}>
@@ -1934,6 +2072,28 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   </div>
                 )}
 
+                {/* ── Basic / Advanced editor switch ───────────────────────────────────────────────
+                    Basic keeps the everyday fields; Advanced exposes every
+                    editable column in the schema (sub-profiles + the
+                    encrypted HEALTH_PROFILES record). */}
+                <div className="admin-profile-editor__mode-toggle" style={{
+                  marginTop: 20, padding: 4,
+                  background: T.sage100, border: `1px solid ${T.border}`,
+                  borderRadius: T.radius.pill, display: 'flex', gap: 6, flexWrap: 'wrap',
+                }}>
+                  <button type="button" onClick={() => handleEditModeSwitch('basic')} style={modeBtnStyle(editMode === 'basic')}>
+                    <Icon name="edit" size={14} /> Basic
+                  </button>
+                  <button type="button" onClick={() => handleEditModeSwitch('advanced')} style={modeBtnStyle(editMode === 'advanced')}>
+                    <Icon name="settings" size={14} /> Advanced · full schema
+                  </button>
+                </div>
+                <p style={{ fontSize: 11.5, color: T.textMuted, margin: '8px 2px 0', lineHeight: 1.5 }}>
+                  {editMode === 'basic'
+                    ? 'Everyday account fields — identity, contact, role and professional details.'
+                    : 'Adds every HEALTH_PROFILES column (sex, date of birth, blood type, body metrics, encrypted allergies & conditions, emergency contacts) plus system metadata.'}
+                </p>
+
                 <form onSubmit={handleSaveUserProfile} style={{ marginTop: 22 }}>
                   {/* Read-only shield for protected admin accounts: a disabled
                       fieldset locks every input/select/button inside at once. */}
@@ -1943,7 +2103,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     Identity & contact
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: 14, marginBottom: 14 }}>
                     <div>
                       <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
                         First name
@@ -1968,7 +2128,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     </div>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: 14, marginBottom: 20 }}>
                     <div>
                       <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
                         Institutional email
@@ -2002,7 +2162,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     Access & account status
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: 14, marginBottom: 20 }}>
                     <div>
                       <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
                         Assigned RBAC role
@@ -2060,7 +2220,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   </div>
 
                   {editingUser.role === 'STUDENT' && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 100px', gap: 14, marginBottom: 20 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 14, marginBottom: 20 }}>
                       <div>
                         <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
                           Student no.
@@ -2087,7 +2247,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
 
                   {/* Clinical staff — doctors, dentists, nurses, responders */}
                   {['DOCTOR', 'DENTIST', 'NURSE', 'EMERGENCY_RESPONDER'].includes(editingUser.role) && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 20 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: 14, marginBottom: 20 }}>
                       <div>
                         <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
                           PRC / staff ID
@@ -2114,7 +2274,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
 
                   {/* ADMIN — admin number replaces PRC license */}
                   {editingUser.role === 'ADMIN' && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 20 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: 14, marginBottom: 20 }}>
                       <div>
                         <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
                           Admin number
@@ -2214,7 +2374,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                               seeded administrator account.
                             </p>
                           ) : (
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 8 }}>
                               {permCatalog.filter((p: any) => p.code !== 'SUPER_ADMIN').map((p: any) => {
                                 const checked = editAdminPerms.includes(p.code);
                                 const beyondCaller = !myPerms.is_super && !myPerms.permissions.includes(p.code);
@@ -2268,7 +2428,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   )}
 
                   {editingUser.role === 'FACULTY' && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1fr', gap: 14, marginBottom: 20 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: 14, marginBottom: 20 }}>
                       <div>
                         <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
                           Faculty number
@@ -2298,7 +2458,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   )}
 
                   {editingUser.role === 'NON_TEACHING' && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1fr', gap: 14, marginBottom: 20 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: 14, marginBottom: 20 }}>
                       <div>
                         <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
                           Employee no. (optional)
@@ -2323,6 +2483,154 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                                placeholder="Utility Worker"
                                onChange={(e) => setEditingUser({ ...editingUser, position: e.target.value })} />
                       </div>
+                    </div>
+                  )}
+
+                  {/* ── ADVANCED: Health record — every HEALTH_PROFILES column ── */}
+                  {editMode === 'advanced' && (
+                    <div style={{
+                      marginTop: 24, padding: 16,
+                      borderRadius: T.radius.md,
+                      background: '#F0F7F1', border: '1px solid #CDE4D2',
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, gap: 10, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 13, fontWeight: 800, color: T.primary }}>
+                          <Icon name="health_and_safety" size={14} /> Health record — HEALTH_PROFILES
+                        </span>
+                        <span style={{ fontSize: 11, color: T.textMuted, fontWeight: 600 }}>
+                          <Icon name="lock" size={14} /> AES-256-GCM encrypted at rest
+                        </span>
+                      </div>
+                      <p style={{ fontSize: 11.5, color: T.textSub, margin: '0 0 14px', lineHeight: 1.55 }}>
+                        {editingProtectedAdmin
+                          ? 'Read-only view: only a Super Admin can access another administrator’s health record.'
+                          : editHealthExists
+                            ? 'Full clinic-staff editing: sex and date of birth are editable here — patients cannot change these themselves on the mobile app.'
+                            : 'No health record on file yet — saving in Advanced mode creates the HEALTH_PROFILES row.'}
+                      </p>
+
+                      {editHealthLoading ? (
+                        <div style={{ fontSize: 12.5, color: T.textMuted, fontStyle: 'italic', padding: '14px 0' }}>
+                          Loading health record…
+                        </div>
+                      ) : editHealth && (
+                        <>
+                          {/* Demographics */}
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: 14, marginBottom: 14 }}>
+                            <div>
+                              <label style={advLabel}>Blood type</label>
+                              <select style={inputStyle} value={editHealth.blood_type || ''}
+                                      onChange={(e) => setEditHealth({ ...editHealth, blood_type: e.target.value })}>
+                                <option value="">— Not recorded —</option>
+                                {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((b) => (
+                                  <option key={b} value={b}>{b}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label style={advLabel}>Sex</label>
+                              <select style={inputStyle} value={editHealth.sex || ''}
+                                      onChange={(e) => setEditHealth({ ...editHealth, sex: e.target.value })}>
+                                <option value="">— Not recorded —</option>
+                                <option value="MALE">MALE</option>
+                                <option value="FEMALE">FEMALE</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label style={advLabel}>Date of birth</label>
+                              <input type="date" style={inputStyle} max={todayIso} value={editHealth.date_of_birth || ''}
+                                     onChange={(e) => setEditHealth({ ...editHealth, date_of_birth: e.target.value })} />
+                            </div>
+                          </div>
+
+                          {/* Body metrics (BMI is a generated column — read-only) */}
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: 14, marginBottom: 14 }}>
+                            <div>
+                              <label style={advLabel}>Height (cm)</label>
+                              <input type="number" style={inputStyle} min={30} max={300} step={0.1} placeholder="170"
+                                     value={editHealth.height ?? ''}
+                                     onChange={(e) => setEditHealth({ ...editHealth, height: e.target.value })} />
+                            </div>
+                            <div>
+                              <label style={advLabel}>Weight (kg)</label>
+                              <input type="number" style={inputStyle} min={1} max={500} step={0.1} placeholder="60"
+                                     value={editHealth.weight ?? ''}
+                                     onChange={(e) => setEditHealth({ ...editHealth, weight: e.target.value })} />
+                            </div>
+                            <div>
+                              <label style={advLabel}>BMI (auto-generated)</label>
+                              <input style={{ ...inputStyle, background: '#F5F8F3' }} readOnly value={previewBmi ?? '—'}
+                                     title="MySQL generated column: ROUND(weight / POW(height/100, 2), 2) — recomputed on save" />
+                              <div style={{ fontSize: 10.5, color: T.textMuted, marginTop: 5, fontStyle: 'italic' }}>
+                                Computed column — recalculated from height &amp; weight.
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Emergency contact */}
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: 14, marginBottom: 14 }}>
+                            <div>
+                              <label style={advLabel}>Emergency contact name</label>
+                              <input style={inputStyle} placeholder="Contact person" value={editHealth.emergency_contact_name || ''}
+                                     onChange={(e) => setEditHealth({ ...editHealth, emergency_contact_name: e.target.value })} />
+                            </div>
+                            <div>
+                              <label style={advLabel}>Emergency contact phone</label>
+                              <input style={inputStyle} placeholder="+63 900 000 0000" value={editHealth.emergency_contact_phone || ''}
+                                     onChange={(e) => setEditHealth({ ...editHealth, emergency_contact_phone: e.target.value })} />
+                            </div>
+                          </div>
+
+                          {/* Encrypted clinical free text */}
+                          <div style={{ marginBottom: 14 }}>
+                            <label style={advLabel}>Allergies</label>
+                            <textarea style={advTextarea} placeholder="None recorded" value={editHealth.allergies || ''}
+                                      onChange={(e) => setEditHealth({ ...editHealth, allergies: e.target.value })} />
+                          </div>
+                          <div>
+                            <label style={advLabel}>Chronic conditions</label>
+                            <textarea style={advTextarea} placeholder="None recorded" value={editHealth.chronic_conditions || ''}
+                                      onChange={(e) => setEditHealth({ ...editHealth, chronic_conditions: e.target.value })} />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ── ADVANCED: system & integrity metadata (read-only) ── */}
+                  {editMode === 'advanced' && (
+                    <div style={{
+                      marginTop: 16, padding: 16,
+                      borderRadius: T.radius.md,
+                      background: T.sage100, border: `1px solid ${T.sage300}`,
+                    }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: T.primary, marginBottom: 12 }}>
+                        <Icon name="badge" size={14} /> System &amp; integrity metadata
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: '8px 18px' }}>
+                        {[
+                          { label: 'User ID', value: `#${editingUser.id}` },
+                          { label: 'Account version', value: editAccountMeta?.account?.version != null ? `v${editAccountMeta.account.version}` : '—' },
+                          { label: 'Account created', value: editAccountMeta?.account?.created_at ? new Date(editAccountMeta.account.created_at).toLocaleString() : '—' },
+                          { label: 'Account last updated', value: editAccountMeta?.account?.updated_at ? new Date(editAccountMeta.account.updated_at).toLocaleString() : '—' },
+                          { label: 'Health record version', value: editHealth?.hp_version != null ? `v${editHealth.hp_version}` : '—' },
+                          { label: 'Health record updated', value: editHealth?.hp_updated_at || '—' },
+                          ...(editAccountMeta?.staff_signature ? [{
+                            label: 'Clinical signature',
+                            value: editAccountMeta.staff_signature.enrolled
+                              ? `Enrolled · ${editAccountMeta.staff_signature.updated_at || 'date unknown'}`
+                              : 'Not enrolled',
+                          }] : []),
+                        ].map((row) => (
+                          <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, borderBottom: `1px dashed ${T.sage300}`, paddingBottom: 6 }}>
+                            <span style={{ fontSize: 11.5, color: T.textMuted, fontWeight: 600 }}>{row.label}</span>
+                            <span style={{ fontSize: 11.5, color: T.textSub, fontWeight: 700, textAlign: 'right' }}>{row.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <p style={{ fontSize: 10.5, color: T.textMuted, margin: '10px 0 0', fontStyle: 'italic' }}>
+                        Read-only: signatures are enrolled cryptographically via the Signature Enrollment screen.
+                      </p>
                     </div>
                   )}
 
@@ -2381,7 +2689,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     </div>
 
                     {/* Add Input */}
-                    <div style={{ display: 'flex', gap: 8 }}>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       <input
                         type="text"
                         placeholder="Add vaccine (e.g. Hepatitis B, COVID-19 Booster, Anti-Rabies)..."
@@ -2517,11 +2825,11 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
               </div>
 
               {/* RIGHT: side info panel */}
-              <div style={{
+              <div className="admin-profile-editor__info-pane" style={{
                 background: T.sage100,
                 padding: '28px 24px',
                 display: 'flex', flexDirection: 'column', gap: 24,
-                maxHeight: '90vh', overflowY: 'auto',
+                minHeight: 0, overflowY: 'auto',
               }}>
                 <div>
                   <div style={{
@@ -2534,6 +2842,8 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   <p style={{ fontSize: 12, color: T.textSub, margin: 0, lineHeight: 1.55 }}>
                     The contextual section changes with the assigned role.
                     Staff fields are shown for this <b>{editingUser.role}</b> account.
+                    Switch to <b>Advanced</b> to edit every schema column,
+                    including the encrypted health record.
                   </p>
                 </div>
 
@@ -2559,7 +2869,8 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

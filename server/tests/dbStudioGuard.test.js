@@ -7,6 +7,8 @@ import assert from 'node:assert/strict';
 
 // cryptoVault throws at import time without a key, so set it BEFORE importing.
 process.env.ENCRYPTION_KEY ||= 'x'.repeat(40);
+// ... and it is v2-only, so a salt is equally mandatory at import time.
+process.env.ENCRYPTION_SALT ||= 'dbstudio-test-salt-0123456789';
 
 const guard = await import('../src/utils/dbStudioGuard.js');
 const vault = await import('../src/utils/cryptoVault.js');

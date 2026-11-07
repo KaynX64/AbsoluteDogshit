@@ -4,6 +4,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 process.env.ENCRYPTION_KEY ||= 'x'.repeat(40);
+// cryptoVault is v2-only and fails closed at import time without a salt.
+process.env.ENCRYPTION_SALT ||= 'analytics-test-salt-0123456789';
+// analyticsStats imports db.js (pool), which validates DB_PASSWORD at import
+// time. mysql2 pools connect lazily, so a dummy password never touches MySQL —
+// the tests inject their own in-memory query function.
+process.env.DB_PASSWORD ||= 'analytics-test-db-password';
 const { encrypt } = await import('../src/utils/cryptoVault.js');
 const { countDiagnoses, countRiskGroups } = await import('../src/utils/analyticsStats.js');
 
