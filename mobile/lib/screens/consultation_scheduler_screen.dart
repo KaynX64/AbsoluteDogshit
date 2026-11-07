@@ -1,6 +1,7 @@
 // mobile/lib/screens/consultation_scheduler_screen.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import '../config/api_config.dart';
@@ -907,7 +908,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
           horizontal: rs.w(20),
           vertical: rs.h(8),
         ),
-        cacheExtent: 300,
+        scrollCacheExtent: ScrollCacheExtent.pixels(300),
         addAutomaticKeepAlives: false,
         addRepaintBoundaries: true,
         addSemanticIndexes: false,
@@ -1200,7 +1201,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
         scrollDirection: Axis.horizontal,
         itemExtent: extent,
         itemCount: _upcomingWeekdays.length,
-        cacheExtent: 200,
+        scrollCacheExtent: ScrollCacheExtent.pixels(200),
         addAutomaticKeepAlives: false,
         addRepaintBoundaries: true,
         itemBuilder: (context, index) {

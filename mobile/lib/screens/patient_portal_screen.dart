@@ -2910,12 +2910,13 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
               SizedBox(height: rs.h(20)),
 
               // Settings links
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
+              Material(
+                color: Colors.white,
+                shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(rs.r(24)),
-                  border: Border.all(color: const Color(0xFFE2EBE2)),
+                  side: const BorderSide(color: Color(0xFFE2EBE2)),
                 ),
+                clipBehavior: Clip.antiAlias,
                 child: Column(
                   children: [
                     ListTile(

@@ -1473,7 +1473,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                           );
 
                           if (res.statusCode != 200) {
-                            if (mounted) {
+                            if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                   content: Text(
@@ -1489,7 +1489,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                               jsonDecode(res.body) as Map<String, dynamic>;
                           final dlToken = data['downloadToken'] as String?;
                           if (dlToken == null || dlToken.isEmpty) {
-                            if (mounted) {
+                            if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                   content: Text(
@@ -1506,7 +1506,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                             mode: LaunchMode.externalApplication,
                           );
                         } catch (e) {
-                          if (mounted) {
+                          if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text('Network error: $e'),

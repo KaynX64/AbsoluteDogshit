@@ -166,8 +166,9 @@ export async function renderPrescriptionPDF(rx) {
     const dobStr = patient.date_of_birth ? new Date(patient.date_of_birth).toLocaleDateString('en-PH') : null;
     const ageStr = patient.age != null ? `${patient.age} yrs old` : null;
     const dobAge = [dobStr, ageStr].filter(Boolean).join(' · ');
-    drawInfoRow(doc, 'DOB / Age:', `${dobAge}${patient.sex ? ` · Sex: ${patient.sex}` : ''}`);
-  } else if (patient.sex) {
+    drawInfoRow(doc, 'DOB / Age:', dobAge);
+  }
+  if (patient.sex) {
     drawInfoRow(doc, 'Sex:', patient.sex);
   }
   drawInfoRow(doc, 'Blood Type:',           patient.blood_type || 'Unknown');

@@ -182,6 +182,8 @@ export default function DoctorConsole({
   const [internalView] = useState<DoctorViewMode>('active');
   const viewMode = controlledView ?? internalView;
   const [showSignature, setShowSignature] = useState(false);
+  const [signatureStatus, setSignatureStatus] = useState<'checking' | 'enrolled' | 'missing' | 'error'>('checking');
+  const [signatureStatusError, setSignatureStatusError] = useState<string | null>(null);
 
   /* Safe dentist detection: prop first, then JWT fallback */
   const isDentist = currentRole
@@ -261,6 +263,40 @@ export default function DoctorConsole({
     d.setMonth(d.getMonth() + 6);
     return d.toISOString().split('T')[0];
   });
+
+  useEffect(() => {
+    let active = true;
+
+    const checkSignatureStatus = async () => {
+      try {
+        const token = localStorage.getItem('valetudo_token');
+        if (!token) throw new Error('Your session is unavailable. Please sign in again.');
+
+        const res = await fetch(`${API_BASE_URL}/api/signature/me/status`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not verify signature status.');
+
+        if (active) {
+          setSignatureStatus(data.enrolled ? 'enrolled' : 'missing');
+          setSignatureStatusError(null);
+        }
+      } catch (error) {
+        if (active) {
+          setSignatureStatus('error');
+          setSignatureStatusError(
+            error instanceof Error ? error.message : 'Could not verify signature status.'
+          );
+        }
+      }
+    };
+
+    void checkSignatureStatus();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   /* ── History modal ─────────────────────────────────────────── */
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -1102,7 +1138,10 @@ const loadPatientTimeline = async (patient: any) => {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to issue medical clearance.');
+      if (!res.ok) {
+        if (data.code === 'SIGNATURE_NOT_ENROLLED') setShowSignature(true);
+        throw new Error(data.error || 'Failed to issue medical clearance.');
+      }
 
       const clearanceId = data.clearanceId;
       await openIssuedPdf('clearances', clearanceId);
@@ -1191,6 +1230,41 @@ const loadPatientTimeline = async (patient: any) => {
             onClick={() => setShowSignature(true)}
           >
             <Icon name="edit_note" size={14} /> My signature
+          </button>
+        </div>
+      )}
+
+      {(signatureStatus === 'missing' || signatureStatus === 'error') && (
+        <div
+          role="alert"
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 16,
+            flexWrap: 'wrap',
+            marginBottom: 18,
+            padding: '14px 18px',
+            borderRadius: T.radius.md,
+            background: T.warningSoft,
+            color: T.textDark,
+            border: `1px solid ${T.warningBorder}`,
+          }}
+        >
+          <div style={{ flex: '1 1 300px' }}>
+            <strong>
+              {signatureStatus === 'missing'
+                ? 'Your handwritten signature is not saved.'
+                : 'Your signature status could not be verified.'}
+            </strong>
+            <div style={{ marginTop: 4, fontSize: 12.5, lineHeight: 1.5 }}>
+              {signatureStatus === 'missing'
+                ? 'Prescriptions and clearances issued without it would reach patients without your handwritten signature. Save it before issuing documents.'
+                : `${signatureStatusError || 'Check your connection.'} Document issuance requires a saved signature.`}
+            </div>
+          </div>
+          <button type="button" style={btnPrimary} onClick={() => setShowSignature(true)}>
+            <Icon name="edit_note" size={14} /> Save signature
           </button>
         </div>
       )}
@@ -2383,12 +2457,15 @@ const loadPatientTimeline = async (patient: any) => {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.15fr', gap: 20 }}>
             {/* LEFT: Document issuance */}
             <section
+              aria-disabled={!selectedApp}
+              inert={!selectedApp}
               style={{
                 background: T.surface,
                 border: `1px solid ${T.border}`,
                 borderRadius: T.radius.lg,
                 padding: 22,
                 boxShadow: T.shadow.xs,
+                opacity: selectedApp ? 1 : 0.45,
               }}
             >
               <div
@@ -2520,6 +2597,12 @@ const loadPatientTimeline = async (patient: any) => {
                   }}
                   initialNotes={selectedApp?.past_dietary_notes}
                   isArchived={isArchivedMode}
+                  signatureEnrolled={
+                    signatureStatus === 'checking' || signatureStatus === 'error'
+                      ? null
+                      : signatureStatus === 'enrolled'
+                  }
+                  onSignatureRequired={() => setShowSignature(true)}
                   onPrescriptionIssued={(info) => {
                     setFeedbackMsg({
                       text: `Prescription #${info.prescriptionId} recorded and signed.`,
@@ -2702,12 +2785,15 @@ const loadPatientTimeline = async (patient: any) => {
 
             {/* RIGHT: Encounter diagnosis & vitals */}
             <section
+              aria-disabled={!selectedApp}
+              inert={!selectedApp}
               style={{
                 background: T.surface,
                 border: `1px solid ${T.border}`,
                 borderRadius: T.radius.lg,
                 padding: 22,
                 boxShadow: T.shadow.xs,
+                opacity: selectedApp ? 1 : 0.45,
               }}
             >
               <h3
@@ -4260,7 +4346,10 @@ const loadPatientTimeline = async (patient: any) => {
                 <Icon name="close" size={14} /> Close
               </button>
             </div>
-            <SignatureEnrollment />
+            <SignatureEnrollment onSaved={() => {
+              setSignatureStatus('enrolled');
+              setSignatureStatusError(null);
+            }} />
           </div>
         </div>
       )}

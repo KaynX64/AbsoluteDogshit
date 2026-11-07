@@ -98,6 +98,22 @@ export async function assertValidSigner(conn, userId, allowedRoles = SIGNER_ROLE
   };
 }
 
+export async function assertSignatureEnrolled(conn, userId) {
+  const [rows] = await conn.query(
+    'SELECT signature_s3_key, signature_sha256 FROM STAFF_PROFILES WHERE user_id = ?',
+    [userId]
+  );
+  const signature = rows[0];
+  if (!signature?.signature_s3_key) {
+    throw new SignerError(
+      'Save your handwritten signature before issuing a prescription or clearance. Without it, the patient would receive a document without your signature.',
+      409,
+      'SIGNATURE_NOT_ENROLLED'
+    );
+  }
+  return signature;
+}
+
 // The document recipient must be an active patient account, never the signer.
 export async function assertValidPatient(conn, patientId, signerId) {
   const id = Number(patientId);

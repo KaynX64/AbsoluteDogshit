@@ -27,7 +27,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late TextEditingController _phoneController;
   late TextEditingController _emContactNameController;
   late TextEditingController _emContactPhoneController;
-  String? _sex;
 
   bool _isSaving = false;
 
@@ -47,7 +46,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         TextEditingController(text: hp['emergency_contact_name'] ?? '');
     _emContactPhoneController =
         TextEditingController(text: hp['emergency_contact_phone'] ?? '');
-    _sex = hp['sex'] as String?;
   }
 
   @override
@@ -68,7 +66,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       'phone': _phoneController.text.trim(),
       'emergency_contact_name': _emContactNameController.text.trim(),
       'emergency_contact_phone': _emContactPhoneController.text.trim(),
-      'sex': _sex,
     };
 
     try {
@@ -153,6 +150,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final rs = Rs.of(context);
     final maxContentWidth = rs.isTablet ? 560.0 : double.infinity;
     final healthProfile = widget.healthProfile ?? {};
+    final rawSex = healthProfile['sex'];
+    final sex = rawSex?.toString().toUpperCase();
     final rawDob = healthProfile['date_of_birth'];
     final dob = rawDob == null ? null : rawDob.toString().split('T')[0];
     final age = healthProfile['age'];
@@ -209,13 +208,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   ),
                   SizedBox(height: rs.h(4)),
                   Text(
-                    'Keep your sex and personal and emergency contacts updated.',
+                    'Keep your personal and emergency contacts updated.',
                     style: TextStyle(fontSize: rs.sp(14), color: textSub),
                   ),
                   SizedBox(height: rs.h(24)),
 
                   Text(
-                    'Sex',
+                    'Sex (read-only)',
                     style: TextStyle(
                       fontSize: rs.sp(13),
                       fontWeight: FontWeight.w700,
@@ -223,18 +222,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     ),
                   ),
                   SizedBox(height: rs.h(8)),
-                  DropdownButtonFormField<String>(
-                    initialValue: _sex,
+                  InputDecorator(
                     decoration: _pillInputDecoration(
                       rs: rs,
-                      hint: 'Select sex',
+                      hint: 'Not recorded in clinic database',
                       icon: Icons.person_outline,
                     ),
-                    items: const [
-                      DropdownMenuItem(value: 'MALE', child: Text('MALE')),
-                      DropdownMenuItem(value: 'FEMALE', child: Text('FEMALE')),
-                    ],
-                    onChanged: (value) => setState(() => _sex = value),
+                    child: Text(
+                      sex ?? 'Not recorded in clinic database',
+                      style: TextStyle(
+                        fontSize: rs.sp(14),
+                        color: sex != null ? textMain : textSub,
+                      ),
+                    ),
                   ),
                   SizedBox(height: rs.h(20)),
 

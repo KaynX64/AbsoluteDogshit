@@ -9,7 +9,13 @@ import { API_BASE_URL } from '../config/api';
 
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('valetudo_token')}` });
 
-export default function SignatureEnrollment({ onClose }: { onClose?: () => void }) {
+export default function SignatureEnrollment({
+  onClose,
+  onSaved,
+}: {
+  onClose?: () => void;
+  onSaved?: () => void;
+}) {
   const padRef = useRef<SignaturePadHandle>(null);
   const [current, setCurrent] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
@@ -53,6 +59,7 @@ export default function SignatureEnrollment({ onClose }: { onClose?: () => void 
       setMsg({ ok: true, text: 'Signature saved. New documents will use it.' });
       setDrawing(false);
       setEmpty(true);
+      onSaved?.();
       await load();
     } catch (e: any) {
       setMsg({ ok: false, text: e.message });

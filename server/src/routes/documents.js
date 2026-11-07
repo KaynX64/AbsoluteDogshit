@@ -27,6 +27,7 @@ import { VERIFY_LIMIT } from '../config/limits.js';
 import {
   SignerError,
   assertValidSigner,
+  assertSignatureEnrolled,
   assertValidPatient,
   assertEmrBelongsToPatient,
   assertAppointmentInQueue,
@@ -84,13 +85,10 @@ export default function documentRoutes(io) {
       
       // ── Re-verify signer, patient and encounter against the database ─────────
       const signer = await assertValidSigner(connection, doctorUserId);
+      const sg = await assertSignatureEnrolled(connection, doctorUserId);
       await assertValidPatient(connection, patient_user_id, doctorUserId);
       await assertAppointmentInQueue(connection, appointment_id, patient_user_id, doctorUserId);
       const expDate = resolveExpiryDate(expires_at, 30, 180);
-      const [[sg]] = await connection.query(
-        'SELECT signature_s3_key, signature_sha256 FROM STAFF_PROFILES WHERE user_id = ?',
-        [doctorUserId]
-      );
       if (emr_id) {
         await assertEmrBelongsToPatient(connection, emr_id, patient_user_id);
       }
@@ -812,13 +810,10 @@ export default function documentRoutes(io) {
 
       // Re-verify signer, recipient and expiry against the database
       const signer = await assertValidSigner(connection, issuerId);
+      const sg = await assertSignatureEnrolled(connection, issuerId);
       await assertValidPatient(connection, user_id, issuerId);
       await assertAppointmentInQueue(connection, appointment_id, user_id, issuerId);
       const expDate = resolveExpiryDate(expires_at);
-      const [[sg]] = await connection.query(
-        'SELECT signature_s3_key, signature_sha256 FROM STAFF_PROFILES WHERE user_id = ?',
-        [issuerId]
-      );
 
       const clearanceUuid = crypto.randomUUID();
       const token = `CLR.${clearanceUuid}.${Date.now()}`;

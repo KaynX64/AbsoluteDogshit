@@ -44,8 +44,10 @@ interface PrescriptionGeneratorProps {
   };
   initialNotes?: string;
   isArchived?: boolean;
+  signatureEnrolled?: boolean | null;
   onPrescriptionIssued?: (info: { prescriptionId: number; qrToken: string; emrId: number }) => void;
   onPrescriptionError?: (message: string) => void;
+  onSignatureRequired?: () => void;
 }
 
 /* ── Hoisted Form Field Wrapper (Must stay outside to preserve focus) ── */
@@ -285,8 +287,10 @@ export default function PrescriptionGenerator({
   verifiedPatient,
   initialNotes,
   isArchived = false,
+  signatureEnrolled,
   onPrescriptionIssued,
   onPrescriptionError,
+  onSignatureRequired,
 }: PrescriptionGeneratorProps) {
   const [medicines, setMedicines] = useState<MedicineMaster[]>([]);
   const [selectedMedicineId, setSelectedMedicineId] = useState<number>(1);
@@ -402,6 +406,14 @@ export default function PrescriptionGenerator({
   };
 
   const handleSaveAndPrintPrescription = async (confirmed = false) => {
+    if (signatureEnrolled === false) {
+      onSignatureRequired?.();
+      onPrescriptionError?.(
+        'Save your handwritten signature before issuing a prescription. The patient would otherwise receive it without your signature.'
+      );
+      return;
+    }
+
     if (!patientUserId) {
       if (onPrescriptionError) {
         onPrescriptionError('No patient selected. Please choose a patient from the queue first.');
@@ -457,6 +469,7 @@ export default function PrescriptionGenerator({
         });
         const data = await res.json();
         if (!res.ok) {
+          if (data.code === 'SIGNATURE_NOT_ENROLLED') onSignatureRequired?.();
           throw new Error(data.error || 'Failed to issue outside prescription.');
         }
         if (onPrescriptionIssued) {
@@ -545,6 +558,7 @@ export default function PrescriptionGenerator({
       });
       const data = await res.json();
       if (!res.ok) {
+        if (data.code === 'SIGNATURE_NOT_ENROLLED') onSignatureRequired?.();
         if (data.code === 'INSUFFICIENT_STOCK') {
           setStockError({
             medicine: data.medicine || rxMedName,
