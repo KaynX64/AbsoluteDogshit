@@ -19,7 +19,7 @@ Root `package.json` only pins shared tooling (concurrently, wait-on, electron). 
 - All clients → `https://<host>:5000/api/...` (self-signed TLS) + Socket.IO (WSS) on the same port.
 - Auth: JWT, 24 h, carries `roles[]` + `jti`; logout/revocation via Redis denylist `token:blacklist:<jti>`.
 - Roles (seeded in `server/schema.sql`): `STUDENT`, `FACULTY`, `NON_TEACHING`, `NURSE`, `DOCTOR`, `DENTIST`, `EMERGENCY_RESPONDER`, `ADMIN`. A user may hold several.
-- Realtime events (server → clients): `emergency:new_alert`, `emergency:status_change`, `emergency:incident_report_required`, `emergency:incident_reported`, `responder:status_changed`, `queue:updated`, `appointment:booked`, `appointment:cancelled`, `appointment:status_changed`, `prescription:status_changed`. Every authenticated socket joins its own `user:<id>` room (delivery is per user, never per role); the incident-report popup additionally uses a per-desktop-window room so only the window that resolved an alert opens it. `join:responders` from old mobile builds is only acknowledged.
+- Realtime events (server → clients): `emergency:new_alert`, `emergency:status_change`, `emergency:incident_report_required`, `emergency:incident_reported`, `responder:status_changed`, `queue:updated`, `appointment:booked`, `appointment:cancelled`, `appointment:status_changed`, `prescription:status_changed`. Every authenticated socket joins its own `user:<id>` room (delivery is per user, never per role); the desktop renderer also joins a per-window room so only the window that resolved an alert opens its incident-report popup. `join:responders` from old mobile builds is only acknowledged.
 - Qualified Responder: `USERS.is_qualified_responder` is a role-independent SOS label (any role can be flagged). It is ADDITIVE to the legacy role-based audience (`EMERGENCY_RESPONDER`/`NURSE`/`DOCTOR`/`ADMIN` keep receiving alerts with the flag off). Non-clinical flagged users get a reduced alert payload (no medical details, `medicalDetailsRedacted: true`). Admins need the `RESPONDERS_MANAGE` permission code to change it.
 
 ## Bootstrap a dev machine (order matters)
@@ -44,7 +44,7 @@ Root `package.json` only pins shared tooling (concurrently, wait-on, electron). 
 
 - **Desktop API URL is build-time.** `desktop/src/config/api.ts` imports `app-config.json`; Vite bakes `apiBaseUrl` into the renderer bundle. Editing `app-config.json` in a packaged exe only affects main-process checks, NOT where renderer requests go. Repoint a built exe ⇒ edit `app-config.json` → `npm run dist` again.
 - Mobile API URL is hardcoded in `mobile/lib/config/api_config.dart` (Android uses the LAN IP; the Android emulator needs `10.0.2.2`).
-- Server CORS is an allow-list (SEC-10): defaults cover the Vite dev origins + the packaged `file://` build (origin `null`); extend via `CORS_ALLOWED_ORIGINS` env. Non-browser clients (Flutter, curl) send no `Origin` and always pass.
+- Server CORS is an exact-match allow-list (SEC-10): built-in entries cover the Vite dev origins and packaged Electron origins (`file://` and `null`); `CORS_ALLOWED_ORIGINS` adds origins without replacing those defaults. Non-browser clients (Flutter, curl) send no `Origin` and always pass.
 - `PUBLIC_API_BASE_URL` (server `.env`) is the URL baked into generated PDFs/QR codes — it must be reachable from whatever device scans them.
 
 ## Security invariants — audit findings SEC-01…14 are remediated on this branch; do not regress

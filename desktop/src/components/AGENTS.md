@@ -9,7 +9,7 @@ Flat folder: one component per file, header comment `// desktop/src/components/<
 - Auth: `const token = localStorage.getItem('valetudo_token')` → `headers: { Authorization: \`Bearer ${token}\` }`. App.tsx sets the key at login (L575) and clears both `valetudo_token` + `token` at logout (L125-126).
 - Base URL: `import { API_BASE_URL, SOCKET_URL } from '../config/api'` — never hardcode a host.
 - HTTP: plain `fetch()` with manual `res.ok` / status-code checks; JSON via `JSON.stringify`. No axios, no react-query.
-- Sockets: each realtime component opens its **own** `io(SOCKET_URL, { auth: { token } })` inside a `useEffect` and disconnects on cleanup (canonical pattern: DoctorConsole L351-374). New client-side event names need a matching server `io.emit(...)` in `server/src/routes/*` or `utils/reminderWorker.js`.
+- Sockets: each realtime component opens its **own** `io(SOCKET_URL, { auth: { token } })` inside a `useEffect` and disconnects on cleanup (canonical pattern: DoctorConsole L351-374). The incident-report modal also sends `clientInstanceId` from `services/clientInstance.ts`; status actions that can open that modal send the same ID in `X-Client-Instance-Id`. Keep these values aligned so only the initiating desktop window receives its popup. New client-side event names need a matching server `io.emit(...)` in `server/src/routes/*` or `utils/reminderWorker.js`.
 - Icons: `<Icon name tone />` only — the name registry is `IconNames` (Icon.tsx L124). Add new glyphs there, not inline SVG.
 - Styling: inline `style` objects + tokens from `../theme`; `index.css` (~48 KB) is globals only.
 - Role-gated UI here is cosmetic — the server enforces RBAC on every route. Never treat client checks as security.
@@ -65,6 +65,9 @@ SignatureEnrollment   → SignaturePad
 - Pre-fill `useEffect` L98 (`GET /api/emergency/:alertId/incident-report`) — patient name / ID number / contact number / role come from the server; `resolvedAt` defaults to the stored resolution timestamp (editable `datetime-local`).
 - Submit `submitReport` L233 (`POST /api/emergency/:alertId/incident-report`; 409 `REPORT_ALREADY_FILED` = another console won, popup dismisses). Socket `emergency:incident_reported` (L189) dismisses this console's popup when someone else files first. "Skip for now" dismisses for the session only.
 - Queue behavior: popups arriving while a form is open are queued and shown one by one (`openFor` L85 / `closePopup` L212).
+
+### IncidentRecords.tsx — archived incident reports
+- Mounted from AdminConsole's Incidents tab. The View modal is rendered with `createPortal(..., document.body)` so the overlay covers the sticky top bar and escapes the animated `.app-content` stacking context. Preserve this portal if adjusting modal layout.
 
 ## Feature components
 
