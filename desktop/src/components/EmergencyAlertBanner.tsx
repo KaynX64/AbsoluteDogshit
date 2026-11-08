@@ -164,71 +164,11 @@ export default function EmergencyAlertBanner() {
     }
   };
 
-  // Test OS notification
-  const handleTestDirectNotification = () => {
-    playEmergencyAlarm();
-    if ((window as any).electronAPI?.showNotification) {
-      (window as any).electronAPI.showNotification({
-        title: 'Valetudo HealthLink — SOS Alert Test',
-        body: 'Daniella Movida (BSIT) reported a medical emergency at PSU Lingayen Library.',
-      });
-    } else {
-      alert('electronAPI.showNotification not detected. Ensure preload.cjs is configured.');
-    }
-  };
-
-  // Full stack SOS test
-  const handleTestFullStackSOS = async () => {
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/emergency/sos`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          latitude: 16.029851,
-          longitude: 120.228543,
-          notes: 'SIMULATED SOS: PSU Lingayen Administration Building',
-        }),
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        alert('Server SOS error: ' + (data.error || 'Check server connection'));
-      }
-    } catch (err: any) {
-      alert('Could not trigger backend test SOS: ' + err.message);
-    }
-  };
-
   // Not an active qualified responder (server said 403) — render nothing.
   if (!authorized) return null;
 
   return (
     <div style={{ marginBottom: 20 }}>
-      {/* TEST TRIGGER TOOLBAR */}
-      <div className="ea-toolbar">
-        <span className="ea-toolbar-label">Test harness</span>
-        <button
-          type="button"
-          className="ea-btn-test"
-          onClick={handleTestDirectNotification}
-          title="Directly test the OS banner without server"
-        >
-          <Icon name="science" size={14} /> Test OS Notification (Instant)
-        </button>
-
-        <button
-          type="button"
-          className="ea-btn-live"
-          onClick={handleTestFullStackSOS}
-          title="Sends real SOS request to backend and broadcasts over Socket.IO"
-        >
-          <Icon name="emergency" size={14} /> Trigger Live SOS (Full System Test)
-        </button>
-      </div>
-
       {/* ACTIVE EMERGENCY ALERTS BANNER */}
       {alerts.map((alert) => {
         const redacted = alert.medicalDetailsRedacted === true;

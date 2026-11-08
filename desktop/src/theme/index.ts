@@ -1,11 +1,13 @@
 // desktop/src/theme/index.ts
 //
 // Valetudo HealthLink — design-system presets.
-// Stage 5 — clean / calm / minimal overhaul (per Overhaul.pdf reference).
+// Stage 6 — login-parity soft pass.
 //
-// Every export from earlier stages is preserved verbatim. The additions
-// below give the rest of the app one consistent place to pull styles from,
-// so components stop re-hardcoding the same hex / shadow / radius values.
+// Every export from earlier stages is preserved verbatim. The Stage 6 pass
+// aligns the workspace presets with the revamped login screen: softer radii,
+// layered negative-spread shadows, the 4px/10% focus ring and the primary
+// CTA glow — so components stop re-hardcoding the same hex / shadow / radius
+// values.
 
 import type { CSSProperties } from 'react';
 
@@ -77,7 +79,7 @@ export const T = {
   ls: { tight: -0.3, normal: 0, wide: 0.3, wider: 0.6, widest: 1.4 },
 
   radius: {
-    xs: 5, sm: 8, md: 10, lg: 14, xl: 18, xxl: 22, pill: 999, circle: '50%',
+    xs: 6, sm: 9, md: 12, lg: 16, xl: 20, xxl: 26, pill: 999, circle: '50%',
   },
 
   shadow: {
@@ -87,6 +89,11 @@ export const T = {
     lg:  '0 4px 12px rgba(15,30,23,0.06), 0 12px 24px rgba(15,30,23,0.08)',
     xl:  '0 8px 20px rgba(15,30,23,0.08), 0 24px 48px rgba(15,30,23,0.10)',
     primary: '0 2px 6px rgba(31, 74, 52, 0.10), 0 6px 14px rgba(31, 74, 52, 0.08)',
+    /* Stage 6 — login parity: layered negative-spread card shadows. */
+    card:    '0 1px 2px rgba(15,30,23,0.03), 0 14px 32px -24px rgba(15,30,23,0.28), 0 8px 18px -14px rgba(15,30,23,0.12)',
+    modal:   '0 1px 2px rgba(15,30,23,0.03), 0 20px 44px -26px rgba(15,30,23,0.42), 0 10px 22px -16px rgba(15,30,23,0.16)',
+    glowPrimary:       '0 12px 26px -16px rgba(31, 74, 52, 0.65)',
+    glowPrimaryHover:  '0 6px 18px rgba(31, 74, 52, 0.22)',
   },
 
   // Motion primitives
@@ -124,7 +131,7 @@ export function rgba(hex: string, alpha: number): string {
 
 export const cardStyle: CSSProperties = {
   background: T.surface,
-  border: `1px solid ${T.border}`,
+  border: `1px solid ${T.borderSoft}`,
   borderRadius: T.radius.lg,
   boxShadow: T.shadow.xs,
 };
@@ -134,7 +141,7 @@ export const cardElevated: CSSProperties = {
   background: T.surface,
   border: `1px solid ${T.borderSoft}`,
   borderRadius: T.radius.xl,
-  boxShadow: T.shadow.sm,
+  boxShadow: T.shadow.card,
 };
 
 /** Inset panel inside a card (e.g. a stat block inside a section card). */
@@ -176,7 +183,7 @@ export const eyebrow: CSSProperties = {
   fontWeight: T.fw.bold,
   letterSpacing: T.ls.widest,
   textTransform: 'uppercase',
-  color: T.textMuted,
+  color: T.primarySoft,
   margin: 0,
 };
 
@@ -313,7 +320,7 @@ export const queueStatusPill = (status: string): CSSProperties => {
 export const inputStyle: CSSProperties = {
   width: '100%',
   boxSizing: 'border-box',
-  padding: '10px 14px',
+  padding: '12px 14px',
   fontSize: T.fs.body,
   color: T.text,
   background: T.surface,
@@ -324,7 +331,7 @@ export const inputStyle: CSSProperties = {
   transition: `border-color ${T.durBase} ${T.ease}, box-shadow ${T.durBase} ${T.ease}`,
 };
 
-export const inputFocusRing = `0 0 0 3px ${rgba(T.primary, 0.14)}`;
+export const inputFocusRing = `0 0 0 4px ${rgba(T.primary, 0.10)}`;
 
 /** Search input — pill shape, slightly smaller. */
 export const searchInput: CSSProperties = {
@@ -368,7 +375,7 @@ export const btnPrimary: CSSProperties = {
   padding: '10px 18px',
   background: T.primary,
   color: '#FFFFFF',
-  boxShadow: `0 1px 2px ${rgba(T.primary, 0.18)}`,
+  boxShadow: T.shadow.glowPrimary,
 };
 
 export const btnGhost: CSSProperties = {
@@ -392,7 +399,7 @@ export const btnDanger: CSSProperties = {
   padding: '10px 18px',
   background: T.danger,
   color: '#FFFFFF',
-  boxShadow: `0 1px 2px ${rgba(T.danger, 0.20)}`,
+  boxShadow: `0 10px 22px -14px ${rgba(T.danger, 0.55)}`,
 };
 
 /** NEW: success confirmation button. */
@@ -401,7 +408,7 @@ export const btnSuccess: CSSProperties = {
   padding: '10px 18px',
   background: T.success,
   color: '#FFFFFF',
-  boxShadow: `0 1px 2px ${rgba(T.success, 0.20)}`,
+  boxShadow: `0 10px 22px -14px ${rgba(T.success, 0.55)}`,
 };
 
 /** NEW: warning / caution button (used by emergency acknowledge). */
@@ -410,7 +417,7 @@ export const btnWarning: CSSProperties = {
   padding: '10px 18px',
   background: T.warning,
   color: '#FFFFFF',
-  boxShadow: `0 1px 2px ${rgba(T.warning, 0.20)}`,
+  boxShadow: `0 10px 22px -14px ${rgba(T.warning, 0.55)}`,
 };
 
 /** NEW: soft danger outline — secondary destructive action. */
@@ -594,10 +601,10 @@ export const toolbar: CSSProperties = {
 
 export const sectionCard: CSSProperties = {
   background: T.surface,
-  border: `1px solid ${T.border}`,
+  border: `1px solid ${T.borderSoft}`,
   borderRadius: T.radius.xl,
   padding: T.sp[5],
-  boxShadow: T.shadow.xs,
+  boxShadow: T.shadow.card,
   display: 'flex',
   flexDirection: 'column',
   gap: T.sp[4],

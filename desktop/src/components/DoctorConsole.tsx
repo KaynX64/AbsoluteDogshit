@@ -1248,7 +1248,7 @@ const loadPatientTimeline = async (patient: any) => {
             padding: '14px 18px',
             borderRadius: T.radius.md,
             background: T.warningSoft,
-            color: T.textDark,
+            color: T.ink,
             border: `1px solid ${T.warningBorder}`,
           }}
         >

@@ -114,31 +114,31 @@ export default function NurseConsole({
     ticket: ActiveTicket | null;
   }>({ loading: false, hasTicket: false, ticket: null });
 
-  /* ── Palette ─────────────────────────────────────────────── */
+  /* ── Palette (synced with theme/tokens.css — Stage 6 login-parity) ── */
   const C = {
     primary:      '#1F4A34',
     primaryDark:  '#153627',
     primaryTint:  '#E2EBE1',
     surface:      '#FFFFFF',
-    sage50:       '#F7F9F6',
-    sage100:      '#EEF3EC',
-    sage200:      '#E2EBE1',
+    sage50:       '#FAFBF9',
+    sage100:      '#F2F5F0',
+    sage200:      '#E5EBE3',
     sage300:      '#C9D9C7',
     sage400:      '#A3B3A1',
-    border:       '#DCE4DA',
-    borderSoft:   '#E8EDE6',
-    text:         '#191C1A',
-    textSub:      '#5A635B',
-    textMuted:    '#94A396',
-    success:      '#15803D',
-    successSoft:  '#DCFCE7',
-    successBorder:'#BBF7D0',
-    warning:      '#8C6826',
-    warningSoft:  '#FEF3C7',
-    warningBorder:'#FDE68A',
-    danger:       '#7A2E26',
-    dangerSoft:   '#FDE8E8',
-    dangerBorder: '#F8B4B4',
+    border:       '#E1E6DF',
+    borderSoft:   '#EDEFE9',
+    text:         '#1A1F1B',
+    textSub:      '#4A5A4D',
+    textMuted:    '#8A9990',
+    success:      '#2D7A4A',
+    successSoft:  '#E0F0E5',
+    successBorder:'#B5DCC1',
+    warning:      '#B8762A',
+    warningSoft:  '#FBF1DD',
+    warningBorder:'#F0D9A8',
+    danger:       '#B43E32',
+    dangerSoft:   '#FCEBEA',
+    dangerBorder: '#F0C5C0',
   };
 
   /* ── Logic ───────────────────────────────────────────────── */

@@ -31,7 +31,7 @@ Sibling of this directory's `AGENTS.md`. Each desktop monolith has its own slice
 ## Small components in this directory (one-liners)
 
 - `desktop/src/components/Icon.tsx` (366): Material Symbols font-ligature Icon component (name/size/tone props) used app-wide
-- `desktop/src/components/EmergencyAlertBanner.tsx` (337): Doctor-console SOS banner: live alert feed, status updates, test SOS trigger
+- `desktop/src/components/EmergencyAlertBanner.tsx` (258): Doctor-console SOS banner: live alert feed and status updates
 - `desktop/src/components/ServerPingMonitor.tsx` (216): Server latency panel: ping sparkline + jitter/loss stats fed by useServerPing hook
 - `desktop/src/components/PasswordStrengthIndicator.tsx` (180): Password meter + evaluatePassword() policy scorer (score>=Medium, all rules)
 - `desktop/src/components/InteractionWarning.tsx` (168): Drug-drug interaction warning cards (severity colors) for the prescription form

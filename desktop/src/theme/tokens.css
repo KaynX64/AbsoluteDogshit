@@ -1,7 +1,7 @@
 /* desktop/src/theme/tokens.css
  *
  * Valetudo HealthLink — design tokens.
- * Stage 5 — clean / calm / minimal overhaul (per Overhaul.pdf reference).
+ * Stage 6 — login-parity soft pass.
  *
  * Principles:
  *   • Sage-green brand preserved — primary #1F4A34 stays the anchor.
@@ -10,7 +10,10 @@
  *   • Type scale tightened: smaller body font (13px), more line-height.
  *   • Generous whitespace: 20–32px gutters everywhere.
  *   • Subtle motion: 150ms ease for everything; no spring overshoots.
- *   • All Stage 1-4 variable names + values preserved.
+ *   • Stage 6: radii softened, layered negative-spread shadows and the
+ *     4px/10% focus ring adopted from the revamped login screen, so the
+ *     post-login workspace shares the login's clean / calm / soft feel.
+ *   • All Stage 1-5 variable names + values otherwise preserved.
  */
 
 :root {
@@ -125,13 +128,13 @@
   --ls-wider:    0.6px;
   --ls-widest:   1.4px;
 
-  /* ── Radius — slightly smaller for a tighter feel ──────────────── */
-  --r-xs:   5px;
-  --r-sm:   8px;
-  --r-md:   10px;
-  --r-lg:   14px;
-  --r-xl:   18px;
-  --r-2xl:  22px;
+  /* ── Radius — softened to match the login card (26px hero radius) ── */
+  --r-xs:   6px;
+  --r-sm:   9px;
+  --r-md:   12px;
+  --r-lg:   16px;
+  --r-xl:   20px;
+  --r-2xl:  26px;
   --r-pill: 999px;
   --r-circle: 50%;
 
@@ -148,11 +151,24 @@
   --shadow-primary: 0 2px 6px rgba(31, 74, 52, 0.10),
                     0 6px 14px rgba(31, 74, 52, 0.08);
 
-  /* NEW: focus rings — softer */
-  --ring-primary: 0 0 0 3px rgba(var(--primary-rgb), 0.12);
-  --ring-danger:  0 0 0 3px rgba(var(--danger-rgb), 0.12);
-  --ring-success: 0 0 0 3px rgba(var(--success-rgb), 0.12);
-  --ring-warning: 0 0 0 3px rgba(var(--warning-rgb), 0.12);
+  /* NEW (Stage 6 — login parity): layered negative-spread card shadows.
+     The exact recipe the revamped login card uses, plus a calmer variant
+     for dense workspace panels. */
+  --shadow-card:    0 1px 2px rgba(15, 30, 23, 0.03),
+                    0 14px 32px -24px rgba(15, 30, 23, 0.28),
+                    0 8px 18px -14px rgba(15, 30, 23, 0.12);
+  --shadow-modal:   0 1px 2px rgba(15, 30, 23, 0.03),
+                    0 20px 44px -26px rgba(15, 30, 23, 0.42),
+                    0 10px 22px -16px rgba(15, 30, 23, 0.16);
+  /* Primary-CTA glow — the login submit button's halo. */
+  --glow-primary:   0 12px 26px -16px rgba(31, 74, 52, 0.65);
+  --glow-primary-hover: 0 6px 18px rgba(31, 74, 52, 0.22);
+
+  /* ── Focus rings — softer, login parity: 4px @ 10% ─────────────── */
+  --ring-primary: 0 0 0 4px rgba(var(--primary-rgb), 0.10);
+  --ring-danger:  0 0 0 4px rgba(var(--danger-rgb), 0.10);
+  --ring-success: 0 0 0 4px rgba(var(--success-rgb), 0.10);
+  --ring-warning: 0 0 0 4px rgba(var(--warning-rgb), 0.10);
 
   /* ── Motion — calmer, no spring overshoots ─────────────────────── */
   --ease:          cubic-bezier(0.4, 0, 0.2, 1);
