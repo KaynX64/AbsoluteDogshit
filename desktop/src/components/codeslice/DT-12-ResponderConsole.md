@@ -3,7 +3,7 @@
 Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172` · check from repo root: `python3 scripts/verify_codeslice.py desktop/src/components/codeslice .`
 
 ## DT-12 · desktop/src/components/ResponderConsole.tsx
-**LOC:** 494 · **Anchor commit:** fb9688d · **Role:** SOS dispatch console: live alert feed, alarm + tray notifications, status workflow buttons, dev test harness
+**LOC:** 495 · **Anchor commit:** fb9688d · **Role:** SOS dispatch console: live alert feed, alarm + tray notifications, status workflow buttons, dev test harness
 **Mounted by:** App (activeRoleView EMERGENCY_RESPONDER, L779)
 **API surface:** GET /api/emergency/active (L33), PATCH /api/emergency/:alertId/status (L98), POST /api/emergency/sos (L129, dev test)
 **Socket events:** on emergency:new_alert (L54), on emergency:status_change (L65); emit none

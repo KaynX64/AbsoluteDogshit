@@ -31,7 +31,7 @@ Electron 44 (main process = CommonJS `.cjs`) + Vite 6 + React 19 + TypeScript 5.
 
 ## Efficiency
 
-- Consoles are huge single files — never read one whole; `rg` the symbol/section, then open a ±40-line window: `DoctorConsole.tsx` ~154 KB · `AdminConsole.tsx` ~124 KB · `InventoryManager.tsx` ~54 KB · `NurseConsole.tsx` ~51 KB · `QrIntakeScanner.tsx` ~46 KB · `index.css` ~48 KB.
+- Consoles are huge single files — never read one whole; `rg` the symbol/section, then open a ±40-line window: `DoctorConsole.tsx` ~168 KB · `AdminConsole.tsx` ~160 KB · `InventoryManager.tsx` ~63 KB · `NurseConsole.tsx` ~76 KB · `QrIntakeScanner.tsx` ~51 KB · `index.css` ~75 KB.
 - The component slice map routes you precisely: `src/components/CODESLICE.md` (index) → `src/components/codeslice/<ID>-<Name>.md` per console — verified line-range slices plus an API-surface / socket / state header. `App.tsx` and `electron/main.cjs` are mapped there too (DT-09 / DT-13).
 - Never read `dist/`, `release/`, or lockfiles.
 - If the packaged app shows TLS/cert errors talking to `https://localhost:5000`, suspect `apiBaseUrl` (loopback check in main), not the renderer code.

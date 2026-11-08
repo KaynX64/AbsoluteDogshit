@@ -12,13 +12,13 @@ Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172`
 
 | # | Lines | Anchor | Description |
 |---|-------|--------|-------------|
-| 1 | 1-22 | valetudo_logo | imports: role consoles, hooks, offline-sync service, API config, theme, IncidentReportModal, logo |
+| 1 | 1-22 | import ThemedLogo | imports: role consoles, hooks, offline-sync service, API config, theme, IncidentReportModal, settings, themed logo |
 | 2 | 23-118 | const I = { | inline SVG icon set I (Users, Shield, Chart, Database, Stethoscope, Calendar, Pill, Alert, Key, Logout...) |
 | 3 | 119-152 | useSessionTimeout | 8h inactivity auto-logout hook (R.A. 10173); activity events reset; clears valetudo_token, reloads |
 | 4 | 154-254 | navByRole | Sidebar rail: role→nav map, badges, sign-out, password link |
 | 5 | 255-340 | tb-role-select | TopBar: greeting, View-as role select, Connected/Offline pill, queued-replay button, user chip |
 | 6 | 341-648 | LoginScreen | login split screen; login card has a faint green pointer-following glow, limited to the card; includes email/password form and dev quick-login chips |
-| 7 | 649-679 | export default function App() | App state: user, activeRoleView, workspace views, connectivity, updater, password modal |
+| 7 | 649-679 | function AppShell() | App state: user, activeRoleView, workspace views, connectivity, updater, password modal |
 | 8 | 680-699 | handleSignOut | POST /api/auth/logout; purge valetudo_token, credentials and user state |
 | 9 | 700-710 | isResponder | responder-only accounts skip session timeout; useBookingBadge → sidebar badge key |
 | 10 | 711-730 | offline-queue-changed | online/offline and offline-queue listeners; refreshOfflineQueueFromBackend() syncs badge on mount |
@@ -30,3 +30,4 @@ Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172`
 | 16 | 896-934 | update-banner | update banner: download %, Later dismiss, Restart now → installUpdate |
 | 17 | 935-963 | app-content | mounts NurseConsole/DoctorConsole/AdminConsole/ResponderConsole by role + IncidentReportModal popup |
 | 18 | 964-1075 | modal-backdrop | change-password modal: 3 fields, PasswordStrengthIndicator, submit gated on evaluatePassword, feedback |
+| 19 | 1080-1096 | export default function App() | mounts ThemeProvider around AppShell |

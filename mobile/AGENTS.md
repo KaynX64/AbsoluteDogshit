@@ -9,7 +9,7 @@ Flutter (Dart SDK ^3.13). Key packages: `http`, `flutter_secure_storage` (token 
 ## Code map — lib/
 
 - `main.dart` — bootstrap, theme, auth gate / navigation.
-- `screens/` — `splash_screen`, `login_screen`, `patient_portal_screen` (~115 KB — search, don't read whole), `consultation_scheduler_screen`, `documents_viewer_screen` (verified PDF stream), `responder_screen` (SOS console), `edit_profile_screen`, `change_password_screen`.
+- `screens/` — `splash_screen`, `login_screen`, `patient_portal_screen` (~123 KB — search, don't read whole), `consultation_scheduler_screen`, `documents_viewer_screen` (verified PDF stream), `responder_screen` (SOS console), `edit_profile_screen`, `change_password_screen`.
 - `screens/CODESLICE.md` + `screens/codeslice/` — per-screen slice maps (verified line ranges + rg-able anchors, one sub-MD per monolith); also maps `services/emergency_alert_service.dart` (MB-07).
 - `services/` — `connectivity_service` (offline detection), `emergency_alert_service` (SOS + geolocation + Qualified Responder flag handling; its socket also listens for `emergency:status_change` — any responder closing an incident stops this device's alarm and closes its SOS dialog), `offline_sos_service` (queues SOS while offline).
 - `widgets/` — `session_timeout_listener` (logout releases the FCM token + stops the responder listener), `valetudo_logo`, `sos_alert_actions` (shared SOS status-change path: `updateSosAlertStatus()` returns a result map `{ok, error, code, currentStatus}` + stateful `SosAlertActions` row; ALL responder tiers may acknowledge/dispatch/resolve/false-alarm — 409 "already closed" is treated as success).

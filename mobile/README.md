@@ -1,17 +1,21 @@
-# mobile
+# Valetudo HealthLink mobile app
 
-A new Flutter project.
+Flutter app for patients and emergency responders. Module-specific architecture, platform, and security guidance lives in [AGENTS.md](./AGENTS.md); repository-wide setup is in the root [AGENTS.md](../AGENTS.md).
 
-## Getting Started
+## Configure and run
 
-This project is a starting point for a Flutter application.
+Set the API host in `lib/config/api_config.dart` for the device running the app. Android devices need a reachable LAN host; the Android emulator uses `10.0.2.2` to reach the development host. See [AGENTS.md](./AGENTS.md) for TLS and Firebase setup.
 
-A few resources to get you started if this is your first Flutter project:
+```powershell
+flutter pub get
+flutter run
+```
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+## Build and test
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```powershell
+flutter test
+flutter build apk --release
+```
+
+Do not commit Firebase service-account or `google-services.json` credentials. Platform folders are generated; edit only the exceptions listed in [AGENTS.md](./AGENTS.md).
