@@ -65,6 +65,12 @@ CREATE TABLE `USERS` (
   `is_qualified_responder` TINYINT(1) NOT NULL DEFAULT 0,
   `qualified_responder_since` TIMESTAMP NULL DEFAULT NULL,
   `qualified_responder_note` VARCHAR(150) NULL,
+  -- Per-account UI theme (Stage 7): the desktop settings menu persists
+  -- the user's Light/Dark mode + palette preset here. Whitelisted in
+  -- server/src/auth.js (THEME_MODES / THEME_PRESETS) and validated on
+  -- every write in routes/profile.js (PUT /api/profile/theme).
+  `theme_mode` ENUM('light','dark') NOT NULL DEFAULT 'light',
+  `theme_preset` ENUM('brand','blossom','sunrise') NOT NULL DEFAULT 'brand',
   `version` INT NOT NULL DEFAULT 1,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -70,16 +70,21 @@ export interface IconProps {
   className?: string;
 }
 
-const toneColor: Record<Exclude<IconTone, 'inherit'>, string> = {
-  primary: T.primary,
-  danger:  T.danger,
-  warning: T.warning,
-  success: T.success,
-  info:    T.info,
-  text:    T.text,
-  muted:   T.textMuted,
-  sub:     T.textSub,
-};
+// Tone → live token resolution. Built as a function (not a module-level
+// record) so icon colors follow theme switches — a static record would
+// freeze the palette that was active at module load.
+function resolveToneColor(tone: Exclude<IconTone, 'inherit'>): string {
+  switch (tone) {
+    case 'primary': return T.primary;
+    case 'danger':  return T.danger;
+    case 'warning': return T.warning;
+    case 'success': return T.success;
+    case 'info':    return T.info;
+    case 'text':    return T.text;
+    case 'muted':   return T.textMuted;
+    case 'sub':     return T.textSub;
+  }
+}
 
 export default function Icon({
   name,
@@ -92,7 +97,7 @@ export default function Icon({
   className,
   ...rest
 }: IconProps) {
-  const color = tone === 'inherit' ? undefined : toneColor[tone];
+  const color = tone === 'inherit' ? undefined : resolveToneColor(tone);
 
   return (
     <span

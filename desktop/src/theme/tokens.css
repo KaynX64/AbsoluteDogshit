@@ -28,6 +28,9 @@
   --primary-50:     #F4F7F2;
   --primary-100:    #E2EBE1;
   --primary-rgb:    31, 74, 52;
+  /* Soft brand tone as an rgb triplet — low-alpha tints (hover glows,
+     hairlines) that must follow the live preset/mode. */
+  --primary-soft-rgb: 74, 122, 94;
 
   /* ── Sage (surfaces) ───────────────────────────────────────────── */
   --sage-50:        #FAFBF9;
@@ -43,8 +46,17 @@
   --surface-3:      #EDF2EB;
   --border:         #E1E6DF;
   --border-soft:    #EDEFE9;
-  --border-hair:    rgba(15, 30, 23, 0.05);
+  --border-hair:    rgba(var(--ink-rgb), 0.05);
   --border-strong:  #C5D0C0;
+
+  /* ── Theme engine extras (Stage 7) ──────────────────────────────
+   * Written by ThemeProvider for the active (preset × mode); these
+   * brand-light values are the static fallback. */
+  --veil-rgb:       226, 235, 225;   /* soft overlay tint on the dark rail */
+  --glass:          rgba(255, 255, 255, 0.82);  /* frosted top bar */
+  --glass-strong:   rgba(255, 255, 255, 0.96);  /* frosted menus/headers */
+  --bloom:          rgba(255, 255, 255, 0.85);  /* canvas halo */
+  --ink-rgb:        15, 30, 23;      /* shadow ink */
 
   /* ── Text ──────────────────────────────────────────────────────── */
   --text:           #1A1F1B;
@@ -52,6 +64,10 @@
   --text-muted:     #8A9990;
   --text-faint:     #B7C0B5;
   --text-on-primary:#FFFFFF;
+  --text-on-danger: #FFFFFF;
+  --text-on-warning:#0F1E17;
+  --text-on-info:   #FFFFFF;
+  --text-on-success:#FFFFFF;
 
   /* ── Semantics ─────────────────────────────────────────────────── */
   --danger:         #B43E32;
@@ -139,30 +155,30 @@
   --r-circle: 50%;
 
   /* ── Elevation — calmer. Hairlines do most of the work. ────────── */
-  --shadow-xs: 0 1px 2px rgba(15, 30, 23, 0.03);
-  --shadow-sm: 0 1px 2px rgba(15, 30, 23, 0.03),
-               0 1px 3px rgba(15, 30, 23, 0.04);
-  --shadow-md: 0 2px 6px rgba(15, 30, 23, 0.04),
-               0 4px 12px rgba(15, 30, 23, 0.05);
-  --shadow-lg: 0 4px 12px rgba(15, 30, 23, 0.06),
-               0 12px 24px rgba(15, 30, 23, 0.08);
-  --shadow-xl: 0 8px 20px rgba(15, 30, 23, 0.08),
-               0 24px 48px rgba(15, 30, 23, 0.10);
-  --shadow-primary: 0 2px 6px rgba(31, 74, 52, 0.10),
-                    0 6px 14px rgba(31, 74, 52, 0.08);
+  --shadow-xs: 0 1px 2px rgba(var(--ink-rgb), 0.03);
+  --shadow-sm: 0 1px 2px rgba(var(--ink-rgb), 0.03),
+               0 1px 3px rgba(var(--ink-rgb), 0.04);
+  --shadow-md: 0 2px 6px rgba(var(--ink-rgb), 0.04),
+               0 4px 12px rgba(var(--ink-rgb), 0.05);
+  --shadow-lg: 0 4px 12px rgba(var(--ink-rgb), 0.06),
+               0 12px 24px rgba(var(--ink-rgb), 0.08);
+  --shadow-xl: 0 8px 20px rgba(var(--ink-rgb), 0.08),
+               0 24px 48px rgba(var(--ink-rgb), 0.10);
+  --shadow-primary: 0 2px 6px rgba(var(--primary-rgb), 0.10),
+                    0 6px 14px rgba(var(--primary-rgb), 0.08);
 
   /* NEW (Stage 6 — login parity): layered negative-spread card shadows.
      The exact recipe the revamped login card uses, plus a calmer variant
      for dense workspace panels. */
-  --shadow-card:    0 1px 2px rgba(15, 30, 23, 0.03),
-                    0 14px 32px -24px rgba(15, 30, 23, 0.28),
-                    0 8px 18px -14px rgba(15, 30, 23, 0.12);
-  --shadow-modal:   0 1px 2px rgba(15, 30, 23, 0.03),
-                    0 20px 44px -26px rgba(15, 30, 23, 0.42),
-                    0 10px 22px -16px rgba(15, 30, 23, 0.16);
+  --shadow-card:    0 1px 2px rgba(var(--ink-rgb), 0.03),
+                    0 14px 32px -24px rgba(var(--ink-rgb), 0.28),
+                    0 8px 18px -14px rgba(var(--ink-rgb), 0.12);
+  --shadow-modal:   0 1px 2px rgba(var(--ink-rgb), 0.03),
+                    0 20px 44px -26px rgba(var(--ink-rgb), 0.42),
+                    0 10px 22px -16px rgba(var(--ink-rgb), 0.16);
   /* Primary-CTA glow — the login submit button's halo. */
-  --glow-primary:   0 12px 26px -16px rgba(31, 74, 52, 0.65);
-  --glow-primary-hover: 0 6px 18px rgba(31, 74, 52, 0.22);
+  --glow-primary:   0 12px 26px -16px rgba(var(--primary-rgb), 0.65);
+  --glow-primary-hover: 0 6px 18px rgba(var(--primary-rgb), 0.22);
 
   /* ── Focus rings — softer, login parity: 4px @ 10% ─────────────── */
   --ring-primary: 0 0 0 4px rgba(var(--primary-rgb), 0.10);

@@ -7,7 +7,7 @@ Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172`
 **Mounted by:** DoctorConsole.tsx L1423 (viewMode=analytics) · AdminConsole.tsx L1679 (analytics tab, gated by ANALYTICS_VIEW)
 **API surface:** GET /api/analytics/summary (L594); GET /api/analytics/export/xlsx (L610); GET /api/analytics/export/pdf (L630, L670); GET /api/analytics/export/excel (L650)
 **Socket events:** none
-**State / key fields:** data: AnalyticsData (totalConsultations, totalStudents, emergencyMetrics, roleDistribution, timeSeries, emergencyTimeSeries, topDiagnoses, deptBreakdown, fluStats, highRiskGroups, lowStockMeds) · loading · exports: handleDownloadExcelXLSX, handleDownloadPdfReport, handleDownloadExcelXlsx, handleDownloadServerPdf (blob + anchor download) · derived: isFluSpike, getRoleTone, totalRegistered · charts: SvgLineChart, SvgVerticalBarChart, SvgHorizontalBarChart + buildSmoothPath, niceAxisStep — hand-rolled SVG, no external chart library
+**State / key fields:** data: AnalyticsData (totalConsultations, totalStudents, emergencyMetrics, roleDistribution, timeSeries, emergencyTimeSeries, topDiagnoses, deptBreakdown, fluStats, highRiskGroups, lowStockMeds) · loading · exports: handleDownloadExcelXLSX, handleDownloadPdfReport, handleDownloadExcelXlsx, handleDownloadServerPdf (blob + anchor download) · derived: isFluSpike, getRoleTone, totalRegistered · charts: SvgLineChart, SvgVerticalBarChart, SvgHorizontalBarChart + buildSmoothPath, niceAxisStep — hand-rolled SVG, no external chart library · chart palette/chrome resolves live `T.*` tokens (svg stopColor/stroke/fill included) so every preset × mode repaints; the print-only header stays on fixed dark ink
 
 | # | Lines | Anchor | Description |
 |---|-------|--------|-------------|
@@ -31,13 +31,13 @@ Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172`
 | 18 | 688-717 | Loading campus epidemiological analytics | guards: loading spinner; !data error card (server not running) |
 | 19 | 719-736 | getRoleTone | derived: isFluSpike; getRoleTone per-role color/icon map; totalRegistered sum |
 | 20 | 738-758 | analytics-report-area | render root #analytics-report-area; @media print stylesheet (print-only visibility) |
-| 21 | 760-780 | print-header | print-only header: PSU Lingayen campus title, RA 10173 line, generated timestamp |
+| 21 | 760-780 | print-header | print-only header: PSU Lingayen campus title, RA 10173 line, generated timestamp (fixed dark ink — paper is always light) |
 | 22 | 782-834 | Epidemiological analytics | toolbar: page head; Refresh, Export Excel .xlsx, Official PDF Report, Print View buttons |
 | 23 | 836-947 | KPI cards | 4 KPI cards: enrolled students, total consultations, active emergencies, avg response time |
 | 24 | 949-1008 | EPIDEMIC SURVEILLANCE | flu surveillance banner: spike alert vs stable, past/prev 7-day counts; pill |
 | 25 | 1010-1088 | Campus population & headcount by role | card 1: roleDistribution grid (getRoleTone tiles) + Total registered pill |
-| 26 | 1090-1116 | 14-day consultation volume | card 2: consultation timeline; SvgLineChart on timeSeries (green grad) |
-| 27 | 1118-1145 | 14-day campus emergency incidents | card 3: emergency SOS timeline; SvgLineChart on emergencyTimeSeries (rose grad) |
+| 26 | 1090-1116 | 14-day consultation volume | card 2: consultation timeline; SvgLineChart on timeSeries (primary grad) |
+| 27 | 1118-1145 | 14-day campus emergency incidents | card 3: emergency SOS timeline; SvgLineChart on emergencyTimeSeries (danger grad) |
 | 28 | 1147-1167 | Top clinical diagnoses | cards 4-5: top diagnoses SvgVerticalBarChart; dept breakdown SvgHorizontalBarChart |
 | 29 | 1169-1252 | High-risk student surveillance watchlist | card 6a: high-risk watchlist tiles asthma, hypertension, severe allergies, diabetes |
 | 30 | 1254-1349 | Critical pharmacy inventory | card 6b: lowStockMeds table (name, batch, qty, expiry; critical flags) + closers |

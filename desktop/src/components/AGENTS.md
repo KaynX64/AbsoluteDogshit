@@ -11,7 +11,7 @@ Flat folder: one component per file, header comment `// desktop/src/components/<
 - HTTP: plain `fetch()` with manual `res.ok` / status-code checks; JSON via `JSON.stringify`. No axios, no react-query.
 - Sockets: each realtime component opens its **own** `io(SOCKET_URL, { auth: { token } })` inside a `useEffect` and disconnects on cleanup (canonical pattern: DoctorConsole L351-374). New client-side event names need a matching server `io.emit(...)` in `server/src/routes/*` or `utils/reminderWorker.js`.
 - Icons: `<Icon name tone />` only — the name registry is `IconNames` (Icon.tsx L124). Add new glyphs there, not inline SVG.
-- Styling: inline `style` objects + tokens from `../theme`; `index.css` (~48 KB) is globals only.
+- Styling: inline `style` objects + live tokens from `../theme`; use `T.textOnPrimary` / semantic `textOn*` tokens for filled controls, and do not add component-local palettes. `index.css` (~48 KB) is globals only.
 - Role-gated UI here is cosmetic — the server enforces RBAC on every route. Never treat client checks as security.
 
 ## Mount graph (who renders what)
@@ -91,7 +91,7 @@ SignatureEnrollment   → SignaturePad
 - Props: `patientUserId`, `appointmentId?`, `verifiedPatient {first_name,last_name,student_no,course,allergies,date_of_birth?,age?,sex?}`, `initialNotes?`, `isArchived?`, `onPrescriptionIssued?`, `onPrescriptionError?`.
 - Medicine catalog L332 (`GET /api/inventory/medicines`); `handleSelectMedicine` L383 auto-fills dosage from `strength`; `rxMode` `inventory|outside` (L392) — outside mode dosage defaults to "As per packaging"; expiry `getExpiresAtDate` L306; save+print L404 → `POST /api/documents/prescriptions` L435. Drug-interaction banner via `InteractionWarning` L829.
 
-### AnalyticsDashboard.tsx — 1,349 lines / 42 KB. Read-only dashboards + exports
+### AnalyticsDashboard.tsx — 1,349 lines / 43 KB. Read-only dashboards + exports
 - **Slice map:** `codeslice/DT-06-AnalyticsDashboard.md` (30 slices, verified @ 93b4172).
 - `GET /api/analytics/summary` L594 (`fetchAnalytics` L590); exports: xlsx L610, PDF L630, excel L650, server-rendered PDF L670.
 - `SvgVerticalBarChart` L267 (`niceAxisStep` L258): adaptive top-diagnoses chart — renders EVERY distinct diagnosis the server returns (the dashboard endpoint no longer slices to a top-5). Slot-width tiers (92/28/22/16 px per bar), label tiers (horizontal → -45° → -90° with every-kth thinning above 90 bars), value pills only when bars ≥ 24 px, `<title>` tooltips always, nice integer y-axis (≤ 6 gridlines), and the card scrolls sideways once the canvas exceeds 900 px.

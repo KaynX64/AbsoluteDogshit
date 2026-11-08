@@ -25,7 +25,7 @@ import InventoryManager from './InventoryManager';
 import { io } from 'socket.io-client';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
 import { CLIENT_INSTANCE_ID } from '../services/clientInstance';
-import { T, iconBtn, rgba, softBadge } from '../theme';
+import { T, iconBtn, rgba, softBadge, liveObject } from '../theme';
 import Icon from './Icon';
 
 interface QueueItem {
@@ -179,14 +179,19 @@ function allergyIsReal(value?: string | null): boolean {
    SHARED STYLE PRIMITIVES
    ═══════════════════════════════════════════════════════════════════ */
 
-const card: CSSProperties = {
+// Wrapped in liveObject so these module-level composites re-resolve the
+// active theme on every read (they would otherwise freeze the palette
+// that was active at module load).
+const card: CSSProperties = liveObject(() => ({
   background: T.surface,
-  border: `1px solid ${T.border}`,
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: T.border,
   borderRadius: T.radius.xl,
   boxShadow: T.shadow.card,
-};
+}));
 
-const microLabel: CSSProperties = {
+const microLabel: CSSProperties = liveObject(() => ({
   margin: 0,
   fontSize: T.fs.caption,
   fontWeight: T.fw.bold,
@@ -194,7 +199,7 @@ const microLabel: CSSProperties = {
   textTransform: 'uppercase',
   color: T.textMuted,
   lineHeight: T.lh.snug,
-};
+}));
 
 const mono: CSSProperties = {
   fontFamily: T.mono,
@@ -233,14 +238,14 @@ const smallButton = (filled: boolean, color: string): CSSProperties => ({
 
 type Tone = 'neutral' | 'primary' | 'info' | 'warning' | 'danger' | 'success';
 
-const TONE: Record<Tone, { bg: string; fg: string; border: string }> = {
+const TONE: Record<Tone, { bg: string; fg: string; border: string }> = liveObject(() => ({
   neutral: { bg: T.sage100, fg: T.textSub, border: T.border },
   primary: { bg: T.primaryTint, fg: T.primary, border: T.sage300 },
   info: { bg: T.infoSoft, fg: T.info, border: T.infoBorder },
   warning: { bg: T.warningSoft, fg: T.warning, border: T.warningBorder },
   danger: { bg: T.dangerSoft, fg: T.danger, border: T.dangerBorder },
   success: { bg: T.successSoft, fg: T.success, border: T.successBorder },
-};
+}));
 
 /* Scoped interaction layer — the only CSS this component ships. */
 const NURSE_CSS = `
@@ -1415,7 +1420,7 @@ export default function NurseConsole({
                         padding: '9px 18px',
                         borderRadius: T.radius.pill,
                         background: busy ? T.sage400 : T.primary,
-                        color: '#FFFFFF',
+                        color: busy ? T.textSub : T.textOnPrimary,
                         border: 'none',
                         fontSize: T.fs.body,
                         fontWeight: T.fw.bold,
@@ -1829,7 +1834,7 @@ export default function NurseConsole({
                                 padding: '2px 7px',
                                 borderRadius: T.radius.xs,
                                 background: T.danger,
-                                color: '#FFFFFF',
+                                color: T.textOnDanger,
                                 fontSize: T.fs.caption,
                                 fontWeight: T.fw.black,
                                 letterSpacing: 0.4,
@@ -1869,7 +1874,7 @@ export default function NurseConsole({
 
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
                         {servingNow ? (
-                          <span style={softBadge(T.primary, '#FFFFFF')}>In consult</span>
+                          <span style={softBadge(T.primary, T.textOnPrimary)}>In consult</span>
                         ) : emergency ? (
                           <span style={softBadge(T.danger, '#FFFFFF')}>Priority</span>
                         ) : (
@@ -1897,7 +1902,11 @@ export default function NurseConsole({
                 borderRadius: T.radius.pill,
                 border: 'none',
                 background: !nextInLine ? T.sage200 : isEmergencyTicket(nextInLine) ? T.danger : T.primary,
-                color: !nextInLine ? T.textMuted : '#FFFFFF',
+                color: !nextInLine
+                  ? T.textMuted
+                  : isEmergencyTicket(nextInLine)
+                  ? T.textOnDanger
+                  : T.textOnPrimary,
                 fontSize: T.fs.bodyLg,
                 fontWeight: T.fw.bold,
                 fontFamily: T.font,

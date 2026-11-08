@@ -84,6 +84,12 @@ export async function runAutoMigrations() {
       { table: 'USERS', column: 'is_qualified_responder', type: "TINYINT(1) NOT NULL DEFAULT 0" },
       { table: 'USERS', column: 'qualified_responder_since', type: 'TIMESTAMP NULL DEFAULT NULL' },
       { table: 'USERS', column: 'qualified_responder_note', type: "VARCHAR(150) NULL" },
+      // Per-account UI theme (Stage 7): mode = light/dark (light default),
+      // preset = brand / blossom (white-pink) / sunrise (yellow-blue).
+      // Kept in sync with the whitelist in desktop/src/theme/presets.ts
+      // and validated on every write in routes/profile.js.
+      { table: 'USERS', column: 'theme_mode', type: "ENUM('light','dark') NOT NULL DEFAULT 'light'" },
+      { table: 'USERS', column: 'theme_preset', type: "ENUM('brand','blossom','sunrise') NOT NULL DEFAULT 'brand'" },
     ];
 
     for (const item of columnsToCheck) {

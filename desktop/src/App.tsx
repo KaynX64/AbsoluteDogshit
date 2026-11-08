@@ -14,9 +14,11 @@ import {
 import { API_BASE_URL } from './config/api';
 import PasswordStrengthIndicator, { evaluatePassword } from './components/PasswordStrengthIndicator';
 import { T, btnPrimary, btnSubtle } from './theme';
+import { ThemeProvider, applyThemeFromAccount, useTheme } from './theme/ThemeProvider';
 import Icon from './components/Icon';
 import IncidentReportModal from './components/IncidentReportModal';
-import valetudoLogo from './assets/valetudo_logo.png';
+import SettingsMenu from './components/SettingsMenu';
+import ThemedLogo from './components/ThemedLogo';
 
 
 /* ── Inline SVG icons ──────────────────────────────────────────── */
@@ -192,7 +194,7 @@ function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, b
     <aside className="sb">
       <div className="sb-logo-block">
         <div className="sb-logo-lg">
-          <img src={valetudoLogo} alt="Valetudo HealthLink" />
+          <ThemedLogo alt="Valetudo HealthLink" />
         </div>
         <div className="sb-brand-text">
           <span className="sb-brand-name">Valetudo</span>
@@ -226,15 +228,9 @@ function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, b
       <div className="sb-spacer" />
 
       <div className="sb-links">
-        <button
-          type="button"
-          className="sb-link"
-          onClick={onChangePassword}
-          title="Change password"
-        >
-          <Icon name="key" size={20} />
-          <span>Change password</span>
-        </button>
+        {/* Dedicated settings menu (bottom-left) — theme mode & presets,
+            reset password, and per-account persistence state. */}
+        <SettingsMenu onResetPassword={onChangePassword} />
         <button
           type="button"
           className="sb-link"
@@ -395,23 +391,23 @@ function LoginScreen({ email, setEmail, password, setPassword, error, onSubmit }
           >
             <defs>
               <linearGradient id="login-wave-a" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stopColor="#E2EBE1" stopOpacity="0.2" />
-                <stop offset="100%" stopColor="#E2EBE1" stopOpacity="0" />
+                <stop offset="0%" style={{ stopColor: 'var(--primary-tint)' }} stopOpacity="0.2" />
+                <stop offset="100%" style={{ stopColor: 'var(--primary-tint)' }} stopOpacity="0" />
               </linearGradient>
               <linearGradient id="login-wave-b" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#E2EBE1" stopOpacity="0.14" />
-                <stop offset="100%" stopColor="#E2EBE1" stopOpacity="0" />
+                <stop offset="0%" style={{ stopColor: 'var(--primary-tint)' }} stopOpacity="0.14" />
+                <stop offset="100%" style={{ stopColor: 'var(--primary-tint)' }} stopOpacity="0" />
               </linearGradient>
               <radialGradient id="login-halo" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stopColor="#E2EBE1" stopOpacity="0.3" />
-                <stop offset="70%" stopColor="#E2EBE1" stopOpacity="0.08" />
-                <stop offset="100%" stopColor="#E2EBE1" stopOpacity="0" />
+                <stop offset="0%" style={{ stopColor: 'var(--primary-tint)' }} stopOpacity="0.3" />
+                <stop offset="70%" style={{ stopColor: 'var(--primary-tint)' }} stopOpacity="0.08" />
+                <stop offset="100%" style={{ stopColor: 'var(--primary-tint)' }} stopOpacity="0" />
               </radialGradient>
             </defs>
             <circle cx="96" cy="470" r="190" fill="url(#login-halo)" />
-            <circle cx="96" cy="470" r="118" fill="none" stroke="#E2EBE1" strokeOpacity="0.24" />
-            <circle cx="96" cy="470" r="166" fill="none" stroke="#E2EBE1" strokeOpacity="0.15" />
-            <circle cx="96" cy="470" r="214" fill="none" stroke="#E2EBE1" strokeOpacity="0.09" />
+            <circle cx="96" cy="470" r="118" fill="none" style={{ stroke: 'var(--primary-tint)' }} strokeOpacity="0.24" />
+            <circle cx="96" cy="470" r="166" fill="none" style={{ stroke: 'var(--primary-tint)' }} strokeOpacity="0.15" />
+            <circle cx="96" cy="470" r="214" fill="none" style={{ stroke: 'var(--primary-tint)' }} strokeOpacity="0.09" />
             <circle cx="402" cy="120" r="96" fill="url(#login-halo)" />
             <path
               d="M0 470 C 70 436 132 502 208 476 C 292 448 356 494 460 452 L460 620 L0 620 Z"
@@ -426,7 +422,7 @@ function LoginScreen({ email, setEmail, password, setPassword, error, onSubmit }
 
         <div className="login-aside-brand">
           <span className="login-aside-mark">
-            <img src={valetudoLogo} alt="" />
+            <ThemedLogo />
           </span>
           <span className="login-aside-wordmark">
             <span className="login-aside-name">Valetudo</span>
@@ -485,26 +481,26 @@ function LoginScreen({ email, setEmail, password, setPassword, error, onSubmit }
             preserveAspectRatio="xMidYMid slice"
             focusable="false"
           >
-            <circle cx="812" cy="790" r="330" fill="none" stroke="#1F4A34" strokeOpacity="0.09" />
-            <circle cx="812" cy="790" r="252" fill="none" stroke="#1F4A34" strokeOpacity="0.08" />
-            <circle cx="812" cy="790" r="174" fill="none" stroke="#1F4A34" strokeOpacity="0.075" />
-            <circle cx="812" cy="790" r="96" fill="#1F4A34" fillOpacity="0.05" />
-            <circle cx="96" cy="110" r="210" fill="none" stroke="#1F4A34" strokeOpacity="0.075" />
-            <circle cx="96" cy="110" r="140" fill="none" stroke="#1F4A34" strokeOpacity="0.06" />
+            <circle cx="812" cy="790" r="330" fill="none" style={{ stroke: 'var(--primary)' }} strokeOpacity="0.09" />
+            <circle cx="812" cy="790" r="252" fill="none" style={{ stroke: 'var(--primary)' }} strokeOpacity="0.08" />
+            <circle cx="812" cy="790" r="174" fill="none" style={{ stroke: 'var(--primary)' }} strokeOpacity="0.075" />
+            <circle cx="812" cy="790" r="96" style={{ fill: 'var(--primary)' }} fillOpacity="0.05" />
+            <circle cx="96" cy="110" r="210" fill="none" style={{ stroke: 'var(--primary)' }} strokeOpacity="0.075" />
+            <circle cx="96" cy="110" r="140" fill="none" style={{ stroke: 'var(--primary)' }} strokeOpacity="0.06" />
             <path
               className="login-main-wave login-main-wave--one"
               d="M-40 700 C 130 640 250 760 400 720 C 560 676 690 780 940 716 L940 940 L-40 940 Z"
-              fill="#1F4A34"
+              style={{ fill: 'var(--primary)' }}
               fillOpacity="0.058"
             />
             <path
               className="login-main-wave login-main-wave--two"
               d="M-40 790 C 140 742 270 848 430 806 C 590 764 720 856 940 800 L940 940 L-40 940 Z"
-              fill="#1F4A34"
+              style={{ fill: 'var(--primary)' }}
               fillOpacity="0.05"
             />
           </svg>
-          <img className="login-main-watermark" src={valetudoLogo} alt="" />
+          <ThemedLogo className="login-main-watermark" />
         </div>
 
         <div className="login-main-top">
@@ -646,7 +642,15 @@ function LoginScreen({ email, setEmail, password, setPassword, error, onSubmit }
 /* ================================================================= */
 /* APP ROOT                                                           */
 /* ================================================================= */
-export default function App() {
+
+/**
+ * Shell — everything below ThemeProvider. Consuming useTheme() here
+ * re-renders the whole tree on theme changes, which re-resolves every
+ * live `T.*` token used by the consoles. (Non-consuming subtrees would
+ * otherwise bail out of re-render and keep stale inline colors.)
+ */
+function AppShell() {
+  const { mode, preset } = useTheme();
   const [updateStatus, setUpdateStatus] = useState<{ state: string; version?: string; percent?: number } | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
 
@@ -751,6 +755,10 @@ export default function App() {
         }
 
         localStorage.setItem('valetudo_token', data.token);
+
+        // Per-account theme: apply the preference stored on the account
+        // (validated inside) so the workspace opens in the user's theme.
+        applyThemeFromAccount(data.user);
 
         // Pull the offline SQLite bootstrap cache (patients + recent EMR)
         // in the background. Non-blocking; fails silently outside Electron.
@@ -857,7 +865,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-theme-mode={mode} data-theme-preset={preset}>
       <Sidebar
         role={activeRoleView}
         badgeCounts={badgeKey ? { [badgeKey]: bookingBadge } : undefined}
@@ -1071,5 +1079,18 @@ const handleChangePassword = async (e: React.FormEvent) => {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * App — mounts the theme provider above the shell so both the login
+ * screen and the authenticated workspace live-theme, and so the
+ * account's stored preference can be applied the moment login succeeds.
+ */
+export default function App() {
+  return (
+    <ThemeProvider>
+      <AppShell />
+    </ThemeProvider>
   );
 }

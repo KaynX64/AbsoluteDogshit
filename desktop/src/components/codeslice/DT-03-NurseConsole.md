@@ -46,4 +46,4 @@ Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172`
 | 33 | 1711-1722 | <div className="nc-main"> | Work surface grid: scanner column (QrIntakeScanner + onPatientVerified) |
 | 34 | 1723-1887 | className="nc-queue" | Live queue card: header + count pill, skeleton/empty states, rows (ticket badge, identity, emergency chip, wait time, status) |
 | 35 | 1888-1924 | onClick={callNextPatient} | Queue footer: primary "Call Q-xx next" (emergency-first styling) + triage-order hint |
-| 36 | 1929-1932 | {sosConfirmModal} | SOS confirmation modal portal mount + component close |
+| 36 | 1936-1939 | {sosConfirmModal} | SOS confirmation modal portal mount + component close |

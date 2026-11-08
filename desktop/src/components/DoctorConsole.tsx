@@ -2573,7 +2573,7 @@ const loadPatientTimeline = async (patient: any) => {
                           padding: '6px 14px',
                           borderRadius: T.radius.pill,
                           background: T.primary,
-                          color: '#fff',
+                          color: T.textOnPrimary,
                           border: 'none',
                           fontSize: 11.5,
                           fontWeight: 700,

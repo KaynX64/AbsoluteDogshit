@@ -1009,7 +1009,7 @@ export default function PrescriptionGenerator({
                     setRxQuantity(String(stockError.available));
                     setStockError(null);
                   }}
-                  style={{ ...btnPrimary, background: T.danger }}
+                  style={{ ...btnPrimary, background: T.danger, color: T.textOnDanger }}
                 >
                   Set quantity to {stockError.available}
                 </button>

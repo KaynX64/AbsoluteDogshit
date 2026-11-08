@@ -74,33 +74,21 @@ export async function checkDrugInteractions(
  */
 export const SEVERITY_CONFIG: Record<
   string,
-  { bg: string; color: string; border: string; label: string; icon: string }
+  { label: string; icon: string }
 > = {
   contraindicated: {
-    bg: '#FDE8E8',
-    color: '#7A2E26',
-    border: '#F8B4B4',
     label: 'CONTRAINDICATED',
     icon: 'block',
   },
   severe: {
-    bg: '#FDE8E8',
-    color: '#9B1C1C',
-    border: '#F8B4B4',
     label: 'SEVERE',
     icon: 'warning',
   },
   moderate: {
-    bg: '#FEF3C7',
-    color: '#92400E',
-    border: '#FDE68A',
     label: 'MODERATE',
     icon: 'bolt',
   },
   mild: {
-    bg: '#E0F2FE',
-    color: '#0369A1',
-    border: '#BAE6FD',
     label: 'MILD',
     icon: 'info',
   },

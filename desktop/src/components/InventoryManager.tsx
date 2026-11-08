@@ -636,7 +636,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                                   background: isSelected ? T.primary : 'transparent',
                                   display: 'grid', placeItems: 'center',
                                 }}>
-                                  {isSelected && <span style={{ color: '#fff', fontSize: 9, fontWeight: 900 }}><Icon name="check" size={14} /></span>}
+                                  {isSelected && <span style={{ color: T.textOnPrimary, fontSize: 9, fontWeight: 900 }}><Icon name="check" size={14} /></span>}
                                 </div>
                               </td>
                               <td style={{ padding: '12px 14px' }}>
@@ -893,7 +893,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
 
             <button
               type="submit"
-              style={{ ...btnPrimary, background: T.danger, padding: 12, marginTop: 6 }}
+              style={{ ...btnPrimary, background: T.danger, color: T.textOnDanger, padding: 12, marginTop: 6 }}
             >
               Confirm & remove from available stock
             </button>
@@ -1139,7 +1139,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                       fontSize: 11.5, fontWeight: 700,
                       border: `1px solid ${isActive ? T.primary : T.border}`,
                       background: isActive ? T.primary : T.surface,
-                      color: isActive ? '#fff' : T.textSub,
+                      color: isActive ? T.textOnPrimary : T.textSub,
                       cursor: 'pointer', fontFamily: T.font,
                     }}
                   >
@@ -1450,6 +1450,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                 style={{
                   ...btnPrimary,
                   background: confirmDialog.isDestructive ? T.danger : T.primary,
+                  color: confirmDialog.isDestructive ? T.textOnDanger : T.textOnPrimary,
                 }}
               >
                 {confirmDialog.confirmLabel || 'Confirm'}

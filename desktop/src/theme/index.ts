@@ -1,75 +1,159 @@
 // desktop/src/theme/index.ts
 //
 // Valetudo HealthLink — design-system presets.
-// Stage 6 — login-parity soft pass.
 //
-// Every export from earlier stages is preserved verbatim. The Stage 6 pass
-// aligns the workspace presets with the revamped login screen: softer radii,
-// layered negative-spread shadows, the 4px/10% focus ring and the primary
-// CTA glow — so components stop re-hardcoding the same hex / shadow / radius
-// values.
+// LIVE THEMING (Stage 7):
+// The token object `T` and every composite style export below are now a
+// *live view* over the active theme. Color properties are getters backed
+// by the module-level `active` ThemeColors map, and composite presets
+// (buttons, cards, list rows…) use getter-backed `liveObject()` styles.
+//
+// Why: ~1,400 render-time `T.*` color references across the consoles stay
+// untouched — a theme switch swaps the active map, the app re-renders, and
+// every inline style resolves the new palette automatically. AppShell
+// consumes the theme context so console trees render after palette changes.
+//
+// Non-color scales (spacing, type, radii, motion) are theme-invariant and
+// remain plain static values, exactly as before.
+//
+// The active theme is set by ThemeProvider (see ./ThemeProvider.tsx) via
+// `setActiveTheme()`. Before React mounts, the default — brand light —
+// matches the static tokens in tokens.css verbatim.
 
 import type { CSSProperties } from 'react';
+import {
+  resolveThemeColors,
+  shadowRecipe,
+  normalizeThemeMode,
+  normalizeThemePreset,
+} from './presets';
+import type { ThemeColors, ThemeMode, ThemePreset } from './presets';
+
+/* ═══════════════════════════════════════════════════════════════════
+   ACTIVE THEME STATE
+   ═══════════════════════════════════════════════════════════════════ */
+
+let activePreset: ThemePreset = 'brand';
+let activeMode: ThemeMode = 'light';
+let active: ThemeColors = resolveThemeColors('brand', 'light');
+let activeShadows = shadowRecipe(active);
+
+/** Snapshot of the currently applied theme (colors + selection). */
+export function getActiveTheme(): { preset: ThemePreset; mode: ThemeMode; colors: ThemeColors } {
+  return { preset: activePreset, mode: activeMode, colors: active };
+}
+
+/**
+ * Swap the active theme. Values are normalized (invalid input falls back
+ * to brand / light) so no caller can push an unknown palette into the DOM.
+ * ThemeProvider is the only intended caller.
+ */
+export function setActiveTheme(preset: ThemePreset, mode: ThemeMode): void {
+  activePreset = normalizeThemePreset(preset);
+  activeMode = normalizeThemeMode(mode);
+  active = resolveThemeColors(activePreset, activeMode);
+  activeShadows = shadowRecipe(active);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   LIVE OBJECT HELPER
+   ═══════════════════════════════════════════════════════════════════ */
+
+/**
+ * A getter-backed object over `build()`. Every property read re-resolves
+ * against the factory, so objects built from theme colors never go stale
+ * after a theme swap. Using ordinary accessors instead of a Proxy keeps
+ * React/devtools object freezing and key enumeration safe.
+ *
+ * Use for module-level composite styles — reading them at render time
+ * always yields the active theme's values:
+ *
+ *   const card = liveObject(() => ({ background: T.surface, ... }));
+ *   … <div style={card} />  or  <div style={{ ...card, padding: 8 }} />
+ */
+export function liveObject<T extends object>(build: () => T): T {
+  const live = {} as T;
+  for (const key of Reflect.ownKeys(build())) {
+    Object.defineProperty(live, key, {
+      configurable: true,
+      enumerable: true,
+      get: () => Reflect.get(build(), key),
+    });
+  }
+  return live;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   DESIGN TOKENS — live color view + static scales
+   ═══════════════════════════════════════════════════════════════════ */
 
 export const T = {
-  ink: '#0F1E17',
-  primary: '#1F4A34',
-  primaryDark: '#153627',
-  primaryMid: '#2E5C43',
-  primarySoft: '#4A7A5E',
-  primaryTint: '#E2EBE1',
-  primary50: '#F2F6F0',
-  primary100: '#E2EBE1',
+  // ── Brand ramp (live) ────────────────────────────────────────────
+  get ink()          { return active.ink; },
+  get primary()      { return active.primary; },
+  get primaryDark()  { return active.primaryDark; },
+  get primaryMid()   { return active.primaryMid; },
+  get primarySoft()  { return active.primarySoft; },
+  get primaryTint()  { return active.primaryTint; },
+  get primary50()    { return active.primary50; },
+  get primary100()   { return active.primary100; },
 
-  sage50: '#FAFBF9',
-  sage100: '#F2F5F0',
-  sage200: '#E5EBE3',
-  sage300: '#C9D9C7',
-  sage400: '#A3B3A1',
+  // ── Surface ramp (live) ──────────────────────────────────────────
+  get sage50()       { return active.sage50; },
+  get sage100()      { return active.sage100; },
+  get sage200()      { return active.sage200; },
+  get sage300()      { return active.sage300; },
+  get sage400()      { return active.sage400; },
 
-  surface: '#FFFFFF',
-  surfaceMuted: '#FBFCFA',
-  surface2: '#F4F7F2',
-  surface3: '#EDF2EB',
-  border: '#E1E6DF',
-  borderSoft: '#EDEFE9',
-  borderStrong: '#C5D0C0',
+  get surface()      { return active.surface; },
+  get surfaceMuted() { return active.surfaceMuted; },
+  get surface2()     { return active.surface2; },
+  get surface3()     { return active.surface3; },
+  get border()       { return active.border; },
+  get borderSoft()   { return active.borderSoft; },
+  get borderStrong() { return active.borderStrong; },
 
-  text: '#1A1F1B',
-  textSub: '#4A5A4D',
-  textMuted: '#8A9990',
-  textFaint: '#B7C0B5',
-  textOnPrimary: '#FFFFFF',
+  // ── Text ramp (live) ─────────────────────────────────────────────
+  get text()         { return active.text; },
+  get textSub()      { return active.textSub; },
+  get textMuted()    { return active.textMuted; },
+  get textFaint()    { return active.textFaint; },
+  get textOnPrimary(){ return active.primaryOn; },
 
-  danger: '#B43E32',
-  dangerSoft: '#FCEBEA',
-  dangerBorder: '#F0C5C0',
+  // ── Semantics (live) ─────────────────────────────────────────────
+  get danger()       { return active.danger; },
+  get textOnDanger() { return active.dangerOn; },
+  get dangerSoft()   { return active.dangerSoft; },
+  get dangerBorder() { return active.dangerBorder; },
 
-  warning: '#B8762A',
-  warningSoft: '#FBF1DD',
-  warningBorder: '#F0D9A8',
+  get warning()      { return active.warning; },
+  get textOnWarning(){ return active.warningOn; },
+  get warningSoft()  { return active.warningSoft; },
+  get warningBorder(){ return active.warningBorder; },
 
-  info: '#2A6FA8',
-  infoSoft: '#E6F0F8',
-  infoBorder: '#B5D2E8',
+  get info()         { return active.info; },
+  get textOnInfo()   { return active.infoOn; },
+  get infoSoft()     { return active.infoSoft; },
+  get infoBorder()   { return active.infoBorder; },
 
-  success: '#2D7A4A',
-  successSoft: '#E0F0E5',
-  successBorder: '#B5DCC1',
+  get success()      { return active.success; },
+  get textOnSuccess(){ return active.successOn; },
+  get successSoft()  { return active.successSoft; },
+  get successBorder(){ return active.successBorder; },
 
-  // Tonal accents (cohesive with sage seed — calmer low-saturation)
-  tonalGreenBg: '#E5EFE2', tonalGreenFg: '#2E5C43',
-  tonalBlueBg:  '#E0EAF2', tonalBlueFg:  '#2A5A75',
-  tonalCreamBg: '#F2EBDA', tonalCreamFg: '#7A6533',
-  tonalLilacBg: '#E6E1EF', tonalLilacFg: '#4F4170',
-  tonalRoseBg:  '#F2E0DC', tonalRoseFg:  '#8A4035',
-  tonalTealBg:  '#DDECE7', tonalTealFg:  '#2A6052',
-  tonalAmberBg: '#F4E5C2', tonalAmberFg: '#7A5A1E',
+  // ── Tonal accents (live) ─────────────────────────────────────────
+  get tonalGreenBg() { return active.tonalGreenBg; }, get tonalGreenFg() { return active.tonalGreenFg; },
+  get tonalBlueBg()  { return active.tonalBlueBg; },  get tonalBlueFg()  { return active.tonalBlueFg; },
+  get tonalCreamBg() { return active.tonalCreamBg; }, get tonalCreamFg() { return active.tonalCreamFg; },
+  get tonalLilacBg() { return active.tonalLilacBg; }, get tonalLilacFg() { return active.tonalLilacFg; },
+  get tonalRoseBg()  { return active.tonalRoseBg; },  get tonalRoseFg()  { return active.tonalRoseFg; },
+  get tonalTealBg()  { return active.tonalTealBg; },  get tonalTealFg()  { return active.tonalTealFg; },
+  get tonalAmberBg() { return active.tonalAmberBg; }, get tonalAmberFg() { return active.tonalAmberFg; },
 
-  // Spacing scale
+  // ── Spacing scale (static — theme-invariant) ─────────────────────
   sp: { 0: 0, 1: 4, 2: 8, 3: 12, 4: 16, 5: 20, 6: 24, 7: 32, 8: 40, 9: 48, 10: 64, 11: 80 },
 
-  // Type scale
+  // ── Type scale (static) ──────────────────────────────────────────
   fs: {
     caption:  10.5, meta: 11.5, body: 13, bodyLg: 14, subtitle: 15,
     title:    17, titleLg: 20, h2: 22, h1: 26, display: 34, hero: 44,
@@ -82,21 +166,10 @@ export const T = {
     xs: 6, sm: 9, md: 12, lg: 16, xl: 20, xxl: 26, pill: 999, circle: '50%',
   },
 
-  shadow: {
-    xs:  '0 1px 2px rgba(15,30,23,0.03)',
-    sm:  '0 1px 2px rgba(15,30,23,0.03), 0 1px 3px rgba(15,30,23,0.04)',
-    md:  '0 2px 6px rgba(15,30,23,0.04), 0 4px 12px rgba(15,30,23,0.05)',
-    lg:  '0 4px 12px rgba(15,30,23,0.06), 0 12px 24px rgba(15,30,23,0.08)',
-    xl:  '0 8px 20px rgba(15,30,23,0.08), 0 24px 48px rgba(15,30,23,0.10)',
-    primary: '0 2px 6px rgba(31, 74, 52, 0.10), 0 6px 14px rgba(31, 74, 52, 0.08)',
-    /* Stage 6 — login parity: layered negative-spread card shadows. */
-    card:    '0 1px 2px rgba(15,30,23,0.03), 0 14px 32px -24px rgba(15,30,23,0.28), 0 8px 18px -14px rgba(15,30,23,0.12)',
-    modal:   '0 1px 2px rgba(15,30,23,0.03), 0 20px 44px -26px rgba(15,30,23,0.42), 0 10px 22px -16px rgba(15,30,23,0.16)',
-    glowPrimary:       '0 12px 26px -16px rgba(31, 74, 52, 0.65)',
-    glowPrimaryHover:  '0 6px 18px rgba(31, 74, 52, 0.22)',
-  },
+  // ── Elevation (live — ink + primary tints follow the theme) ──────
+  get shadow() { return activeShadows; },
 
-  // Motion primitives
+  // ── Motion primitives (static) ───────────────────────────────────
   ease:        'cubic-bezier(0.4, 0, 0.2, 1)',
   easeOut:     'cubic-bezier(0.16, 1, 0.3, 1)',
   easeSpring:  'cubic-bezier(0.4, 0, 0.2, 1)',
@@ -129,27 +202,33 @@ export function rgba(hex: string, alpha: number): string {
    LAYOUT PRIMITIVES
    ═══════════════════════════════════════════════════════════════════ */
 
-export const cardStyle: CSSProperties = {
+export const cardStyle: CSSProperties = liveObject(() => ({
   background: T.surface,
-  border: `1px solid ${T.borderSoft}`,
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: T.borderSoft,
   borderRadius: T.radius.lg,
   boxShadow: T.shadow.xs,
-};
+}));
 
 /** Card with slightly stronger elevation for primary content panels. */
-export const cardElevated: CSSProperties = {
+export const cardElevated: CSSProperties = liveObject(() => ({
   background: T.surface,
-  border: `1px solid ${T.borderSoft}`,
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: T.borderSoft,
   borderRadius: T.radius.xl,
   boxShadow: T.shadow.card,
-};
+}));
 
 /** Inset panel inside a card (e.g. a stat block inside a section card). */
-export const cardInset: CSSProperties = {
+export const cardInset: CSSProperties = liveObject(() => ({
   background: T.surface2,
-  border: `1px solid ${T.borderSoft}`,
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: T.borderSoft,
   borderRadius: T.radius.md,
-};
+}));
 
 /** Page wrapper used by every console for consistent gutters. */
 export const pageWrap: CSSProperties = {
@@ -160,78 +239,78 @@ export const pageWrap: CSSProperties = {
 
 /* ── Dividers ───────────────────────────────────────────────────── */
 
-export const divider: CSSProperties = {
+export const divider: CSSProperties = liveObject(() => ({
   height: 1,
   background: T.borderSoft,
   border: 'none',
   margin: 0,
-};
+}));
 
-export const dividerVertical: CSSProperties = {
+export const dividerVertical: CSSProperties = liveObject(() => ({
   width: 1,
   alignSelf: 'stretch',
   background: T.borderSoft,
   border: 'none',
-};
+}));
 
 /* ═══════════════════════════════════════════════════════════════════
    TYPOGRAPHY PRESETS
    ═══════════════════════════════════════════════════════════════════ */
 
-export const eyebrow: CSSProperties = {
+export const eyebrow: CSSProperties = liveObject(() => ({
   fontSize: T.fs.caption,
   fontWeight: T.fw.bold,
   letterSpacing: T.ls.widest,
   textTransform: 'uppercase',
   color: T.primarySoft,
   margin: 0,
-};
+}));
 
-export const sectionTitle: CSSProperties = {
+export const sectionTitle: CSSProperties = liveObject(() => ({
   fontSize: T.fs.caption,
   fontWeight: T.fw.bold,
   letterSpacing: T.ls.widest,
   textTransform: 'uppercase',
   color: T.textSub,
   margin: 0,
-};
+}));
 
-export const sectionHeading: CSSProperties = {
+export const sectionHeading: CSSProperties = liveObject(() => ({
   fontSize: T.fs.titleLg,
   fontWeight: T.fw.extrabold,
   letterSpacing: T.ls.tight,
   color: T.text,
   margin: 0,
-};
+}));
 
-export const pageTitle: CSSProperties = {
+export const pageTitle: CSSProperties = liveObject(() => ({
   fontSize: T.fs.h1,
   fontWeight: T.fw.extrabold,
   letterSpacing: T.ls.tight,
   color: T.text,
   margin: 0,
-};
+}));
 
-export const pageSub: CSSProperties = {
+export const pageSub: CSSProperties = liveObject(() => ({
   fontSize: T.fs.subtitle,
   color: T.textSub,
   margin: '4px 0 0',
   lineHeight: T.lh.normal,
-};
+}));
 
-export const bodyText: CSSProperties = {
+export const bodyText: CSSProperties = liveObject(() => ({
   fontSize: T.fs.body,
   color: T.text,
   lineHeight: T.lh.normal,
   margin: 0,
-};
+}));
 
-export const caption: CSSProperties = {
+export const caption: CSSProperties = liveObject(() => ({
   fontSize: T.fs.caption,
   color: T.textMuted,
   lineHeight: T.lh.normal,
   margin: 0,
-};
+}));
 
 export const monoNumerals: CSSProperties = {
   fontFamily: T.mono,
@@ -279,10 +358,10 @@ export const rolePill = (role: string): CSSProperties => {
   switch (role) {
     case 'ADMIN':               return pill(T.tonalLilacBg, T.tonalLilacFg);
     case 'DOCTOR':              return pill(T.infoSoft, T.info);
-    case 'DENTIST':             return pill('#ECFEFF', '#0E7490');
+    case 'DENTIST':             return pill(T.tonalTealBg, T.tonalTealFg);
     case 'NURSE':               return pill(T.tonalGreenBg, T.tonalGreenFg);
     case 'EMERGENCY_RESPONDER': return pill(T.tonalRoseBg, T.tonalRoseFg);
-    case 'FACULTY':             return pill('#FFF7ED', '#C2410C');
+    case 'FACULTY':             return pill(T.tonalAmberBg, T.tonalAmberFg);
     case 'NON_TEACHING':        return pill(T.tonalCreamBg, T.tonalCreamFg);
     case 'STUDENT':             return pill(T.successSoft, T.success);
     default:                    return pill(T.sage100, T.textSub);
@@ -317,51 +396,58 @@ export const queueStatusPill = (status: string): CSSProperties => {
    INPUTS
    ═══════════════════════════════════════════════════════════════════ */
 
-export const inputStyle: CSSProperties = {
+export const inputStyle: CSSProperties = liveObject(() => ({
   width: '100%',
   boxSizing: 'border-box',
   padding: '12px 14px',
   fontSize: T.fs.body,
   color: T.text,
   background: T.surface,
-  border: `1px solid ${T.border}`,
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: T.border,
   borderRadius: T.radius.md,
   outline: 'none',
   fontFamily: T.font,
   transition: `border-color ${T.durBase} ${T.ease}, box-shadow ${T.durBase} ${T.ease}`,
-};
+}));
 
-export const inputFocusRing = `0 0 0 4px ${rgba(T.primary, 0.10)}`;
+/** Focus ring for inputs — resolved live so it tracks the active primary. */
+export function getInputFocusRing(): string {
+  return `0 0 0 4px ${rgba(T.primary, 0.10)}`;
+}
 
 /** Search input — pill shape, slightly smaller. */
-export const searchInput: CSSProperties = {
+export const searchInput: CSSProperties = liveObject(() => ({
   ...inputStyle,
   padding: '9px 16px 9px 36px',
   borderRadius: T.radius.pill,
   fontSize: T.fs.meta,
-};
+}));
 
 /** Textarea variant. */
-export const textareaStyle: CSSProperties = {
+export const textareaStyle: CSSProperties = liveObject(() => ({
   ...inputStyle,
   padding: '12px 14px',
   minHeight: 88,
   resize: 'vertical',
   lineHeight: T.lh.normal,
   fontFamily: T.font,
-};
+}));
 
 /* ═══════════════════════════════════════════════════════════════════
    BUTTONS
    ═══════════════════════════════════════════════════════════════════ */
 
-export const btnBase: CSSProperties = {
+const btnBase: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
   gap: 8,
   borderRadius: T.radius.pill,
-  border: 'none',
+  borderWidth: 0,
+  borderStyle: 'none',
+  borderColor: 'transparent',
   fontSize: T.fs.body,
   fontWeight: T.fw.bold,
   cursor: 'pointer',
@@ -370,74 +456,78 @@ export const btnBase: CSSProperties = {
   transition: `background ${T.durBase} ${T.ease}, box-shadow ${T.durBase} ${T.ease}, transform ${T.durFast} ${T.ease}, border-color ${T.durBase} ${T.ease}`,
 };
 
-export const btnPrimary: CSSProperties = {
+export const btnPrimary: CSSProperties = liveObject(() => ({
   ...btnBase,
   padding: '10px 18px',
   background: T.primary,
-  color: '#FFFFFF',
+  color: T.textOnPrimary,
   boxShadow: T.shadow.glowPrimary,
-};
+}));
 
-export const btnGhost: CSSProperties = {
+export const btnGhost: CSSProperties = liveObject(() => ({
   ...btnBase,
   padding: '9px 16px',
   background: T.surface,
   color: T.text,
-  border: `1px solid ${T.border}`,
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: T.border,
   fontWeight: T.fw.semibold,
-};
+}));
 
-export const btnSubtle: CSSProperties = {
+export const btnSubtle: CSSProperties = liveObject(() => ({
   ...btnGhost,
   background: T.sage100,
-  border: '1px solid transparent',
-};
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: 'transparent',
+}));
 
-/** NEW: danger / destructive action button. */
-export const btnDanger: CSSProperties = {
+/** Danger / destructive action button. */
+export const btnDanger: CSSProperties = liveObject(() => ({
   ...btnBase,
   padding: '10px 18px',
   background: T.danger,
-  color: '#FFFFFF',
+  color: T.textOnDanger,
   boxShadow: `0 10px 22px -14px ${rgba(T.danger, 0.55)}`,
-};
+}));
 
-/** NEW: success confirmation button. */
-export const btnSuccess: CSSProperties = {
+/** Success confirmation button. */
+export const btnSuccess: CSSProperties = liveObject(() => ({
   ...btnBase,
   padding: '10px 18px',
   background: T.success,
-  color: '#FFFFFF',
+  color: T.textOnSuccess,
   boxShadow: `0 10px 22px -14px ${rgba(T.success, 0.55)}`,
-};
+}));
 
-/** NEW: warning / caution button (used by emergency acknowledge). */
-export const btnWarning: CSSProperties = {
+/** Warning / caution button (used by emergency acknowledge). */
+export const btnWarning: CSSProperties = liveObject(() => ({
   ...btnBase,
   padding: '10px 18px',
   background: T.warning,
-  color: '#FFFFFF',
+  color: T.textOnWarning,
   boxShadow: `0 10px 22px -14px ${rgba(T.warning, 0.55)}`,
-};
+}));
 
-/** NEW: soft danger outline — secondary destructive action. */
-export const btnGhostDanger: CSSProperties = {
+/** Soft danger outline — secondary destructive action. */
+export const btnGhostDanger: CSSProperties = liveObject(() => ({
   ...btnGhost,
   background: T.dangerSoft,
   color: T.danger,
   border: `1px solid ${T.dangerBorder}`,
-};
+}));
 
-/** NEW: soft success outline — secondary positive action. */
-export const btnGhostSuccess: CSSProperties = {
+/** Soft success outline — secondary positive action. */
+export const btnGhostSuccess: CSSProperties = liveObject(() => ({
   ...btnGhost,
   background: T.successSoft,
   color: T.success,
   border: `1px solid ${T.successBorder}`,
-};
+}));
 
-/** NEW: icon-only square button (38×38 default). */
-export const iconBtn: CSSProperties = {
+/** Icon-only square button (38×38 default). */
+export const iconBtn: CSSProperties = liveObject(() => ({
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -450,13 +540,13 @@ export const iconBtn: CSSProperties = {
   cursor: 'pointer',
   transition: `background ${T.durBase} ${T.ease}, color ${T.durBase} ${T.ease}, transform ${T.durFast} ${T.ease}`,
   padding: 0,
-};
+}));
 
 /* ═══════════════════════════════════════════════════════════════════
    TABLES
    ═══════════════════════════════════════════════════════════════════ */
 
-export const tableHeaderStyle: CSSProperties = {
+export const tableHeaderStyle: CSSProperties = liveObject(() => ({
   fontSize: T.fs.caption,
   fontWeight: T.fw.extrabold,
   letterSpacing: T.ls.wider,
@@ -467,15 +557,15 @@ export const tableHeaderStyle: CSSProperties = {
   background: T.sage100,
   borderBottom: `1px solid ${T.border}`,
   whiteSpace: 'nowrap',
-};
+}));
 
-export const tableCellStyle: CSSProperties = {
+export const tableCellStyle: CSSProperties = liveObject(() => ({
   padding: '14px',
   fontSize: T.fs.body,
   color: T.text,
   borderBottom: `1px solid ${T.borderSoft}`,
   verticalAlign: 'middle',
-};
+}));
 
 /* ═══════════════════════════════════════════════════════════════════
    KPI / STAT CARDS
@@ -519,16 +609,16 @@ export const kpiHint: CSSProperties = {
    EMPTY STATES
    ═══════════════════════════════════════════════════════════════════ */
 
-export const emptyState: CSSProperties = {
+export const emptyState: CSSProperties = liveObject(() => ({
   padding: '48px 24px',
   textAlign: 'center',
   background: T.sage50,
   borderRadius: T.radius.xl,
   border: `1px dashed ${T.sage300}`,
   color: T.textSub,
-};
+}));
 
-export const emptyStateIcon: CSSProperties = {
+export const emptyStateIcon: CSSProperties = liveObject(() => ({
   width: 48,
   height: 48,
   margin: '0 auto 14px',
@@ -538,7 +628,7 @@ export const emptyStateIcon: CSSProperties = {
   display: 'grid',
   placeItems: 'center',
   fontSize: 22,
-};
+}));
 
 /* ═══════════════════════════════════════════════════════════════════
    ALERT / CALLOUT BLOCKS
@@ -599,7 +689,7 @@ export const toolbar: CSSProperties = {
    SECTION CARD (titled container)
    ═══════════════════════════════════════════════════════════════════ */
 
-export const sectionCard: CSSProperties = {
+export const sectionCard: CSSProperties = liveObject(() => ({
   background: T.surface,
   border: `1px solid ${T.borderSoft}`,
   borderRadius: T.radius.xl,
@@ -608,7 +698,7 @@ export const sectionCard: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: T.sp[4],
-};
+}));
 
 export const sectionCardHeader: CSSProperties = {
   display: 'flex',
@@ -625,7 +715,7 @@ export const sectionCardTitleGroup: CSSProperties = {
   minWidth: 0,
 };
 
-export const sectionCardIcon: CSSProperties = {
+export const sectionCardIcon: CSSProperties = liveObject(() => ({
   width: 40,
   height: 40,
   borderRadius: T.radius.md,
@@ -635,13 +725,13 @@ export const sectionCardIcon: CSSProperties = {
   placeItems: 'center',
   fontSize: 18,
   flexShrink: 0,
-};
+}));
 
 /* ═══════════════════════════════════════════════════════════════════
    LIST ITEM (queue row, search result, audit log entry, etc.)
    ═══════════════════════════════════════════════════════════════════ */
 
-export const listItem: CSSProperties = {
+export const listItem: CSSProperties = liveObject(() => ({
   display: 'grid',
   gridTemplateColumns: 'auto 1fr auto',
   gap: T.sp[3],
@@ -649,12 +739,14 @@ export const listItem: CSSProperties = {
   padding: '14px 16px',
   borderRadius: T.radius.lg,
   background: T.sage50,
-  border: `1px solid transparent`,
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: 'transparent',
   transition: `background ${T.durBase} ${T.ease}, border-color ${T.durBase} ${T.ease}`,
-};
+}));
 
-export const listItemActive: CSSProperties = {
+export const listItemActive: CSSProperties = liveObject(() => ({
   ...listItem,
   background: T.primaryTint,
   borderColor: T.sage300,
-};
+}));

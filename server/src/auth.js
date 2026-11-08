@@ -16,6 +16,15 @@ import { resolveAdminPermissions } from './middleware/rbac.js';
 const DUMMY_HASH = bcrypt.hashSync('timing-equalizer-valetudo-2026', 10);
 
 // ─────────────────────────────────────────────────────────────────────────
+// PER-ACCOUNT UI THEME (Stage 7) — single server-side whitelist.
+// Mirrors desktop/src/theme/presets.ts (THEME_MODES / THEME_PRESETS).
+// Every write path (routes/profile.js PUT /theme) and read path (login
+// response below) validates against these sets.
+// ─────────────────────────────────────────────────────────────────────────
+export const THEME_MODES = new Set(['light', 'dark']);
+export const THEME_PRESETS = new Set(['brand', 'blossom', 'sunrise']);
+
+// ─────────────────────────────────────────────────────────────────────────
 // RATE LIMITING (brute-force protection on the login endpoint)
 // Values come from server/src/config/limits.js
 // ─────────────────────────────────────────────────────────────────────────
@@ -255,6 +264,11 @@ export async function loginUser(req, res) {
         // UI hint ONLY — never used for authorization. SOS access is always
         // resolved live from the database (the 24h JWT would go stale).
         is_qualified_responder: Boolean(user.is_qualified_responder),
+        // Per-account UI theme (Stage 7). Clamped against the whitelist so
+        // a manually-edited DB row can never push an invalid value to
+        // clients — unknown/NULL falls back to the defaults (light/brand).
+        theme_mode: THEME_MODES.has(user.theme_mode) ? user.theme_mode : 'light',
+        theme_preset: THEME_PRESETS.has(user.theme_preset) ? user.theme_preset : 'brand',
       },
     });
   } catch (error) {

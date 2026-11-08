@@ -79,8 +79,8 @@ function buildSmoothPath(points: { x: number; y: number }[]): string {
 /* ================================================================= */
 function SvgLineChart({
   data,
-  themeColor = '#2E5C43',
-  themeColorLight = '#7BAA87',
+  themeColor = T.primaryMid,
+  themeColorLight = T.primarySoft,
   gradId = 'lineGrad',
   emptyMessage = 'No data recorded yet.',
 }: {
@@ -99,7 +99,7 @@ function SvgLineChart({
           placeItems: 'center',
           color: 'var(--text-muted)',
           fontSize: 13,
-          background: '#F5F8F3',
+          background: T.surface2,
           borderRadius: 20,
         }}
       >
@@ -155,7 +155,7 @@ function SvgLineChart({
               y1={y}
               x2={width - padX}
               y2={y}
-              stroke="#E8EDE6"
+              stroke={T.borderSoft}
               strokeWidth="1"
               strokeDasharray="2 6"
               strokeLinecap="round"
@@ -166,7 +166,7 @@ function SvgLineChart({
               textAnchor="end"
               fontSize="11"
               fontWeight="600"
-              fill="#9AA79B"
+              fill={T.textMuted}
             >
               {val}
             </text>
@@ -204,7 +204,7 @@ function SvgLineChart({
                 cx={p.x}
                 cy={p.y}
                 r="5.5"
-                fill="#FFFFFF"
+                fill={T.surface}
                 stroke={themeColor}
                 strokeWidth="2.5"
               />
@@ -215,8 +215,8 @@ function SvgLineChart({
               cx={p.x}
               cy={p.y}
               r="3.5"
-              fill="#FFFFFF"
-              stroke="#C9D9C7"
+              fill={T.surface}
+              stroke={T.sage300}
               strokeWidth="2"
             />
           )}
@@ -227,7 +227,7 @@ function SvgLineChart({
               textAnchor="middle"
               fontSize="11.5"
               fontWeight="700"
-              fill={themeColor}
+              fill={T.text}
             >
               {p.count}
             </text>
@@ -238,7 +238,7 @@ function SvgLineChart({
             textAnchor="middle"
             fontSize="10.5"
             fontWeight="600"
-            fill="#9AA79B"
+            fill={T.textMuted}
           >
             {i % 2 === 0 ? p.label : ''}
           </text>
@@ -274,7 +274,7 @@ function SvgVerticalBarChart({ data }: { data: DiagnosisItem[] }) {
           placeItems: 'center',
           color: 'var(--text-muted)',
           fontSize: 13,
-          background: '#F5F8F3',
+          background: T.surface2,
           borderRadius: 20,
         }}
       >
@@ -356,8 +356,8 @@ function SvgVerticalBarChart({ data }: { data: DiagnosisItem[] }) {
         >
           <defs>
             <linearGradient id="barVertGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#4A7A5E" />
-              <stop offset="100%" stopColor="#1F4A34" />
+              <stop offset="0%" stopColor={T.primarySoft} />
+              <stop offset="100%" stopColor={T.primary} />
             </linearGradient>
           </defs>
 
@@ -369,7 +369,7 @@ function SvgVerticalBarChart({ data }: { data: DiagnosisItem[] }) {
                 y1={yOf(v)}
                 x2={width - padRight}
                 y2={yOf(v)}
-                stroke={v === 0 ? '#CBD5CC' : '#E8EDE6'}
+                stroke={v === 0 ? T.borderStrong : T.borderSoft}
                 strokeWidth={v === 0 ? 1.5 : 1}
                 strokeDasharray={v === 0 ? undefined : '2 6'}
                 strokeLinecap="round"
@@ -380,7 +380,7 @@ function SvgVerticalBarChart({ data }: { data: DiagnosisItem[] }) {
                 textAnchor="end"
                 fontSize="11"
                 fontWeight="600"
-                fill="#9AA79B"
+                fill={T.textMuted}
               >
                 {v}
               </text>
@@ -393,7 +393,7 @@ function SvgVerticalBarChart({ data }: { data: DiagnosisItem[] }) {
             y1={padTop - 6}
             x2={padLeft}
             y2={y0}
-            stroke="#CBD5CC"
+            stroke={T.borderStrong}
             strokeWidth="1.5"
             strokeLinecap="round"
           />
@@ -420,8 +420,8 @@ function SvgVerticalBarChart({ data }: { data: DiagnosisItem[] }) {
                 />
                 {showValuePill && (
                   <g transform={`translate(${cx}, ${y - 14})`}>
-                    <rect x={-pillW / 2} y="-14" width={pillW} height="22" rx="11" fill="#D7E8D2" />
-                    <text x="0" y="3" textAnchor="middle" fontSize="12" fontWeight="800" fill="#264D36">
+                    <rect x={-pillW / 2} y="-14" width={pillW} height="22" rx="11" fill={T.primaryTint} />
+                    <text x="0" y="3" textAnchor="middle" fontSize="12" fontWeight="800" fill={T.text}>
                       {item.count}
                     </text>
                   </g>
@@ -434,7 +434,7 @@ function SvgVerticalBarChart({ data }: { data: DiagnosisItem[] }) {
                     textAnchor={labelAnchor}
                     fontSize={labelAngle === -90 ? 10.5 : 11.5}
                     fontWeight="600"
-                    fill="#5A635B"
+                    fill={T.textSub}
                   >
                     {truncate(item.diagnosis)}
                   </text>
@@ -480,7 +480,7 @@ function SvgHorizontalBarChart({ data }: { data: DeptItem[] }) {
           placeItems: 'center',
           color: 'var(--text-muted)',
           fontSize: 13,
-          background: '#F5F8F3',
+          background: T.surface2,
           borderRadius: 20,
         }}
       >
@@ -507,8 +507,8 @@ function SvgHorizontalBarChart({ data }: { data: DeptItem[] }) {
     >
       <defs>
         <linearGradient id="barHorizGrad" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#2E5C43" />
-          <stop offset="100%" stopColor="#4A7A5E" />
+          <stop offset="0%" stopColor={T.primary} />
+          <stop offset="100%" stopColor={T.primarySoft} />
         </linearGradient>
       </defs>
 
@@ -525,7 +525,7 @@ function SvgHorizontalBarChart({ data }: { data: DeptItem[] }) {
               textAnchor="end"
               fontSize="12.5"
               fontWeight="600"
-              fill="#1F4462"
+              fill={T.textSub}
             >
               {d.department}
             </text>
@@ -537,7 +537,7 @@ function SvgHorizontalBarChart({ data }: { data: DeptItem[] }) {
               width={chartW}
               height={barThickness}
               rx={barThickness / 2}
-              fill="#EEF3EC"
+              fill={T.surface3}
             />
 
             {/* Pill fill */}
@@ -560,7 +560,7 @@ function SvgHorizontalBarChart({ data }: { data: DeptItem[] }) {
                 width="66"
                 height={barThickness}
                 rx={barThickness / 2}
-                fill="#D7E8D2"
+                fill={T.primaryTint}
               />
               <text
                 x="33"
@@ -568,7 +568,7 @@ function SvgHorizontalBarChart({ data }: { data: DeptItem[] }) {
                 textAnchor="middle"
                 fontSize="12"
                 fontWeight="800"
-                fill="#264D36"
+                fill={T.text}
               >
                 {d.consultations_count} {d.consultations_count === 1 ? 'visit' : 'visits'}
               </text>
@@ -691,7 +691,7 @@ export default function AnalyticsDashboard() {
         style={{
           padding: 80,
           textAlign: 'center',
-          color: '#2E5C43',
+          color: T.primary,
           fontWeight: 700,
           fontSize: 14,
         }}
@@ -724,11 +724,11 @@ export default function AnalyticsDashboard() {
       case 'STUDENT':             return { bg: T.tonalBlueBg, fg: T.tonalBlueFg, icon: 'school' };
       case 'FACULTY':             return { bg: T.tonalCreamBg, fg: T.tonalCreamFg, icon: 'work' };
       case 'DOCTOR':              return { bg: T.tonalGreenBg, fg: T.tonalGreenFg, icon: 'medical_services' };
-      case 'DENTIST':             return { bg: '#D3E8E5', fg: '#1F5A55', icon: 'medical_information' };
-      case 'NURSE':               return { bg: '#DFEBE0', fg: '#2A5A38', icon: 'medical_information' };
-      case 'EMERGENCY_RESPONDER': return { bg: '#F4DBD6', fg: T.danger, icon: 'emergency' };
+      case 'DENTIST':             return { bg: T.tonalTealBg, fg: T.tonalTealFg, icon: 'medical_information' };
+      case 'NURSE':               return { bg: T.tonalGreenBg, fg: T.tonalGreenFg, icon: 'medical_information' };
+      case 'EMERGENCY_RESPONDER': return { bg: T.tonalRoseBg, fg: T.tonalRoseFg, icon: 'emergency' };
       case 'ADMIN':               return { bg: T.tonalLilacBg, fg: T.tonalLilacFg, icon: 'admin_panel_settings' };
-      default:                    return { bg: '#EEF3EC', fg: '#5A635B', icon: 'person' };
+      default:                    return { bg: T.surface3, fg: T.textSub, icon: 'person' };
     }
   };
 
@@ -863,8 +863,8 @@ export default function AnalyticsDashboard() {
             label: 'Active emergencies',
             value: data.emergencyMetrics?.active || 0,
             icon: 'emergency',
-            bg: '#F4DBD6',
-            fg: T.danger,
+            bg: T.tonalRoseBg,
+            fg: T.tonalRoseFg,
             sub: 'Pending / in-dispatch triage',
           },
           {
@@ -900,7 +900,7 @@ export default function AnalyticsDashboard() {
                   width: 36,
                   height: 36,
                   borderRadius: 12,
-                  background: 'rgba(255,255,255,0.55)',
+                  background: 'var(--glass)',
                   display: 'grid',
                   placeItems: 'center',
                   color: card.fg,
@@ -953,7 +953,7 @@ export default function AnalyticsDashboard() {
           marginBottom: 22,
           borderRadius: 24,
           background: isFluSpike && (data.fluStats?.cases_past_7_days || 0) > 0
-            ? '#F4DBD6'
+            ? T.tonalRoseBg
             : T.tonalGreenBg,
           display: 'flex',
           justifyContent: 'space-between',
@@ -995,7 +995,7 @@ export default function AnalyticsDashboard() {
         <span
           className="my-pill"
           style={{
-            background: 'rgba(255,255,255,0.6)',
+            background: 'var(--glass)',
             color: isFluSpike && (data.fluStats?.cases_past_7_days || 0) > 0
               ? T.danger
               : T.tonalGreenFg,
@@ -1028,8 +1028,8 @@ export default function AnalyticsDashboard() {
           <span
             className="my-pill"
             style={{
-              background: '#EEF3EC',
-              color: '#5A635B',
+              background: T.surface3,
+              color: T.textSub,
               fontSize: 11.5,
             }}
           >
@@ -1056,7 +1056,7 @@ export default function AnalyticsDashboard() {
                   textAlign: 'center',
                 }}
               >
-                <div style={{ fontSize: 22, display: 'grid', placeItems: 'center' }}>
+                <div style={{ fontSize: 22, display: 'grid', placeItems: 'center', color: tone.fg }}>
                   <Icon name={tone.icon} size={22} />
                 </div>
                 <div
@@ -1109,8 +1109,8 @@ export default function AnalyticsDashboard() {
         </div>
         <SvgLineChart
           data={data.timeSeries || []}
-          themeColor="#2E5C43"
-          themeColorLight="#7BAA87"
+          themeColor={T.primaryMid}
+          themeColorLight={T.primarySoft}
           gradId="consultationGrad"
         />
       </div>
@@ -1137,8 +1137,8 @@ export default function AnalyticsDashboard() {
         </div>
         <SvgLineChart
           data={data.emergencyTimeSeries || []}
-          themeColor="#B25C4D"
-          themeColorLight="#E0A89A"
+          themeColor={T.danger}
+          themeColorLight={T.tonalRoseFg}
           gradId="emergencyGrad"
           emptyMessage="No campus emergency incidents reported in the past 14 days."
         />
@@ -1199,8 +1199,8 @@ export default function AnalyticsDashboard() {
               {
                 label: 'Hypertension / cardiac',
                 value: data.highRiskGroups?.hypertension_count || 0,
-                bg: '#F4DBD6',
-                fg: T.danger,
+                bg: T.tonalRoseBg,
+                fg: T.tonalRoseFg,
               },
               {
                 label: 'Severe allergies',
@@ -1279,7 +1279,7 @@ export default function AnalyticsDashboard() {
               style={{
                 borderRadius: 20,
                 overflow: 'hidden',
-                background: '#F5F8F3',
+                background: T.surface2,
               }}
             >
               {data.lowStockMeds.slice(0, 4).map((med, idx, arr) => {
@@ -1295,7 +1295,7 @@ export default function AnalyticsDashboard() {
                       padding: '14px 18px',
                       alignItems: 'center',
                       borderBottom: idx < arr.length - 1
-                        ? '1px solid rgba(15,30,23,0.06)'
+                        ? `1px solid ${T.borderSoft}`
                         : 'none',
                     }}
                   >

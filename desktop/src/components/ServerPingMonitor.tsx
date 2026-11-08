@@ -178,7 +178,7 @@ export default function ServerPingMonitor() {
           onClick={pingNow}
           style={{
             padding: '8px 16px', borderRadius: T.radius.pill,
-            background: T.primary, color: '#fff', border: 'none',
+            background: T.primary, color: T.textOnPrimary, border: 'none',
             fontSize: 12, fontWeight: 700, cursor: 'pointer',
             fontFamily: T.font, whiteSpace: 'nowrap',
             display: 'inline-flex', alignItems: 'center', gap: 6,

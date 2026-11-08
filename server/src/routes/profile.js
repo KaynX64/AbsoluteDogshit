@@ -2,6 +2,7 @@
 import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
+import { THEME_MODES, THEME_PRESETS } from '../auth.js';
 import { logAudit } from '../utils/auditLogger.js';
 import { encrypt, decrypt } from '../utils/cryptoVault.js';
 import { requirePrivacyConsent } from '../middleware/consent.js';
@@ -305,6 +306,62 @@ router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => 
     res.status(500).json({ error: 'Failed to update database record.' });
   } finally {
     connection.release();
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// PUT /api/profile/theme — persist the account's UI theme selection.
+//
+// Per-account persistence for the desktop settings menu (Stage 7).
+// The desktop client applies changes locally first (offline-first) and
+// pushes the selection here; the stored values are returned with the
+// login response so the theme follows the account to any machine.
+//
+// Validation: both fields are REQUIRED and must match the server-side
+// whitelist (mirrored from desktop/src/theme/presets.ts). The write is
+// skipped entirely when the stored values are identical (theme toggles
+// are frequent — no need to bump USERS.updated_at each time).
+// ─────────────────────────────────────────────────────────────────────────
+router.put('/theme', authenticateToken, async (req, res) => {
+  const userId = req.user.user_id;
+  const { theme_mode, theme_preset } = req.body ?? {};
+
+  // Field-level validation with explicit messages the client can surface.
+  const issues = [];
+  if (typeof theme_mode !== 'string') {
+    issues.push('theme_mode is required and must be a string.');
+  } else if (!THEME_MODES.has(theme_mode.trim().toLowerCase())) {
+    issues.push(`theme_mode must be one of: ${[...THEME_MODES].join(', ')}.`);
+  }
+  if (typeof theme_preset !== 'string') {
+    issues.push('theme_preset is required and must be a string.');
+  } else if (!THEME_PRESETS.has(theme_preset.trim().toLowerCase())) {
+    issues.push(`theme_preset must be one of: ${[...THEME_PRESETS].join(', ')}.`);
+  }
+  if (issues.length > 0) {
+    return res.status(400).json({ error: 'Invalid theme selection.', issues });
+  }
+
+  const mode = theme_mode.trim().toLowerCase();
+  const preset = theme_preset.trim().toLowerCase();
+
+  try {
+    const [result] = await pool.query(
+      'UPDATE USERS SET theme_mode = ?, theme_preset = ? WHERE user_id = ?',
+      [mode, preset, userId]
+    );
+
+    // identical rows report affectedRows = 0 in MySQL's default config —
+    // that is still a success for an idempotent preference write.
+    res.json({
+      message: 'Theme preference saved.',
+      theme_mode: mode,
+      theme_preset: preset,
+      changed: result.affectedRows > 0,
+    });
+  } catch (error) {
+    console.error('[Theme Preference Error]:', error);
+    res.status(500).json({ error: 'Failed to save theme preference.' });
   }
 });
 

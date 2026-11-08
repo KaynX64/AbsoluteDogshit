@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import jsQR from 'jsqr';
 import { API_BASE_URL } from '../config/api';
+import { T } from '../theme';
 import Icon from './Icon';
 
 interface QrIntakeScannerProps {
@@ -71,31 +72,33 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationFrameId = useRef<number | null>(null);
 
-  /* ── Palette (self-contained hex, synced with theme/tokens.css — Stage 6) ── */
+  /* ── Resolve the current palette at render time so intake follows theme changes. ── */
   const C = {
-    primary:     '#1F4A34',
-    primaryDark: '#153627',
-    primaryTint: '#E2EBE1',
-    surface:     '#FFFFFF',
-    sage50:      '#FAFBF9',
-    sage100:     '#F2F5F0',
-    sage200:     '#E5EBE3',
-    sage300:     '#C9D9C7',
-    sage400:     '#A3B3A1',
-    border:      '#E1E6DF',
-    borderSoft:  '#EDEFE9',
-    text:        '#1A1F1B',
-    textSub:     '#4A5A4D',
-    textMuted:   '#8A9990',
-    danger:       '#B43E32',
-    dangerSoft:   '#FCEBEA',
-    dangerBorder: '#F0C5C0',
-    warning:      '#B8762A',
-    warningSoft:  '#FBF1DD',
-    warningBorder:'#F0D9A8',
-    success:      '#2D7A4A',
-    successSoft:  '#E0F0E5',
-    successBorder:'#B5DCC1',
+    primary: T.primary,
+    primaryDark: T.primaryDark,
+    primaryTint: T.primaryTint,
+    surface: T.surface,
+    sage50: T.sage50,
+    sage100: T.sage100,
+    sage200: T.sage200,
+    sage300: T.sage300,
+    sage400: T.sage400,
+    border: T.border,
+    borderSoft: T.borderSoft,
+    text: T.text,
+    textSub: T.textSub,
+    textMuted: T.textMuted,
+    danger: T.danger,
+    dangerSoft: T.dangerSoft,
+    dangerBorder: T.dangerBorder,
+    warning: T.warning,
+    warningSoft: T.warningSoft,
+    warningBorder: T.warningBorder,
+    success: T.success,
+    successSoft: T.successSoft,
+    successBorder: T.successBorder,
+    textOnPrimary: T.textOnPrimary,
+    textOnDanger: T.textOnDanger,
   };
 
   /* ── Active-ticket pre-check ─────────────────────────────── */
@@ -654,7 +657,7 @@ try {
               padding: '10px 20px',
               borderRadius: 999,
               background: C.primary,
-              color: '#FFFFFF',
+              color: C.textOnPrimary,
               border: 'none',
               fontSize: 13,
               fontWeight: 700,
@@ -690,7 +693,7 @@ try {
               padding: '11px 22px',
               borderRadius: 999,
               background: C.primary,
-              color: '#FFFFFF',
+              color: C.textOnPrimary,
               border: 'none',
               fontSize: 13,
               fontWeight: 700,
@@ -724,7 +727,7 @@ try {
               padding: '11px 22px',
               borderRadius: 999,
               background: C.danger,
-              color: '#FFFFFF',
+              color: C.textOnDanger,
               border: 'none',
               fontSize: 13,
               fontWeight: 700,
@@ -996,7 +999,7 @@ try {
                     padding: '3px 10px',
                     borderRadius: 999,
                     background: C.warning,
-                    color: '#FFFFFF',
+                    color: C.textOnPrimary,
                     fontWeight: 800,
                     textTransform: 'uppercase',
                     letterSpacing: 0.3,
@@ -1243,7 +1246,7 @@ try {
                     padding: 12,
                     borderRadius: 999,
                     background: C.primary,
-                    color: '#FFFFFF',
+                    color: C.textOnPrimary,
                     border: 'none',
                     fontSize: 13,
                     fontWeight: 700,
@@ -1412,7 +1415,7 @@ try {
                       padding: 12,
                       borderRadius: 999,
                       background: isRegisteringWalkIn ? C.sage400 : C.primary,
-                      color: '#FFFFFF',
+                      color: C.textOnPrimary,
                       border: 'none',
                       fontSize: 13,
                       fontWeight: 700,

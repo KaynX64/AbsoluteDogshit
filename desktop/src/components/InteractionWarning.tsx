@@ -38,7 +38,7 @@ export default function InteractionWarning({
           alignItems: 'center',
           padding: '12px 18px',
           background: blocking ? T.danger : T.warning,
-          color: '#FFFFFF',
+          color: blocking ? T.textOnDanger : T.textOnWarning,
         }}
       >
         <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.3, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -51,9 +51,9 @@ export default function InteractionWarning({
             type="button"
             onClick={onDismiss}
             style={{
-              background: 'rgba(255,255,255,0.20)',
-              border: '1px solid rgba(255,255,255,0.30)',
-              color: '#fff',
+              background: 'rgba(15,30,23,0.12)',
+              border: '1px solid rgba(15,30,23,0.24)',
+              color: 'inherit',
               borderRadius: T.radius.pill,
               padding: '4px 12px',
               fontSize: 11,
@@ -61,8 +61,8 @@ export default function InteractionWarning({
               fontWeight: 700,
               transition: `background ${T.durBase} ${T.ease}`,
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.32)')}
-            onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.20)')}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(15,30,23,0.20)')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(15,30,23,0.12)')}
           >
             Dismiss
           </button>
@@ -72,8 +72,16 @@ export default function InteractionWarning({
       {/* Interaction cards */}
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {interactions.map((interaction) => {
-          const cfg =
-            SEVERITY_CONFIG[interaction.severity] || SEVERITY_CONFIG.mild;
+          const severity = interaction.severity;
+          const baseCfg = SEVERITY_CONFIG[severity] || SEVERITY_CONFIG.mild;
+          const cfg = {
+            ...baseCfg,
+            ...(severity === 'contraindicated' || severity === 'severe'
+              ? { bg: T.dangerSoft, color: T.danger, border: T.dangerBorder, onColor: T.textOnDanger }
+              : severity === 'moderate'
+              ? { bg: T.warningSoft, color: T.warning, border: T.warningBorder, onColor: T.textOnWarning }
+              : { bg: T.infoSoft, color: T.info, border: T.infoBorder, onColor: T.textOnInfo }),
+          };
           return (
             <div
               key={interaction.interaction_id}
@@ -110,7 +118,7 @@ export default function InteractionWarning({
                     padding: '2px 8px',
                     borderRadius: T.radius.pill,
                     background: cfg.color,
-                    color: '#fff',
+                    color: cfg.onColor,
                     textTransform: 'uppercase',
                   }}
                 >

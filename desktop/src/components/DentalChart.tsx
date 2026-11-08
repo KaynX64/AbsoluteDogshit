@@ -1,6 +1,6 @@
 // desktop/src/components/DentalChart.tsx
 import React, { useState } from 'react';
-import { T } from '../theme';
+import { T, liveObject } from '../theme';
 import Icon from './Icon';
 
 export type ToothCondition = 'sound' | 'caries' | 'filled' | 'missing' | 'extraction_needed' | 'prophylaxis';
@@ -19,14 +19,14 @@ interface DentalChartProps {
 
 // All condition tones now sourced from the theme — palette stays cohesive
 // with the rest of the app instead of drifting into Tailwind pastels.
-const CONDITION_COLORS: Record<ToothCondition, { bg: string; text: string; label: string }> = {
+const CONDITION_COLORS: Record<ToothCondition, { bg: string; text: string; label: string }> = liveObject(() => ({
   sound:            { bg: T.sage100,        text: T.primaryMid,    label: 'Sound' },
   caries:           { bg: T.dangerSoft,     text: T.danger,        label: 'Caries (Decay)' },
   filled:           { bg: T.infoSoft,       text: T.info,          label: 'Restored / Filled' },
   missing:          { bg: T.surface2,       text: T.textSub,       label: 'Missing / Extracted' },
   extraction_needed:{ bg: T.warningSoft,    text: T.warning,       label: 'Indicated for Extraction' },
   prophylaxis:      { bg: T.tonalTealBg,    text: T.tonalTealFg,   label: 'Calculus / Prophylaxis' },
-};
+}));
 
 // Adult Universal Numbering System: Upper (1-16) and Lower (32-17)
 const UPPER_TEETH = Array.from({ length: 16 }, (_, i) => i + 1);

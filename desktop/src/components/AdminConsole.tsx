@@ -4,7 +4,8 @@ import { createPortal } from 'react-dom';
 import AnalyticsDashboard from './AnalyticsDashboard';
 import IncidentRecords from './IncidentRecords';
 import CreateUserModal from './CreateUserModal';
-import { T, rolePill, inputStyle, btnPrimary, btnGhost } from '../theme';
+import { T, rolePill, inputStyle, btnPrimary, btnGhost, liveObject } from '../theme';
+import { getTextColorOn } from '../theme/presets';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
 import ServerPingMonitor from './ServerPingMonitor';
 import Icon from './Icon';
@@ -29,12 +30,12 @@ const I = {
 /* ── Advanced profile editor (Basic / Advanced modes) ─────────────────────────
    Shared styles + the segmented-toggle button style. Basic mode keeps
    the everyday fields; Advanced exposes every editable schema column. */
-const advLabel: React.CSSProperties = {
+const advLabel: React.CSSProperties = liveObject(() => ({
   fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6,
-};
-const advTextarea: React.CSSProperties = {
+}));
+const advTextarea: React.CSSProperties = liveObject(() => ({
   ...inputStyle, minHeight: 64, resize: 'vertical', lineHeight: 1.5,
-};
+}));
 const modeBtnStyle = (active: boolean): React.CSSProperties => ({
   flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
   padding: '9px 12px',
@@ -900,7 +901,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   padding: '8px 16px',
                   borderRadius: T.radius.pill,
                   background: T.primary,
-                  color: '#FFFFFF',
+                  color: T.textOnPrimary,
                   border: 'none',
                   fontSize: 12.5,
                   fontWeight: 700,
@@ -1697,7 +1698,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <span style={{
                 fontFamily: T.mono, fontSize: 12, fontWeight: 700,
-                background: T.primary, color: '#fff',
+                background: T.primary, color: T.textOnPrimary,
                 padding: '5px 12px', borderRadius: T.radius.xs,
               }}>
                 valetudo_healthlink
@@ -2951,7 +2952,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                         onClick={handleAdminResetPassword}
                         style={{
                           padding: '0 18px', borderRadius: T.radius.pill,
-                          background: T.tonalLilacFg, color: '#fff',
+                          background: T.tonalLilacFg, color: getTextColorOn(T.tonalLilacFg),
                           border: 'none', fontWeight: 700, fontSize: 12.5,
                           cursor: 'pointer', fontFamily: T.font,
                         }}
