@@ -53,13 +53,13 @@ SignatureEnrollment   → SignaturePad
 - **Qualified Responder section (Basic tab, every role) L2574**: toggle + note (≤150) + read-only since-date. Disabled without `RESPONDERS_MANAGE`, or for ADMIN targets unless the caller is a Super Admin. `sos_via_role` renders an "also receives SOS through role X" hint. On save, flag/note diffs (snapshot `editQrOriginal` L136) call `PUT /api/admin/users/:id/qualified-responder` as a separate partial-success step (`qrWarning`), exactly like permissions.
 - Audit tab: mutation logs L240, PHI access logs L252, retention L264, sweep `handleExecuteSweep` L284 (`POST /api/privacy/retention/sweep`).
 - Telemetry tab: telemetry L274. Analytics tab L1590 → `AnalyticsDashboard`. DB Studio tab L1595: tables L660/L679, save row L710, delete row L751 (writes to arbitrary tables — `DATABASE_MANAGE` protected; keep it that way).
-### NurseConsole.tsx — 1,520 lines / 52 KB / 17 useState. Triage queue, expected, intake, live metrics
-- **Slice map:** `codeslice/DT-03-NurseConsole.md` (34 slices, verified @ 93b4172).
-- Exports: `NurseViewMode` L72 (`'triage'|'expected'|'inventory'`), component L79. App.tsx owns the mode (L486; tab bar L164-166) — `viewMode` prop is controlled, falls back to internal state.
-- Live stat row: queue L144 (`GET /api/appointments/queue/today`), active SOS count L160, no-shows today L214, inventory metrics L227 (`GET /api/inventory/dashboard-summary`), expected today L249.
-- Sockets L270-311: `queue:updated`, `emergency:new_alert`, `emergency:status_change`, `inventory:updated`, `appointment:status_changed`, `appointment:booked` — each triggers a targeted refetch.
-- Actions: `updateSosStatus` L177, `callNextPatient` L324, check-in confirm L346 / execute L371 (`POST /api/appointments/:id/checkin`).
-- Views: `inventory` → renders `InventoryManager` L410; `expected` L413; SOS panel L926; `QrIntakeScanner` embedded L1104.
+### NurseConsole.tsx — 1,928 lines / 76 KB / 22 useState. Triage queue, expected, intake, live metrics
+- **Slice map:** `codeslice/DT-03-NurseConsole.md` (36 slices, verified @ 93b4172).
+- Exports: `NurseViewMode` L95 (`'triage'|'expected'|'inventory'`), component L499. App.tsx owns the mode (L486; tab bar L164-166) — `viewMode` prop is controlled, falls back to internal state.
+- Station metrics are derived from live data, never hard-coded: queue L548 (`GET /api/appointments/queue/today`), active SOS L567, no-shows L615, inventory L628 (`GET /api/inventory/dashboard-summary`), expected L645 — rendered as tiles at L1652.
+- Sockets L674-728: `queue:updated`, `emergency:new_alert`, `emergency:status_change`, `inventory:updated`, `appointment:status_changed`, `appointment:booked` — each triggers a targeted refetch.
+- Actions: `updateSosStatus` L583 (in-app confirm portal rendered at `document.body` to cover the full app window), `callNextPatient` L729 (emergency tickets offered first), check-in confirm L756 / execute L781 (`POST /api/appointments/:id/checkin`).
+- Views: `inventory` L1183 (+ SOS safety strip); `expected` L1238; SOS band L877 (rendered on triage, expected and inventory); `QrIntakeScanner` embedded L1712.
 
 ### ResponderConsole.tsx — 490 lines / 20 KB. SOS list & dispatch
 - **Slice map:** `codeslice/DT-12-ResponderConsole.md` (15 slices, verified @ 93b4172).
