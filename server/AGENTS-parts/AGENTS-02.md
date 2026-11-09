@@ -3,7 +3,7 @@
 ## Auth model — src/auth.js
 
 - Login: bcrypt `compare` with a `DUMMY_HASH` timing equalizer (unknown user ⇒ identical latency), MySQL role join, JWT `{sub, email, roles, jti}`, `expiresIn: '24h'`.
-- Logout: writes `token:blacklist:<jti>` to Redis; the Socket.IO handshake checks the same denylist.
+- Logout: writes `token:blacklist:<jti>` to Redis; the Socket.IO handshake checks the same denylist. HTTP middleware and socket handshakes also verify that the account is still active and not soft-deleted, so archived/suspended accounts cannot continue using existing JWTs.
 - Documents use separate short-lived **download tokens** (`DOWNLOAD_TOKEN_TTL_SECONDS`), single-use, replay-checked in Redis.
 
 ## Utils — src/utils/*.js

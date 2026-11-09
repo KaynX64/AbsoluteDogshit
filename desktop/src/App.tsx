@@ -14,7 +14,7 @@ import {
 import { API_BASE_URL } from './config/api';
 import PasswordStrengthIndicator, { evaluatePassword } from './components/PasswordStrengthIndicator';
 import { T, btnPrimary, btnSubtle } from './theme';
-import { ThemeProvider, applyThemeFromAccount, useTheme } from './theme/ThemeProvider';
+import { ThemeProvider, applyThemeFromAccount, resetThemeAfterLogout, useTheme } from './theme/ThemeProvider';
 import Icon from './components/Icon';
 import IncidentReportModal from './components/IncidentReportModal';
 import SettingsMenu from './components/SettingsMenu';
@@ -693,6 +693,7 @@ function AppShell() {
     }
     localStorage.removeItem('valetudo_token');
     localStorage.removeItem('token');
+    resetThemeAfterLogout();
 
     // Purge cached credentials and role state from React memory
     setPassword('');

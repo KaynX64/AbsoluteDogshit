@@ -22,7 +22,7 @@ App.tsx ─ NURSE→NurseConsole · DOCTOR/DENTIST→DoctorConsole · ADMIN→Ad
          └─ IncidentReportModal (mounted once for EVERY console view, App.tsx L785 — post-resolution documentation popup; server routes to the specific desktop window that resolved the alert)
 NurseConsole    → QrIntakeScanner (L1104) · InventoryManager (L410, inventory view)
 DoctorConsole   → AnalyticsDashboard (L1341) · PrescriptionGenerator (L2507) · SignatureEnrollment (L4263) · EmergencyAlertBanner (SOS banner, mounted for DOCTOR+DENTIST after the signature warning L1273) · embedded odontogram (L2079)
-AdminConsole    → CreateUserModal (L1958) · ServerPingMonitor (L1450) · AnalyticsDashboard (analytics tab L1590)
+AdminConsole    → CreateUserModal (Add account; modal portals to document.body so the sticky top bar cannot constrain its backdrop) · ServerPingMonitor · AnalyticsDashboard
 PrescriptionGenerator → InteractionWarning (L829)
 SignatureEnrollment   → SignaturePad
 ```

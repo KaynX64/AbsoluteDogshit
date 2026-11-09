@@ -189,6 +189,140 @@ router.get('/users', requirePermission('USERS_MANAGE'), async (req, res) => {
   }
 });
 
+// Archive an account without deleting clinical or audit history.
+router.delete('/users/:id', requirePermission('USERS_MANAGE'), async (req, res) => {
+  const targetUserId = Number(req.params.id);
+  if (!Number.isSafeInteger(targetUserId) || targetUserId <= 0) {
+    return res.status(400).json({ error: 'Invalid user id.' });
+  }
+  if (targetUserId === Number(req.user.user_id)) {
+    return res.status(400).json({ error: 'You cannot archive your own account.' });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [existingRows] = await connection.query(
+      'SELECT user_id FROM USERS WHERE user_id = ? AND deleted_at IS NULL',
+      [targetUserId]
+    );
+    if (existingRows.length === 0) {
+      throw Object.assign(new Error('Account not found.'), { status: 404 });
+    }
+
+    const [adminLocks] = await connection.query(
+      `SELECT u.user_id
+       FROM USERS u
+       WHERE u.is_active = TRUE AND u.deleted_at IS NULL
+         AND EXISTS (
+           SELECT 1
+           FROM USER_ROLES ur
+           INNER JOIN ROLES r ON ur.role_id = r.role_id
+           WHERE ur.user_id = u.user_id AND r.code = 'ADMIN'
+         )
+       ORDER BY u.user_id
+       FOR UPDATE`
+    );
+    const activeAccountIds = adminLocks.map((row) => row.user_id);
+    const [activeAdminRows] = activeAccountIds.length > 0
+      ? await connection.query(
+        `SELECT ur.user_id
+         FROM USER_ROLES ur
+         INNER JOIN ROLES r ON ur.role_id = r.role_id
+         WHERE ur.user_id IN (?) AND r.code = 'ADMIN'
+         FOR UPDATE`,
+        [activeAccountIds]
+      )
+      : [[]];
+    const activeAdminIds = activeAdminRows.map((row) => row.user_id);
+    const [activePermissionRows] = activeAdminIds.length > 0
+      ? await connection.query(
+        `SELECT uap.user_id, ap.code
+         FROM USER_ADMIN_PERMISSIONS uap
+         INNER JOIN ADMIN_PERMISSIONS ap ON uap.permission_id = ap.permission_id
+         WHERE uap.user_id IN (?)
+         FOR UPDATE`,
+        [activeAdminIds]
+      )
+      : [[]];
+    const grantsByUser = new Map();
+    for (const row of activePermissionRows) {
+      const codes = grantsByUser.get(Number(row.user_id)) || [];
+      codes.push(row.code);
+      grantsByUser.set(Number(row.user_id), codes);
+    }
+
+    const [targetRows] = await connection.query(
+      'SELECT user_id, is_active FROM USERS WHERE user_id = ? AND deleted_at IS NULL FOR UPDATE',
+      [targetUserId]
+    );
+    if (targetRows.length === 0) {
+      throw Object.assign(new Error('Account not found.'), { status: 404 });
+    }
+
+    const [roleRows] = await connection.query(
+      `SELECT r.code
+       FROM USER_ROLES ur
+       INNER JOIN ROLES r ON ur.role_id = r.role_id
+       WHERE ur.user_id = ?
+       FOR UPDATE`,
+      [targetUserId]
+    );
+    const targetRole = roleRows.some((row) => row.code === 'ADMIN')
+      ? 'ADMIN'
+      : (roleRows[0]?.code || null);
+
+    if (targetRole === 'ADMIN') {
+      await requireSuperAdminCaller(req);
+      const targetCodes = grantsByUser.get(targetUserId) || [];
+      const targetIsSuper = targetCodes.length === 0 || targetCodes.includes('SUPER_ADMIN');
+      if (targetRows[0].is_active && targetIsSuper) {
+        const activeSuperCount = activeAdminRows.filter((row) => {
+          const codes = grantsByUser.get(Number(row.user_id)) || [];
+          return codes.length === 0 || codes.includes('SUPER_ADMIN');
+        }).length;
+        if (activeSuperCount <= 1) {
+          throw Object.assign(new Error('The last active Super Admin account cannot be archived.'), { status: 409 });
+        }
+      }
+    }
+
+    await connection.query(
+      `UPDATE USERS
+       SET is_active = FALSE,
+           is_qualified_responder = FALSE,
+           qualified_responder_since = NULL,
+           qualified_responder_note = NULL,
+           deleted_at = NOW(),
+           version = version + 1
+       WHERE user_id = ? AND deleted_at IS NULL`,
+      [targetUserId]
+    );
+    await connection.query('DELETE FROM DEVICE_TOKENS WHERE user_id = ?', [targetUserId]);
+    await logAudit(connection, {
+      userId: req.user.user_id,
+      action: 'ARCHIVE_USER_ACCOUNT',
+      table: 'USERS',
+      recordId: targetUserId,
+      oldValue: { is_active: Boolean(targetRows[0].is_active), deleted_at: null },
+      newValue: { is_active: false, deleted_at: true },
+      ipAddress: req.ip,
+    });
+
+    await connection.commit();
+    io?.in(`user:${targetUserId}`).disconnectSockets(true);
+    return res.json({ message: 'Account archived. Clinical and audit history has been retained.' });
+  } catch (error) {
+    await connection.rollback();
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    console.error('Failed to archive user account:', error);
+    return res.status(500).json({ error: 'Failed to archive user account.' });
+  } finally {
+    connection.release();
+  }
+});
+
 // 1a. GET /api/admin/permissions - Admin archetype permission catalog
 router.get('/permissions', async (req, res) => {
   try {

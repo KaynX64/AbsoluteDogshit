@@ -1,5 +1,6 @@
 // desktop/src/components/CreateUserModal.tsx
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { T, inputStyle, btnPrimary, btnGhost } from '../theme';
 import { API_BASE_URL } from '../config/api';
 import Icon from './Icon';
@@ -271,7 +272,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
 
   const showStaffFields = ['DOCTOR', 'DENTIST', 'NURSE', 'EMERGENCY_RESPONDER', 'ADMIN'].includes(roleCode);
 
-  return (
+  return createPortal(
     <div className="modal-backdrop" onClick={onClose}>
       <div
         className="modal-card"
@@ -721,6 +722,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -3,7 +3,7 @@
 Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172` · check from repo root: `python3 scripts/verify_codeslice.py desktop/src/components/codeslice .`
 
 ## DT-09 · desktop/src/App.tsx
-**LOC:** 1075 · **Anchor commit:** working tree · **Role:** App shell: login/session bootstrap, role-based console routing, offline replay badge, update banner, change-password modal
+**LOC:** 1097 · **Anchor commit:** working tree · **Role:** App shell: login/session bootstrap, account themes, role-based console routing, offline replay badge, update banner, change-password modal
 **Mounted by:** entry (main.tsx)
 **API surface:** POST /api/auth/login (L731), POST /api/auth/logout (L684), PUT /api/auth/change-password (L797)
 **Socket events:** none directly (child consoles own their sockets)
@@ -19,10 +19,10 @@ Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172`
 | 5 | 255-340 | tb-role-select | TopBar: greeting, View-as role select, Connected/Offline pill, queued-replay button, user chip |
 | 6 | 341-648 | LoginScreen | login split screen; login card has a faint green pointer-following glow, limited to the card; includes email/password form and dev quick-login chips |
 | 7 | 649-679 | function AppShell() | App state: user, activeRoleView, workspace views, connectivity, updater, password modal |
-| 8 | 680-699 | handleSignOut | POST /api/auth/logout; purge valetudo_token, credentials and user state |
+| 8 | 680-699 | handleSignOut | POST /api/auth/logout; restore default unauthenticated theme and purge valetudo_token, credentials and user state |
 | 9 | 700-710 | isResponder | responder-only accounts skip session timeout; useBookingBadge → sidebar badge key |
 | 10 | 711-730 | offline-queue-changed | online/offline and offline-queue listeners; refreshOfflineQueueFromBackend() syncs badge on mount |
-| 11 | 731-770 | handleLogin | POST /api/auth/login; staff-role gate; store valetudo_token; default role view; bootstrapOfflineCache bg |
+| 11 | 731-770 | handleLogin | POST /api/auth/login; staff-role gate; store valetudo_token; apply account theme after authentication; default role view; bootstrapOfflineCache bg |
 | 12 | 771-782 | handleManualReplay | manual replayOfflineQueue() with synced-count alert (TopBar queued button) |
 | 13 | 783-839 | handleChangePassword | password policy and match checks; PUT /api/auth/change-password; surfaces server issues[] |
 | 14 | 840-858 | onUpdateStatus | subscribe electronAPI.onUpdateStatus; unauthenticated gate renders LoginScreen |

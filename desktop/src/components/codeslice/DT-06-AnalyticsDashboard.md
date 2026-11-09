@@ -3,7 +3,7 @@
 Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172` · check from repo root: `python3 scripts/verify_codeslice.py desktop/src/components/codeslice .`
 
 ## DT-06 · desktop/src/components/AnalyticsDashboard.tsx
-**LOC:** 1349 · **Anchor commit:** ba200f6 · **Role:** Analytics dashboard: hand-rolled SVG charts (no chart lib), KPI cards, flu spike banner, XLSX/PDF exports
+**LOC:** 1352 · **Anchor commit:** working tree · **Role:** Analytics dashboard: hand-rolled SVG charts (no chart lib), KPI cards, flu spike banner, theme-aware XLSX/PDF export controls
 **Mounted by:** DoctorConsole.tsx L1423 (viewMode=analytics) · AdminConsole.tsx L1679 (analytics tab, gated by ANALYTICS_VIEW)
 **API surface:** GET /api/analytics/summary (L594); GET /api/analytics/export/xlsx (L610); GET /api/analytics/export/pdf (L630, L670); GET /api/analytics/export/excel (L650)
 **Socket events:** none
@@ -32,7 +32,7 @@ Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172`
 | 19 | 719-736 | getRoleTone | derived: isFluSpike; getRoleTone per-role color/icon map; totalRegistered sum |
 | 20 | 738-758 | analytics-report-area | render root #analytics-report-area; @media print stylesheet (print-only visibility) |
 | 21 | 760-780 | print-header | print-only header: PSU Lingayen campus title, RA 10173 line, generated timestamp (fixed dark ink — paper is always light) |
-| 22 | 782-834 | Epidemiological analytics | toolbar: page head; Refresh, Export Excel .xlsx, Official PDF Report, Print View buttons |
+| 22 | 782-834 | Epidemiological analytics | toolbar: page head; Refresh, Export Excel .xlsx (selected-theme primary tint), Official PDF Report, Print View buttons use live theme tokens and consistent longhand borders |
 | 23 | 836-947 | KPI cards | 4 KPI cards: enrolled students, total consultations, active emergencies, avg response time |
 | 24 | 949-1008 | EPIDEMIC SURVEILLANCE | flu surveillance banner: spike alert vs stable, past/prev 7-day counts; pill |
 | 25 | 1010-1088 | Campus population & headcount by role | card 1: roleDistribution grid (getRoleTone tiles) + Total registered pill |

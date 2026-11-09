@@ -808,9 +808,11 @@ export default function AnalyticsDashboard() {
             onClick={handleDownloadExcelXlsx}
             style={{
               ...btnGhost,
-              background: T.tonalGreenBg,
-              color: T.tonalGreenFg,
-              border: 'none',
+              background: T.primary50,
+              color: T.primary,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: T.primaryTint,
               fontWeight: 700,
             }}
           >

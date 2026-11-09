@@ -34,7 +34,7 @@ import signatureRoutes from './routes/signature.js';
 // Utilities (MinIO S3 & Redis)
 import { ensureBucketExists } from './utils/s3Vault.js';
 import { initRedis, redis, isRedisActive } from './utils/redisClient.js';
-import { runAutoMigrations } from './db.js';
+import { pool, runAutoMigrations } from './db.js';
 
 dotenv.config();
 
@@ -189,6 +189,19 @@ io.use(async (socket, next) => {
       } catch (redisErr) {
         console.error('[Socket.IO Revocation Check Warning]:', redisErr.message);
       }
+    }
+
+    try {
+      const [accountRows] = await pool.query(
+        'SELECT is_active, deleted_at FROM USERS WHERE user_id = ?',
+        [user.user_id]
+      );
+      if (accountRows.length === 0 || !accountRows[0].is_active || accountRows[0].deleted_at) {
+        return next(new Error('WebSocket account is no longer active.'));
+      }
+    } catch (accountErr) {
+      console.error('[Socket.IO Account Status Check Error]:', accountErr.message);
+      return next(new Error('WebSocket account status could not be verified.'));
     }
 
     socket.user = user;

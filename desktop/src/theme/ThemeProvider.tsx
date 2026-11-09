@@ -43,6 +43,8 @@ import {
 import type { ThemeMode, ThemePreset, ThemeSelection } from './presets';
 import { prefetchThemedLogo } from './themedLogo';
 
+export const DEFAULT_THEME_SELECTION: ThemeSelection = { mode: 'light', preset: 'brand' };
+
 /* ═══════════════════════════════════════════════════════════════════
    PERSISTENCE — localStorage (offline-first cache)
    ═══════════════════════════════════════════════════════════════════ */
@@ -51,10 +53,10 @@ import { prefetchThemedLogo } from './themedLogo';
 export function readCachedTheme(): ThemeSelection {
   try {
     const raw = localStorage.getItem(THEME_STORAGE_KEY);
-    if (!raw) return { mode: 'light', preset: 'brand' };
+    if (!raw) return { ...DEFAULT_THEME_SELECTION };
     return normalizeThemeSelection(JSON.parse(raw));
   } catch (_) {
-    return { mode: 'light', preset: 'brand' };
+    return { ...DEFAULT_THEME_SELECTION };
   }
 }
 
@@ -101,11 +103,11 @@ function applyThemeToDocument(sel: ThemeSelection): void {
 }
 
 /**
- * Synchronous bootstrap — call once before React's first render (see
- * main.tsx) so a persisted dark/preset theme never flashes light-brand.
+ * Synchronous bootstrap — unauthenticated screens always start in the
+ * default theme; account preferences are applied only after login.
  */
 export function bootstrapTheme(): void {
-  applyThemeToDocument(readCachedTheme());
+  applyThemeToDocument(DEFAULT_THEME_SELECTION);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -186,12 +188,16 @@ export function applyThemeFromAccount(user: unknown): void {
   const hasPreset = typeof src.theme_preset === 'string';
   if (!hasMode && !hasPreset) return; // older server — keep local theme
 
-  const current = readCachedTheme();
   const sel: ThemeSelection = {
-    mode: hasMode ? normalizeThemeMode(src.theme_mode) : current.mode,
-    preset: hasPreset ? normalizeThemePreset(src.theme_preset) : current.preset,
+    mode: hasMode ? normalizeThemeMode(src.theme_mode) : DEFAULT_THEME_SELECTION.mode,
+    preset: hasPreset ? normalizeThemePreset(src.theme_preset) : DEFAULT_THEME_SELECTION.preset,
   };
   registeredApply?.(sel, true);
+}
+
+/** Reset the local UI theme after logout without changing the saved account preference. */
+export function resetThemeAfterLogout(): void {
+  registeredApply?.({ ...DEFAULT_THEME_SELECTION }, true);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -203,7 +209,7 @@ interface ThemeProviderProps {
 }
 
 export function ThemeProvider({ children }: ThemeProviderProps) {
-  const [selection, setSelection] = useState<ThemeSelection>(() => readCachedTheme());
+  const [selection, setSelection] = useState<ThemeSelection>(() => ({ ...DEFAULT_THEME_SELECTION }));
   const [sync, setSync] = useState<ThemeSyncState>('idle');
 
   /** Debounce timer for the server PUT (rapid mode toggles coalesce). */

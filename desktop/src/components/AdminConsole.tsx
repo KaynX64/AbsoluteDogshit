@@ -109,6 +109,8 @@ export default function AdminConsole({
   const [editingUser, setEditingUser] = useState<any | null>(null);
   const [showCreateUserModal, setShowCreateUserModal] = useState(false);
   const [isSavingUser, setIsSavingUser] = useState(false);
+  const [archivingUserId, setArchivingUserId] = useState<number | null>(null);
+  const [userActionFeedback, setUserActionFeedback] = useState<{ text: string; isError: boolean } | null>(null);
 
   /* ── Admin archetype permissions (additive — only gates LIMITED admins) ── */
   const [myPerms, setMyPerms] = useState<{ userId: number | null; archetype: string; is_super: boolean; permissions: string[] }>({
@@ -399,6 +401,43 @@ export default function AdminConsole({
     });
 
   /* ── Handlers (unchanged) ────────────────────────────────────── */
+  const handleArchiveUser = async (target: any) => {
+    const targetLabel = target.name || `account #${target.id}`;
+    if (!window.confirm(
+      `Archive ${targetLabel}? This disables sign-in and retains clinical and audit history.`
+    )) return;
+
+    const targetUserId = Number(target.id);
+    setArchivingUserId(targetUserId);
+    setUserActionFeedback(null);
+    try {
+      const token = localStorage.getItem('valetudo_token');
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
+
+      const response = await fetch(`${API_BASE_URL}/api/admin/users/${targetUserId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || `Account archive failed (HTTP ${response.status}).`);
+      }
+
+      setUsersList((current) => current.filter((user) => Number(user.id) !== targetUserId));
+      setUserActionFeedback({
+        text: result.message || 'Account archived. Clinical and audit history has been retained.',
+        isError: false,
+      });
+    } catch (error) {
+      setUserActionFeedback({
+        text: error instanceof Error ? error.message : 'Failed to archive account.',
+        isError: true,
+      });
+    } finally {
+      setArchivingUserId(null);
+    }
+  };
+
   const handleOpenEditModal = (u: any) => {
     setEditingUser({
       ...u,
@@ -1031,7 +1070,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     <th>Institutional email</th>
                     <th>Assigned RBAC role</th>
                     <th style={{ width: 110 }}>Status</th>
-                    <th style={{ width: 100, textAlign: 'right' }}>Action</th>
+                    <th style={{ width: 190, textAlign: 'right' }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1096,7 +1135,8 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                           {u.status}
                         </span>
                       </td>
-                      <td style={{ textAlign: 'right' }}>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                         {viewingAsLimited && u.role === 'ADMIN' && Number(u.id) !== Number(myPerms.userId) ? (
                           <button
                             type="button"
@@ -1128,12 +1168,59 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                             Edit
                           </button>
                         )}
+                        {Number(u.id) !== Number(myPerms.userId)
+                          && (u.role !== 'ADMIN' || myPerms.is_super) && (
+                          <button
+                            type="button"
+                            onClick={() => handleArchiveUser(u)}
+                            disabled={archivingUserId === Number(u.id)}
+                            title="Archive account; clinical and audit history will be retained"
+                            style={{
+                              padding: '6px 12px',
+                              borderRadius: T.radius.pill,
+                              background: T.dangerSoft,
+                              color: T.danger,
+                              borderWidth: 1,
+                              borderStyle: 'solid',
+                              borderColor: T.dangerBorder,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              cursor: archivingUserId === Number(u.id) ? 'wait' : 'pointer',
+                              opacity: archivingUserId === Number(u.id) ? 0.65 : 1,
+                              fontFamily: T.font,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 5,
+                            }}
+                          >
+                            <Icon name="archive" size={14} />
+                            {archivingUserId === Number(u.id) ? 'Archiving...' : 'Archive'}
+                          </button>
+                        )}
+                        </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+
+            {userActionFeedback && (
+              <div
+                role={userActionFeedback.isError ? 'alert' : 'status'}
+                style={{
+                  margin: '12px 16px',
+                  padding: '10px 14px',
+                  borderRadius: T.radius.md,
+                  background: userActionFeedback.isError ? T.dangerSoft : T.successSoft,
+                  color: userActionFeedback.isError ? T.danger : T.success,
+                  fontSize: 13,
+                  fontWeight: 600,
+                }}
+              >
+                {userActionFeedback.text}
+              </div>
+            )}
 
             {processedUsers.length === 0 && (
               <div style={{ padding: 40, textAlign: 'center', color: T.textMuted, fontSize: 13 }}>

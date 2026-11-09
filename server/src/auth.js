@@ -316,6 +316,22 @@ export function authenticateToken(req, res, next) {
       }
     }
 
+    try {
+      const [accountRows] = await pool.query(
+        'SELECT is_active, deleted_at FROM USERS WHERE user_id = ?',
+        [user.user_id]
+      );
+      if (accountRows.length === 0 || !accountRows[0].is_active || accountRows[0].deleted_at) {
+        return res.status(401).json({
+          error: 'ACCOUNT_INACTIVE',
+          message: 'This account is no longer active. Please contact an administrator.',
+        });
+      }
+    } catch (accountErr) {
+      console.error('[Account Status Check Error]:', accountErr.message);
+      return res.status(503).json({ error: 'Account status could not be verified.' });
+    }
+
     req.user = user;
     req.token = token;
     next();
