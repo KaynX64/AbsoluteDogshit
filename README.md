@@ -1,6 +1,6 @@
 <!-- README.md is over the 7 KB documentation-file cap — its content lives on, split into byte-preserved parts; this stub is the entry point. -->
 
-# Valetudo HealthLink — split index
+# LeoVital HealthLink — split index
 
 `README.md` (32,758 bytes) exceeds the 7 KB cap for documentation files, so it was split in half — recursively, at clean line boundaries — into the 8 parts below. Bytes are preserved: concatenating the parts in order and dropping each part's one-line `<!-- split from … -->` comment (and the `../` prefix the split added to relative links) reproduces the original file exactly.
 
