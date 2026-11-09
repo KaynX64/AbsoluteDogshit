@@ -158,6 +158,7 @@ function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, b
   const navByRole: Record<string, { key: string; label: string; icon: string }[]> = {
     ADMIN: [
       { key: 'users',     label: 'Users & roles',    icon: 'manage_accounts' },
+      { key: 'archived',  label: 'Archived accounts', icon: 'archive' },
       { key: 'audit',     label: 'Privacy & audit',  icon: 'shield_lock' },
       { key: 'telemetry', label: 'System health',    icon: 'dns' },
       { key: 'analytics', label: 'Health analytics', icon: 'monitoring' },
@@ -661,7 +662,7 @@ function AppShell() {
   const [activeRoleView, setActiveRoleView] = useState<string>('');
 
   /* ── Workspace state (driven by sidebar) ─────────────────────── */
-  const [adminTab, setAdminTab] = useState<'users' | 'audit' | 'telemetry' | 'analytics' | 'incidents' | 'db'>('users');
+  const [adminTab, setAdminTab] = useState<'users' | 'archived' | 'audit' | 'telemetry' | 'analytics' | 'incidents' | 'db'>('users');
   const [doctorViewMode, setDoctorViewMode] = useState<
     'active' | 'scheduled' | 'history' | 'archive' | 'analytics'
   >('active');

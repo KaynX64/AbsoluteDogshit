@@ -122,6 +122,7 @@ async function getUserRoleCode(connection, userId) {
 // 1. GET /api/admin/users - Comprehensive User Accounts, Roles & Sub-profiles
 router.get('/users', requirePermission('USERS_MANAGE'), async (req, res) => {
   try {
+    const includeArchived = req.query.archived === 'true';
     const [users] = await pool.query(
       `SELECT u.user_id as id,
               u.first_name,
@@ -131,8 +132,13 @@ router.get('/users', requirePermission('USERS_MANAGE'), async (req, res) => {
               u.phone,
               COALESCE(r.code, 'STUDENT') as role,
               u.is_active,
-              CASE WHEN u.is_active = TRUE THEN 'Active' ELSE 'Suspended' END as status,
+              CASE
+                WHEN u.deleted_at IS NOT NULL THEN 'Archived'
+                WHEN u.is_active = TRUE THEN 'Active'
+                ELSE 'Suspended'
+              END as status,
               u.created_at,
+              u.deleted_at as archived_at,
               u.is_qualified_responder,
               DATE_FORMAT(u.qualified_responder_since, '%Y-%m-%d %H:%i') as qualified_responder_since,
               u.qualified_responder_note,
@@ -162,7 +168,7 @@ router.get('/users', requirePermission('USERS_MANAGE'), async (req, res) => {
        LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
        LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
        LEFT JOIN NON_TEACHING_PROFILES ntp ON u.user_id = ntp.user_id
-       WHERE u.deleted_at IS NULL
+       WHERE u.deleted_at IS ${includeArchived ? 'NOT ' : ''}NULL
        ORDER BY u.user_id ASC`
     );
 
@@ -302,11 +308,11 @@ router.delete('/users/:id', requirePermission('USERS_MANAGE'), async (req, res) 
     await connection.query('DELETE FROM DEVICE_TOKENS WHERE user_id = ?', [targetUserId]);
     await logAudit(connection, {
       userId: req.user.user_id,
-      action: 'ARCHIVE_USER_ACCOUNT',
+      action: 'DELETE',
       table: 'USERS',
       recordId: targetUserId,
       oldValue: { is_active: Boolean(targetRows[0].is_active), deleted_at: null },
-      newValue: { is_active: false, deleted_at: true },
+      newValue: { operation: 'ADMIN_ARCHIVE_USER_ACCOUNT', is_active: false, deleted_at: true },
       ipAddress: req.ip,
     });
 

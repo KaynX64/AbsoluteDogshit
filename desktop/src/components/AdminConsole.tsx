@@ -83,7 +83,7 @@ function NoPermissionPanel({ required }: { required: string }) {
   );
 }
 
-export type AdminTab = 'users' | 'audit' | 'telemetry' | 'analytics' | 'incidents' | 'db';
+export type AdminTab = 'users' | 'archived' | 'audit' | 'telemetry' | 'analytics' | 'incidents' | 'db';
 
 interface AdminConsoleProps {
   /** Optional controlled active tab — if provided, the sidebar drives the tab. */
@@ -94,14 +94,22 @@ interface AdminConsoleProps {
 
 export default function AdminConsole({
   activeTab: controlledTab,
+  onTabChange,
 }: AdminConsoleProps = {}) {
-  /* Controlled <Icon name="swap_horiz" size={14} /> uncontrolled: fall back to internal state when no parent props are passed. */
-  const [internalTab] = useState<AdminTab>('users');
+  /* Controlled or uncontrolled: fall back to internal state when no parent props are passed. */
+  const [internalTab, setInternalTab] = useState<AdminTab>('users');
   const activeTab = controlledTab ?? internalTab;
+  const changeTab = (tab: AdminTab) => {
+    setInternalTab(tab);
+    onTabChange?.(tab);
+  };
 
   const [auditSubTab, setAuditSubTab] = useState<'mutations' | 'phi'>('phi');
 
   const [usersList, setUsersList] = useState<any[]>([]);
+  const [archivedUsers, setArchivedUsers] = useState<any[]>([]);
+  const [loadingArchivedUsers, setLoadingArchivedUsers] = useState(false);
+  const [archivedUsersError, setArchivedUsersError] = useState('');
   const [mutationLogs, setMutationLogs] = useState<any[]>([]);
   const [phiLogs, setPhiLogs] = useState<any[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
@@ -183,6 +191,28 @@ export default function AdminConsole({
       });
       if (res.ok) setUsersList(await res.json());
     } catch (_) {}
+  };
+
+  const fetchArchivedUsers = async () => {
+    setLoadingArchivedUsers(true);
+    setArchivedUsersError('');
+    try {
+      const token = localStorage.getItem('valetudo_token');
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
+      const response = await fetch(`${API_BASE_URL}/api/admin/users?archived=true`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || `Failed to load archived accounts (HTTP ${response.status}).`);
+      }
+      if (!Array.isArray(result)) throw new Error('The server returned an invalid archived account list.');
+      setArchivedUsers(result);
+    } catch (error) {
+      setArchivedUsersError(error instanceof Error ? error.message : 'Failed to load archived accounts.');
+    } finally {
+      setLoadingArchivedUsers(false);
+    }
   };
 
   /* Caller's effective admin permission state (super admins keep full access). */
@@ -322,6 +352,7 @@ export default function AdminConsole({
 
   // Refetch contextual data whenever the parent (sidebar) switches the active tab
   useEffect(() => {
+    if (activeTab === 'archived') fetchArchivedUsers();
     if (activeTab === 'audit') {
       fetchPhiLogs();
       fetchMutationLogs();
@@ -874,6 +905,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
         <div className="vd-page-head-eyebrow">Administration</div>
         <h1 className="vd-page-head-title">
           {activeTab === 'users' && 'Users & roles'}
+          {activeTab === 'archived' && 'Archived accounts'}
           {activeTab === 'audit' && 'Privacy & audit'}
           {activeTab === 'telemetry' && 'System health & retention'}
           {activeTab === 'analytics' && 'Health analytics'}
@@ -882,6 +914,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
         </h1>
         <p className="vd-page-head-sub">
           {activeTab === 'users' && 'Manage institutional accounts, access permissions and account status. Seven RBAC roles govern access. Editing a user changes their assigned permissions; suspending an account disables access without deleting its profile.'}
+          {activeTab === 'archived' && 'Review accounts that have been archived. Sign-in is disabled; associated clinical and audit history is retained.'}
           {activeTab === 'audit' && 'Trace access and changes to clinic information with read-only audit records.'}
           {activeTab === 'telemetry' && 'Service telemetry and clinical data lifecycle governance, in one place.'}
           {activeTab === 'analytics' && 'Campus illness trajectories, seasonal spike monitoring & health reports.'}
@@ -889,6 +922,47 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           {activeTab === 'db' && 'Inspect and maintain system records · valetudo_healthlink'}
         </p>
       </div>
+
+      {(activeTab === 'users' || activeTab === 'archived') && (
+        <div
+          role="group"
+          aria-label="Account views"
+          style={{
+            display: 'flex',
+            gap: 8,
+            marginBottom: 18,
+            borderBottom: `1px solid ${T.border}`,
+          }}
+        >
+          {([
+            { key: 'users', label: 'Active accounts' },
+            { key: 'archived', label: 'Archived accounts' },
+          ] as const).map(({ key, label }) => {
+            const isSelected = activeTab === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={isSelected}
+                onClick={() => changeTab(key)}
+                style={{
+                  padding: '10px 14px',
+                  border: 0,
+                  borderBottom: `2px solid ${isSelected ? T.primary : 'transparent'}`,
+                  background: 'transparent',
+                  color: isSelected ? T.primary : T.textSub,
+                  fontSize: 13,
+                  fontWeight: isSelected ? 700 : 600,
+                  fontFamily: T.font,
+                  cursor: 'pointer',
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: USERS                                                 */}
@@ -1245,7 +1319,74 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           </p>
         </div>
       )}
-            {/* ═══════════════════════════════════════════════════════════ */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* TAB: ARCHIVED ACCOUNTS                                     */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {activeTab === 'archived' && !can('USERS_MANAGE') && (<NoPermissionPanel required="USERS_MANAGE" />)}
+      {activeTab === 'archived' && can('USERS_MANAGE') && (
+        <div style={{
+          background: T.surface,
+          border: `1px solid ${T.border}`,
+          borderRadius: T.radius.lg,
+          overflow: 'hidden',
+          boxShadow: T.shadow.xs,
+        }}>
+          {archivedUsersError && (
+            <div role="alert" style={{
+              margin: 16,
+              padding: '10px 14px',
+              borderRadius: T.radius.md,
+              background: T.dangerSoft,
+              color: T.danger,
+              fontSize: 13,
+              fontWeight: 600,
+            }}>
+              {archivedUsersError}
+            </div>
+          )}
+          {loadingArchivedUsers ? (
+            <div role="status" style={{ padding: 32, textAlign: 'center', color: T.textMuted }}>
+              Loading archived accounts...
+            </div>
+          ) : archivedUsers.length === 0 && !archivedUsersError ? (
+            <div style={{ padding: 40, textAlign: 'center', color: T.textMuted, fontSize: 13 }}>
+              No archived accounts.
+            </div>
+          ) : (
+            <div className="vd-table-wrap" style={{ overflowX: 'auto' }}>
+              <table className="tbl" style={{ minWidth: 760 }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: 90 }}>User ID</th>
+                    <th>Full name</th>
+                    <th>Institutional email</th>
+                    <th>Assigned RBAC role</th>
+                    <th style={{ width: 190 }}>Archived</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {archivedUsers.map((archivedUser) => (
+                    <tr key={archivedUser.id}>
+                      <td style={{ color: T.textSub, fontWeight: 600, fontFamily: T.mono, fontSize: 12 }}>
+                        {archivedUser.id}
+                      </td>
+                      <td style={{ fontWeight: 600, color: T.text }}>{archivedUser.name}</td>
+                      <td style={{ color: T.textSub }}>{archivedUser.email}</td>
+                      <td><span style={rolePill(archivedUser.role)}>{archivedUser.role}</span></td>
+                      <td style={{ color: T.textSub }}>
+                        {archivedUser.archived_at
+                          ? new Date(archivedUser.archived_at).toLocaleString()
+                          : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+      {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: AUDIT                                                */}
       {/* ═══════════════════════════════════════════════════════════ */}
       {activeTab === 'audit' && !can('AUDIT_VIEW') && (<NoPermissionPanel required="AUDIT_VIEW" />)}
