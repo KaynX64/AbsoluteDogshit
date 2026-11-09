@@ -2047,7 +2047,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                   rs,
                                   name,
                                   phone,
-                                  'EMERGENCY: I need help. This is an automated alert from Valetudo HealthLink.',
+                                  'EMERGENCY: I need help. This is an automated alert from LeoVital HealthLink.',
                                 ),
                               ],
                             );

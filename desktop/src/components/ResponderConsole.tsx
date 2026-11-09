@@ -115,7 +115,7 @@ export default function ResponderConsole() {
     playEmergencyAlarm();
     if (window.electronAPI?.showNotification) {
       window.electronAPI.showNotification({
-        title: 'Valetudo HealthLink — SOS alert test',
+        title: 'LeoVital HealthLink — SOS alert test',
         body: 'Daniella Movida (BSIT) reported a medical emergency at PSU Lingayen Library. Allergies: Penicillin.',
       });
     } else {

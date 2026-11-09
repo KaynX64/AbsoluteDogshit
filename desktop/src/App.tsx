@@ -195,10 +195,10 @@ function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, b
     <aside className="sb">
       <div className="sb-logo-block">
         <div className="sb-logo-lg">
-          <ThemedLogo alt="Valetudo HealthLink" />
+          <ThemedLogo alt="LeoVital HealthLink" />
         </div>
         <div className="sb-brand-text">
-          <span className="sb-brand-name">Valetudo</span>
+          <span className="sb-brand-name">LeoVital</span>
           <span className="sb-brand-sub">HealthLink</span>
         </div>
       </div>
@@ -285,7 +285,7 @@ function TopBar({
   return (
     <header className="tb">
       <div className="tb-left">
-        <div className="tb-eyebrow">Valetudo HealthLink Console</div>
+        <div className="tb-eyebrow">LeoVital HealthLink Console</div>
         <h1 className="tb-greeting">{greeting}, {user.first_name}</h1>
       </div>
 
@@ -426,7 +426,7 @@ function LoginScreen({ email, setEmail, password, setPassword, error, onSubmit }
             <ThemedLogo />
           </span>
           <span className="login-aside-wordmark">
-            <span className="login-aside-name">Valetudo</span>
+            <span className="login-aside-name">LeoVital</span>
             <span className="login-aside-sub">HealthLink</span>
           </span>
         </div>
@@ -633,7 +633,7 @@ function LoginScreen({ email, setEmail, password, setPassword, error, onSubmit }
 
         <div className="login-main-foot">
           <p><strong>Need account help?</strong> Contact your campus administrator.</p>
-          <p>Valetudo HealthLink · R.A. 10173 Data Privacy Act</p>
+          <p>LeoVital HealthLink · R.A. 10173 Data Privacy Act</p>
         </div>
       </main>
     </div>

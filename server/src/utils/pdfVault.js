@@ -24,7 +24,7 @@ function createDoc() {
     size: 'A4',
     margin: 50,
     info: {
-      Producer: 'Valetudo HealthLink',
+      Producer: 'LeoVital HealthLink',
       Creator: 'Pangasinan State University - Lingayen Infirmary',
     },
   });
@@ -335,7 +335,7 @@ export async function renderPrescriptionPDF(rx) {
     .font('Helvetica')
     .fontSize(9)
     .text(
-      'Scan with the Valetudo mobile scanner or infirmary terminal to confirm valid issuance.',
+      'Scan with the LeoVital mobile scanner or infirmary terminal to confirm valid issuance.',
       205,
       panelY + 34,
       { width: 320 }
@@ -700,13 +700,13 @@ export async function renderIncidentReportPDF(incident) {
     .fillColor(BRAND_GREEN)
     .font('Helvetica-Bold')
     .fontSize(10)
-    .text('Valetudo HealthLink · Electronic Incident Record', 178, panelY + 12, { width: 330 });
+    .text('LeoVital HealthLink · Electronic Incident Record', 178, panelY + 12, { width: 330 });
   doc
     .fillColor(TEXT_SUB)
     .font('Helvetica')
     .fontSize(8.5)
     .text(
-      'Permanent campus emergency record archived in Valetudo MinIO storage. Certified R.A. 10173 compliant.',
+      'Permanent campus emergency record archived in LeoVital MinIO storage. Certified R.A. 10173 compliant.',
       178,
       panelY + 28,
       { width: 330 }

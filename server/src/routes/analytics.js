@@ -300,7 +300,7 @@ router.get('/export/csv', async (req, res) => {
 router.get('/export/excel', async (req, res) => {
   try {
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'Valetudo HealthLink - PSU Lingayen Infirmary';
+    workbook.creator = 'LeoVital HealthLink - PSU Lingayen Infirmary';
     workbook.created = new Date();
 
     // Palette & Styles

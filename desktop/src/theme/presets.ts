@@ -206,7 +206,7 @@ interface PresetSeed {
 
 export const PRESET_META: Record<ThemePreset, Omit<PresetSeed, 'light' | 'dark'>> = {
   brand: {
-    label: 'Valetudo',
+    label: 'LeoVital',
     hint: 'Classic sage green',
     swatch: ['#1F4A34', '#788F7B'],
   },

@@ -302,7 +302,7 @@ function createWindow() {
   initLocalDatabase();
 
   const win = new BrowserWindow({
-    title: 'Valetudo HealthLink',
+    title: 'LeoVital HealthLink',
     width: 1300,
     height: 880,
     minWidth: 1024,
@@ -337,7 +337,7 @@ function createWindow() {
   }
 
   win.once('ready-to-show', () => {
-    win.setTitle('Valetudo HealthLink - PSU Lingayen Infirmary');
+    win.setTitle('LeoVital HealthLink - PSU Lingayen Infirmary');
     win.show();
     win.focus();
     setupAutoUpdater(win);
@@ -405,8 +405,8 @@ ipcMain.handle('print-document', async (event, { htmlContent }) => {
 ipcMain.handle('show-notification', (event, { title, body }) => {
   if (Notification.isSupported()) {
     new Notification({
-      title: title || 'Valetudo Alert',
-      body: body || 'Notification from Valetudo HealthLink',
+      title: title || 'LeoVital Alert',
+      body: body || 'Notification from LeoVital HealthLink',
       urgency: 'critical',
     }).show();
     return { success: true };

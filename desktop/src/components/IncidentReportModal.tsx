@@ -132,7 +132,7 @@ export default function IncidentReportModal() {
           // The console window may be in the background — surface the
           // documentation request in the OS tray as well.
           (window as any).electronAPI.showNotification({
-            title: 'Valetudo HealthLink — incident documentation required',
+            title: 'LeoVital HealthLink — incident documentation required',
             body: `SOS #${openAlertId} (${prefill.patient?.name || 'campus member'}) was resolved. Open the console to file the incident report.`,
           });
         }

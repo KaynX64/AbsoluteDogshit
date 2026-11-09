@@ -66,7 +66,7 @@ class ValetudoMobileApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: navigatorKey,
-      title: 'Valetudo HealthLink',
+      title: 'LeoVital HealthLink',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
