@@ -18,9 +18,8 @@ export function requireRoles(...allowedRoles) {
    ADMIN ARCHETYPE PERMISSIONS (additive — requireRoles above is unchanged)
 
    Semantics:
-   • Applies ONLY to users whose roles are exclusively 'ADMIN'. Any account
-     holding a clinical/patient role (DOCTOR, DENTIST, NURSE, …) bypasses
-     permission checks entirely, exactly as before this feature existed.
+   • Applies to every account holding ADMIN, including multi-role accounts.
+   • Shared endpoints may explicitly allow a non-admin clinical role.
    • An ADMIN user with NO grant rows keeps FULL access (legacy default —
      every administrator created before this feature is unaffected).
    • An ADMIN user holding the SUPER_ADMIN sentinel keeps FULL access.
@@ -54,29 +53,26 @@ export async function resolveAdminPermissions(userId) {
   return { isSuper, codes: isSuper ? ['SUPER_ADMIN'] : codes.filter((c) => c !== 'SUPER_ADMIN') };
 }
 
-/** Does this JWT user hold any non-ADMIN role? (permission model governs ADMIN only) */
-function hasNonAdminRole(user) {
-  return (user.roles || []).some((r) => r !== 'ADMIN');
-}
-
 /**
  * Express middleware factory — guards a route behind an admin-permission code.
  * MUST be mounted after `authenticateToken` (and typically after requireRoles).
  *
  * Behaviour:
- *   • Non-ADMIN-only users (e.g. DOCTOR/DENTIST on shared analytics routes)
- *     pass through untouched — identical to pre-feature behaviour.
+ *   • Accounts without ADMIN need an explicitly allowed non-admin role.
  *   • Super admins (legacy no-rows or explicit SUPER_ADMIN) pass.
  *   • Limited admins must hold the requested code.
  */
-export function requirePermission(code) {
+export function requirePermission(code, { nonAdminRoles = [] } = {}) {
   return async (req, res, next) => {
     try {
-      if (!req.user || !req.user.roles) {
+      const roles = req.user?.roles;
+      if (!Array.isArray(roles) || roles.length === 0) {
         return res.status(403).json({ error: 'Access forbidden: No roles assigned.' });
       }
-      // Clinical/patient roles are not governed by admin permissions.
-      if (hasNonAdminRole(req.user)) return next();
+      if (!roles.includes('ADMIN')) {
+        if (roles.some((role) => nonAdminRoles.includes(role))) return next();
+        return res.status(403).json({ error: 'Access forbidden: Insufficient permissions.' });
+      }
 
       const { isSuper, codes } = await resolveAdminPermissions(req.user.user_id);
       if (isSuper) return next();

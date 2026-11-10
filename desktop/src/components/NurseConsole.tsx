@@ -708,11 +708,11 @@ export default function NurseConsole({
       if (evt?.status === 'no_show') fetchNoShowCount();
     });
 
-    socket.on('appointment:booked', (newBooking: any) => {
+    socket.on('appointment:booked', () => {
       if (window.electronAPI?.showNotification) {
         window.electronAPI.showNotification({
           title: 'New appointment in system',
-          body: `${newBooking.patientName || 'Student'} booked for ${newBooking.date_time}.`,
+          body: 'Open Expected arrivals to review the booking.',
         });
       }
       fetchExpected();

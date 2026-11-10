@@ -11,7 +11,8 @@ import PDFDocument from 'pdfkit';
 
 const router = express.Router();
 
-router.use(authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'ADMIN'), requirePermission('ANALYTICS_VIEW'));
+const clinicalRoles = ['DOCTOR', 'DENTIST'];
+router.use(authenticateToken, requireRoles(...clinicalRoles, 'ADMIN'), requirePermission('ANALYTICS_VIEW', { nonAdminRoles: clinicalRoles }));
 
 // 1. GET /api/analytics/summary
 router.get('/summary', async (req, res) => {

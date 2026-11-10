@@ -5,7 +5,7 @@
 - Exports: `ToothCondition` L13, `ToothRecord` L21, `DoctorViewMode` L27 (`'active'|'scheduled'|'history'|'archive'|'analytics'`), component L178.
 - Sockets L351-374: `appointment:booked`, `appointment:status_changed`, `queue:updated`, `appointment:cancelled`.
 - Queue & consult: `fetchAppointments` L308 (`GET /api/appointments/today?filter=active|history|scheduled` L312-314), `handleConflict` L376, `selectPatient` L407, `handleStartConsultation` L557 (status → in-progress L562), `handleFinishConsultation` L588 (complete L643 + EMR + attachments upload L662).
-- Patient data: attachments L465 + download L507, history L469/L722/L854, patient search L816 (`/api/appointments/patients/search?query=`).
+- Patient data: the consultation strip requests attachment metadata only. Past EMR History and the archive timeline use `usePatientHistory` for 25-record pages and the offline SQLite fallback. Patient search uses `/api/appointments/patients/search?query=`.
 - Rx/clearance: rx history L752 (`/api/documents/prescriptions/patient/:id`), clearance history L788, print clearance L1085 (`POST /api/documents/clearances`).
 - Immunizations: open modal L883, quick-add L928, custom L940, remove L961, save L965 (`GET/POST /api/profile/patient/:id/immunizations` L895/L976).
 - PDFs: `handleDownloadPdf` L1009, `openIssuedPdf` L1051 (`GET /api/documents/:kind/:id/pdf`).

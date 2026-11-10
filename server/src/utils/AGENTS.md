@@ -16,7 +16,8 @@
 | passwordPolicy.js | password rules |
 | mailer.js | nodemailer (SMTP_* env) |
 | fcmNotifier.js | FCM push |
-| reminderWorker.js | `startReminderScheduler(io)`: reminders + no-show flip |
+| reminderWorker.js | Reminders and no-show transitions. Locks eligible appointments, skips locked rows and emits only after commit. |
+| queueTickets.js | Reserves daily ticket numbers per counter inside the intake transaction. The first reservation starts after any existing tickets. |
 | dbStudioGuard.js | DB-studio access guard (tested) |
 
 Changing `cryptoVault.js` → run `node --test tests/cryptoVault.test.js tests/reencrypt.test.js`. Never alter the ciphertext format without a re-encrypt migration.

@@ -80,6 +80,7 @@ export default function documentRoutes(io) {
     }
 
     const connection = await pool.getConnection();
+    let issued;
 
     try {
       await connection.beginTransaction();
@@ -454,15 +455,7 @@ export default function documentRoutes(io) {
         ipAddress: req.ip,
       });
 
-      await connection.commit();
-
-      if (io) {
-        io.emit('inventory:updated');
-      }
-
-      const pdfKey = await generateAndStorePrescriptionPDF(prescriptionId);
-
-      res.status(201).json({
+      issued = {
         message:
           outsideItems.length > 0
             ? 'Outside prescription issued and signed. No infirmary stock was deducted for outside-pharmacy item(s).'
@@ -474,8 +467,8 @@ export default function documentRoutes(io) {
         signatureMetadata,
         allocatedBatches: plannedDeductions,
         outsideItemsCount: outsideItems.length,
-        pdfAvailable: Boolean(pdfKey),
-      });
+      };
+      await connection.commit();
     } catch (error) {
       await connection.rollback();
       if (error instanceof SignerError) {
@@ -490,10 +483,14 @@ export default function documentRoutes(io) {
           requested: error.requested,
         });
       }
-      res.status(400).json({ error: error.message || 'Failed to issue prescription.' });
+      return res.status(400).json({ error: error.message || 'Failed to issue prescription.' });
     } finally {
       connection.release();
     }
+
+    io?.emit('inventory:updated');
+    const pdfKey = await generateAndStorePrescriptionPDF(issued.prescriptionId);
+    return res.status(201).json({ ...issued, pdfAvailable: Boolean(pdfKey) });
   });
 
   // GET /api/documents/prescriptions/my (Decrypted for authorized patient)
@@ -805,6 +802,7 @@ export default function documentRoutes(io) {
     }
 
     const connection = await pool.getConnection();
+    let issued;
 
     try {
       await connection.beginTransaction();
@@ -865,27 +863,26 @@ export default function documentRoutes(io) {
         ipAddress: req.ip,
       });
 
-      await connection.commit();
-
-      const pdfKey = await generateAndStoreClearancePDF(clearanceId);
-
-      res.status(201).json({
+      issued = {
         message: 'Medical clearance issued successfully.',
         clearanceId,
         qrToken: token,
         signer: signer.display,
-        pdfAvailable: Boolean(pdfKey),
-      });
+      };
+      await connection.commit();
     } catch (error) {
       await connection.rollback();
       if (error instanceof SignerError) {
         return res.status(error.status).json({ error: error.message, code: error.code });
       }
       console.error('Clearance Issuance Error:', error);
-      res.status(500).json({ error: 'Failed to issue medical clearance.' });
+      return res.status(500).json({ error: 'Failed to issue medical clearance.' });
     } finally {
       connection.release();
     }
+
+    const pdfKey = await generateAndStoreClearancePDF(issued.clearanceId);
+    return res.status(201).json({ ...issued, pdfAvailable: Boolean(pdfKey) });
   });
 
   router.get('/clearances/my', authenticateToken, requirePrivacyConsent, async (req, res) => {

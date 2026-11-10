@@ -40,7 +40,7 @@ describe('read-only ledger tables', () => {
     for (const t of ['AUDIT_LOGS', 'PHI_ACCESS_LOGS', 'INVENTORY_LOGS']) {
       assert.equal(isReadOnlyTable(t), true, t);
     }
-    assert.deepEqual([...READ_ONLY_TABLES].sort(), ['AUDIT_LOGS', 'INVENTORY_LOGS', 'PHI_ACCESS_LOGS', 'SERVER_POLICY']);
+    assert.deepEqual([...READ_ONLY_TABLES].sort(), ['AUDIT_LOGS', 'INVENTORY_LOGS', 'PHI_ACCESS_LOGS', 'QUEUE_TICKET_COUNTERS', 'SERVER_POLICY']);
   });
 
   test('server policy writes must use its dedicated editor', () => {

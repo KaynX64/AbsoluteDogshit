@@ -1500,7 +1500,7 @@ async function getWhitelistedTables() {
   const [rows] = await pool.query(
     `SELECT TABLE_NAME as tableName, TABLE_ROWS as estimatedRows
      FROM information_schema.TABLES
-     WHERE TABLE_SCHEMA = DATABASE() AND UPPER(TABLE_NAME) <> 'SERVER_POLICY'
+     WHERE TABLE_SCHEMA = DATABASE() AND UPPER(TABLE_NAME) NOT IN ('SERVER_POLICY', 'QUEUE_TICKET_COUNTERS')
      ORDER BY TABLE_NAME ASC`
   );
   return rows;

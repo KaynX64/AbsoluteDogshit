@@ -5,7 +5,7 @@
 
 ## Boot pipeline (src/index.js)
 
-CORS allow-list → security headers (HSTS, nosniff, X-Frame-Options DENY, XSS, Referrer-Policy) → `express.json()` → routes → `https.createServer` from `../certs/{cert,key}.pem` (**process exits if certs are missing**, unless `ALLOW_INSECURE_HTTP=true`) → Socket.IO `io` (exported) → load the persisted [server policy](../src/config/SERVER-POLICY.md) → `listen(PORT=5000)` → async boot: `initRedis` → `ensureBucketExists` (MinIO bucket `valetudo-attachments`) → `runAutoMigrations` → `logActiveLimits` → `startReminderScheduler(io)`.
+CORS allow-list → security headers (HSTS, nosniff, X-Frame-Options DENY, XSS, Referrer-Policy) → `express.json()` → routes → `https.createServer` from `../certs/{cert,key}.pem` (**process exits if certs are missing**, unless `ALLOW_INSECURE_HTTP=true`) → Socket.IO `io` (exported) → load the persisted [server policy](../src/config/SERVER-POLICY.md) → ensure `QUEUE_TICKET_COUNTERS` → `listen(PORT=5000)` → async boot: `initRedis` → `ensureBucketExists` (MinIO bucket `valetudo-attachments`) → `runAutoMigrations` → `logActiveLimits` → `startReminderScheduler(io)`.
 
 ## Route map — src/routes/*.js (all mounted under /api in index.js)
 
@@ -28,7 +28,9 @@ Not in `routes/`: auth endpoints are wired directly in `index.js` — `POST /api
 
 Routers that emit realtime events receive `io` as a factory argument: `appointmentRoutes(io)` pattern — keep it.
 
+`appointment:booked` is an authenticated global refresh signal with an empty object payload. Clients retrieve appointment details through authorized REST endpoints.
+
 ## Middleware — src/middleware/
 
-- `rbac.js` — `requireRoles(...codes)`, `requirePermission(code)` (granular ADMIN perms), `resolveAdminPermissions(userId)`.
+- `rbac.js` — `requireRoles(...codes)`, `requirePermission(code)` (granular grants for every ADMIN, including mixed-role accounts), `resolveAdminPermissions(userId)`. Shared analytics explicitly allows DOCTOR and DENTIST accounts without ADMIN.
 - `consent.js` — `requirePrivacyConsent`: RA 10173 gate in front of PHI reads.

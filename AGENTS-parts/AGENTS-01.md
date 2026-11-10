@@ -11,7 +11,7 @@ Monorepo with three deployables. No npm workspaces, no root scripts, no submodul
 | `desktop/` | Electron 44, Vite 6, React 19, TypeScript | Clinic-staff console, Windows NSIS exe | 5173 (dev only) |
 | `mobile/` | Flutter / Dart ≥ 3.13 | Patient & responder app (Android primarily) | — |
 | `docker-compose.yml` | MySQL 8, Redis 7, MinIO | Local infra | 3307 / 6379 / 9000–9001 |
-| `server/schema.sql` | MySQL DDL | 31-table schema, source of truth | — |
+| `server/schema.sql` | MySQL DDL | 32-table schema, source of truth | — |
 
 Root `package.json` only pins shared tooling (concurrently, wait-on, electron). Read the module's own `AGENTS.md` before working in that module.
 
@@ -20,7 +20,7 @@ Root `package.json` only pins shared tooling (concurrently, wait-on, electron). 
 - All clients → `https://<host>:5000/api/...` (self-signed TLS) + Socket.IO (WSS) on the same port.
 - Auth: JWT, 24 h, carries `roles[]` + `jti`; logout/revocation via Redis denylist `token:blacklist:<jti>`.
 - Roles (seeded in `server/schema.sql`): `STUDENT`, `FACULTY`, `NON_TEACHING`, `NURSE`, `DOCTOR`, `DENTIST`, `EMERGENCY_RESPONDER`, `ADMIN`. A user may hold several.
-- Realtime events (server → clients): `emergency:new_alert`, `emergency:status_change`, `emergency:incident_report_required`, `emergency:incident_reported`, `responder:status_changed`, `queue:updated`, `appointment:booked`, `appointment:cancelled`, `appointment:status_changed`, `prescription:status_changed`. Every authenticated socket joins its own `user:<id>` room (delivery is per user, never per role); the incident-report popup additionally uses a per-desktop-window room so only the window that resolved an alert opens it. `join:responders` from old mobile builds is only acknowledged.
+- Realtime events (server → clients): `emergency:new_alert`, `emergency:status_change`, `emergency:incident_report_required`, `emergency:incident_reported`, `responder:status_changed`, `queue:updated`, `appointment:booked`, `appointment:cancelled`, `appointment:status_changed`, `prescription:status_changed`. Every authenticated socket joins its own `user:<id>` room for targeted delivery. `appointment:booked` is a global refresh signal with an empty object payload. The incident-report popup uses a per-desktop-window room so only the window that resolved an alert opens it. `join:responders` from old mobile builds is only acknowledged.
 - Qualified Responder: `USERS.is_qualified_responder` is a role-independent SOS label (any role can be flagged). It is ADDITIVE to the legacy role-based audience (`EMERGENCY_RESPONDER`/`NURSE`/`DOCTOR`/`ADMIN` keep receiving alerts with the flag off). Non-clinical flagged users get a reduced alert payload (no medical details, `medicalDetailsRedacted: true`). Admins need the `RESPONDERS_MANAGE` permission code to change it.
 
 ## Bootstrap a dev machine (order matters)

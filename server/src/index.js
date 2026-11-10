@@ -37,6 +37,7 @@ import signatureRoutes from './routes/signature.js';
 import { ensureBucketExists } from './utils/s3Vault.js';
 import { initRedis, redis, isRedisActive } from './utils/redisClient.js';
 import { pool, runAutoMigrations } from './db.js';
+import { ensureQueueTicketCounters } from './utils/queueTickets.js';
 
 dotenv.config();
 
@@ -285,6 +286,7 @@ app.get('/api/ping', (req, res) => {
 const PORT = process.env.PORT || 5000;
 
 await loadServerPolicy();
+await ensureQueueTicketCounters(pool);
 server.listen(PORT, async () => {
   console.log(`✅ Valetudo HealthLink API & WebSockets running on ${isHttps ? 'HTTPS/WSS' : 'HTTP/WS'} port ${PORT}`);
   await initRedis().catch(() => {});

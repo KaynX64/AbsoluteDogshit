@@ -1,5 +1,5 @@
 // desktop/src/components/DoctorConsole.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import PrescriptionGenerator from './PrescriptionGenerator';
 import { io } from 'socket.io-client';
@@ -10,6 +10,19 @@ import { T, btnPrimary, btnGhost, inputStyle } from '../theme';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
 import SignatureEnrollment from './SignatureEnrollment';
 import Icon from './Icon';
+import { usePatientHistory } from '../hooks/usePatientHistory';
+
+function HistoryPageControls({ page }: { page: ReturnType<typeof usePatientHistory> }) {
+  if (!page.nextCursor && !page.error) return null;
+  return (
+    <div style={{ marginTop: 14 }}>
+      {page.error && <p role="alert" style={{ color: T.textSub }}>Could not load encounter history.</p>}
+      <button type="button" style={btnGhost} onClick={page.loadMore} disabled={page.loading}>
+        {page.loading ? 'Loading…' : page.error ? 'Retry loading records' : 'Load older encounters'}
+      </button>
+    </div>
+  );
+}
 
 /* ── ODONTOGRAM TYPES (declared before use) ─────────────────── */
 export type ToothCondition =
@@ -233,7 +246,10 @@ export default function DoctorConsole({
   } | null>(null);
 
   /* ── In-consultation diagnostic attachments ───────────────── */
-  const [activePatientAttachments, setActivePatientAttachments] = useState<any[]>([]);
+  const [priorAttachments, setPriorAttachments] = useState<{ patientId: number; items: any[] } | null>(null);
+  const activePatientAttachments = priorAttachments?.patientId === selectedApp?.patient_id ? priorAttachments?.items ?? [] : [];
+  const attachmentRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => attachmentRequest.current?.abort(), []);
   const [openingAttachmentId, setOpeningAttachmentId] = useState<number | null>(null);
 
   /* ── Odontogram state ──────────────────────────────────────── */
@@ -302,8 +318,8 @@ export default function DoctorConsole({
 
   /* ── History modal ─────────────────────────────────────────── */
   const [showHistoryModal, setShowHistoryModal] = useState(false);
-  const [patientHistory, setPatientHistory] = useState<any[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(false);
+  const historyPage = usePatientHistory(showHistoryModal ? selectedApp?.patient_id : undefined);
+  const { records: patientHistory, loading: loadingHistory } = historyPage;
   
   /* ── Prescription history modal (issuer-only) ──────────────── */
   const [showRxHistoryModal, setShowRxHistoryModal] = useState(false);
@@ -324,8 +340,8 @@ export default function DoctorConsole({
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearchingPatients, setIsSearchingPatients] = useState(false);
   const [selectedDirectoryPatient, setSelectedDirectoryPatient] = useState<any | null>(null);
-  const [directoryTimeline, setDirectoryTimeline] = useState<any[]>([]);
-  const [loadingTimeline, setLoadingTimeline] = useState(false);
+  const timelinePage = usePatientHistory(selectedDirectoryPatient?.user_id);
+  const { records: directoryTimeline, loading: loadingTimeline } = timelinePage;
 
   /* ── Immunization modal state (single source of truth) ────── */
   const [showImmunizationModal, setShowImmunizationModal] = useState(false);
@@ -438,7 +454,7 @@ export default function DoctorConsole({
     setFeedbackMsg(null);
     setDentalChartData({});
     setSelectedTooth(null);
-    setActivePatientAttachments([]);
+    setPriorAttachments(null);
     setForceShowDentalChart(false);
   };
 
@@ -502,31 +518,25 @@ export default function DoctorConsole({
   };
 
   const fetchActivePatientAttachments = async (patientId: number) => {
+    attachmentRequest.current?.abort();
+    const controller = new AbortController();
+    attachmentRequest.current = controller;
     const token = localStorage.getItem('valetudo_token');
     try {
       const res = await fetch(
-        `${API_BASE_URL}/api/appointments/patient/${patientId}/history`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        `${API_BASE_URL}/api/appointments/patient/${patientId}/history?view=attachments`,
+        { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal }
       );
-      if (res.ok) {
-        const emrs = await res.json();
-        const allAtts: any[] = [];
-        emrs.forEach((e: any) => {
-          if (Array.isArray(e.attachments)) {
-            e.attachments.forEach((att: any) => {
-              allAtts.push({
-                ...att,
-                encounter_date: e.encounter_date,
-                doctor_last_name: e.doctor_last_name,
-                diagnosis: e.diagnosis,
-              });
-            });
-          }
-        });
-        setActivePatientAttachments(allAtts);
-      }
-    } catch (_) {
-      setActivePatientAttachments([]);
+      if (!res.ok) return;
+      const rows = await res.json();
+      if (controller.signal.aborted) return;
+      // Older servers return encounters for this URL.
+      const items = rows.flatMap((row: any) => Array.isArray(row.attachments)
+        ? row.attachments.map((attachment: any) => ({ ...attachment, encounter_date: row.encounter_date }))
+        : [row]);
+      setPriorAttachments({ patientId, items });
+    } catch {
+      if (!controller.signal.aborted) setPriorAttachments(null);
     }
   };
 
@@ -751,37 +761,8 @@ export default function DoctorConsole({
   /* HISTORY MODAL                                               */
   /* ═══════════════════════════════════════════════════════════ */
 
-const handleViewPatientHistory = async () => {
-    if (!selectedApp) return;
-    setShowHistoryModal(true);
-    setLoadingHistory(true);
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch(
-        `${API_BASE_URL}/api/appointments/patient/${selectedApp.patient_id}/history`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        setPatientHistory(data);
-        return;
-      }
-      throw new Error('Server returned non-200');
-    } catch (err) {
-      // Feature 6: Offline SQLite Fallback for Past EMR History Modal
-      if (window.electronAPI?.offlineGetEmrHistory) {
-        try {
-          const offlineEmrs = await window.electronAPI.offlineGetEmrHistory(selectedApp.patient_id);
-          setPatientHistory(offlineEmrs);
-          return;
-        } catch (sqliteErr) {
-          console.error('[SQLite History Error]:', sqliteErr);
-        }
-      }
-      console.error('History fetch error:', err);
-    } finally {
-      setLoadingHistory(false);
-    }
+  const handleViewPatientHistory = () => {
+    if (selectedApp) setShowHistoryModal(true);
   };
 
   /* ═══════════════════════════════════════════════════════════ */
@@ -884,35 +865,8 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
     }
   };
 
-const loadPatientTimeline = async (patient: any) => {
+  const loadPatientTimeline = (patient: any) => {
     setSelectedDirectoryPatient(patient);
-    setLoadingTimeline(true);
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch(
-        `${API_BASE_URL}/api/appointments/patient/${patient.user_id}/history`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (res.ok) {
-        setDirectoryTimeline(await res.json());
-        return;
-      }
-      throw new Error('Server returned non-200');
-    } catch (err) {
-      // Feature 6: Offline SQLite Fallback for EMR Timeline
-      if (window.electronAPI?.offlineGetEmrHistory) {
-        try {
-          const offlineEmrs = await window.electronAPI.offlineGetEmrHistory(patient.user_id);
-          setDirectoryTimeline(offlineEmrs);
-          return;
-        } catch (sqliteErr) {
-          console.error('[SQLite Timeline Error]:', sqliteErr);
-        }
-      }
-      console.error('Failed to load patient timeline:', err);
-    } finally {
-      setLoadingTimeline(false);
-    }
   };
 
   /* ═══════════════════════════════════════════════════════════ */
@@ -1536,7 +1490,7 @@ const loadPatientTimeline = async (patient: any) => {
                   Select a patient from the search results to inspect their chronological
                   EMR timeline.
                 </div>
-              ) : loadingTimeline ? (
+              ) : loadingTimeline && directoryTimeline.length === 0 ? (
                 <p style={{ color: T.textSub, fontSize: 13 }}>
                   Loading clinical timeline…
                 </p>
@@ -1627,11 +1581,11 @@ const loadPatientTimeline = async (patient: any) => {
                       marginBottom: 10,
                     }}
                   >
-                    Chronological encounter history ({directoryTimeline.length})
+                    Chronological encounter history ({directoryTimeline.length} loaded)
                   </div>
 
                   {directoryTimeline.length === 0 ? (
-                    <p style={{ fontSize: 13, color: T.textSub }}>
+                    !timelinePage.error && <p style={{ fontSize: 13, color: T.textSub }}>
                       No prior encounters on record.
                     </p>
                   ) : (
@@ -1777,6 +1731,7 @@ const loadPatientTimeline = async (patient: any) => {
                       ))}
                     </div>
                   )}
+                  <HistoryPageControls page={timelinePage} />
                 </div>
               )}
             </div>
@@ -3594,7 +3549,7 @@ const loadPatientTimeline = async (patient: any) => {
       )}
       
       {/* ── EMR History modal ───────────────────────────────── */}
-      {showHistoryModal && createPortal(
+      {showHistoryModal && selectedApp && createPortal(
         <div className="modal-backdrop" onClick={() => setShowHistoryModal(false)}>
           <div
             className="modal-card"
@@ -3642,7 +3597,7 @@ const loadPatientTimeline = async (patient: any) => {
               </button>
             </div>
 
-            {loadingHistory ? (
+            {loadingHistory && patientHistory.length === 0 ? (
               <div
                 style={{
                   padding: '40px 20px',
@@ -3653,7 +3608,7 @@ const loadPatientTimeline = async (patient: any) => {
                 Loading records…
               </div>
             ) : patientHistory.length === 0 ? (
-              <div
+              !historyPage.error && <div
                 style={{
                   padding: '40px 20px',
                   textAlign: 'center',
@@ -3785,6 +3740,7 @@ const loadPatientTimeline = async (patient: any) => {
                 ))}
               </div>
             )}
+            <HistoryPageControls page={historyPage} />
           </div>
         </div>,
         document.body
