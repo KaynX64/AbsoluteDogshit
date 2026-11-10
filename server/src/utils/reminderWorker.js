@@ -3,7 +3,7 @@ import { pool } from '../db.js';
 import { sendAppointmentEmail } from './mailer.js';
 import { logAudit } from './auditLogger.js';
 import { sendPushToUser } from './fcmNotifier.js';
-import { NOSHOW_LIMIT } from '../config/limits.js';
+import { getServerPolicy } from '../config/serverPolicy.js';
 
 export function startReminderScheduler(io) {
   // Check every 15 minutes
@@ -66,12 +66,14 @@ for (const app of upcoming) {
   // ── Auto-no-show worker: runs every 60 seconds ────────────────────
   setInterval(async () => {
     try {
+      const { graceMinutes } = getServerPolicy().limits.noShow;
       const [expired] = await pool.query(
         `SELECT appointment_id FROM APPOINTMENTS
          WHERE status = 'scheduled'
-           AND date_time < DATE_SUB(NOW(), INTERVAL ${NOSHOW_LIMIT.graceMinutes} MINUTE)
+           AND date_time < DATE_SUB(NOW(), INTERVAL ? MINUTE)
            AND date_time > DATE_SUB(NOW(), INTERVAL 24 HOUR)
-           AND deleted_at IS NULL`
+           AND deleted_at IS NULL`,
+        [graceMinutes],
       );
       if (expired.length === 0) return;
 

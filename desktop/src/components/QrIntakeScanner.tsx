@@ -1,9 +1,11 @@
 // desktop/src/components/QrIntakeScanner.tsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useId, useRef } from 'react';
 import jsQR from 'jsqr';
 import { API_BASE_URL } from '../config/api';
 import { T } from '../theme';
 import Icon from './Icon';
+import { triageDraftError, validateTriageVitals, VITAL_RULES } from '../../../server/src/utils/vitals.js';
+import type { TriageVitalField } from '../../../server/src/utils/vitals.js';
 
 interface QrIntakeScannerProps {
   onPatientVerified: (patient: any, token: string) => void;
@@ -46,15 +48,33 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
   const [height, setHeight] = useState('');
   const [weight, setWeight] = useState('');
   const [lastVerifiedAt, setLastVerifiedAt] = useState<string>('');
-  const heightMeters = Number(height) / 100;
-  const weightKg = Number(weight);
-  const bmi =
-    Number.isFinite(heightMeters) &&
-    Number.isFinite(weightKg) &&
-    heightMeters > 0 &&
-    weightKg > 0
-      ? weightKg / (heightMeters * heightMeters)
-      : null;
+  const vitalId = useId();
+  const [touchedVitals, setTouchedVitals] = useState<Partial<Record<TriageVitalField, boolean>>>({});
+  const [rejectedVitals, setRejectedVitals] = useState<Partial<Record<TriageVitalField, string>>>({});
+  const [isCheckingIn, setIsCheckingIn] = useState(false);
+  const submittingIntake = useRef(false);
+  const vitalFields = {
+    blood_pressure: { label: 'Blood pressure (mmHg)', value: bp, set: setBp, placeholder: '120/80' },
+    temperature: { label: 'Temp (°C)', value: temp, set: setTemp, placeholder: '36.6' },
+    pulse: { label: 'Pulse (bpm)', value: pulse, set: setPulse, placeholder: '78' },
+    spo2: { label: 'SpO₂ (%)', value: spo2, set: setSpo2, placeholder: '98' },
+    resp_rate: { label: 'Resp (breaths/min)', value: respRate, set: setRespRate, placeholder: '18' },
+    height: { label: 'Height (cm)', value: height, set: setHeight, placeholder: '162.5' },
+    weight: { label: 'Weight (kg)', value: weight, set: setWeight, placeholder: '54.0' },
+  };
+  const triageVitals = validateTriageVitals({ blood_pressure: bp, temperature: temp, pulse, spo2, resp_rate: respRate, height, weight });
+  const vitalErrors = { ...triageVitals.errors, ...rejectedVitals };
+  const invalidFields = Object.keys(vitalErrors) as TriageVitalField[];
+  const intakeBlocked = invalidFields.length > 0;
+  const { systolic_bp, diastolic_bp, ...measurements } = triageVitals.values;
+  const bloodPressure = systolic_bp === undefined || diastolic_bp === undefined ? undefined : `${systolic_bp}/${diastolic_bp}`;
+  const heightMeters = (measurements.height ?? 0) / 100;
+  const weightKg = measurements.weight;
+  const invalidBodyMetrics = Boolean(vitalErrors.height || vitalErrors.weight);
+  const bmi = !invalidBodyMetrics && heightMeters && weightKg ? weightKg / (heightMeters * heightMeters) : null;
+  const bmiPrompt = invalidBodyMetrics ? 'Correct height or weight to calculate BMI'
+    : !height.trim() && !weight.trim() ? 'Enter height and weight'
+    : !height.trim() ? 'Enter height' : 'Enter weight';
   const bmiCategory =
     bmi === null
       ? null
@@ -122,19 +142,30 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
     }
   };
 
-  /* ── Verify QR token ─────────────────────────────────────── */
-  const verifyToken = async (tokenToVerify: string) => {
-    if (!tokenToVerify || tokenToVerify.trim().length === 0) return;
-    setScanStatus('Verifying cryptographic QR pass signature...');
+  const resetIntake = () => {
     setVerifiedPatient(null);
     setPendingAppointment(null);
     setCheckInSuccess(null);
     setWalkInSuccess(null);
     setActiveTicket(null);
+    setBp('');
+    setTemp('');
+    setPulse('');
+    setSpo2('');
+    setRespRate('');
     setSex('');
     setHeight('');
     setWeight('');
+    setLastVerifiedAt('');
+    setTouchedVitals({});
+    setRejectedVitals({});
+  };
 
+  /* ── Verify QR token ─────────────────────────────────────── */
+  const verifyToken = async (tokenToVerify: string) => {
+    if (submittingIntake.current || !tokenToVerify?.trim()) return;
+    resetIntake();
+    setScanStatus('Verifying cryptographic QR pass signature...');
     const jwt = localStorage.getItem('valetudo_token');
     try {
       const res = await fetch(`${API_BASE_URL}/api/health-pass/verify`, {
@@ -167,14 +198,12 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
 
   const handleManualSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!searchQuery.trim()) return;
+    if (submittingIntake.current || !searchQuery.trim()) return;
+    resetIntake();
     setScanStatus('Searching student records...');
-    setCheckInSuccess(null);
-    setWalkInSuccess(null);
-    setActiveTicket(null);
 
     const jwt = localStorage.getItem('valetudo_token');
-try {
+    try {
       const res = await fetch(`${API_BASE_URL}/api/appointments/lookup?query=${encodeURIComponent(searchQuery.trim())}`, {
         headers: { Authorization: `Bearer ${jwt}` },
       });
@@ -211,9 +240,6 @@ try {
           const offlineMatches = await window.electronAPI.offlineSearchPatients(searchQuery.trim());
           if (offlineMatches.length > 0) {
             const p = offlineMatches[0];
-            setSex('');
-            setHeight('');
-            setWeight('');
             setVerifiedPatient({
               user_id: p.user_id,
               first_name: p.first_name,
@@ -258,22 +284,26 @@ try {
     } catch (_) {}
   };
 
+  const checkVitalInputs = () => {
+    if (!intakeBlocked) return true;
+    setTouchedVitals(Object.fromEntries(invalidFields.map((field) => [field, true])));
+    document.getElementById(`${vitalId}-${invalidFields[0]}`)?.focus();
+    return false;
+  };
+
   const handleConfirmArrival = async () => {
-    if (!pendingAppointment) return;
+    if (!pendingAppointment || submittingIntake.current || !checkVitalInputs()) return;
+    submittingIntake.current = true;
+    setIsCheckingIn(true);
     const jwt = localStorage.getItem('valetudo_token');
     try {
       const res = await fetch(`${API_BASE_URL}/api/appointments/${pendingAppointment.appointment_id}/checkin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
         body: JSON.stringify({
-          blood_pressure: bp,
-          temperature: temp,
-          pulse: pulse,
-          spo2: spo2 || null,
-          resp_rate: respRate || null,
+          ...measurements,
+          blood_pressure: bloodPressure,
           sex: sex || null,
-          height: height || null,
-          weight: weight || null,
         }),
       });
 
@@ -293,12 +323,16 @@ try {
       if (verifiedPatient) await checkActiveTicket(verifiedPatient.user_id);
     } catch (err: any) {
       setScanStatus('' + err.message);
+    } finally {
+      submittingIntake.current = false;
+      setIsCheckingIn(false);
     }
   };
 
   /* ── Register as walk-in ─────────────────────────────────── */
   const handleRegisterWalkIn = async () => {
-    if (!verifiedPatient) return;
+    if (!verifiedPatient || submittingIntake.current || !checkVitalInputs()) return;
+    submittingIntake.current = true;
     setIsRegisteringWalkIn(true);
     setWalkInSuccess(null);
     const jwt = localStorage.getItem('valetudo_token');
@@ -310,12 +344,9 @@ try {
         body: JSON.stringify({
           patient_user_id: verifiedPatient.user_id,
           visit_type: 'Walk-in Consultation',
-          notes: `Walk-in triage vitals · Sex ${sex || '—'}, BP ${bp}, Temp ${temp}°C, Pulse ${pulse} bpm, SpO2 ${spo2 || '—'}%, Resp ${respRate || '—'} cpm`,
+          notes: `Walk-in triage vitals · Sex ${sex || '—'}, BP ${bloodPressure ?? '—'}, Temp ${measurements.temperature ?? '—'}°C, Pulse ${measurements.pulse ?? '—'} bpm, SpO2 ${measurements.spo2 ?? '—'}%, Resp ${measurements.resp_rate ?? '—'} cpm`,
           sex: sex || null,
-          vitals: {
-            height: height || null,
-            weight: weight || null,
-          },
+          vitals: triageVitals.values,
         }),
       });
       const data = await res.json();
@@ -334,6 +365,7 @@ try {
     } catch (err: any) {
       setScanStatus('' + err.message);
     } finally {
+      submittingIntake.current = false;
       setIsRegisteringWalkIn(false);
     }
   };
@@ -432,6 +464,127 @@ try {
   const statusIsOk = scanStatus.includes('');
   const statusIsErr = scanStatus.includes('');
   const statusIsWarn = scanStatus.includes('');
+
+  const updateVital = (field: TriageVitalField, draft: string) => {
+    const error = triageDraftError(field, draft);
+    setRejectedVitals((previous) => {
+      const next = { ...previous };
+      if (error) next[field] = error;
+      else delete next[field];
+      return next;
+    });
+    if (!error) vitalFields[field].set(draft);
+  };
+
+  const intakeError = intakeBlocked && (
+    <p id={`${vitalId}-intake-error`} role="status" style={{ color: C.danger, fontSize: 12 }}>
+      Correct or clear the following readings before continuing: {invalidFields.map((field) => vitalFields[field].label).join(', ')}.
+    </p>
+  );
+
+  const triageFields = (
+    <>
+      <div
+        style={{
+          fontSize: 10.5,
+          fontWeight: 800,
+          letterSpacing: 1.2,
+          color: C.textMuted,
+          textTransform: 'uppercase',
+          marginBottom: 8,
+        }}
+      >
+        Triage vitals
+      </div>
+      <p style={{ margin: '0 0 10px', fontSize: 12, color: C.textSub }}>Leave any unmeasured readings blank.</p>
+      <label style={{ display: 'block', marginBottom: 10, fontSize: 10.5, color: C.textSub, fontWeight: 600 }}>
+        Patient sex
+        <select
+          value={sex}
+          onChange={(e) => setSex(e.target.value)}
+          style={{
+            display: 'block',
+            width: '100%',
+            boxSizing: 'border-box',
+            marginTop: 4,
+            padding: '8px 10px',
+            color: C.text,
+            background: C.surface,
+            border: `1px solid ${C.border}`,
+            borderRadius: 8,
+            fontFamily: 'inherit',
+          }}
+        >
+          <option value="">Not recorded</option>
+          <option value="MALE">MALE</option>
+          <option value="FEMALE">FEMALE</option>
+        </select>
+      </label>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))',
+          gap: 8,
+          marginBottom: 14,
+        }}
+      >
+        {(Object.keys(vitalFields) as TriageVitalField[]).map((field) => {
+          const { label, value, placeholder } = vitalFields[field];
+          const id = vitalId + '-' + field;
+          const error = rejectedVitals[field] || (touchedVitals[field] ? vitalErrors[field] : undefined);
+          const rejectedBlank = rejectedVitals[field] && !value.trim();
+          return (
+            <div key={field} style={{ minWidth: 0 }}>
+              <label htmlFor={id} style={{ fontSize: 10.5, color: C.textSub, fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                {label}
+              </label>
+              <input
+                id={id}
+                form={`${vitalId}-intake`}
+                type="text"
+                inputMode={field === 'blood_pressure' ? 'text' : VITAL_RULES[field].integer ? 'numeric' : 'decimal'}
+                placeholder={placeholder}
+                autoComplete="off" disabled={isCheckingIn || isRegisteringWalkIn}
+                aria-invalid={Boolean(error)}
+                aria-describedby={error ? id + '-error' : undefined}
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  padding: '8px 10px',
+                  fontSize: 12,
+                  color: C.text,
+                  background: C.surface,
+                  border: '1px solid ' + (error ? C.danger : C.border),
+                  borderRadius: 8,
+                  fontFamily: 'inherit',
+                }}
+                value={value}
+                onChange={(event) => updateVital(field, event.target.value)}
+                onBlur={() => setTouchedVitals((touched) => ({ ...touched, [field]: true }))}
+                onKeyDown={(event) => {
+                  if (rejectedBlank && (event.key === 'Backspace' || event.key === 'Delete')) {
+                    event.preventDefault();
+                    updateVital(field, '');
+                  }
+                }}
+              />
+              {error && (
+                <div id={id + '-error'} role="alert" style={{ marginTop: 4, color: C.danger, fontSize: 11 }}>
+                  {error}
+                  {rejectedBlank && ' Press Backspace or Delete to leave it blank.'}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ marginTop: 10, fontSize: 12, color: C.textSub }}>
+        Calculated BMI: <strong style={{ color: C.text }}>
+          {bmi === null ? bmiPrompt : `${bmi.toFixed(1)} (${bmiCategory})`}
+        </strong>
+      </div>
+    </>
+  );
 
   /* ── Render ──────────────────────────────────────────────── */
   return (
@@ -1129,96 +1282,7 @@ try {
 
               {pendingAppointment.status !== 'checked_in' && (
                 <>
-                  <div
-                    style={{
-                      fontSize: 10.5,
-                      fontWeight: 800,
-                      letterSpacing: 1.2,
-                      color: C.textMuted,
-                      textTransform: 'uppercase',
-                      marginBottom: 8,
-                    }}
-                  >
-                    Triage vitals
-                  </div>
-                  <label style={{ display: 'block', marginBottom: 10, fontSize: 10.5, color: C.textSub, fontWeight: 600 }}>
-                    Patient sex
-                    <select
-                      value={sex}
-                      onChange={(e) => setSex(e.target.value)}
-                      style={{
-                        display: 'block',
-                        width: '100%',
-                        boxSizing: 'border-box',
-                        marginTop: 4,
-                        padding: '8px 10px',
-                        color: C.text,
-                        background: C.surface,
-                        border: `1px solid ${C.border}`,
-                        borderRadius: 8,
-                        fontFamily: 'inherit',
-                      }}
-                    >
-                      <option value="">Not recorded</option>
-                      <option value="MALE">MALE</option>
-                      <option value="FEMALE">FEMALE</option>
-                    </select>
-                  </label>
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(4, 1fr)',
-                      gap: 8,
-                      marginBottom: 14,
-                    }}
-                  >
-                    {[
-                      { label: 'Blood pressure', value: bp, set: setBp, placeholder: '120/80' },
-                      { label: 'Temp (°C)', value: temp, set: setTemp, placeholder: '36.6' },
-                      { label: 'Pulse (bpm)', value: pulse, set: setPulse, placeholder: '78' },
-                      { label: 'SpO₂ (%)', value: spo2, set: setSpo2, placeholder: '98' },
-                      { label: 'Resp (cpm)', value: respRate, set: setRespRate, placeholder: '18' },
-                      { label: 'Height (cm)', value: height, set: setHeight, placeholder: '162.5' },
-                      { label: 'Weight (kg)', value: weight, set: setWeight, placeholder: '54.0' },
-                    ].map((f) => (
-                      <div key={f.label}>
-                        <label
-                          style={{
-                            fontSize: 10.5,
-                            color: C.textSub,
-                            fontWeight: 600,
-                            display: 'block',
-                            marginBottom: 4,
-                          }}
-                        >
-                          {f.label}
-                        </label>
-                        <input
-                          type="text"
-                          placeholder={f.placeholder}
-                          style={{
-                            width: '100%',
-                            boxSizing: 'border-box',
-                            padding: '8px 10px',
-                            fontSize: 12,
-                            color: C.text,
-                            background: C.surface,
-                            border: `1px solid ${C.border}`,
-                            borderRadius: 8,
-                            outline: 'none',
-                            fontFamily: 'inherit',
-                          }}
-                          value={f.value}
-                          onChange={(e) => f.set(e.target.value)}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{ marginTop: 10, fontSize: 12, color: C.textSub }}>
-                    Calculated BMI: <strong style={{ color: C.text }}>
-                      {bmi === null ? 'Enter height and weight' : `${bmi.toFixed(1)} (${bmiCategory})`}
-                    </strong>
-                  </div>
+                  {triageFields}
                 </>
               )}
 
@@ -1238,24 +1302,28 @@ try {
                   {checkInSuccess || 'Patient is checked in and waiting in queue.'}
                 </div>
               ) : (
+                <form id={`${vitalId}-intake`} onSubmit={(event) => { event.preventDefault(); void handleConfirmArrival(); }}>
+                {intakeError}
                 <button
-                  type="button"
-                  onClick={handleConfirmArrival}
+                  type="submit"
+                  disabled={intakeBlocked || isCheckingIn}
+                  aria-describedby={intakeBlocked ? `${vitalId}-intake-error` : undefined}
                   style={{
                     width: '100%',
                     padding: 12,
                     borderRadius: 999,
-                    background: C.primary,
+                    background: intakeBlocked || isCheckingIn ? C.sage400 : C.primary,
                     color: C.textOnPrimary,
                     border: 'none',
                     fontSize: 13,
                     fontWeight: 700,
-                    cursor: 'pointer',
+                    cursor: intakeBlocked || isCheckingIn ? 'not-allowed' : 'pointer',
                     fontFamily: 'inherit',
                   }}
                 >
-                  Confirm arrival & check-in patient
+                  {isCheckingIn ? 'Confirming arrival…' : 'Confirm arrival & check-in patient'}
                 </button>
+                </form>
               )}
             </div>
           ) : (
@@ -1314,112 +1382,24 @@ try {
                   {walkInSuccess}
                 </div>
               ) : (
-                <>
-                  <div
-                    style={{
-                      fontSize: 10.5,
-                      fontWeight: 800,
-                      letterSpacing: 1.2,
-                      color: C.textMuted,
-                      textTransform: 'uppercase',
-                      marginBottom: 8,
-                    }}
-                  >
-                    Triage vitals
-                  </div>
-                  <label style={{ display: 'block', marginBottom: 10, fontSize: 10.5, color: C.textSub, fontWeight: 600 }}>
-                    Patient sex
-                    <select
-                      value={sex}
-                      onChange={(e) => setSex(e.target.value)}
-                      style={{
-                        display: 'block',
-                        width: '100%',
-                        boxSizing: 'border-box',
-                        marginTop: 4,
-                        padding: '8px 10px',
-                        color: C.text,
-                        background: C.surface,
-                        border: `1px solid ${C.border}`,
-                        borderRadius: 8,
-                        fontFamily: 'inherit',
-                      }}
-                    >
-                      <option value="">Not recorded</option>
-                      <option value="MALE">MALE</option>
-                      <option value="FEMALE">FEMALE</option>
-                    </select>
-                  </label>
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(4, 1fr)',
-                      gap: 8,
-                      marginBottom: 14,
-                    }}
-                  >
-                    {[
-                      { label: 'Blood pressure', value: bp, set: setBp, placeholder: '120/80' },
-                      { label: 'Temp (°C)', value: temp, set: setTemp, placeholder: '36.6' },
-                      { label: 'Pulse (bpm)', value: pulse, set: setPulse, placeholder: '78' },
-                      { label: 'SpO₂ (%)', value: spo2, set: setSpo2, placeholder: '98' },
-                      { label: 'Resp (cpm)', value: respRate, set: setRespRate, placeholder: '18' },
-                      { label: 'Height (cm)', value: height, set: setHeight, placeholder: '162.5' },
-                      { label: 'Weight (kg)', value: weight, set: setWeight, placeholder: '54.0' },
-                    ].map((f) => (
-                      <div key={f.label}>
-                        <label
-                          style={{
-                            fontSize: 10.5,
-                            color: C.textSub,
-                            fontWeight: 600,
-                            display: 'block',
-                            marginBottom: 4,
-                          }}
-                        >
-                          {f.label}
-                        </label>
-                        <input
-                          type="text"
-                          placeholder={f.placeholder}
-                          style={{
-                            width: '100%',
-                            boxSizing: 'border-box',
-                            padding: '8px 10px',
-                            fontSize: 12,
-                            color: C.text,
-                            background: C.surface,
-                            border: `1px solid ${C.border}`,
-                            borderRadius: 8,
-                            outline: 'none',
-                            fontFamily: 'inherit',
-                          }}
-                          value={f.value}
-                          onChange={(e) => f.set(e.target.value)}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{ marginTop: 10, fontSize: 12, color: C.textSub }}>
-                    Calculated BMI: <strong style={{ color: C.text }}>
-                      {bmi === null ? 'Enter height and weight' : `${bmi.toFixed(1)} (${bmiCategory})`}
-                    </strong>
-                  </div>
+                <form id={`${vitalId}-intake`} onSubmit={(event) => { event.preventDefault(); void handleRegisterWalkIn(); }}>
+                  {triageFields}
+                  {intakeError}
 
                   <button
-                    type="button"
-                    onClick={handleRegisterWalkIn}
-                    disabled={isRegisteringWalkIn}
+                    type="submit"
+                    disabled={intakeBlocked || isRegisteringWalkIn}
+                    aria-describedby={intakeBlocked ? `${vitalId}-intake-error` : undefined}
                     style={{
                       width: '100%',
                       padding: 12,
                       borderRadius: 999,
-                      background: isRegisteringWalkIn ? C.sage400 : C.primary,
+                      background: intakeBlocked || isRegisteringWalkIn ? C.sage400 : C.primary,
                       color: C.textOnPrimary,
                       border: 'none',
                       fontSize: 13,
                       fontWeight: 700,
-                      cursor: isRegisteringWalkIn ? 'not-allowed' : 'pointer',
+                      cursor: intakeBlocked || isRegisteringWalkIn ? 'not-allowed' : 'pointer',
                       fontFamily: 'inherit',
                       boxShadow: '0 4px 12px rgba(31,74,52,0.16)',
                       transition: 'background 120ms ease',
@@ -1429,7 +1409,7 @@ try {
                       ? 'Registering walk-in…'
                       : 'Register as walk-in patient'}
                   </button>
-                </>
+                </form>
               )}
             </div>
           )}

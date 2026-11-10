@@ -65,22 +65,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   List<dynamic> _slots = [];
   bool _loadingSlots = false;
   String? _selectedSlotTime;
-
-  final List<String> _medicalPurposes = [
-    'General consultation',
-    'Prescription refill',
-    'Medical clearance',
-  ];
-
-  final List<String> _dentalPurposes = [
-    'Dental Checkup',
-    'Tooth Extraction',
-    'Oral Prophylaxis',
-    'Toothache Emergency',
-  ];
-
+  int _slotsRequest = 0;
   List<String> _currentPurposes = [];
-  String _selectedPurpose = 'General consultation';
+  String _selectedPurpose = '';
 
   final _notesController = TextEditingController();
   bool _isSubmitting = false;
@@ -109,7 +96,6 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _currentPurposes = _medicalPurposes;
     _monthNotifier.value = "${_months[_selectedDate.month - 1]} ${_selectedDate.year}";
     _generateWeekdaysList();
     _dateScrollController.addListener(_onDateScroll);
@@ -353,7 +339,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
           children: group.map((slot) {
             final rawTime = slot['time'];
             final displayTime = _formatSlotDisplay(rawTime);
-            final isAvail = slot['isAvailable'] == true;
+            final availability = slot['availabilityByType'] as Map?;
+            final isAvail = availability?[_selectedPurpose]?['available'] == true;
             final isSelected = _selectedSlotTime == rawTime;
             final isDisabled = !isAvail;
 
@@ -406,25 +393,6 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     );
   }
 
-  void _updatePurposesForSelectedDoctor(int doctorId) {
-    final doc = _doctors.firstWhere((d) => d['user_id'] == doctorId, orElse: () => null);
-    if (doc != null) {
-      final isDentist = doc['role_code'] == 'DENTIST' ||
-          (doc['specialty'] != null &&
-              doc['specialty'].toString().toLowerCase().contains('dent'));
-
-      setState(() {
-        if (isDentist) {
-          _currentPurposes = _dentalPurposes;
-          _selectedPurpose = _dentalPurposes[0];
-        } else {
-          _currentPurposes = _medicalPurposes;
-          _selectedPurpose = _medicalPurposes[0];
-        }
-      });
-    }
-  }
-
   Future<void> _fetchDoctors() async {
     setState(() => _loadingDoctors = true);
     final token = await _storage.read(key: 'jwt_token');
@@ -435,14 +403,14 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
       );
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
+        if (!mounted) return;
         setState(() {
           _doctors = data;
           if (_doctors.isNotEmpty) {
             _selectedDoctorId = _doctors[0]['user_id'];
-            _updatePurposesForSelectedDoctor(_selectedDoctorId!);
-            _fetchAvailableSlots();
           }
         });
+        if (_selectedDoctorId != null) _fetchAvailableSlots();
       }
     } catch (e) {
       _showToast('Failed to load doctors: $e', isError: true);
@@ -452,31 +420,46 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   }
 
   Future<void> _fetchAvailableSlots() async {
-    if (_selectedDoctorId == null) return;
+    final doctorId = _selectedDoctorId;
+    if (!mounted || doctorId == null) return;
+    final request = ++_slotsRequest;
+    final selectedDate = _selectedDate;
 
     setState(() {
       _loadingSlots = true;
       _selectedSlotTime = null;
+      _slots = [];
     });
 
     final token = await _storage.read(key: 'jwt_token');
     final formattedDate =
-        "${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}";
+        "${selectedDate.year}-${selectedDate.month.toString().padLeft(2, '0')}-${selectedDate.day.toString().padLeft(2, '0')}";
 
     try {
       final res = await ApiConfig.client.get(
         Uri.parse(
-            '${ApiConfig.baseUrl}/api/appointments/slots?doctorId=$_selectedDoctorId&date=$formattedDate'),
+            '${ApiConfig.baseUrl}/api/appointments/slots?doctorId=$doctorId&date=$formattedDate'),
         headers: {'Authorization': 'Bearer $token'},
       );
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        setState(() => _slots = data['slots'] ?? []);
-      }
+      if (!mounted || request != _slotsRequest) return;
+      final data = jsonDecode(res.body);
+      if (res.statusCode != 200) throw StateError(data['error'] ?? 'Availability is unavailable.');
+      final types = data['rules']?['appointmentTypes'] as List? ?? [];
+      final purposes = types.map((entry) => entry is Map ? entry['name'] : entry).whereType<String>().toList();
+      setState(() {
+        _slots = data['slots'] ?? [];
+        _currentPurposes = purposes;
+        if (!purposes.contains(_selectedPurpose)) {
+          _selectedPurpose = purposes.isEmpty ? '' : purposes.first;
+        }
+      });
     } catch (e) {
-      _showToast('Failed to load slots: $e', isError: true);
+      if (mounted && request == _slotsRequest) {
+        setState(() => _currentPurposes = []);
+        _showToast('Failed to load slots: $e', isError: true);
+      }
     } finally {
-      if (mounted) setState(() => _loadingSlots = false);
+      if (mounted && request == _slotsRequest) setState(() => _loadingSlots = false);
     }
   }
 
@@ -499,23 +482,26 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   }
 
   Future<void> _submitBooking() async {
+    if (_isSubmitting) return;
     if (_selectedDoctorId == null) {
       _showToast('Please select a doctor or dentist.', isError: true);
       return;
     }
-    if (_selectedSlotTime == null) {
+    if (_selectedSlotTime == null || !_currentPurposes.contains(_selectedPurpose)) {
       _showToast('Please select an available time slot.', isError: true);
       return;
     }
 
-    setState(() => _isSubmitting = true);
-    final token = await _storage.read(key: 'jwt_token');
-
+    final doctorId = _selectedDoctorId;
+    final purpose = _selectedPurpose;
     final formattedDate =
         "${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}";
     final scheduledDateTime = "$formattedDate $_selectedSlotTime:00";
 
+    setState(() => _isSubmitting = true);
     try {
+      final token = await _storage.read(key: 'jwt_token');
+      if (!mounted) return;
       final res = await ApiConfig.client.post(
         Uri.parse('${ApiConfig.baseUrl}/api/appointments'),
         headers: {
@@ -523,9 +509,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
           'Authorization': 'Bearer $token',
         },
         body: jsonEncode({
-          'doctor_user_id': _selectedDoctorId,
+          'doctor_user_id': doctorId,
           'date_time': scheduledDateTime,
-          'appointment_type': _selectedPurpose,
+          'appointment_type': purpose,
           'notes': _notesController.text.trim(),
         }),
       );
@@ -538,7 +524,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
 
         EmergencyAlertService().showAppointmentConfirmedNotification(
           '📅 Consultation Confirmed',
-          'Your appointment for $_selectedPurpose on $scheduledDateTime is set.',
+          'Your appointment for $purpose on $scheduledDateTime is set.',
         );
 
         if (mounted) {
@@ -573,7 +559,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                   ),
                   SizedBox(height: rs.h(6)),
                   Text(
-                    'Purpose: $_selectedPurpose',
+                    'Purpose: $purpose',
                     style: TextStyle(fontSize: rs.sp(13), color: textSub),
                   ),
                   SizedBox(height: rs.h(12)),
@@ -605,7 +591,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
           );
         }
       } else {
+        if (!mounted) return;
         _showToast(data['error'] ?? 'Booking failed', isError: true);
+        if (res.statusCode == 409) await _fetchAvailableSlots();
       }
     } catch (e) {
       _showToast('Network error: $e', isError: true);
@@ -980,7 +968,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                 elevation: 0,
                 shape: const StadiumBorder(),
               ),
-              onPressed: _isSubmitting ? null : _submitBooking,
+              onPressed: _isSubmitting || _selectedSlotTime == null ? null : _submitBooking,
               child: _isSubmitting
                   ? const SizedBox(
                       width: 20,
@@ -1024,8 +1012,11 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
       items.add(
         GestureDetector(
           onTap: () {
-            setState(() => _selectedDoctorId = doc['user_id']);
-            _updatePurposesForSelectedDoctor(doc['user_id']);
+            setState(() {
+              _selectedDoctorId = doc['user_id'];
+              _currentPurposes = [];
+              _selectedPurpose = '';
+            });
             _fetchAvailableSlots();
           },
           behavior: HitTestBehavior.opaque,
@@ -1103,7 +1094,10 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
       children: _currentPurposes.map((purpose) {
         final isSelected = _selectedPurpose == purpose;
         return GestureDetector(
-          onTap: () => setState(() => _selectedPurpose = purpose),
+          onTap: () => setState(() {
+            if (_selectedPurpose != purpose) _selectedSlotTime = null;
+            _selectedPurpose = purpose;
+          }),
           behavior: HitTestBehavior.opaque,
           child: Container(
             padding: EdgeInsets.symmetric(

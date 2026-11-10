@@ -3,6 +3,7 @@ import express from 'express';
 import { pool } from '../db.js';
 import { authenticateToken } from '../auth.js';
 import { requireRoles, requirePermission, resolveAdminPermissions, getAdminPermissionCodes } from '../middleware/rbac.js';
+import serverPolicyRoutes from './serverPolicy.js';
 import { logAudit } from '../utils/auditLogger.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
 import {
@@ -35,6 +36,7 @@ export default function adminRouter(io) {
 const router = express.Router();
 
 router.use(authenticateToken, requireRoles('ADMIN'));
+router.use('/server-policy', serverPolicyRoutes);
 
 /* ═════════════════════════════════════════════════════════════════════════
    ADMIN ARCHETYPE PERMISSIONS — shared helpers (local to this router)
@@ -1498,7 +1500,7 @@ async function getWhitelistedTables() {
   const [rows] = await pool.query(
     `SELECT TABLE_NAME as tableName, TABLE_ROWS as estimatedRows
      FROM information_schema.TABLES
-     WHERE TABLE_SCHEMA = DATABASE()
+     WHERE TABLE_SCHEMA = DATABASE() AND UPPER(TABLE_NAME) <> 'SERVER_POLICY'
      ORDER BY TABLE_NAME ASC`
   );
   return rows;

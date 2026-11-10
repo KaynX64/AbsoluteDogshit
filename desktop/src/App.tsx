@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import NurseConsole from './components/NurseConsole';
 import DoctorConsole from './components/DoctorConsole';
 import AdminConsole from './components/AdminConsole';
+import type { AdminTab } from './components/AdminConsole';
 import ResponderConsole from './components/ResponderConsole';
 import { useBookingBadge } from './hooks/useBookingBadge';
 import {
@@ -158,9 +159,9 @@ function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, b
   const navByRole: Record<string, { key: string; label: string; icon: string }[]> = {
     ADMIN: [
       { key: 'users',     label: 'Users & roles',    icon: 'manage_accounts' },
-      { key: 'archived',  label: 'Archived accounts', icon: 'archive' },
       { key: 'audit',     label: 'Privacy & audit',  icon: 'shield_lock' },
       { key: 'telemetry', label: 'System health',    icon: 'dns' },
+      { key: 'serverPolicy', label: 'Server Policy', icon: 'tune' },
       { key: 'analytics', label: 'Health analytics', icon: 'monitoring' },
       { key: 'incidents', label: 'Incident Records', icon: 'assignment' },
       { key: 'db',        label: 'Database Studio',  icon: 'database' },
@@ -662,7 +663,7 @@ function AppShell() {
   const [activeRoleView, setActiveRoleView] = useState<string>('');
 
   /* ── Workspace state (driven by sidebar) ─────────────────────── */
-  const [adminTab, setAdminTab] = useState<'users' | 'archived' | 'audit' | 'telemetry' | 'analytics' | 'incidents' | 'db'>('users');
+  const [adminTab, setAdminTab] = useState<AdminTab>('users');
   const [doctorViewMode, setDoctorViewMode] = useState<
     'active' | 'scheduled' | 'history' | 'archive' | 'analytics'
   >('active');
@@ -874,7 +875,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
         onSignOut={handleSignOut}
         onChangePassword={() => { setShowPasswordModal(true); setPasswordMsg(null); }}
         activeItem={
-          activeRoleView === 'ADMIN' ? adminTab
+          activeRoleView === 'ADMIN' ? (adminTab === 'archived' ? 'users' : adminTab)
           : (activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST') ? doctorViewMode
           : activeRoleView === 'NURSE' ? nurseViewMode
           : undefined

@@ -10,7 +10,7 @@ import { logPhiAccess } from '../utils/phiLogger.js';
 import { generateAndStoreIncidentReportPDF } from '../utils/documentService.js';
 import { getBufferFromS3 } from '../utils/s3Vault.js';
 import { redis, isRedisActive, invalidateCache } from '../utils/redisClient.js';
-import { SOS_LIMIT } from '../config/limits.js';
+import { getServerPolicy } from '../config/serverPolicy.js';
 import {
   requireResponderAccess,
   redactForTier,
@@ -24,6 +24,7 @@ function sosRateLimitKey(userIdOrIp) {
 }
 
 async function sosRateLimit(req, res, next) {
+  const { sos: SOS_LIMIT } = getServerPolicy().limits;
   if (!isRedisActive()) return next();
 
   const identifier = req.user?.user_id || req.ip || 'unknown';

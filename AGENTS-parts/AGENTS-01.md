@@ -11,7 +11,7 @@ Monorepo with three deployables. No npm workspaces, no root scripts, no submodul
 | `desktop/` | Electron 44, Vite 6, React 19, TypeScript | Clinic-staff console, Windows NSIS exe | 5173 (dev only) |
 | `mobile/` | Flutter / Dart ≥ 3.13 | Patient & responder app (Android primarily) | — |
 | `docker-compose.yml` | MySQL 8, Redis 7, MinIO | Local infra | 3307 / 6379 / 9000–9001 |
-| `server/schema.sql` | MySQL DDL | 30-table schema, source of truth | — |
+| `server/schema.sql` | MySQL DDL | 31-table schema, source of truth | — |
 
 Root `package.json` only pins shared tooling (concurrently, wait-on, electron). Read the module's own `AGENTS.md` before working in that module.
 

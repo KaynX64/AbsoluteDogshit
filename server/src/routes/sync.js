@@ -8,6 +8,7 @@ import { encrypt, decrypt } from '../utils/cryptoVault.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
 import { validateDentalChart } from '../utils/dentalValidator.js';
 import { assertAppointmentInQueue } from '../utils/signatory.js';
+import { validateVitals, VITAL_RULES } from '../utils/vitals.js';
 
 const router = express.Router();
 
@@ -168,18 +169,21 @@ router.post('/replay', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NUR
             treatment_plan,
             notes,
             appointment_id,
-            vitals,
+            vitals: submittedVitals,
             dental_chart,
           } = payload;
 
           const userRoles = req.user.roles || [];
           if (
-            payload.vitals !== undefined &&
+            submittedVitals !== undefined &&
             !userRoles.includes('ADMIN') &&
             (userRoles.includes('DOCTOR') || userRoles.includes('DENTIST'))
           ) {
             throw new Error('Doctors and dentists cannot record patient vitals.');
           }
+          const { values: vitals, errors } = validateVitals(submittedVitals);
+          const vitalError = Object.values(errors)[0];
+          if (vitalError) throw new Error(vitalError);
 
           // Check if appointment was already processed while this PC was offline
           if (appointment_id) {
@@ -238,16 +242,11 @@ router.post('/replay', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NUR
           }
 
           // Persist replayed vitals
-          if (vitals && typeof vitals === 'object') {
-            for (const [metric, val] of Object.entries(vitals)) {
-              if (val !== undefined && val !== null && val !== '' && !isNaN(Number(val))) {
-                const unit = metric.includes('bp') ? 'mmHg' : metric === 'temperature' ? '°C' : metric === 'pulse' ? 'bpm' : metric === 'spo2' ? '%' : 'cpm';
-                await connection.query(
-                  'INSERT INTO VITAL_SIGNS (emr_id, metric, value, unit, recorded_by) VALUES (?, ?, ?, ?, ?)',
-                  [serverRecordId, metric, Number(val), unit, userId]
-                );
-              }
-            }
+          for (const [metric, value] of Object.entries(vitals)) {
+            await connection.query(
+              'INSERT INTO VITAL_SIGNS (emr_id, metric, value, unit, recorded_by) VALUES (?, ?, ?, ?, ?)',
+              [serverRecordId, metric, value, VITAL_RULES[metric].unit, userId]
+            );
           }
         } 
         else if (table_name === 'EMR_RECORDS' && action === 'UPDATE') {

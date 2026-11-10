@@ -13,12 +13,19 @@
  *   • Primary CTAs wear the login submit's soft glow + press-down feedback.
  *   • Calm motion (150ms ease, no spring overshoots).
  *   • Honors prefers-reduced-motion.
- *   • Google Material Symbols for all icons.
+ *   • Locally bundled Material Symbols for desktop icons.
  */
 
 @import '/src/theme/tokens.css';
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap');
+
+@font-face {
+  font-family: 'Material Symbols Outlined';
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: block;
+  src: url('./assets/fonts/material-symbols-outlined.woff2') format('woff2');
+}
 
 .material-symbols-outlined {
   font-family: 'Material Symbols Outlined', 'Material Icons', sans-serif;

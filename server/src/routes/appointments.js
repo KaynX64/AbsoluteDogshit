@@ -11,17 +11,22 @@ import { redis, isRedisActive, getCache, setCache, invalidateCache } from '../ut
 import { sendAppointmentEmail } from '../utils/mailer.js';
 import { sendPushToUser } from '../utils/fcmNotifier.js';
 import {
-  APPOINTMENT_RULES,
-  CLINIC_HOURS,
+  availabilityForHour,
   getHourBlock,
-  addHourBlock,
-  isLunchBreak,
+  groupBookingsByHour,
+  isCalendarDate,
   isPastSlot,
+  isRecoveryBlocked,
+  minutesOf,
+  parseBookingTime,
+  scheduleSlotIssue,
 } from '../config/appointmentRules.js';
-import { BOOKING_LIMIT } from '../config/limits.js';
+import { getServerPolicy } from '../config/serverPolicy.js';
+import { readServerPolicy } from '../utils/serverPolicyStore.js';
 import { validateDentalChart } from '../utils/dentalValidator.js';
 import { getBmiCategory } from '../utils/bmi.js';
 import { SignerError, assertAppointmentInQueue } from '../utils/signatory.js';
+import { formatTriageNote, validateTriageVitals, validateVitals, VITAL_RULES } from '../utils/vitals.js';
 
 // Odontogram helpers
 function stripLegacyOdontogram(text) {
@@ -34,6 +39,7 @@ function readDentalChart(cipher) {
 
 // ── Rate Limiter Middleware para sa Booking (Audit Security Issue #6) ───────
 async function bookingRateLimit(req, res, next) {
+  const { booking: BOOKING_LIMIT } = getServerPolicy().limits;
   if (!isRedisActive()) return next();
 
   const identifier = req.user?.user_id || req.ip || 'unknown';
@@ -120,9 +126,11 @@ export default function appointmentRoutes(io) {
   router.get('/slots', authenticateToken, async (req, res) => {
     const { doctorId, date } = req.query;
 
-    if (!doctorId || !date) {
-      return res.status(400).json({ error: 'doctorId and date query parameters are required.' });
+    if (!doctorId || !isCalendarDate(date)) {
+      return res.status(400).json({ error: 'Supply a practitioner and a valid date (YYYY-MM-DD).' });
     }
+    const policy = getServerPolicy();
+    const clinic = policy.clinic;
 
     try {
       const [roleRows] = await pool.query(
@@ -135,7 +143,7 @@ export default function appointmentRoutes(io) {
         [doctorId]
       );
       const doctorRole = roleRows[0]?.code || 'DOCTOR';
-      const rules = APPOINTMENT_RULES[doctorRole];
+      const rules = policy.appointments[doctorRole];
 
       const [bookings] = await pool.query(
         `SELECT DATE_FORMAT(date_time, '%H:%i') AS time_slot, appointment_type
@@ -147,101 +155,26 @@ export default function appointmentRoutes(io) {
         [doctorId, date]
       );
 
-      const bookingsByHour = {};
-      for (const b of bookings) {
-        const hour = getHourBlock(b.time_slot);
-        if (!bookingsByHour[hour]) bookingsByHour[hour] = {};
-        bookingsByHour[hour][b.appointment_type] =
-          (bookingsByHour[hour][b.appointment_type] || 0) + 1;
-      }
-
-      const blockedHours = new Set();
-      for (const [hourBlock, typeCounts] of Object.entries(bookingsByHour)) {
-        let isFull = false;
-
-        if (rules.mode === 'exclusive-hour') {
-          const totalInHour = Object.values(typeCounts).reduce((a, b) => a + b, 0);
-          isFull = totalInHour >= rules.hourlyCapacity;
-        } else if (rules.mode === 'shared-hour') {
-          for (const typeRule of rules.appointmentTypes) {
-            const count = typeCounts[typeRule.name] || 0;
-            if (count >= typeRule.hourlyCapacity) {
-              isFull = true;
-              break;
-            }
-          }
-        }
-
-        if (isFull && rules.cascadeNextHour) {
-          const nextHour = addHourBlock(hourBlock, 1);
-          if (nextHour) blockedHours.add(nextHour);
-        }
-      }
-
-      const defaultSlots = [];
-      const [openH, openM] = CLINIC_HOURS.openTime.split(':').map(Number);
-      const [closeH, closeM] = CLINIC_HOURS.closeTime.split(':').map(Number);
-      const startMins = openH * 60 + openM;
-      const endMins = closeH * 60 + closeM;
-
-      for (let m = startMins; m < endMins; m += CLINIC_HOURS.slotMinutes) {
-        const hh = String(Math.floor(m / 60)).padStart(2, '0');
-        const mm = String(m % 60).padStart(2, '0');
-        defaultSlots.push(`${hh}:${mm}`);
-      }
-
-      const slots = defaultSlots.map((time) => {
+      const bookingsByHour = groupBookingsByHour(bookings);
+      const slots = [];
+      for (let minute = minutesOf(clinic.openTime); minute < minutesOf(clinic.closeTime); minute += clinic.slotMinutes) {
+        const time = String(Math.floor(minute / 60)).padStart(2, '0') + ':' + String(minute % 60).padStart(2, '0');
         const hourBlock = getHourBlock(time);
-        const isLunch = isLunchBreak(time);
+        const isLunchBreak = scheduleSlotIssue(time, clinic) === 'LUNCH_BREAK';
         const isPast = isPastSlot(time, date);
-        const isCascadeBlocked = blockedHours.has(hourBlock);
-
-        const availabilityByType = {};
-
-        if (rules.mode === 'exclusive-hour') {
-          const totalBooked = Object.values(bookingsByHour[hourBlock] || {})
-            .reduce((a, b) => a + b, 0);
-          const anyAvailable =
-            !isLunch && !isPast && !isCascadeBlocked &&
-            totalBooked < rules.hourlyCapacity;
-
-          for (const typeName of rules.appointmentTypes) {
-            availabilityByType[typeName] = {
-              booked: totalBooked,
-              capacity: rules.hourlyCapacity,
-              available: anyAvailable,
-            };
-          }
-        } else {
-          for (const typeRule of rules.appointmentTypes) {
-            const booked = (bookingsByHour[hourBlock] || {})[typeRule.name] || 0;
-            availabilityByType[typeRule.name] = {
-              booked,
-              capacity: typeRule.hourlyCapacity,
-              available:
-                !isLunch && !isPast && !isCascadeBlocked &&
-                booked < typeRule.hourlyCapacity,
-            };
-          }
-        }
-
-        const isAvailable = Object.values(availabilityByType).some((v) => v.available);
-
-        return {
-          time,
-          hourBlock,
-          isPast,
-          isLunchBreak: isLunch,
-          isCascadeBlocked,
-          availabilityByType,
-          isAvailable,
-        };
-      });
+        const isCascadeBlocked = isRecoveryBlocked(hourBlock, bookingsByHour, rules);
+        const availabilityByType = availabilityForHour(hourBlock, bookingsByHour, rules, isLunchBreak || isPast || isCascadeBlocked);
+        slots.push({
+          time, hourBlock, isPast, isLunchBreak, isCascadeBlocked, availabilityByType,
+          isAvailable: Object.values(availabilityByType).some((entry) => entry.available),
+        });
+      }
 
       res.json({
         doctorRole,
         doctorId: Number(doctorId),
         date,
+        policyVersion: policy.version,
         rules: {
           mode: rules.mode,
           hourlyCapacity: rules.hourlyCapacity,
@@ -290,37 +223,42 @@ export default function appointmentRoutes(io) {
   });
 
   router.post('/', authenticateToken, requirePrivacyConsent, bookingRateLimit, async (req, res) => {
-    const { doctor_user_id, date_time, appointment_type, notes } = req.body;
+    const { doctor_user_id, date_time: requestedTime, appointment_type, notes } = req.body;
     const patientUserId = req.user.user_id;
 
-    if (!doctor_user_id || !date_time || !appointment_type) {
+    if (!doctor_user_id || !requestedTime || !appointment_type) {
       return res.status(400).json({ error: 'doctor_user_id, date_time, and appointment_type are required.' });
     }
 
-    const dt = new Date(date_time);
-    if (isNaN(dt.getTime())) {
-      return res.status(400).json({ error: 'Invalid date_time format.' });
-    }
-    const dateStr = dt.toISOString().split('T')[0];
-    const timeStr = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
-
-    if (isLunchBreak(timeStr)) {
-      return res.status(409).json({
-        error: 'The clinic is closed for lunch (12:00–1:00 PM). Please choose another time.',
-        code: 'LUNCH_BREAK',
-      });
-    }
-
-    if (isPastSlot(timeStr, dateStr)) {
-      return res.status(409).json({
-        error: 'That time has already passed. Please choose a future slot.',
-        code: 'SLOT_IN_PAST',
-      });
-    }
+    const slot = parseBookingTime(requestedTime);
+    if (!slot) return res.status(400).json({ error: 'Choose a valid appointment date and time at a whole minute.' });
+    const { date: dateStr, time: timeStr, dateTime: date_time } = slot;
 
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
+      // Hold the policy version through the insert. Policy edits take the
+      // exclusive lock and bookings for different practitioners may proceed.
+      const { clinic, appointments } = await readServerPolicy(connection, 'FOR SHARE');
+      const slotIssue = scheduleSlotIssue(timeStr, clinic);
+      if (slotIssue || isPastSlot(timeStr, dateStr)) {
+        await connection.rollback();
+        const code = slotIssue || 'SLOT_IN_PAST';
+        const messages = {
+          OUTSIDE_CLINIC_HOURS: 'That time is outside the current clinic hours.',
+          LUNCH_BREAK: 'That time is within the current clinic lunch break.',
+          OFF_SLOT_GRID: 'That time is not on the current clinic slot grid.',
+          SLOT_IN_PAST: 'That time has already passed.',
+        };
+        return res.status(409).json({ error: messages[code] + ' Please choose another time.', code });
+      }
+
+      // Serialize capacity checks for this practitioner, even for an empty day.
+      const [practitioner] = await connection.query(
+        'SELECT user_id FROM USERS WHERE user_id = ? AND is_active = TRUE AND deleted_at IS NULL FOR UPDATE',
+        [doctor_user_id],
+      );
+      if (!practitioner.length) throw new Error('Selected practitioner is unavailable.');
 
       const [roleRows] = await connection.query(
         `SELECT r.code
@@ -337,15 +275,7 @@ export default function appointmentRoutes(io) {
       }
 
       const doctorRole = roleRows[0].code;
-      const rules = APPOINTMENT_RULES[doctorRole];
-
-      const typeNames = rules.mode === 'shared-hour'
-        ? rules.appointmentTypes.map((t) => t.name)
-        : rules.appointmentTypes;
-
-      if (!typeNames.includes(appointment_type)) {
-        throw new Error(`${doctorRole} practitioners do not offer "${appointment_type}".`);
-      }
+      const rules = appointments[doctorRole];
 
       const [bookings] = await connection.query(
         `SELECT DATE_FORMAT(date_time, '%H:%i') AS time_slot, appointment_type
@@ -359,51 +289,19 @@ export default function appointmentRoutes(io) {
       );
 
       const hourBlock = getHourBlock(timeStr);
-
-      const bookingsByHour = {};
-      for (const b of bookings) {
-        const h = getHourBlock(b.time_slot);
-        if (!bookingsByHour[h]) bookingsByHour[h] = {};
-        bookingsByHour[h][b.appointment_type] =
-          (bookingsByHour[h][b.appointment_type] || 0) + 1;
+      const bookingsByHour = groupBookingsByHour(bookings);
+      const availability = availabilityForHour(hourBlock, bookingsByHour, rules);
+      if (!Object.hasOwn(availability, appointment_type)) {
+        throw new Error('The selected practitioner does not offer that appointment type.');
       }
-
-      if (rules.cascadeNextHour) {
-        const [prevHourNum] = hourBlock.split(':').map(Number);
-        if (prevHourNum > 0) {
-          const prevHourBlock = `${String(prevHourNum - 1).padStart(2, '0')}:00`;
-          const prevTypeCounts = bookingsByHour[prevHourBlock] || {};
-
-          for (const typeRule of rules.appointmentTypes) {
-            const count = prevTypeCounts[typeRule.name] || 0;
-            if (count >= typeRule.hourlyCapacity) {
-              throw new Error(
-                `The ${prevHourBlock} block is full for ${typeRule.name}. ` +
-                `This hour is reserved as a recovery buffer — please choose a later slot.`
-              );
-            }
-          }
-        }
-      }
-
-      const thisHourCounts = bookingsByHour[hourBlock] || {};
-
-      if (rules.mode === 'exclusive-hour') {
-        const totalInHour = Object.values(thisHourCounts).reduce((a, b) => a + b, 0);
-        if (totalInHour >= rules.hourlyCapacity) {
-          throw new Error(
-            `This hour is fully booked. Only ${rules.hourlyCapacity} patient per hour can be seen by the ${doctorRole.toLowerCase()}.`
-          );
-        }
-      } else {
-        const typeRule = rules.appointmentTypes.find((t) => t.name === appointment_type);
-        const existingCount = thisHourCounts[appointment_type] || 0;
-        if (existingCount >= typeRule.hourlyCapacity) {
-          throw new Error(
-            `"${appointment_type}" is fully booked for this hour ` +
-            `(${existingCount}/${typeRule.hourlyCapacity}). Please choose a different time.`
-          );
-        }
+      const isCascadeBlocked = isRecoveryBlocked(hourBlock, bookingsByHour, rules);
+      if (isCascadeBlocked || !availability[appointment_type].available) {
+        await connection.rollback();
+        return res.status(409).json({
+          error: isCascadeBlocked ? 'This hour is reserved as a recovery buffer. Please choose a later slot.'
+            : 'This hour has reached capacity for the selected appointment type. Please choose another time.',
+          code: 'SLOT_UNAVAILABLE',
+        });
       }
 
       const [insertResult] = await connection.query(
@@ -971,7 +869,11 @@ export default function appointmentRoutes(io) {
   // ===========================================================================
   router.post('/:id/checkin', authenticateToken, requireRoles('NURSE', 'ADMIN'), async (req, res) => {
     const appointmentId = Number(req.params.id);
-    const { blood_pressure, temperature, pulse, spo2, resp_rate, sex, date_of_birth, height, weight } = req.body;
+    const { sex, date_of_birth } = req.body;
+    const { values: vitals, errors } = validateTriageVitals(req.body);
+    const vitalError = Object.values(errors)[0];
+    if (vitalError) return res.status(400).json({ error: vitalError });
+    const { height, weight } = vitals;
 
     if (sex !== undefined && sex !== null && !['MALE', 'FEMALE'].includes(sex)) {
       return res.status(400).json({ error: 'sex must be MALE or FEMALE.' });
@@ -1031,8 +933,7 @@ export default function appointmentRoutes(io) {
         [app.patient_user_id, appointmentId, nextNum]
       );
 
-      const triageNote = `[TRIAGE VITALS] BP: ${blood_pressure || '120/80'}, Temp: ${temperature || '36.6'}°C, Pulse: ${pulse || '75'} bpm, SpO2: ${spo2 || '—'}%, Resp: ${resp_rate || '—'} cpm, Height: ${height || '—'} cm, Weight: ${weight || '—'} kg\n`;
-      const combinedNotes = triageNote + (app.notes || '');
+      const combinedNotes = formatTriageNote(vitals) + (app.notes || '');
 
       await connection.query(
         "UPDATE APPOINTMENTS SET status = 'checked_in', notes = ? WHERE appointment_id = ?",
@@ -1127,7 +1028,9 @@ export default function appointmentRoutes(io) {
         return res.status(400).json({ error: 'date_of_birth must be a valid date in the past.' });
       }
     }
-    const patientVitals = vitals && typeof vitals === 'object' ? vitals : {};
+    const { values: patientVitals, errors } = validateVitals(vitals);
+    const vitalError = Object.values(errors)[0];
+    if (vitalError) return res.status(400).json({ error: vitalError });
 
     if (!patient_user_id) {
       return res.status(400).json({ error: 'patient_user_id is required.' });
@@ -1382,18 +1285,22 @@ export default function appointmentRoutes(io) {
       diagnosis,
       treatment_plan,
       notes,
-      vitals,
+      vitals: submittedVitals,
       dental_chart,
     } = req.body;
 
     const userRoles = req.user.roles || [];
     if (
-      vitals !== undefined &&
+      submittedVitals !== undefined &&
       !userRoles.includes('ADMIN') &&
       (userRoles.includes('DOCTOR') || userRoles.includes('DENTIST'))
     ) {
       return res.status(403).json({ error: 'Doctors and dentists cannot record patient vitals.' });
     }
+
+    const { values: vitals, errors } = validateVitals(submittedVitals);
+    const vitalError = Object.values(errors)[0];
+    if (vitalError) return res.status(400).json({ error: vitalError });
 
     if (!diagnosis || !chief_complaint) {
       return res.status(400).json({ error: 'Chief complaint and diagnosis are required.' });
@@ -1445,31 +1352,15 @@ export default function appointmentRoutes(io) {
         );
       }
 
-      if (vitals && typeof vitals === 'object') {
-        const metricUnits = {
-          systolic_bp: 'mmHg',
-          diastolic_bp: 'mmHg',
-          temperature: '°C',
-          pulse: 'bpm',
-          spo2: '%',
-          resp_rate: 'cpm',
-          height: 'cm',
-          weight: 'kg',
-        };
-
-        for (const [metric, val] of Object.entries(vitals)) {
-          if (val !== undefined && val !== null && val !== '' && !isNaN(Number(val))) {
-            const unit = metricUnits[metric] || 'units';
-            await connection.query(
-              `INSERT INTO VITAL_SIGNS (emr_id, metric, value, unit, recorded_by)
-               VALUES (?, ?, ?, ?, ?)`,
-              [emrId, metric, Number(val), unit, doctorUserId]
-            );
-          }
-        }
+      for (const [metric, value] of Object.entries(vitals)) {
+        await connection.query(
+          `INSERT INTO VITAL_SIGNS (emr_id, metric, value, unit, recorded_by)
+           VALUES (?, ?, ?, ?, ?)`,
+          [emrId, metric, value, VITAL_RULES[metric].unit, doctorUserId]
+        );
       }
 
-      if (vitals && (vitals.height || vitals.weight)) {
+      if (vitals.height || vitals.weight) {
         const [hpRows] = await connection.query(
           'SELECT profile_id FROM HEALTH_PROFILES WHERE user_id = ?',
           [patient_user_id]

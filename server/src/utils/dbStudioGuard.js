@@ -9,8 +9,9 @@ export const REDACTED = '[REDACTED]';
 export const DECRYPT_FAILED_MARKER = '[ENCRYPTED PHI - INTEGRITY VERIFICATION FAILED]';
 
 // Tables DB Studio may display but never modify. AUDIT_LOGS / PHI_ACCESS_LOGS are the
-// statutory ledgers; INVENTORY_LOGS is the immutable stock-movement trail (see ERD §3.5).
-export const READ_ONLY_TABLES = ['AUDIT_LOGS', 'PHI_ACCESS_LOGS', 'INVENTORY_LOGS'];
+// statutory ledgers; INVENTORY_LOGS is the immutable stock-movement trail. The policy
+// table uses its dedicated validator, revision check and audit path.
+export const READ_ONLY_TABLES = ['AUDIT_LOGS', 'PHI_ACCESS_LOGS', 'INVENTORY_LOGS', 'SERVER_POLICY'];
 
 // Account-security tables: writable from DB Studio ONLY by Super Admins.
 // A limited admin holding DATABASE_MANAGE must not be able to mint admin
@@ -67,13 +68,14 @@ export const PHI_PATIENT_SOURCE = {
 const BCRYPT_RE = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/;
 const CIPHERTEXT_RE = /^enc:v[12]:[0-9a-f]{24}:[0-9a-f]{32}:[0-9a-f]+$/;
 
-export const isReadOnlyTable = (table) => READ_ONLY_TABLES.includes(table);
+export const isReadOnlyTable = (table) => READ_ONLY_TABLES.includes(table.toUpperCase());
 export const isSecurityTable = (table) => SECURITY_TABLES.includes(table);
 export const isEncryptedCol = (table, col) => (ENCRYPTED_COLUMNS[table] || []).includes(col);
 export const isSecretCol = (table, col) => (SECRET_COLUMNS[table] || []).includes(col);
 export const phiPatientSource = (table) => PHI_PATIENT_SOURCE[table] || null;
 
 export function readOnlyMessage(table) {
+  if (table.toUpperCase() === 'SERVER_POLICY') return 'Use the Server Policy editor to change server policy.';
   return `Statutory compliance violation: ${table} is an append-only ledger and cannot be modified from DB Studio.`;
 }
 

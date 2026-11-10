@@ -1,9 +1,10 @@
 // desktop/src/components/InventoryManager.tsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
-import { T, btnPrimary, btnGhost, inputStyle } from '../theme';
+import { T, btnPrimary, btnGhost, calloutDanger, calloutInfo, calloutSuccess, inputStyle } from '../theme';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
 import Icon from './Icon';
+import './InventoryManager.css';
 
 interface MedicineMaster {
   medicine_id: number;
@@ -23,8 +24,31 @@ interface ConfirmDialogState {
   message: string;
   confirmLabel?: string;
   isDestructive?: boolean;
-  onConfirm: () => void;
+  onConfirm: () => Promise<void>;
 }
+
+type InventoryNotice = { tone: 'info' | 'success' | 'error'; text: string };
+type InventoryRead = 'batches' | 'medicines' | 'reorder-suggestions' | 'expiring-soon' | 'logs';
+
+const tabs = [
+  { id: 'catalog', label: 'Catalog & dispense', icon: 'medication' },
+  { id: 'stockin', label: 'Stock-in', icon: 'download' },
+  { id: 'adjust', label: 'Adjust & dispose', icon: 'swap_horiz' },
+  { id: 'alerts', label: 'Alerts & reorder', icon: 'warning' },
+  { id: 'logs', label: 'Consumption logs', icon: 'history' },
+  { id: 'addmed', label: 'Formulary master', icon: 'inventory_2' },
+] as const;
+
+const noticeStyles = { info: calloutInfo, success: calloutSuccess, error: calloutDanger };
+const noticeIcons = { info: 'info', success: 'check_circle', error: 'error' } as const;
+const tabResources: Record<InvTab, InventoryRead[]> = {
+  catalog: ['batches'],
+  stockin: ['medicines'],
+  adjust: ['batches'],
+  alerts: ['batches', 'reorder-suggestions', 'expiring-soon'],
+  logs: ['logs'],
+  addmed: ['medicines'],
+};
 
 function getExpiryStatus(expiryDate: string) {
   const daysUntil = (new Date(expiryDate).getTime() - new Date().getTime()) / (1000 * 3600 * 24);
@@ -36,12 +60,18 @@ function getExpiryStatus(expiryDate: string) {
 export default function InventoryManager({ initialTab = 'catalog' }: { initialTab?: InvTab } = {}) {
   const [activeTab, setActiveTab] = useState<InvTab>(initialTab);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const dialogOpen = confirmDialog !== null;
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const [readStatus, setReadStatus] = useState<Partial<Record<InventoryRead, 'ready' | 'error'>>>({});
+  const readRequests = useRef<Partial<Record<InventoryRead, AbortController>>>({});
 
   /* ── Catalog & Deduction ─────────────────────────────────── */
   const [batchId, setBatchId] = useState('');
   const [quantity, setQuantity] = useState('1');
   const [reason, setReason] = useState('Prescription issuance');
-  const [statusMessage, setStatusMessage] = useState('');
+  const [notice, setNotice] = useState<InventoryNotice | null>(null);
   const [batches, setBatches] = useState<any[]>([]);
   const [medicines, setMedicines] = useState<MedicineMaster[]>([]);
 
@@ -75,7 +105,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
 
   /* ── Logs ────────────────────────────────────────────────── */
   const [inventoryLogs, setInventoryLogs] = useState<any[]>([]);
-  const [loadingLogs, setLoadingLogs] = useState(false);
+  const [loadingLogs, setLoadingLogs] = useState(initialTab === 'logs');
 
   /* ── New medicine ────────────────────────────────────────── */
   const [newMedName, setNewMedName] = useState('');
@@ -92,6 +122,28 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
     }
   }, [initialTab]);
 
+  useEffect(() => {
+    if (!dialogOpen) return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const trigger = document.activeElement;
+    dialog.showModal();
+    dialog.querySelector('button')?.focus();
+    return () => {
+      dialog.close();
+      if (trigger instanceof HTMLElement && trigger.isConnected) {
+        trigger.focus();
+        if (document.activeElement !== trigger) document.getElementById('inventory-title')?.focus();
+      }
+    };
+  }, [dialogOpen]);
+
+  const selectedBatch = batches.find((batch) => String(batch.batch_id) === batchId);
+  const filteredMedicines = medicines.filter((medicine) =>
+    medicine.name.toLowerCase().includes(medSearchFilter.toLowerCase()) ||
+    medicine.generic_name.toLowerCase().includes(medSearchFilter.toLowerCase())
+  );
+
   const lowStockLots = (batches || [])
     .filter((b) => {
       if (!b || !b.expiry_date) return false;
@@ -102,58 +154,57 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
     .sort((a, b) => a.quantity_on_hand - b.quantity_on_hand);
 
   /* ── Fetchers ────────────────────────────────────────────── */
-  const fetchBatches = async () => {
+  const readInventory = async <Data,>(resource: InventoryRead, onLoaded: (data: Data) => void) => {
+    readRequests.current[resource]?.abort();
+    const request = new AbortController();
+    readRequests.current[resource] = request;
+    if (resource === 'logs') setLoadingLogs(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`${API_BASE_URL}/api/inventory/batches`, {
+      const res = await fetch(`${API_BASE_URL}/api/inventory/${resource}`, {
         headers: { Authorization: `Bearer ${token}` },
+        signal: request.signal,
       });
-      if (res.ok) setBatches(await res.json());
-    } catch (err) { console.error('Failed to fetch batches:', err); }
+      if (!res.ok) throw new Error(`Inventory request failed (${res.status})`);
+      const data: Data = await res.json();
+      if (request.signal.aborted) return false;
+      onLoaded(data);
+      setReadStatus((status) => ({ ...status, [resource]: 'ready' }));
+      return true;
+    } catch {
+      if (!request.signal.aborted) setReadStatus((status) => ({ ...status, [resource]: 'error' }));
+      return false;
+    } finally {
+      if (!request.signal.aborted && resource === 'logs') setLoadingLogs(false);
+    }
   };
 
-  const fetchMedicines = async () => {
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/inventory/medicines`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data: MedicineMaster[] = await res.json();
-        setMedicines(data);
-        if (data.length > 0 && stockInMedId === '') setStockInMedId(data[0].medicine_id);
-      }
-    } catch (_) {}
-  };
+  const fetchBatches = () => readInventory<any[]>('batches', setBatches);
 
-  const fetchReorderAndAlerts = async () => {
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      const [resSug, resExp] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/inventory/reorder-suggestions`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API_BASE_URL}/api/inventory/expiring-soon`, { headers: { Authorization: `Bearer ${token}` } }),
-      ]);
-      if (resSug.ok) setReorderSuggestions(await resSug.json());
-      if (resExp.ok) setExpiringLots(await resExp.json());
-    } catch (_) {}
-  };
+  const fetchMedicines = () => readInventory<MedicineMaster[]>('medicines', (data) => {
+    setMedicines(data);
+    setStockInMedId((selected) =>
+      data.some((medicine) => medicine.medicine_id === selected) ? selected : data[0]?.medicine_id ?? ''
+    );
+  });
 
-  const fetchLogs = async () => {
-    setLoadingLogs(true);
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/inventory/logs`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) setInventoryLogs(await res.json());
-    } catch (_) {}
-    setLoadingLogs(false);
+  const fetchReorderAndAlerts = () => Promise.all([
+    readInventory<any[]>('reorder-suggestions', setReorderSuggestions),
+    readInventory<any[]>('expiring-soon', setExpiringLots),
+  ]);
+
+  const fetchLogs = () => readInventory<any[]>('logs', setInventoryLogs);
+
+  const emptyText = (resource: InventoryRead, ready: string) => {
+    if (readStatus[resource] === 'ready') return ready;
+    return readStatus[resource] === 'error' ? 'Unable to load this inventory data.' : 'Loading inventory data…';
   };
 
   useEffect(() => {
     fetchBatches();
     fetchMedicines();
     fetchReorderAndAlerts();
+    if (initialTab === 'logs') fetchLogs();
 
     // ── Real-Time WebSocket Synchronization ─────────────────
     const token = localStorage.getItem('valetudo_token');
@@ -162,21 +213,21 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
       transports: ['websocket', 'polling'],
     });
 
-    socket.on('inventory:updated', () => {
-      fetchBatches();
-      fetchMedicines();
-      fetchReorderAndAlerts();
-      fetchLogs();
-      setStatusMessage('Inventory synchronized with latest clinical dispensations.');
+    socket.on('inventory:updated', async () => {
+      const results = await Promise.all([fetchBatches(), fetchMedicines(), fetchReorderAndAlerts(), fetchLogs()]);
+      if (results.flat().every(Boolean)) {
+        setNotice((current) => current ?? { tone: 'info', text: 'Inventory synchronized with the latest changes.' });
+      }
     });
 
     return () => {
       socket.disconnect();
+      Object.values(readRequests.current).forEach((request) => request.abort());
     };
   }, []);
 
   // ── USB HID Hardware Barcode Scanner Listener ──────────────
-  const processScannedCode = (code: string, isHardwareHID = false) => {
+  const processScannedCode = useCallback((code: string, isHardwareHID = false) => {
     const trimmed = code.trim();
     if (!trimmed) return;
 
@@ -187,41 +238,46 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
     );
 
     if (match) {
-      if (activeTab === 'catalog') {
-        const expStatus = getExpiryStatus(match.expiry_date);
-        if (expStatus.label === 'Expired') {
-          setStatusMessage(
-            `⚠️ Cannot select Lot "${match.batch_no}" (${match.name}): Batch EXPIRED on ${new Date(match.expiry_date).toISOString().split('T')[0]}. Expired medications are barred from dispensation and must be disposed of via Adjust & Dispose.`
-          );
-          setBarcodeQuery('');
-          return;
-        }
+      const isExpired = getExpiryStatus(match.expiry_date).label === 'Expired';
+      if (activeTab === 'catalog' && isExpired) {
+        setNotice({
+          tone: 'error',
+          text: `Cannot select lot "${match.batch_no}" (${match.name}): expired on ${new Date(match.expiry_date).toISOString().split('T')[0]}. Use Adjust & Dispose to remove this lot.`,
+        });
+        setBarcodeQuery('');
+        return;
       }
-      setBatchId(match.batch_id.toString());
+      if (!isExpired) setBatchId(match.batch_id.toString());
       setAdjustBatchId(match.batch_id);
-      setStatusMessage(
-        `${isHardwareHID ? 'USB HID Scanner' : 'Barcode search'}: Selected ${match.name} (Lot ${match.batch_no}) · ${match.quantity_on_hand} ${match.unit || 'pcs'} on hand`
-      );
+      setNotice({
+        tone: 'success',
+        text: `${isHardwareHID ? 'USB HID Scanner' : 'Barcode search'}: Selected ${match.name} (Lot ${match.batch_no}) · ${match.quantity_on_hand} ${match.unit || 'pcs'} on hand`,
+      });
       setBarcodeQuery('');
     } else {
-      setStatusMessage(`Barcode / Lot "${trimmed}" not found in active clinic inventory.`);
+      setNotice({ tone: 'error', text: `Barcode / Lot "${trimmed}" not found in active clinic inventory.` });
     }
-  };
+  }, [activeTab, batches]);
 
   useEffect(() => {
     let buffer = '';
     let lastKeyTime = 0;
 
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const isInputFocused = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      const isControl = target?.closest('input, textarea, select, button, a, [contenteditable], [role="dialog"]');
+      if (dialogOpen || submittingRef.current || e.defaultPrevented || e.isComposing || e.ctrlKey || e.altKey || e.metaKey ||
+          (isControl && target !== barcodeInputRef.current)) {
+        buffer = '';
+        return;
+      }
 
       const now = Date.now();
       const timeDiff = now - lastKeyTime;
       lastKeyTime = now;
 
       if (e.key === 'Enter') {
-        if (buffer.length >= 2 && (!isInputFocused || target === barcodeInputRef.current)) {
+        if (buffer.length >= 2 && timeDiff <= 150) {
           const scanned = buffer.trim();
           buffer = '';
           if (scanned) {
@@ -234,7 +290,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
         return;
       }
 
-      if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      if (e.key.length === 1) {
         if (timeDiff > 60) {
           buffer = e.key;
         } else {
@@ -245,10 +301,11 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [batches]);
+  }, [dialogOpen, processScannedCode]);
 
   const handleBarcodeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current) return;
     processScannedCode(barcodeQuery, false);
   };
 
@@ -267,107 +324,105 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
     return matchesType && matchesSearch;
   });
 
-  const handleDeductStock = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setStatusMessage('');
-    const targetBatch = batches.find((b) => b.batch_id.toString() === batchId);
-    if (targetBatch && getExpiryStatus(targetBatch.expiry_date).label === 'Expired') {
-      setStatusMessage(
-        `Cannot dispense expired medication: Lot "${targetBatch.batch_no}" is expired. Please quarantine or dispose of this lot via Adjust & Dispose.`
-      );
-      return;
-    }
+  const submitInventoryChange = async (
+    path: string,
+    request: Pick<RequestInit, 'method' | 'body'>,
+    messages: { pending: string; failed: string },
+  ) => {
+    if (submittingRef.current) return false;
+    submittingRef.current = true;
+    setIsSubmitting(true);
+    setNotice({ tone: 'info', text: messages.pending });
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`${API_BASE_URL}/api/inventory/deduct`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          batch_id: Number(batchId),
-          quantity_deducted: Number(quantity),
-          reason,
-        }),
+      const res = await fetch(`${API_BASE_URL}/api/inventory/${path}`, {
+        ...request,
+        headers: request.body
+          ? { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+          : { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
-      if (res.ok) {
-        setStatusMessage('' + data.message);
-        fetchBatches();
-        fetchReorderAndAlerts();
-        setBatchId('');
-        setQuantity('1');
-      } else {
-        setStatusMessage('' + (data.error || 'Failed to deduct stock'));
-      }
-    } catch (err: any) {
-      setStatusMessage('Network error: ' + err.message);
+      const data = await res.json().catch(() => ({}));
+      setNotice(res.ok
+        ? { tone: 'success', text: data.message || 'Inventory updated.' }
+        : { tone: 'error', text: data.error || messages.failed });
+      return res.ok;
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      setNotice({ tone: 'error', text: `Network error: ${detail}` });
+      return false;
+    } finally {
+      submittingRef.current = false;
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeductStock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (submittingRef.current || !selectedBatch) return;
+    if (getExpiryStatus(selectedBatch.expiry_date).label === 'Expired') {
+      setNotice({
+        tone: 'error',
+        text: `Cannot dispense expired medication: lot "${selectedBatch.batch_no}" is expired. Use Adjust & Dispose to remove this lot.`,
+      });
+      return;
+    }
+    const saved = await submitInventoryChange('deduct', {
+      method: 'POST',
+      body: JSON.stringify({ batch_id: Number(batchId), quantity_deducted: Number(quantity), reason }),
+    }, { pending: 'Recording dispensation…', failed: 'Failed to deduct stock.' });
+    if (saved) {
+      fetchBatches();
+      fetchReorderAndAlerts();
+      setBatchId('');
+      setQuantity('1');
     }
   };
 
   const handleReceiveStock = async (e: React.FormEvent) => {
     e.preventDefault();
-    setStatusMessage('Logging shipment receipt...');
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/inventory/receive`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          medicine_id: Number(stockInMedId),
-          batch_no: stockInBatchNo.trim(),
-          manufacture_date: stockInMfgDate,
-          expiry_date: stockInExpDate,
-          supplier: stockInSupplier.trim(),
-          quantity_received: Number(stockInQty),
-        }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setStatusMessage('' + data.message);
-        setStockInBatchNo('');
-        setStockInQty('100');
-        fetchBatches();
-        fetchReorderAndAlerts();
-      } else {
-        setStatusMessage('' + (data.error || 'Failed to record shipment intake'));
-      }
-    } catch (err: any) {
-      setStatusMessage('Network error: ' + err.message);
+    if (stockInMedId === '') return;
+    const saved = await submitInventoryChange('receive', {
+      method: 'POST',
+      body: JSON.stringify({
+        medicine_id: Number(stockInMedId),
+        batch_no: stockInBatchNo.trim(),
+        manufacture_date: stockInMfgDate,
+        expiry_date: stockInExpDate,
+        supplier: stockInSupplier.trim(),
+        quantity_received: Number(stockInQty),
+      }),
+    }, { pending: 'Logging shipment receipt…', failed: 'Failed to record shipment intake.' });
+    if (saved) {
+      setStockInBatchNo('');
+      setStockInQty('100');
+      fetchBatches();
+      fetchReorderAndAlerts();
     }
   };
 
   const executeAdjustStock = async () => {
-    setStatusMessage('Processing inventory adjustment...');
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/inventory/adjust`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          batch_id: Number(adjustBatchId),
-          quantity_removed: Number(adjustQty),
-          transaction_type: adjustType,
-          reason: adjustReason,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setStatusMessage('' + data.message);
-        fetchBatches();
-        fetchReorderAndAlerts();
-        setAdjustBatchId('');
-        setAdjustQty('1');
-      } else {
-        setStatusMessage('' + (data.error || 'Failed to adjust inventory'));
-      }
-    } catch (err: any) {
-      setStatusMessage('Network error: ' + err.message);
+    const saved = await submitInventoryChange('adjust', {
+      method: 'POST',
+      body: JSON.stringify({
+        batch_id: Number(adjustBatchId),
+        quantity_removed: Number(adjustQty),
+        transaction_type: adjustType,
+        reason: adjustReason,
+      }),
+    }, { pending: 'Processing inventory adjustment…', failed: 'Failed to adjust inventory.' });
+    if (saved) {
+      fetchBatches();
+      fetchReorderAndAlerts();
+      setAdjustBatchId('');
+      setAdjustQty('1');
     }
   };
 
   const handleAdjustStock = (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current) return;
     if (!adjustBatchId) {
-      setStatusMessage('Please select a batch to adjust.');
+      setNotice({ tone: 'error', text: 'Please select a batch to adjust.' });
       return;
     }
 
@@ -384,37 +439,27 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
   };
 
   const executeCreateMedicine = async () => {
-    setStatusMessage('Registering new formulary medicine...');
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/inventory/medicines`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          name: newMedName.trim(),
-          generic_name: newMedGeneric.trim(),
-          form: newMedForm,
-          strength: newMedStrength.trim(),
-          unit: newMedUnit,
-          reorder_level: Number(newMedReorder),
-        }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setStatusMessage('' + data.message);
-        setNewMedName('');
-        setNewMedGeneric('');
-        fetchMedicines();
-      } else {
-        setStatusMessage('' + (data.error || 'Failed to add medicine'));
-      }
-    } catch (err: any) {
-      setStatusMessage('Network error: ' + err.message);
+    const saved = await submitInventoryChange('medicines', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: newMedName.trim(),
+        generic_name: newMedGeneric.trim(),
+        form: newMedForm,
+        strength: newMedStrength.trim(),
+        unit: newMedUnit,
+        reorder_level: Number(newMedReorder),
+      }),
+    }, { pending: 'Registering new formulary medicine…', failed: 'Failed to add medicine.' });
+    if (saved) {
+      setNewMedName('');
+      setNewMedGeneric('');
+      fetchMedicines();
     }
   };
 
   const handleCreateMedicine = (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current) return;
 
     const existingMatch = medicines.find(
       (m) =>
@@ -442,42 +487,24 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
   };
 
   const handleDeleteMedicine = (medicineId: number, medName: string) => {
+    if (submittingRef.current) return;
     setConfirmDialog({
       title: 'Delete Formulary Entry',
-      message: `Are you sure you want to delete "${medName}" from the formulary catalog?\n\nThis will remove it from the Stock-in dropdown.`,
+      message: `Remove "${medName}" from the active formulary and the Stock-in dropdown?\n\nAny remaining stock, including expired stock, must be cleared before the entry can be removed.`,
       confirmLabel: 'Delete',
       isDestructive: true,
       onConfirm: async () => {
-        setStatusMessage(`Removing "${medName}"...`);
-        const token = localStorage.getItem('valetudo_token');
-        try {
-          const res = await fetch(`${API_BASE_URL}/api/inventory/medicines/${medicineId}`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          const data = await res.json();
-          if (res.ok) {
-            setStatusMessage(`${data.message}`);
-            fetchMedicines();
-            fetchBatches();
-          } else {
-            setStatusMessage(`${data.error || 'Failed to delete medicine'}`);
-          }
-        } catch (err: any) {
-          setStatusMessage(`Network error: ${err.message}`);
+        const saved = await submitInventoryChange(`medicines/${medicineId}`, { method: 'DELETE' }, {
+          pending: `Removing "${medName}"…`,
+          failed: 'Failed to delete medicine.',
+        });
+        if (saved) {
+          fetchMedicines();
+          fetchBatches();
         }
       },
     });
   };
-
-  const tabs: { id: InvTab; label: string }[] = [
-    { id: 'catalog', label: 'Catalog & dispense' },
-    { id: 'stockin', label: 'Stock-in' },
-    { id: 'adjust',  label: 'Adjust & dispose' },
-    { id: 'alerts',  label: 'Alerts & reorder' },
-    { id: 'logs',    label: 'Consumption logs' },
-    { id: 'addmed',  label: 'Formulary master' },
-  ];
 
   const fieldLabel: React.CSSProperties = {
     display: 'block', fontSize: 11.5, fontWeight: 700,
@@ -485,93 +512,77 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
   };
 
   return (
-    <section style={{
-      flex: 1,
-      minHeight: 0,
-      background: T.surface,
-      border: `1px solid ${T.border}`,
-      borderRadius: 0,
-      padding: 22,
-      boxShadow: T.shadow.xs,
-    }}>
-      <div className="vd-page-head" style={{ marginBottom: 18 }}>
+    <section className="inventory-workspace" aria-labelledby="inventory-title">
+      <div className="vd-page-head inventory-heading">
         <div className="vd-page-head-eyebrow">Clinic operations</div>
-        <h3 className="vd-page-head-title" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <Icon name="medication" size={18} tone="primary" /> Medicine & first-aid inventory
+        <h3 id="inventory-title" className="vd-page-head-title" tabIndex={-1}>
+          <Icon name="medication" size={20} tone="primary" /> Medicine & first-aid inventory
         </h3>
         <p className="vd-page-head-sub">
-          FEFO lot traceability, USB HID scanner integration & real-time automated dispensation sync
+          Track medicine lots, record stock movements, and review expiry alerts.
         </p>
       </div>
 
-      <div style={{
-        display: 'flex', gap: 6, flexWrap: 'wrap',
-        padding: 4, background: T.sage100,
-        borderRadius: T.radius.pill, marginBottom: 20,
-        width: 'fit-content', maxWidth: '100%',
-      }}>
+      <nav className="inventory-nav" aria-label="Inventory sections">
         {tabs.map((tab) => {
           const isActive = activeTab === tab.id;
           return (
             <button
               key={tab.id}
               type="button"
+              className="inventory-nav-button"
+              aria-current={isActive ? 'true' : undefined}
               onClick={() => {
                 setActiveTab(tab.id);
-                setStatusMessage('');
+                if (!submittingRef.current) setNotice(null);
                 if (tab.id === 'logs') fetchLogs();
                 if (tab.id === 'alerts') fetchReorderAndAlerts();
               }}
-              style={{
-                padding: '8px 16px', borderRadius: T.radius.pill, border: 'none',
-                background: isActive ? T.surface : 'transparent',
-                color: isActive ? T.primary : T.textSub,
-                fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                fontFamily: T.font,
-                boxShadow: isActive ? T.shadow.xs : 'none',
-              }}
             >
-              {tab.label}
+              <Icon name={tab.icon} size={18} />
+              <span>{tab.label}</span>
             </button>
           );
         })}
-      </div>
+      </nav>
 
-      {statusMessage && (
-        <div style={{
-          padding: '12px 16px', marginBottom: 16,
-          borderRadius: T.radius.md, fontSize: 13, fontWeight: 600,
-          background: statusMessage.includes('Selected') ? T.successSoft : T.dangerSoft,
-          color: statusMessage.includes('Selected') ? T.success : T.danger,
-          border: `1px solid ${statusMessage.includes('Selected') ? T.successBorder : T.dangerBorder}`,
-        }}>
-          {statusMessage}
+      {notice && (
+        <div className="inventory-notice" role={notice.tone === 'error' ? 'alert' : 'status'} style={noticeStyles[notice.tone]()}>
+          <Icon name={noticeIcons[notice.tone]} size={18} />
+          <span>{notice.text}</span>
+        </div>
+      )}
+      {tabResources[activeTab].some((resource) => readStatus[resource] === 'error') && (
+        <div className="inventory-notice" role="alert" style={calloutDanger()}>
+          <Icon name="error" size={18} />
+          <span>Some inventory data could not be loaded. Displayed results may be out of date.</span>
         </div>
       )}
 
       {/* ── CATALOG & DISPENSE ──────────────────────────── */}
       {activeTab === 'catalog' && (
         <div>
-          <form onSubmit={handleBarcodeSubmit} style={{
-            display: 'flex', gap: 10, marginBottom: 20, alignItems: 'center',
-            background: T.sage50, padding: 12,
-            borderRadius: T.radius.md, border: `1px solid ${T.borderSoft}`,
-          }}>
-            <span style={{ fontSize: 18 }}><Icon name="Search" size={14} /></span>  
-            <input
-              ref={barcodeInputRef}
-              type="text"
-              placeholder="USB Barcode / QR Scanner active (scan directly or type lot/batch and hit Enter)"
-              value={barcodeQuery}
-              onChange={(e) => setBarcodeQuery(e.target.value)}
-              style={{ ...inputStyle, flex: 1 }}
-            />
-            <button type="submit" style={{ ...btnPrimary, padding: '10px 18px', fontSize: 12.5 }}>
+          <form className="inventory-lookup" onSubmit={handleBarcodeSubmit}>
+            <div>
+              <label htmlFor="inventory-barcode" style={fieldLabel}>Barcode or batch lookup</label>
+              <input
+                id="inventory-barcode"
+                ref={barcodeInputRef}
+                type="text"
+                placeholder="Scan a code or enter a lot number, batch ID, or medicine name"
+                value={barcodeQuery}
+                onChange={(e) => setBarcodeQuery(e.target.value)}
+                style={inputStyle}
+                disabled={isSubmitting}
+              />
+            </div>
+            <button type="submit" style={btnPrimary} disabled={isSubmitting}>
+              <Icon name="search" size={16} />
               Find lot
             </button>
           </form>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 20 }}>
+          <div className="inventory-split inventory-catalog">
             <div>
               <div style={{
                 display: 'flex', justifyContent: 'space-between',
@@ -580,22 +591,16 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                 <span style={{ fontSize: 13, fontWeight: 800, color: T.text }}>
                   First-expiry-first-out batches (FEFO)
                 </span>
-                <small style={{ color: T.textMuted, fontSize: 11.5 }}>
-                  Select a row to dispense manually
+                <small style={{ color: T.textSub, fontSize: 11.5 }}>
+                  Select a lot to dispense manually
                 </small>
               </div>
 
-              <div style={{
-                border: `1px solid ${T.border}`,
-                borderRadius: T.radius.md,
-                overflow: 'hidden',
-                maxHeight: 420,
-                overflowY: 'auto',
-              }}>
+              <div className="inventory-table" style={{ maxHeight: 420 }} tabIndex={0} role="region" aria-label="Dispensable batches">
                 <table className="tbl" style={{ fontSize: 12.5 }}>
                   <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
                     <tr>
-                      <th style={{ width: 44 }}></th>
+                      <th scope="col" style={{ width: 44 }}><span className="inventory-sr-only">Select lot</span></th>
                       <th>Medicine</th>
                       <th>Lot / batch</th>
                       <th style={{ textAlign: 'right' }}>Stock</th>
@@ -607,7 +612,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                     {batches.filter((b) => getExpiryStatus(b.expiry_date).label !== 'Expired').length === 0 ? (
                       <tr>
                         <td colSpan={6} style={{ padding: '36px 16px', textAlign: 'center', color: T.textMuted }}>
-                          No unexpired lots available for dispensation.
+                          {emptyText('batches', 'No unexpired lots available for dispensation.')}
                         </td>
                       </tr>
                     ) : (
@@ -616,28 +621,32 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                         .map((b) => {
                           const status = getExpiryStatus(b.expiry_date);
                           const isSelected = batchId === b.batch_id.toString();
+                          const selectBatch = () => {
+                            if (submittingRef.current) return;
+                            setBatchId(b.batch_id.toString());
+                            setAdjustBatchId(b.batch_id);
+                            setNotice({ tone: 'success', text: `Selected: ${b.name} (${b.batch_no})` });
+                          };
                           return (
                             <tr
                               key={b.batch_id}
-                              onClick={() => {
-                                setBatchId(b.batch_id.toString());
-                                setAdjustBatchId(b.batch_id);
-                                setStatusMessage(`Selected: ${b.name} (${b.batch_no})`);
-                              }}
+                              onClick={selectBatch}
                               style={{
                                 cursor: 'pointer',
                                 background: isSelected ? T.primaryTint : 'transparent',
                               }}
                             >
                               <td style={{ padding: '12px 14px' }}>
-                                <div style={{
-                                  width: 16, height: 16, borderRadius: '50%',
-                                  border: `2px solid ${isSelected ? T.primary : T.sage300}`,
-                                  background: isSelected ? T.primary : 'transparent',
-                                  display: 'grid', placeItems: 'center',
-                                }}>
-                                  {isSelected && <span style={{ color: T.textOnPrimary, fontSize: 9, fontWeight: 900 }}><Icon name="check" size={14} /></span>}
-                                </div>
+                                <input
+                                  className="inventory-batch-radio"
+                                  type="radio"
+                                  name="inventory-batch"
+                                  aria-label={`Select ${b.name} ${b.strength}, lot ${b.batch_no}`}
+                                  checked={isSelected}
+                                  disabled={isSubmitting}
+                                  onClick={(event) => event.stopPropagation()}
+                                  onChange={selectBatch}
+                                />
                               </td>
                               <td style={{ padding: '12px 14px' }}>
                                 <div style={{ fontWeight: 700, color: T.text }}>{b.name}</div>
@@ -681,13 +690,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
               </div>
             </div>
 
-            <div style={{
-              background: T.sage50,
-              padding: 18,
-              borderRadius: T.radius.md,
-              border: `1px solid ${T.borderSoft}`,
-              height: 'fit-content',
-            }}>
+            <div className="inventory-panel">
               <h4 style={{
                 margin: '0 0 14px 0', fontSize: 14, fontWeight: 800, color: T.primary,
                 display: 'flex', alignItems: 'center', gap: 8,
@@ -696,43 +699,44 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
               </h4>
               <form onSubmit={handleDeductStock}>
                 <div style={{ marginBottom: 14 }}>
-                  <label style={fieldLabel}>Selected batch</label>
-                  <input
-                    style={{ ...inputStyle, background: T.surface, color: batchId ? T.text : T.textMuted }}
-                    value={batchId ? `Batch #${batchId}` : ''}
-                    readOnly
-                    placeholder="Scan lot or click row"
-                  />
+                  <div style={fieldLabel}>Selected batch</div>
+                  <div className="inventory-selected-batch">
+                    {selectedBatch ? (
+                      <>
+                        <strong>{selectedBatch.name} · {selectedBatch.strength}</strong>
+                        <span>Lot {selectedBatch.batch_no} · {selectedBatch.quantity_on_hand} {selectedBatch.unit || 'pcs'} on hand</span>
+                      </>
+                    ) : 'Scan a lot or select a batch from the table.'}
+                  </div>
                 </div>
                 <div style={{ marginBottom: 14 }}>
-                  <label style={fieldLabel}>Quantity</label>
+                  <label htmlFor="inventory-dispense-quantity" style={fieldLabel}>Quantity</label>
                   <input
+                    id="inventory-dispense-quantity"
                     style={inputStyle}
                     type="number"
                     min="1"
                     value={quantity}
                     onChange={(e) => setQuantity(e.target.value)}
+                    disabled={isSubmitting}
                     required
                   />
                 </div>
                 <div style={{ marginBottom: 18 }}>
-                  <label style={fieldLabel}>Reason / remarks</label>
+                  <label htmlFor="inventory-dispense-reason" style={fieldLabel}>Reason / remarks</label>
                   <input
+                    id="inventory-dispense-reason"
                     style={inputStyle}
                     value={reason}
                     onChange={(e) => setReason(e.target.value)}
+                    disabled={isSubmitting}
                     required
                   />
                 </div>
                 <button
                   type="submit"
-                  disabled={!batchId}
-                  style={{
-                    ...btnPrimary, width: '100%', padding: 12,
-                    opacity: batchId ? 1 : 0.4,
-                    cursor: batchId ? 'pointer' : 'not-allowed',
-                    background: batchId ? T.primary : T.sage400,
-                  }}
+                  disabled={!selectedBatch || isSubmitting}
+                  style={{ ...btnPrimary, width: '100%' }}
                 >
                   Confirm dispensation
                 </button>
@@ -744,18 +748,19 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
 
       {/* ── STOCK-IN ────────────────────────────────────── */}
       {activeTab === 'stockin' && (
-        <div style={{ maxWidth: 720 }}>
+        <div className="inventory-panel inventory-standalone">
           <h4 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 800, color: T.primary }}>
             <Icon name="download" size={14} /> Log incoming medication shipment
           </h4>
           <p style={{ margin: '0 0 20px', fontSize: 12.5, color: T.textSub }}>
-            Every lot is tracked by batch and expiry for FEFO dispensing.
+            Receiving an existing medicine and lot adds stock to that lot and keeps its recorded dates.
           </p>
 
-          <form onSubmit={handleReceiveStock} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <div style={{ gridColumn: 'span 2' }}>
-              <label style={fieldLabel}>Medicine master</label>
-              <select style={inputStyle} value={stockInMedId} onChange={(e) => setStockInMedId(Number(e.target.value))} required>
+          <form onSubmit={handleReceiveStock} className="inventory-field-grid">
+            <div className="inventory-field-wide">
+              <label htmlFor="inventory-medicine" style={fieldLabel}>Medicine master</label>
+              <select id="inventory-medicine" disabled={isSubmitting} style={inputStyle} value={stockInMedId} onChange={(e) => setStockInMedId(Number(e.target.value))} required>
+                {medicines.length === 0 && <option value="">{emptyText('medicines', 'No formulary medicines available')}</option>}
                 {medicines.map((m) => (
                   <option key={m.medicine_id} value={m.medicine_id}>
                     {m.name} ({m.generic_name}) — {m.strength} [{m.form}]
@@ -765,8 +770,10 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
             </div>
 
             <div>
-              <label style={fieldLabel}>Lot / batch number</label>
+              <label htmlFor="inventory-stock-lot" style={fieldLabel}>Lot / batch number</label>
               <input
+                id="inventory-stock-lot"
+                disabled={isSubmitting}
                 style={inputStyle}
                 placeholder="e.g. BATCH-BIO-2026C"
                 value={stockInBatchNo}
@@ -776,8 +783,10 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
             </div>
 
             <div>
-              <label style={fieldLabel}>Quantity received</label>
+              <label htmlFor="inventory-stock-quantity" style={fieldLabel}>Quantity received</label>
               <input
+                id="inventory-stock-quantity"
+                disabled={isSubmitting}
                 style={inputStyle}
                 type="number"
                 min="1"
@@ -788,8 +797,10 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
             </div>
 
             <div>
-              <label style={fieldLabel}>Manufacture date</label>
+              <label htmlFor="inventory-manufacture-date" style={fieldLabel}>Manufacture date</label>
               <input
+                id="inventory-manufacture-date"
+                disabled={isSubmitting}
                 style={inputStyle}
                 type="date"
                 value={stockInMfgDate}
@@ -799,8 +810,10 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
             </div>
 
             <div>
-              <label style={fieldLabel}>Expiry date</label>
+              <label htmlFor="inventory-expiry-date" style={fieldLabel}>Expiry date</label>
               <input
+                id="inventory-expiry-date"
+                disabled={isSubmitting}
                 style={inputStyle}
                 type="date"
                 value={stockInExpDate}
@@ -809,9 +822,11 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
               />
             </div>
 
-            <div style={{ gridColumn: 'span 2' }}>
-              <label style={fieldLabel}>Supplier / distributor</label>
+            <div className="inventory-field-wide">
+              <label htmlFor="inventory-supplier" style={fieldLabel}>Supplier / distributor</label>
               <input
+                id="inventory-supplier"
+                disabled={isSubmitting}
                 style={inputStyle}
                 value={stockInSupplier}
                 onChange={(e) => setStockInSupplier(e.target.value)}
@@ -819,8 +834,8 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
               />
             </div>
 
-            <div style={{ gridColumn: 'span 2', marginTop: 6 }}>
-              <button type="submit" style={{ ...btnPrimary, width: '100%', padding: 13 }}>
+            <div className="inventory-field-wide inventory-form-actions">
+              <button type="submit" style={btnPrimary} disabled={isSubmitting || stockInMedId === ''}>
                 <Icon name="download" size={14} /> Record stock intake to central ledger
               </button>
             </div>
@@ -830,7 +845,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
 
       {/* ── ADJUST & DISPOSE ────────────────────────────── */}
       {activeTab === 'adjust' && (
-        <div style={{ maxWidth: 620 }}>
+        <div className="inventory-panel inventory-standalone">
           <h4 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 800, color: T.danger }}>
             <Icon name="delete" size={14} /> Discard expired / damaged medicines
           </h4>
@@ -838,13 +853,15 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
             Removals are permanent and written to the activity log.
           </p>
 
-          <form onSubmit={handleAdjustStock} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <form onSubmit={handleAdjustStock} className="inventory-form-stack">
             <div>
-              <label style={fieldLabel}>Batch lot</label>
+              <label htmlFor="inventory-adjust-lot" style={fieldLabel}>Batch lot</label>
               <select
+                id="inventory-adjust-lot"
+                disabled={isSubmitting}
                 style={inputStyle}
                 value={adjustBatchId}
-                onChange={(e) => setAdjustBatchId(Number(e.target.value))}
+                onChange={(e) => setAdjustBatchId(e.target.value ? Number(e.target.value) : '')}
                 required
               >
                 <option value="">Choose batch lot…</option>
@@ -858,10 +875,12 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
               </select>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div className="inventory-field-grid">
               <div>
-                <label style={fieldLabel}>Quantity to remove</label>
+                <label htmlFor="inventory-adjust-quantity" style={fieldLabel}>Quantity to remove</label>
                 <input
+                  id="inventory-adjust-quantity"
+                  disabled={isSubmitting}
                   style={inputStyle}
                   type="number"
                   min="1"
@@ -871,8 +890,8 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                 />
               </div>
               <div>
-                <label style={fieldLabel}>Adjustment type</label>
-                <select style={inputStyle} value={adjustType} onChange={(e: any) => setAdjustType(e.target.value)}>
+                <label htmlFor="inventory-adjust-type" style={fieldLabel}>Adjustment type</label>
+                <select id="inventory-adjust-type" disabled={isSubmitting} style={inputStyle} value={adjustType} onChange={(e) => setAdjustType(e.target.value as typeof adjustType)}>
                   <option value="dispose">Disposal (expired/spoiled)</option>
                   <option value="recall">Manufacturer recall</option>
                   <option value="return">Supplier return</option>
@@ -882,8 +901,10 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
             </div>
 
             <div>
-              <label style={fieldLabel}>Official reason / protocol</label>
+              <label htmlFor="inventory-adjust-reason" style={fieldLabel}>Official reason / protocol</label>
               <input
+                id="inventory-adjust-reason"
+                disabled={isSubmitting}
                 style={inputStyle}
                 value={adjustReason}
                 onChange={(e) => setAdjustReason(e.target.value)}
@@ -893,7 +914,9 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
 
             <button
               type="submit"
-              style={{ ...btnPrimary, background: T.danger, color: T.textOnDanger, padding: 12, marginTop: 6 }}
+              className="inventory-form-end"
+              disabled={isSubmitting}
+              style={{ ...btnPrimary, background: T.danger, color: T.textOnDanger }}
             >
               Confirm & remove from available stock
             </button>
@@ -905,7 +928,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
       {activeTab === 'alerts' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           {/* Top row: 2 columns for Reorder suggestions & Expiring stocks */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+          <div className="inventory-split inventory-alerts">
             <div>
               <h4 style={{
                 margin: '0 0 12px', fontSize: 14, fontWeight: 800, color: T.warning,
@@ -913,11 +936,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
               }}>
                 <Icon name="trending_down" size={14} /> Automated reorder suggestions
               </h4>
-              <div style={{
-                border: `1px solid ${T.border}`,
-                borderRadius: T.radius.md,
-                overflow: 'hidden', maxHeight: 360, overflowY: 'auto',
-              }}>
+              <div className="inventory-table" style={{ maxHeight: 360 }} tabIndex={0} role="region" aria-label="Reorder suggestions">
                 <table className="tbl" style={{ fontSize: 12 }}>
                   <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
                     <tr>
@@ -928,6 +947,9 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                     </tr>
                   </thead>
                   <tbody>
+                    {reorderSuggestions.length === 0 && (
+                      <tr><td colSpan={4}>{emptyText('reorder-suggestions', 'No reorder suggestions available.')}</td></tr>
+                    )}
                     {reorderSuggestions.map((s) => (
                       <tr key={s.medicine_id}>
                         <td style={{ fontWeight: 700 }}>{s.name}</td>
@@ -958,19 +980,15 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                 margin: '0 0 12px', fontSize: 14, fontWeight: 800, color: T.danger,
                 display: 'flex', alignItems: 'center', gap: 8,
               }}>
-                ⏳ Expiring stocks on shelf (&lt; 90 days)
+                <Icon name="schedule" size={14} /> Expiry alerts
               </h4>
-              <div style={{
-                border: `1px solid ${T.border}`,
-                borderRadius: T.radius.md,
-                overflow: 'hidden', maxHeight: 360, overflowY: 'auto',
-              }}>
+              <div className="inventory-table" style={{ maxHeight: 360 }} tabIndex={0} role="region" aria-label="Expiry alerts">
                 {expiringLots.length === 0 ? (
                   <div style={{
                     padding: 24, textAlign: 'center',
-                    color: T.success, fontSize: 12.5, fontWeight: 700,
+                    color: T.textSub, fontSize: 12.5, fontWeight: 700,
                   }}>
-                    <Icon name="check_circle" size={14} /> No active batches expiring within 90 days.
+                    {emptyText('expiring-soon', 'No expired lots or lots expiring within 90 days.')}
                   </div>
                 ) : (
                   <table className="tbl" style={{ fontSize: 12 }}>
@@ -1021,22 +1039,20 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
               }}>
                 <Icon name="warning" size={14} /> Low stock lots
               </h4>
-              <span style={{ fontSize: 11.5, color: T.textSub, fontWeight: 600 }}>
-                {lowStockLots.length} lot{lowStockLots.length === 1 ? '' : 's'} at or below reorder buffer
-              </span>
+              {readStatus.batches === 'ready' && (
+                <span style={{ fontSize: 11.5, color: T.textSub, fontWeight: 600 }}>
+                  {lowStockLots.length} lot{lowStockLots.length === 1 ? '' : 's'} at or below reorder buffer
+                </span>
+              )}
             </div>
 
-            <div style={{
-              border: `1px solid ${T.border}`,
-              borderRadius: T.radius.md,
-              overflow: 'hidden', maxHeight: 360, overflowY: 'auto',
-            }}>
+            <div className="inventory-table" style={{ maxHeight: 360 }} tabIndex={0} role="region" aria-label="Low stock lots">
               {lowStockLots.length === 0 ? (
                 <div style={{
                   padding: 28, textAlign: 'center',
-                  color: T.success, fontSize: 12.5, fontWeight: 700,
+                  color: T.textSub, fontSize: 12.5, fontWeight: 700,
                 }}>
-                  <Icon name="check_circle" size={14} /> All active lots have adequate stock buffers.
+                  {emptyText('batches', 'No active lots at or below their reorder buffer.')}
                 </div>
               ) : (
                 <table className="tbl" style={{ fontSize: 12 }}>
@@ -1110,7 +1126,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                 Showing <b>{filteredLogs.length}</b> of <b>{inventoryLogs.length}</b> recorded transactions
               </p>
             </div>
-            <button type="button" onClick={fetchLogs} style={btnGhost}>
+            <button type="button" onClick={fetchLogs} style={btnGhost} disabled={loadingLogs}>
               <Icon name="refresh" size={14} /> Refresh
             </button>
           </div>
@@ -1133,6 +1149,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                   <button
                     key={chip.id}
                     type="button"
+                    aria-pressed={isActive}
                     onClick={() => setLogTypeFilter(chip.id)}
                     style={{
                       padding: '5px 12px', borderRadius: T.radius.pill,
@@ -1151,6 +1168,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
 
             <input
               type="text"
+              aria-label="Search logs by medicine, lot, staff, or reason"
               placeholder="Search drug, lot, staff…"
               value={logSearchQuery}
               onChange={(e) => setLogSearchQuery(e.target.value)}
@@ -1168,14 +1186,10 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
               background: T.sage50, borderRadius: T.radius.md,
               border: `1px dashed ${T.border}`,
             }}>
-              No transaction records found matching the selected filter.
+              {emptyText('logs', 'No transaction records found matching the selected filter.')}
             </div>
           ) : (
-            <div style={{
-              border: `1px solid ${T.border}`,
-              borderRadius: T.radius.md,
-              overflow: 'hidden', maxHeight: 480, overflowY: 'auto',
-            }}>
+            <div className="inventory-table" style={{ maxHeight: 480 }} tabIndex={0} role="region" aria-label="Consumption logs">
               <table className="tbl" style={{ fontSize: 12 }}>
                 <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
                   <tr>
@@ -1246,8 +1260,8 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
 
       {/* ── FORMULARY MASTER ────────────────────────────── */}
       {activeTab === 'addmed' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.6fr', gap: 24, alignItems: 'start' }}>
-          <div style={{ background: T.sage50, padding: 20, borderRadius: T.radius.md, border: `1px solid ${T.borderSoft}` }}>
+        <div className="inventory-split inventory-formulary">
+          <div className="inventory-panel">
             <h4 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 800, color: T.primary }}>
               <Icon name="add" size={14} /> Register new drug
             </h4>
@@ -1255,10 +1269,12 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
               Adds a new formulation definition to the master catalog.
             </p>
 
-            <form onSubmit={handleCreateMedicine} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <form onSubmit={handleCreateMedicine} className="inventory-form-stack">
               <div>
-                <label style={fieldLabel}>Brand / trade name</label>
+                <label htmlFor="inventory-brand" style={fieldLabel}>Brand / trade name</label>
                 <input
+                  id="inventory-brand"
+                  disabled={isSubmitting}
                   style={inputStyle}
                   placeholder="e.g. Alaxan FR"
                   value={newMedName}
@@ -1267,8 +1283,10 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                 />
               </div>
               <div>
-                <label style={fieldLabel}>Generic active ingredient</label>
+                <label htmlFor="inventory-generic" style={fieldLabel}>Generic active ingredient</label>
                 <input
+                  id="inventory-generic"
+                  disabled={isSubmitting}
                   style={inputStyle}
                   placeholder="e.g. Ibuprofen + Paracetamol"
                   value={newMedGeneric}
@@ -1276,10 +1294,10 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                   required
                 />
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div className="inventory-field-grid">
                 <div>
-                  <label style={fieldLabel}>Dosage form</label>
-                  <select style={inputStyle} value={newMedForm} onChange={(e) => setNewMedForm(e.target.value)}>
+                  <label htmlFor="inventory-dosage-form" style={fieldLabel}>Dosage form</label>
+                  <select id="inventory-dosage-form" disabled={isSubmitting} style={inputStyle} value={newMedForm} onChange={(e) => setNewMedForm(e.target.value)}>
                     <option value="Tablet">Tablet</option>
                     <option value="Capsule">Capsule</option>
                     <option value="Syrup">Syrup</option>
@@ -1289,8 +1307,10 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                   </select>
                 </div>
                 <div>
-                  <label style={fieldLabel}>Strength</label>
+                  <label htmlFor="inventory-strength" style={fieldLabel}>Strength</label>
                   <input
+                    id="inventory-strength"
+                    disabled={isSubmitting}
                     style={inputStyle}
                     placeholder="e.g. 500mg"
                     value={newMedStrength}
@@ -1299,10 +1319,12 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                   />
                 </div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div className="inventory-field-grid">
                 <div>
-                  <label style={fieldLabel}>Unit</label>
+                  <label htmlFor="inventory-unit" style={fieldLabel}>Unit</label>
                   <input
+                    id="inventory-unit"
+                    disabled={isSubmitting}
                     style={inputStyle}
                     placeholder="pcs, bottle"
                     value={newMedUnit}
@@ -1311,8 +1333,10 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                   />
                 </div>
                 <div>
-                  <label style={fieldLabel}>Buffer threshold</label>
+                  <label htmlFor="inventory-buffer" style={fieldLabel}>Buffer threshold</label>
                   <input
+                    id="inventory-buffer"
+                    disabled={isSubmitting}
                     style={inputStyle}
                     type="number"
                     min="1"
@@ -1322,14 +1346,14 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                   />
                 </div>
               </div>
-              <button type="submit" style={{ ...btnPrimary, padding: 12, marginTop: 4 }}>
+              <button type="submit" style={btnPrimary} disabled={isSubmitting}>
                 <Icon name="add" size={14} /> Add to master formulary
               </button>
             </form>
           </div>
 
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div className="inventory-table-toolbar">
               <div>
                 <h4 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: T.text }}>
                   <Icon name="description" size={14} /> Registered formulary drugs ({medicines.length})
@@ -1340,6 +1364,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
               </div>
               <input
                 type="text"
+                aria-label="Filter medicines by brand or generic name"
                 placeholder="Filter medicines…"
                 value={medSearchFilter}
                 onChange={(e) => setMedSearchFilter(e.target.value)}
@@ -1347,31 +1372,27 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
               />
             </div>
 
-            <div style={{
-              border: `1px solid ${T.border}`,
-              borderRadius: T.radius.md,
-              overflow: 'hidden',
-              maxHeight: 460,
-              overflowY: 'auto',
-            }}>
-              <table className="tbl" style={{ fontSize: 12 }}>
+            <div className="inventory-table" style={{ maxHeight: 460 }} tabIndex={0} role="region" aria-label="Registered formulary drugs">
+              <table className="tbl inventory-formulary-table" style={{ fontSize: 12 }}>
+                <colgroup>
+                  <col className="inventory-formulary-name-col" />
+                  <col className="inventory-formulary-strength-col" />
+                  <col className="inventory-formulary-stock-col" />
+                  <col className="inventory-formulary-action-col" />
+                </colgroup>
                 <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
                   <tr>
                     <th>Brand & generic name</th>
                     <th>Form & strength</th>
-                    <th style={{ textAlign: 'right' }}>Stock on hand</th>
-                    <th style={{ width: 80, textAlign: 'center' }}>Action</th>
+                    <th style={{ textAlign: 'right' }}>Available stock</th>
+                    <th style={{ textAlign: 'center' }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {medicines
-                    .filter(
-                      (m) =>
-                        !medSearchFilter ||
-                        m.name.toLowerCase().includes(medSearchFilter.toLowerCase()) ||
-                        m.generic_name.toLowerCase().includes(medSearchFilter.toLowerCase())
-                    )
-                    .map((m) => (
+                  {filteredMedicines.length === 0 && (
+                    <tr><td colSpan={4}>{emptyText('medicines', 'No formulary entries match the filter.')}</td></tr>
+                  )}
+                  {filteredMedicines.map((m) => (
                       <tr key={m.medicine_id}>
                         <td>
                           <div style={{ fontWeight: 700, color: T.text }}>{m.name}</div>
@@ -1390,6 +1411,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                         <td style={{ textAlign: 'center' }}>
                           <button
                             type="button"
+                            disabled={isSubmitting}
                             onClick={() => handleDeleteMedicine(m.medicine_id, m.name)}
                             style={{
                               padding: '4px 10px',
@@ -1401,6 +1423,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                               fontWeight: 700,
                               cursor: 'pointer',
                               fontFamily: T.font,
+                              whiteSpace: 'nowrap',
                             }}
                             title="Delete this formulary definition"
                           >
@@ -1418,21 +1441,33 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
 
       {/* ── CONFIRMATION MODAL ──────────────────────────── */}
       {confirmDialog && (
-        <div className="modal-backdrop" onClick={() => setConfirmDialog(null)}>
-          <div className="modal-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{
+        <dialog
+          ref={dialogRef}
+          className="inventory-dialog"
+          aria-labelledby="inventory-dialog-title"
+          aria-describedby="inventory-dialog-message"
+          onCancel={(event) => {
+            event.preventDefault();
+            setConfirmDialog(null);
+          }}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setConfirmDialog(null);
+          }}
+        >
+          <div className="modal-card">
+            <h3 id="inventory-dialog-title" style={{
               margin: '0 0 12px', fontSize: 17, fontWeight: 800,
               color: confirmDialog.isDestructive ? T.danger : T.primary,
             }}>
               {confirmDialog.title}
             </h3>
-            <p style={{
+            <p id="inventory-dialog-message" style={{
               fontSize: 13, color: T.textSub, margin: '0 0 22px',
               lineHeight: 1.55, whiteSpace: 'pre-line',
             }}>
               {confirmDialog.message}
             </p>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <div className="inventory-dialog-actions">
               <button
                 type="button"
                 onClick={() => setConfirmDialog(null)}
@@ -1445,7 +1480,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                 onClick={() => {
                   const action = confirmDialog.onConfirm;
                   setConfirmDialog(null);
-                  action();
+                  void action();
                 }}
                 style={{
                   ...btnPrimary,
@@ -1457,7 +1492,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
               </button>
             </div>
           </div>
-        </div>
+        </dialog>
       )}
     </section>
   );

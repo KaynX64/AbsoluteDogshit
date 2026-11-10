@@ -24,7 +24,7 @@ import {
 import { logPhiAccess } from '../utils/phiLogger.js';
 import { JWT_SECRET } from '../utils/secrets.js';
 import { redis, isRedisActive } from '../utils/redisClient.js';
-import { VERIFY_LIMIT } from '../config/limits.js';
+import { getServerPolicy } from '../config/serverPolicy.js';
 import {
   SignerError,
   assertValidSigner,
@@ -1112,6 +1112,7 @@ export default function documentRoutes(io) {
   const verifyMemoryHits = new Map();
 
   async function verifyRateLimit(req, res, next) {
+    const { verify: VERIFY_LIMIT } = getServerPolicy().limits;
     const identifier = req.ip || 'unknown';
     let count;
     let retrySec = VERIFY_LIMIT.windowSeconds;

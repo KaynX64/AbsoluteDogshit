@@ -8,6 +8,7 @@ import { T, rolePill, inputStyle, btnPrimary, btnGhost, liveObject } from '../th
 import { getTextColorOn } from '../theme/presets';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
 import ServerPingMonitor from './ServerPingMonitor';
+import ServerPolicyPanel from './ServerPolicyPanel';
 import Icon from './Icon';
 
 /* ── Icons (inline, no dependency) ─────────────────────────────── */
@@ -83,7 +84,7 @@ function NoPermissionPanel({ required }: { required: string }) {
   );
 }
 
-export type AdminTab = 'users' | 'archived' | 'audit' | 'telemetry' | 'analytics' | 'incidents' | 'db';
+export type AdminTab = 'users' | 'archived' | 'audit' | 'telemetry' | 'analytics' | 'incidents' | 'db' | 'serverPolicy';
 
 interface AdminConsoleProps {
   /** Optional controlled active tab — if provided, the sidebar drives the tab. */
@@ -911,6 +912,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           {activeTab === 'analytics' && 'Health analytics'}
           {activeTab === 'incidents' && 'Incident records'}
           {activeTab === 'db' && 'Database Studio'}
+          {activeTab === 'serverPolicy' && 'Server Policy'}
         </h1>
         <p className="vd-page-head-sub">
           {activeTab === 'users' && 'Manage institutional accounts, access permissions and account status. Seven RBAC roles govern access. Editing a user changes their assigned permissions; suspending an account disables access without deleting its profile.'}
@@ -920,8 +922,11 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           {activeTab === 'analytics' && 'Campus illness trajectories, seasonal spike monitoring & health reports.'}
           {activeTab === 'incidents' && 'Official documentation and MinIO-archived PDF records of resolved emergency incidents.'}
           {activeTab === 'db' && 'Inspect and maintain system records · valetudo_healthlink'}
+          {activeTab === 'serverPolicy' && 'Review and update rate limits, no-show grace, and appointment rules.'}
         </p>
       </div>
+
+      {activeTab === 'serverPolicy' && <ServerPolicyPanel />}
 
       {(activeTab === 'users' || activeTab === 'archived') && (
         <div

@@ -1,5 +1,6 @@
 // desktop/src/components/DoctorConsole.tsx
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import PrescriptionGenerator from './PrescriptionGenerator';
 import { io } from 'socket.io-client';
 import AnalyticsDashboard from './AnalyticsDashboard';
@@ -475,24 +476,25 @@ export default function DoctorConsole({
     /* Restore dentist-only odontogram when the server provided one */
     setDentalChartData(isDentist && app.past_dental_chart ? app.past_dental_chart : {});
 
-    /* Extract triage vitals from the appointment notes */
-    if (app.notes && app.notes.includes('[TRIAGE VITALS]')) {
-      const bpMatch = app.notes.match(/BP:\s*(\d+)\/(\d+)/);
+    /* Check-in prepends a single triage line ahead of the appointment notes. */
+    const triageNote = app.notes?.split('\n', 1)[0];
+    if (triageNote?.startsWith('[TRIAGE VITALS] ')) {
+      const bpMatch = triageNote.match(/BP:\s*(\d+)\/(\d+)/);
       if (bpMatch) {
         setBpSystolic(bpMatch[1]);
         setBpDiastolic(bpMatch[2]);
       }
-      const tempMatch = app.notes.match(/Temp:\s*([0-9.]+)/);
+      const tempMatch = triageNote.match(/Temp:\s*([0-9.]+)/);
       if (tempMatch) setTemperature(tempMatch[1]);
-      const pulseMatch = app.notes.match(/Pulse:\s*(\d+)/);
+      const pulseMatch = triageNote.match(/Pulse:\s*(\d+)/);
       if (pulseMatch) setPulseRate(pulseMatch[1]);
-      const spo2Match = app.notes.match(/SpO2:\s*([0-9.]+|—)/i);
+      const spo2Match = triageNote.match(/SpO2:\s*([0-9.]+|—)/i);
       if (spo2Match) setSpo2(spo2Match[1] === '—' ? '' : spo2Match[1]);
-      const respRateMatch = app.notes.match(/Resp:\s*([0-9.]+|—)/i);
+      const respRateMatch = triageNote.match(/Resp:\s*([0-9.]+|—)/i);
       if (respRateMatch) setRespRate(respRateMatch[1] === '—' ? '' : respRateMatch[1]);
-      const heightMatch = app.notes.match(/Height:\s*([0-9.]+|—)/);
+      const heightMatch = triageNote.match(/Height:\s*([0-9.]+|—)/);
       if (heightMatch) setHeight(heightMatch[1] === '—' ? '' : heightMatch[1]);
-      const weightMatch = app.notes.match(/Weight:\s*([0-9.]+|—)/);
+      const weightMatch = triageNote.match(/Weight:\s*([0-9.]+|—)/);
       if (weightMatch) setWeight(weightMatch[1] === '—' ? '' : weightMatch[1]);
     }
 
@@ -3592,10 +3594,13 @@ const loadPatientTimeline = async (patient: any) => {
       )}
       
       {/* ── EMR History modal ───────────────────────────────── */}
-      {showHistoryModal && (
+      {showHistoryModal && createPortal(
         <div className="modal-backdrop" onClick={() => setShowHistoryModal(false)}>
           <div
             className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="past-emr-history-title"
             style={{ maxWidth: 780 }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -3610,6 +3615,7 @@ const loadPatientTimeline = async (patient: any) => {
               }}
             >
               <h3
+                id="past-emr-history-title"
                 style={{
                   margin: 0,
                   color: T.info,
@@ -3623,6 +3629,7 @@ const loadPatientTimeline = async (patient: any) => {
               <button
                 type="button"
                 onClick={() => setShowHistoryModal(false)}
+                aria-label="Close medical history"
                 style={{
                   background: 'none',
                   border: 'none',
@@ -3779,7 +3786,8 @@ const loadPatientTimeline = async (patient: any) => {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ═══════════════════════════════════════════════════════════ */}

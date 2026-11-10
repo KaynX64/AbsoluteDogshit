@@ -11,6 +11,8 @@ import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 import { loginUser, authenticateToken, changePassword, loginRateLimit, logoutUser } from './auth.js';
 import { logActiveLimits } from './config/limits.js';
+import { getServerPolicy } from './config/serverPolicy.js';
+import { loadServerPolicy } from './utils/serverPolicyStore.js';
 
 
 
@@ -282,11 +284,12 @@ app.get('/api/ping', (req, res) => {
 // =============================================================================
 const PORT = process.env.PORT || 5000;
 
+await loadServerPolicy();
 server.listen(PORT, async () => {
   console.log(`✅ Valetudo HealthLink API & WebSockets running on ${isHttps ? 'HTTPS/WSS' : 'HTTP/WS'} port ${PORT}`);
   await initRedis().catch(() => {});
   await ensureBucketExists().catch(() => {});
   await runAutoMigrations().catch(() => {});
-  logActiveLimits();
+  logActiveLimits(getServerPolicy().limits);
   startReminderScheduler(io);
 });

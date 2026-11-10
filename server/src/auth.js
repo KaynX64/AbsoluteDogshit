@@ -5,7 +5,7 @@ import { pool } from './db.js';
 import { logAudit } from './utils/auditLogger.js';
 import { JWT_SECRET } from './utils/secrets.js';
 import { redis, isRedisActive } from './utils/redisClient.js';
-import { LOGIN_LIMIT } from './config/limits.js';
+import { getServerPolicy } from './config/serverPolicy.js';
 import crypto from 'crypto';
 import { evaluatePasswordStrength } from './utils/passwordPolicy.js';
 import { resolveAdminPermissions } from './middleware/rbac.js';
@@ -41,6 +41,7 @@ function loginRateLimitKey(ip) {
 const loginMemoryHits = new Map();
 
 export async function loginRateLimit(req, res, next) {
+  const { login: LOGIN_LIMIT } = getServerPolicy().limits;
   const ip = req.ip || req.socket?.remoteAddress || 'unknown';
   const key = loginRateLimitKey(ip);
 

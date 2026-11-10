@@ -11,7 +11,7 @@ Flat folder: one component per file, header comment `// desktop/src/components/<
 - Base URL: `import { API_BASE_URL, SOCKET_URL } from '../config/api'` — never hardcode a host.
 - HTTP: plain `fetch()` with manual `res.ok` / status-code checks; JSON via `JSON.stringify`. No axios, no react-query.
 - Sockets: each realtime component opens its **own** `io(SOCKET_URL, { auth: { token } })` inside a `useEffect` and disconnects on cleanup (canonical pattern: DoctorConsole L351-374). New client-side event names need a matching server `io.emit(...)` in `server/src/routes/*` or `utils/reminderWorker.js`.
-- Icons: `<Icon name tone />` only — the name registry is `IconNames` (Icon.tsx L124). Add new glyphs there, not inline SVG.
+- Icons: `<Icon name tone />` only — the name registry is `IconNames` in `Icon.tsx`. Use ligatures from the bundled Material Symbols font.
 - Styling: inline `style` objects + live tokens from `../theme`; use `T.textOnPrimary` / semantic `textOn*` tokens for filled controls, and do not add component-local palettes. `index.css` (~75 KB) is globals only.
 - Role-gated UI here is cosmetic — the server enforces RBAC on every route. Never treat client checks as security.
 

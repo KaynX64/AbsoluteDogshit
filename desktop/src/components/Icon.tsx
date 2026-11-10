@@ -1,48 +1,9 @@
 // desktop/src/components/Icon.tsx
 //
-// Centralized Google Material Symbols icon component.
-//
-// Loads the Material Symbols Outlined font (single CSS import in index.css)
-// and renders the requested icon as a ligature span. This is the official
-// "Material Google Icons" font — every glyph is the canonical Material icon.
-//
-// Usage:
-//   <Icon name="users" />                       // outlined, default size
-//   <Icon name="shield" weight={600} />         // weight control
-//   <Icon name="alert" fill size={20} tone="danger" />
-//
-// The `tone` prop maps to semantic theme colors (primary / danger / warning /
-// success / info / text / muted). Pass `tone={null}` to inherit the parent's
-// currentColor.
-//
-// Why a font and not inline SVG?
-//   • Every Material icon is available via a single ligature lookup.
-//   • One 60 KB woff2 download covers all icons used in the app.
-//   • Optical sizing, weight, and grade are configurable per-glyph.
-//   • Works offline once cached by Electron's HTTP cache.
+// Renders Material Symbols as ligatures from the variable font bundled by
+// index.css. Fill, weight, grade, and optical size are configurable per icon.
+// Use semantic theme tones or inherit the parent's current color.
 
-// desktop/src/components/Icon.tsx
-//
-// Centralized Google Material Symbols icon component.
-//
-// Loads the Material Symbols Outlined font (single CSS import in index.css)
-// and renders the requested icon as a ligature span. This is the official
-// "Material Google Icons" font — every glyph is the canonical Material icon.
-//
-// Usage:
-//   <Icon name="users" />                       // outlined, default size
-//   <Icon name="shield" weight={600} />         // weight control
-//   <Icon name="alert" fill size={20} tone="danger" />
-//
-// The `tone` prop maps to semantic theme colors (primary / danger / warning /
-// success / info / text / muted). Pass `tone={null}` to inherit the parent's
-// currentColor.
-//
-// Why a font and not inline SVG?
-//   • Every Material icon is available via a single ligature lookup.
-//   • One 60 KB woff2 download covers all icons used in the app.
-//   • Optical sizing, weight, and grade are configurable per-glyph.
-//   • Works offline once cached by Electron's HTTP cache.
 import type { CSSProperties } from 'react';
 import { T } from '../theme';
 

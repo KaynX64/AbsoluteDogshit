@@ -5,7 +5,7 @@
 
 ## Boot pipeline (src/index.js)
 
-CORS allow-list → security headers (HSTS, nosniff, X-Frame-Options DENY, XSS, Referrer-Policy) → `express.json()` → routes → `https.createServer` from `../certs/{cert,key}.pem` (**process exits if certs are missing**, unless `ALLOW_INSECURE_HTTP=true`) → Socket.IO `io` (exported) → `listen(PORT=5000)` → async boot: `initRedis` → `ensureBucketExists` (MinIO bucket `valetudo-attachments`) → `runAutoMigrations` → `logActiveLimits` → `startReminderScheduler(io)`.
+CORS allow-list → security headers (HSTS, nosniff, X-Frame-Options DENY, XSS, Referrer-Policy) → `express.json()` → routes → `https.createServer` from `../certs/{cert,key}.pem` (**process exits if certs are missing**, unless `ALLOW_INSECURE_HTTP=true`) → Socket.IO `io` (exported) → load the persisted [server policy](../src/config/SERVER-POLICY.md) → `listen(PORT=5000)` → async boot: `initRedis` → `ensureBucketExists` (MinIO bucket `valetudo-attachments`) → `runAutoMigrations` → `logActiveLimits` → `startReminderScheduler(io)`.
 
 ## Route map — src/routes/*.js (all mounted under /api in index.js)
 
