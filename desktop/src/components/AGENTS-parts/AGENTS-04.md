@@ -3,7 +3,7 @@
 ### PrescriptionGenerator.tsx — e-Prescription form
 - **Slice map:** `codeslice/DT-07-PrescriptionGenerator.md` has the current line ranges.
 - Props: `patientUserId`, `appointmentId?`, `verifiedPatient {first_name,last_name,student_no,course,allergies,date_of_birth?,age?,sex?}`, `initialNotes?`, `isArchived?`, `onPrescriptionIssued?`, `onPrescriptionError?`.
-- The catalog (`GET /api/inventory/medicines`) provides `strength` and `form`. The selected entry supplies the read-only Dosage and Dosage Type for formulary prescriptions. Outside pharmacy prescriptions retain manual dosage. `handleSaveAndPrintPrescription` reviews the draft and posts to `/api/documents/prescriptions` after stock and interaction checks.
+- The selected catalog entry supplies the read-only Dosage, Dosage Type, and Generic active ingredient from `strength`, `form`, and `generic_name`. Outside pharmacy prescriptions retain manual dosage. `handleSaveAndPrintPrescription` reviews the draft and posts to `/api/documents/prescriptions` after stock and interaction checks.
 
 ### AnalyticsDashboard.tsx — 1,350 lines / 43 KB. Read-only dashboards + exports
 - **Slice map:** `codeslice/DT-06-AnalyticsDashboard.md` (30 slices, verified @ 93b4172).

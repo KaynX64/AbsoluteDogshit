@@ -773,8 +773,14 @@
 }
 
 .doctor-console .doctor-formulary-fields {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
+}
+
+@container doctor-clinic (min-width: 900px) {
+  .doctor-console .doctor-formulary-fields {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  }
 }
 
 .doctor-console .doctor-formulary-details {

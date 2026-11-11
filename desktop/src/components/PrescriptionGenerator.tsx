@@ -380,6 +380,7 @@ export default function PrescriptionGenerator({
   const outside = rxMode === 'outside';
   const strength = selectedMed?.strength?.trim() || '';
   const dosageType = selectedMed?.form?.trim() || '';
+  const genericIngredient = selectedMed?.generic_name?.trim() || '';
   const medicineName = outside ? outsideName.trim() : selectedMed?.name || '';
   const prescriptionDraft = {
     patient_user_id: patientUserId,
@@ -407,7 +408,10 @@ export default function PrescriptionGenerator({
       input: outside ? 'rx-dosage' : undefined,
       error: item.dosage ? undefined : outside ? 'Enter a dosage.' : 'Choose a formulary medicine with a recorded strength.',
     },
-    ...(!outside ? [{ label: 'Dosage Type', value: dosageType }] : []),
+    ...(!outside ? [
+      { label: 'Dosage Type', value: dosageType },
+      { label: 'Generic active ingredient', value: genericIngredient },
+    ] : []),
     { label: 'Frequency', value: item.frequency, input: 'rx-frequency', error: item.frequency ? undefined : 'Enter a frequency.' },
     { label: 'Route', value: item.route, input: 'rx-route', error: item.route ? undefined : 'Enter an administration route.' },
     { label: 'Duration (days)', value: rxDurationDays, input: 'rx-duration', error: wholeNumber(rxDurationDays, 2147483647) ? undefined : 'Enter a positive whole number.' },
@@ -621,6 +625,10 @@ export default function PrescriptionGenerator({
             <div>
               <dt>Dosage Type</dt>
               <dd>{dosageType || (selectedMed ? 'Not recorded' : '—')}</dd>
+            </div>
+            <div>
+              <dt>Generic active ingredient</dt>
+              <dd>{genericIngredient || (selectedMed ? 'Not recorded' : '—')}</dd>
             </div>
           </dl>
         )}
