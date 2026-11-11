@@ -2,9 +2,10 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { initializeApp, cert } from 'firebase-admin/app';
+import { initializeApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { pool } from '../db.js';
+import { createFcmAppOptions } from './fcmCredential.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,10 +16,14 @@ let firebaseApp = null;
 
 if (fs.existsSync(serviceAccountPath)) {
   try {
-    const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
-    firebaseApp = initializeApp({
-      credential: cert(serviceAccount),
-    });
+    const accountJson = fs.readFileSync(serviceAccountPath, 'utf8');
+    let serviceAccount;
+    try {
+      serviceAccount = JSON.parse(accountJson);
+    } catch {
+      throw new Error('Firebase service-account file contains invalid JSON.');
+    }
+    firebaseApp = initializeApp(createFcmAppOptions(serviceAccount));
     isFcmInitialized = true;
     console.log('🔥 [FCM Push] Firebase Admin SDK initialized successfully.');
   } catch (err) {

@@ -79,7 +79,7 @@ function ModePill({
       onClick={onClick}
       disabled={disabled}
       style={{
-        flex: 1,
+        flex: '1 1 145px', minWidth: 0,
         padding: '9px 12px',
         border: `1px solid ${active ? T.primary : 'transparent'}`,
         borderRadius: T.radius.pill,
@@ -91,7 +91,7 @@ function ModePill({
         fontFamily: T.font,
         boxShadow: active ? T.shadow.xs : 'none',
         transition: 'all 120ms ease',
-        whiteSpace: 'nowrap',
+        whiteSpace: 'normal', overflowWrap: 'anywhere',
       }}
     >
       {children}
@@ -151,7 +151,7 @@ function FormularySelect({
           }}
         >
           {selected
-            ? `${selected.name} (${selected.generic_name}) · ${selected.strength} [${selected.form}]`
+            ? selected.name
             : 'Select medicine…'}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
@@ -286,7 +286,7 @@ export default function PrescriptionGenerator({
 }: PrescriptionGeneratorProps) {
   const [medicines, setMedicines] = useState<MedicineMaster[]>([]);
   const [selectedMedicineId, setSelectedMedicineId] = useState<number>(0);
-  const [rxDosage, setRxDosage] = useState('');
+  const [outsideDosage, setOutsideDosage] = useState('');
   const [rxFrequency, setRxFrequency] = useState('');
   const [rxRoute, setRxRoute] = useState('');
   const [rxDurationDays, setRxDurationDays] = useState('');
@@ -362,17 +362,12 @@ export default function PrescriptionGenerator({
     };
   }, [selectedMedicineId, rxMode]);
 
-  const handleSelectMedicine = (medId: number) => {
-    setSelectedMedicineId(medId);
-    setRxDosage('');
-  };
-
   const handleSwitchMode = (mode: 'formulary' | 'outside') => {
     if (isArchived || mode === rxMode) return;
     setRxMode(mode);
     setInteractionResult(null);
     setStockError(null);
-    setRxDosage('');
+    setOutsideDosage('');
   };
 
   const wholeNumber = (value: string, max: number) =>
@@ -383,7 +378,9 @@ export default function PrescriptionGenerator({
   const validExpiry = wholeNumber(rxValidityDays, 180);
   const expiresAt = validExpiry ? new Date(Date.now() + validity * 86400000).toISOString().slice(0, 10) : '';
   const outside = rxMode === 'outside';
-  const medicineName = outside ? outsideName.trim() : selectedMed ? selectedMed.name + ' · ' + selectedMed.strength : '';
+  const strength = selectedMed?.strength?.trim() || '';
+  const dosageType = selectedMed?.form?.trim() || '';
+  const medicineName = outside ? outsideName.trim() : selectedMed?.name || '';
   const prescriptionDraft = {
     patient_user_id: patientUserId,
     appointment_id: appointmentId,
@@ -392,7 +389,7 @@ export default function PrescriptionGenerator({
     items: [{
       medicine_id: outside ? null : selectedMedicineId,
       outside_drug_name: outside ? outsideName.trim() : undefined,
-      dosage: rxDosage.trim(),
+      dosage: outside ? outsideDosage.trim() : strength,
       frequency: rxFrequency.trim(),
       route: rxRoute.trim(),
       duration_days: duration,
@@ -404,7 +401,13 @@ export default function PrescriptionGenerator({
   const item = prescriptionDraft.items[0];
   const reviewFields: ReviewField[] = [
     { label: 'Medicine', value: medicineName, input: outside ? 'rx-outside-name' : 'rx-formulary', error: medicineName ? undefined : 'Choose or enter a medicine.' },
-    { label: 'Dosage', value: item.dosage, input: 'rx-dosage', error: item.dosage ? undefined : 'Enter a dosage.' },
+    {
+      label: outside ? 'Dosage' : 'Dosage (formulary strength)',
+      value: item.dosage,
+      input: outside ? 'rx-dosage' : undefined,
+      error: item.dosage ? undefined : outside ? 'Enter a dosage.' : 'Choose a formulary medicine with a recorded strength.',
+    },
+    ...(!outside ? [{ label: 'Dosage Type', value: dosageType }] : []),
     { label: 'Frequency', value: item.frequency, input: 'rx-frequency', error: item.frequency ? undefined : 'Enter a frequency.' },
     { label: 'Route', value: item.route, input: 'rx-route', error: item.route ? undefined : 'Enter an administration route.' },
     { label: 'Duration (days)', value: rxDurationDays, input: 'rx-duration', error: wholeNumber(rxDurationDays, 2147483647) ? undefined : 'Enter a positive whole number.' },
@@ -526,7 +529,7 @@ export default function PrescriptionGenerator({
               <b style={{ color: T.textSub }}>Sex:</b> {verifiedPatient.sex}
             </span>
           )}
-          {verifiedPatient.allergies && verifiedPatient.allergies !== 'None' && (
+          {verifiedPatient.allergies?.trim() && !/^(none|none reported)$/i.test(verifiedPatient.allergies.trim()) && (
             <span style={{ color: T.danger, fontWeight: 700 }}>
               ⚠ Allergies: {verifiedPatient.allergies}
             </span>
@@ -537,12 +540,12 @@ export default function PrescriptionGenerator({
       {/* ── Medication source: infirmary formulary vs outside pharmacy ── */}
       <div
         style={{
-          display: 'flex',
+          display: 'flex', flexWrap: 'wrap',
           gap: 6,
           padding: 4,
           background: T.sage100,
           border: `1px solid ${T.border}`,
-          borderRadius: T.radius.pill,
+          borderRadius: T.radius.lg,
         }}
       >
         <ModePill
@@ -566,7 +569,7 @@ export default function PrescriptionGenerator({
           <FormularySelect
             medicines={medicines}
             value={selectedMedicineId}
-            onChange={handleSelectMedicine}
+            onChange={setSelectedMedicineId}
             disabled={isArchived}
           />
         </Field>
@@ -599,17 +602,29 @@ export default function PrescriptionGenerator({
         </Field>
       )}
 
-      <div className="doctor-prescription-fields">
-        <Field label="Dosage" inputId="rx-dosage">
-          <input
-            style={inputStyle}
-            disabled={isArchived}
-
-            id="rx-dosage" maxLength={100} value={rxDosage}
-            onChange={(e) => setRxDosage(e.target.value)}
-          />
-        </Field>
-        <Field label={rxMode === 'outside' ? 'Quantity to purchase (prescribed)' : 'Quantity prescribed (dispensed)'}>
+      <div className={outside ? 'doctor-prescription-fields' : 'doctor-prescription-fields doctor-formulary-fields'}>
+        {outside ? (
+          <Field label="Dosage" inputId="rx-dosage">
+            <input
+              style={inputStyle}
+              disabled={isArchived}
+              id="rx-dosage" maxLength={100} value={outsideDosage}
+              onChange={(e) => setOutsideDosage(e.target.value)}
+            />
+          </Field>
+        ) : (
+          <dl className="doctor-formulary-details" aria-live="polite">
+            <div>
+              <dt>Dosage <span>(strength)</span></dt>
+              <dd>{strength || (selectedMed ? 'Not recorded' : '—')}</dd>
+            </div>
+            <div>
+              <dt>Dosage Type</dt>
+              <dd>{dosageType || (selectedMed ? 'Not recorded' : '—')}</dd>
+            </div>
+          </dl>
+        )}
+        <Field inputId="rx-quantity" label={outside ? 'Quantity to purchase (prescribed)' : 'Quantity prescribed (dispensed)'}>
           <input
             type="number"
             min="1"

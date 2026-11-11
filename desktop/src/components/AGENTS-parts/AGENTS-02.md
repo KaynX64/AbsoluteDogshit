@@ -1,18 +1,18 @@
 <!-- split from desktop/src/components/AGENTS.md — part 02 of 04 -->
 
-### DoctorConsole.tsx — 4,366 lines. Consultations, EMR, e-Rx, clearances, immunizations, analytics
-- **Slice map:** `codeslice/DT-01-DoctorConsole-parts/` (68 slices, 2 parts, verified @ 93b4172).
+### DoctorConsole.tsx — Consultations, EMR, e-Rx, clearances, immunizations, analytics
+- **Slice map:** `codeslice/DT-01-DoctorConsole-parts/` has the current line ranges.
 - Exports: `ToothCondition` L13, `ToothRecord` L21, `DoctorViewMode` L27 (`'active'|'scheduled'|'history'|'archive'|'analytics'`), component L178.
 - Sockets L351-374: `appointment:booked`, `appointment:status_changed`, `queue:updated`, `appointment:cancelled`.
 - Queue & consult: `fetchAppointments` L308 (`GET /api/appointments/today?filter=active|history|scheduled` L312-314), `handleConflict` L376, `selectPatient` L407, `handleStartConsultation` L557 (status → in-progress L562), `handleFinishConsultation` L588 (complete L643 + EMR + attachments upload L662).
 - Patient data: the consultation strip requests attachment metadata only. Past EMR History and the archive timeline use `usePatientHistory` for 25-record pages and the offline SQLite fallback. Patient search uses `/api/appointments/patients/search?query=`.
 - `ClinicalReview` shows the values to be saved for encounters, prescriptions and clearances. Edit actions focus the corresponding input. Queue refreshes preserve the selected encounter's draft. The issuer history reads saved details even when a PDF is pending.
-- `DoctorConsole.css` lets the archive and prescription fields wrap within the available workspace. The dental arches scroll horizontally to keep the tooth order and button size. Reselecting the current appointment and refreshing the queue preserve the draft and keyboard focus.
+- On wide screens, the patient context and read-only triage vitals sit above the queue beside the editor. Patient details, record history, and long safety entries use keyboard-operable disclosures. Encounter, Documents, and the dentist-only Dental chart share one scroll area and preserve draft state across views. The encounter action bar keeps the attachment and discharge review controls together. Narrow and short windows use one vertical scroll area. Dental arches keep their horizontal scroll and tooth button sizes.
 - Rx/clearance: rx history L752 (`/api/documents/prescriptions/patient/:id`), clearance history L788, print clearance L1085 (`POST /api/documents/clearances`).
 - Immunizations: open modal L883, quick-add L928, custom L940, remove L961, save L965 (`GET/POST /api/profile/patient/:id/immunizations` L895/L976).
 - PDFs: `handleDownloadPdf` L1009, `openIssuedPdf` L1051 (`GET /api/documents/:kind/:id/pdf`).
 - BMI: consult form computes `bmi`/`bmiCategory` client-side from height/weight; header also shows appointment-supplied `bmi`/`bmi_category`.
-- Render anchors: page header L1172 · queue grid L1198 · analytics L1341 · archive/EMR directory L1344 · active/scheduled/history lists L1703 · labs & attachment preview L1997 · interactive odontogram L2079 · rx history modal L3085 · clearance history modal L3308 · EMR history modal L3500 · signature enroll L4239.
+- Layout anchors: `doctor-context`, `doctor-roster`, `doctor-workspace-switch`, `doctor-encounter-panel`, `doctor-encounter-actions`, `doctor-document-panel` and `doctor-dental-panel`.
 
 ### AdminConsole.tsx — 3,054 lines. Users, audit, telemetry, analytics, DB Studio
 - **Slice map:** `codeslice/DT-02-AdminConsole-parts/` (59 slices, 2 parts, verified @ 93b4172).

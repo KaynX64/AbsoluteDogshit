@@ -1,0 +1,1834 @@
+diff --git a/desktop/src/components/DoctorConsole.tsx b/desktop/src/components/DoctorConsole.tsx
+--- a/desktop/src/components/DoctorConsole.tsx
++++ b/desktop/src/components/DoctorConsole.tsx
+@@ -274,6 +274,9 @@
+ 
+   /* ── Issuance tab state ────────────────────────────────────── */
+   const [docType, setDocType] = useState<'rx' | 'clearance'>('rx');
++  const [workspacePanel, setWorkspacePanel] = useState<'encounter' | 'documents'>('encounter');
++  const [queueExpanded, setQueueExpanded] = useState(false);
++  const queueToggle = useRef<HTMLButtonElement>(null);
+   const [clearancePurpose, setClearancePurpose] = useState('');
+   const [clearanceRemarks, setClearanceRemarks] = useState('');
+   const [isIssuingClearance, setIsIssuingClearance] = useState(false);
+@@ -455,6 +458,7 @@
+ 
+   const selectPatient = (app: AppointmentItem) => {
+     selectedAppointmentId.current = app.appointment_id;
++    setWorkspacePanel('encounter');
+     setSelectedApp(app);
+     setClearanceConfirmation(false);
+     setClearancePurpose('');
+@@ -1181,19 +1185,23 @@
+     <div className="doctor-console">
+       {/* ── Page header ─────────────────────────────────────── */}
+       {viewMode !== 'analytics' && (
+-        <div className="doctor-header">
+-          <div className="vd-page-head" style={{ marginBottom: 0 }}>
++        <header className="doctor-header">
++          <div className="doctor-heading-icon" aria-hidden="true">
++            <Icon name={isDentist ? 'dentistry' : 'medical_services'} size={22} />
++          </div>
++          <div className="vd-page-head">
+             <h1 className="vd-page-head-title">{headerTitle[viewMode]}</h1>
+             <p className="vd-page-head-sub">{headerSub[viewMode]}</p>
+           </div>
+           <button
+             type="button"
+-            style={btnGhost}
++            className="doctor-signature-button" aria-label="My signature" title="My signature"
+             onClick={() => setShowSignature(true)}
+           >
+-            <Icon name="edit_note" size={14} /> My signature
++            <Icon name="edit_note" size={18} />
++            <span className="doctor-signature-label">My signature</span>
+           </button>
+-        </div>
++        </header>
+       )}
+ 
+       {(signatureStatus === 'missing' || signatureStatus === 'error') && (
+@@ -1238,147 +1246,12 @@
+           payload under the same server-side access rules. */}
+       <EmergencyAlertBanner />
+ 
+-      {/* ── Queue grid (hidden on analytics/archive) ────────── */}
+-      {viewMode !== 'analytics' && viewMode !== 'archive' && (
+-        <div
+-          style={{
+-            background: T.surface,
+-            border: `1px solid ${T.border}`,
+-            borderRadius: T.radius.lg,
+-            padding: 22,
+-            marginBottom: 22,
+-            boxShadow: T.shadow.xs,
+-          }}
+-        >
+-          {loadingAppointments ? (
+-            <div
+-              style={{
+-                padding: 24,
+-                textAlign: 'center',
+-                color: T.textSub,
+-                fontSize: 13,
+-              }}
+-            >
+-              Loading roster…
+-            </div>
+-          ) : appointments.length === 0 ? (
+-            <div
+-              style={{
+-                padding: '28px 20px',
+-                textAlign: 'center',
+-                color: T.textSub,
+-                fontSize: 13,
+-                lineHeight: 1.6,
+-              }}
+-            >
+-              {viewMode === 'active'
+-                ? 'No patients currently waiting in your consultation queue.'
+-                : viewMode === 'scheduled'
+-                ? 'No pending mobile bookings assigned to your schedule.'
+-                : 'No archived consultations found for your department.'}
+-            </div>
+-          ) : (
+-            <div className="doctor-queue-grid">
+-              {appointments.map((app) => {
+-                const isSelected = selectedApp?.appointment_id === app.appointment_id;
+-                const badge = STATUS_STYLE(app.status);
+-                return (
+-                  <button
+-                    key={app.appointment_id}
+-                    type="button"
+-                    className="doctor-queue-item"
+-                    aria-pressed={isSelected}
+-                    onClick={() => { if (!isSelected) selectPatient(app); }}
+-                  >
+-                    <div
+-                      style={{
+-                        display: 'flex',
+-                        justifyContent: 'space-between',
+-                        alignItems: 'center',
+-                        marginBottom: 10,
+-                      }}
+-                    >
+-                      <span
+-                        style={{
+-                          display: 'inline-flex',
+-                          alignItems: 'center',
+-                          gap: 6,
+-                          fontFamily: T.mono,
+-                          fontSize: 11.5,
+-                          fontWeight: 700,
+-                          color: T.primary,
+-                          background: T.surface,
+-                          padding: '3px 8px',
+-                          borderRadius: T.radius.xs,
+-                          border: `1px solid ${T.primaryTint}`,
+-                        }}
+-                      >
+-                        <Icon name="confirmation_number" size={14} /> {app.queue_ticket || (app.status === 'completed' ? 'DONE' : 'WAITING')}
+-                      </span>
+-                      <span
+-                        style={{
+-                          padding: '3px 10px',
+-                          borderRadius: T.radius.pill,
+-                          background: badge.bg,
+-                          color: badge.color,
+-                          fontSize: 10,
+-                          fontWeight: 800,
+-                          letterSpacing: 0.3,
+-                        }}
+-                      >
+-                        {badge.text}
+-                      </span>
+-                    </div>
+-                    <div
+-                      style={{
+-                        fontSize: 15,
+-                        fontWeight: 700,
+-                        color: T.text,
+-                        marginBottom: 4,
+-                      }}
+-                    >
+-                      {app.first_name} {app.last_name}
+-                    </div>
+-                    <div
+-                      style={{
+-                        fontSize: 12,
+-                        color: T.textSub,
+-                        marginBottom: 2,
+-                      }}
+-                    >
+-                      {app.appointment_type}
+-                    </div>
+-                    <div
+-                      style={{
+-                        fontSize: 11,
+-                        color: T.textMuted,
+-                        fontFamily: T.mono,
+-                      }}
+-                    >
+-                         <Icon name="calendar_month" size={14} /> {app.date_str} · ⏰ {app.time_slot}
+-                    </div>
+-                  </button>
+-                );
+-              })}
+-            </div>
+-          )}
+-        </div>
+-      )}
+-
+       {/* ── Analytics tab ───────────────────────────────────── */}
+       {viewMode === 'analytics' && <AnalyticsDashboard />}
+ 
+       {/* ── Archive (patient EMR directory) ────────────────── */}
+       {viewMode === 'archive' && (
+-        <div
+-          style={{
+-            background: T.surface,
+-            border: `1px solid ${T.border}`,
+-            borderRadius: T.radius.lg,
+-            padding: 22,
+-            boxShadow: T.shadow.xs,
+-          }}
+-        >
++        <section className="doctor-directory" aria-label="Patient directory">
+           <form
+             onSubmit={handleSearchPatientDirectory}
+             className="doctor-archive-search"
+@@ -1728,77 +1601,92 @@
+               )}
+             </div>
+           </div>
+-        </div>
++        </section>
+       )}
+ 
+       {/* ── Active / Scheduled / History ───────────────────── */}
+       {viewMode !== 'analytics' && viewMode !== 'archive' && (
+-        <>
++        <div className="doctor-clinic-layout">
++          <section className="doctor-roster" aria-labelledby="doctor-roster-title" data-expanded={queueExpanded || !selectedApp}>
++            <div className="doctor-roster-heading">
++              <h2 id="doctor-roster-title">Patients</h2>
++              {!loadingAppointments && <span>{appointments.length} {appointments.length === 1 ? 'record' : 'records'}</span>}
++            </div>
++            {selectedApp && (
++              <button type="button" ref={queueToggle} className="doctor-roster-toggle" aria-controls="doctor-roster-list"
++                aria-expanded={queueExpanded} onClick={() => setQueueExpanded((expanded) => !expanded)}>
++                {queueExpanded ? 'Hide queue' : 'Change patient'}
++                <Icon name={queueExpanded ? 'expand_less' : 'expand_more'} size={18} />
++              </button>
++            )}
++            <div id="doctor-roster-list">
++              {loadingAppointments ? (
++                <p className="doctor-roster-empty" role="status">Loading patients…</p>
++              ) : appointments.length === 0 ? (
++                <p className="doctor-roster-empty">
++                  {viewMode === 'active' ? 'The consultation queue is empty.'
++                    : viewMode === 'scheduled' ? 'No upcoming bookings.'
++                    : 'No archived consultations.'}
++                </p>
++              ) : (
++                <ul className="doctor-queue-grid">
++                  {appointments.map((app) => {
++                    const isSelected = selectedApp?.appointment_id === app.appointment_id;
++                    const badge = STATUS_STYLE(app.status);
++                    return (
++                      <li key={app.appointment_id}>
++                        <button type="button" className="doctor-queue-item" aria-pressed={isSelected}
++                          onClick={() => {
++                            if (!isSelected) selectPatient(app);
++                            if (queueToggle.current?.getClientRects().length) {
++                              setQueueExpanded(false);
++                              queueToggle.current.focus();
++                            }
++                          }}>
++                          <span className="doctor-queue-top">
++                            <span className="doctor-queue-ticket">{app.queue_ticket || app.time_slot || app.date_str}</span>
++                            <span className="doctor-queue-status" style={{ background: badge.bg, color: badge.color }}>
++                              {badge.text}
++                            </span>
++                          </span>
++                          <strong className="doctor-queue-name">{app.first_name} {app.last_name}</strong>
++                          <span className="doctor-queue-type">{app.appointment_type}</span>
++                          {app.date_str && app.date_str !== (app.queue_ticket || app.time_slot || app.date_str) && (
++                            <span className="doctor-queue-date">
++                              {[app.date_str, app.queue_ticket && app.time_slot].filter(Boolean).join(' · ')}
++                            </span>
++                          )}
++                        </button>
++                      </li>
++                    );
++                  })}
++                </ul>
++              )}
++            </div>
++          </section>
++          <div className="doctor-patient-workspace">
++          {!selectedApp && !loadingAppointments && (
++            <div className="doctor-workspace-empty">
++              <Icon name="person_search" size={26} />
++              <h2>Select a patient</h2>
++              <p>Choose a patient from the list to open their record.</p>
++            </div>
++          )}
+           {/* Patient safety strip */}
+           {selectedApp && (
+-            <div
+-              style={{
+-                background: T.surface,
+-                border: `1px solid ${T.border}`,
+-                borderLeft: `5px solid ${
+-                  selectedApp.status === 'scheduled'
+-                    ? T.warning
+-                    : selectedApp.status === 'completed'
+-                    ? T.success
+-                    : T.info
+-                }`,
+-                borderRadius: T.radius.lg,
+-                padding: '18px 22px',
+-                marginBottom: 20,
+-                display: 'flex',
+-                justifyContent: 'space-between',
+-                alignItems: 'center',
+-                flexWrap: 'wrap',
+-                gap: 16,
+-                boxShadow: T.shadow.xs,
+-              }}
+-            >
++            <section className="doctor-patient-card" aria-labelledby="doctor-patient-name">
+               <div className="doctor-patient-identity">
+-                <div
+-                  style={{
+-                    display: 'flex',
+-                    alignItems: 'center',
+-                    gap: 10,
+-                    flexWrap: 'wrap',
+-                  }}
+-                >
+-                  <h3
+-                    style={{
+-                      margin: 0,
+-                      fontSize: 17,
+-                      fontWeight: 800,
+-                      color: T.text,
+-                    }}
+-                  >
+-                    {selectedApp.first_name} {selectedApp.last_name}
+-                    <span
+-                      style={{
+-                        color: T.textSub,
+-                        fontSize: 13,
+-                        fontWeight: 600,
+-                        marginLeft: 8,
+-                      }}
+-                    >
+-                      {selectedApp.student_no || 'Staff'}
+-                    </span>
+-                  </h3>
+-                  <span
+-                    style={{
+-                      background: T.sage100,
+-                      color: T.textSub,
+-                      fontSize: 11.5,
+-                      fontWeight: 700,
+-                      padding: '3px 10px',
+-                      borderRadius: T.radius.pill,
+-                    }}
+-                  >
+-                    {selectedApp.course || 'PSU Lingayen'}
+-                  </span>
++                <div className="doctor-patient-heading">
++                  <div className="doctor-patient-monogram" aria-hidden="true">
++                    {selectedApp.first_name?.trim().charAt(0)}{selectedApp.last_name?.trim().charAt(0)}
++                  </div>
++                  <div className="doctor-patient-title">
++                    <h2 id="doctor-patient-name">{selectedApp.first_name} {selectedApp.last_name}</h2>
++                    <div className="doctor-patient-meta">
++                      <span>{selectedApp.student_no || 'Staff'}</span>
++                      <span>{selectedApp.course || 'PSU Lingayen'}</span>
++                    </div>
++                  </div>
+                   <span
+                     style={{
+                       background: STATUS_STYLE(selectedApp.status).bg,
+@@ -1814,39 +1702,21 @@
+                   </span>
+                 </div>
+ 
+-                <div
+-                  style={{
+-                    display: 'flex',
+-                    gap: 18,
+-                    marginTop: 10,
+-                    fontSize: 12.5,
+-                    flexWrap: 'wrap',
+-                  }}
+-                >
+-                  <span>
+-                    <b style={{ color: T.textSub }}>Blood:</b>{' '}
+-                    {selectedApp.blood_type || 'Not recorded'}
+-                  </span>
+-                  <span>
+-                    <b style={{ color: T.textSub }}>Allergies:</b>{' '}
+-                    <span
+-                      style={{
+-                        color:
+-                          selectedApp.allergies && selectedApp.allergies !== 'None'
+-                            ? T.danger
+-                            : T.success,
+-                        fontWeight: 700,
+-                      }}
+-                    >
+-                      {selectedApp.allergies
+-                        ? `${selectedApp.allergies}`
+-                        : 'None reported'}
+-                    </span>
+-                  </span>
+-                  <span>
+-                    <b style={{ color: T.textSub }}>Conditions:</b>{' '}
+-                    {selectedApp.chronic_conditions || 'None'}
+-                  </span>
++                <div className="doctor-patient-safety">
++                  <div className="doctor-safety-item">
++                    <Icon name="health_and_safety" size={17} />
++                    <div><strong>Allergies</strong><span data-alert={Boolean(selectedApp.allergies &&
++                      !/^(none|none reported)$/i.test(selectedApp.allergies.trim()))}>
++                      {selectedApp.allergies || 'None reported'}
++                    </span></div>
++                  </div>
++                  <div className="doctor-safety-item">
++                    <Icon name="medical_information" size={17} />
++                    <div><strong>Conditions</strong><span>{selectedApp.chronic_conditions || 'None'}</span></div>
++                  </div>
++                </div>
++                <div className="doctor-patient-facts">
++                  <span><b>Blood type</b> {selectedApp.blood_type || 'Not recorded'}</span>
+                   <span>
+                     <b style={{ color: T.textSub }}>H:</b>{' '}
+                     {selectedApp.height ? `${selectedApp.height} cm` : '—'}
+@@ -1882,22 +1752,11 @@
+                 </div>
+               </div>
+ 
+-              <div
+-                style={{
+-                  display: 'flex',
+-                  gap: 10,
+-                  alignItems: 'center',
+-                  flexWrap: 'wrap',
+-                }}
+-              >
++              <div className="doctor-patient-actions">
+                 <button
+                   type="button"
+                   onClick={handleViewPatientHistory}
+-                  style={{
+-                    ...btnGhost,
+-                    color: T.info,
+-                    borderColor: T.infoBorder,
+-                  }}
++                  className="doctor-record-action"
+                 >
+                   <Icon name="article" size={14} /> Past EMR history
+                 </button>
+@@ -1910,11 +1769,7 @@
+                       `${selectedApp.first_name} ${selectedApp.last_name}`
+                     )
+                   }
+-                  style={{
+-                    ...btnGhost,
+-                    color: T.primary,
+-                    borderColor: T.primaryTint,
+-                  }}
++                  className="doctor-record-action"
+                   title="Prescriptions you issued to this patient"
+                 >
+                   <Icon name="medication" size={14} /> My prescriptions
+@@ -1929,11 +1784,7 @@
+                       `${selectedApp.first_name} ${selectedApp.last_name}`
+                     )
+                   }
+-                  style={{
+-                    ...btnGhost,
+-                    color: T.primary,
+-                    borderColor: T.primaryTint,
+-                  }}
++                  className="doctor-record-action"
+                   title="Clearances you issued to this patient"
+                 >
+                   <Icon name="description" size={14} /> My clearances
+@@ -1943,11 +1794,7 @@
+                   <button
+                     type="button"
+                     onClick={openImmunizationModal}
+-                    style={{
+-                      ...btnGhost,
+-                      color: T.primary,
+-                      borderColor: T.primaryTint,
+-                    }}
++                    className="doctor-record-action"
+                     title="View and append immunization records"
+                   >
+                     <Icon name="vaccines" size={14} /> Immunizations
+@@ -1957,16 +1804,20 @@
+                 {isDentist && !isBookingMode && (
+                   <button
+                     type="button"
+-                    onClick={() => setForceShowDentalChart((prev) => !prev)}
++                    onClick={() => {
++                      setWorkspacePanel('encounter');
++                      setForceShowDentalChart((visible) => workspacePanel === 'documents' || !visible);
++                      requestAnimationFrame(() => document.getElementById('doctor-dental-chart')?.scrollIntoView({ block: 'nearest' }));
++                    }}
+                     style={{
+                       ...btnGhost,
+                       color: isDentalVisit ? T.tonalTealFg : T.textSub,
+                       borderColor: isDentalVisit ? '#9FD9CB' : T.border,
+                       background: isDentalVisit ? T.tonalTealBg : T.surface,
+                     }}
+-                    title="Toggle Dental Odontogram"
++                    title="Open dental chart"
+                   >
+-                    <Icon name="dentistry" size={14} /> {isDentalVisit ? 'Odontogram Active' : 'Dental Chart'}
++                    <Icon name="dentistry" size={14} /> Dental chart
+                   </button>
+                 )}
+ 
+@@ -1998,21 +1849,7 @@
+                   >
+                     ⏳ Awaiting nurse triage
+                   </span>
+-                ) : selectedApp.status === 'serving' ? (
+-                  <span
+-                    style={{
+-                      background: T.successSoft,
+-                      color: T.success,
+-                      padding: '10px 16px',
+-                      borderRadius: T.radius.pill,
+-                      fontWeight: 700,
+-                      fontSize: 13,
+-                      border: `1px solid ${T.successBorder}`,
+-                    }}
+-                  >
+-                    <Icon name="medical_services" size={14} /> In consultation
+-                  </span>
+-                ) : (
++                ) : selectedApp.status === 'serving' ? null : (
+                   <button
+                     type="button"
+                     onClick={handleStartConsultation}
+@@ -2022,11 +1859,79 @@
+                   </button>
+                 )}
+               </div>
++            </section>
++          )}
++
++          {/* Encounter and issuance feedback */}
++          {feedbackMsg && (
++            <div role={feedbackMsg.type === 'error' ? 'alert' : 'status'}
++              style={{
++                marginBottom: 16,
++                padding: '12px 16px',
++                borderRadius: T.radius.md,
++                fontSize: 12.5,
++                fontWeight: 600,
++                background:
++                  feedbackMsg.type === 'success' ? T.successSoft : T.dangerSoft,
++                color: feedbackMsg.type === 'success' ? T.success : T.danger,
++                border: `1px solid ${
++                  feedbackMsg.type === 'success'
++                    ? T.successBorder
++                    : T.dangerBorder
++                }`,
++                overflowWrap: 'anywhere',
++                lineHeight: 1.5,
++                display: 'flex',
++                justifyContent: 'space-between',
++                alignItems: 'center',
++                gap: 12,
++                flexWrap: 'wrap',
++              }}
++            >
++              <span style={{ flex: '1 1 260px' }}>{feedbackMsg.text}</span>
++
++              {feedbackMsg.type === 'success' &&
++                feedbackMsg.pdfKind &&
++                feedbackMsg.pdfId && (
++                  <button
++                    type="button"
++                    onClick={() =>
++                      handleDownloadPdf(feedbackMsg.pdfKind!, feedbackMsg.pdfId!)
++                    }
++                    style={{
++                      padding: '6px 14px',
++                      borderRadius: T.radius.pill,
++                      background: T.primary,
++                      color: T.textOnPrimary,
++                      border: 'none',
++                      fontSize: 11.5,
++                      fontWeight: 700,
++                      cursor: 'pointer',
++                      fontFamily: T.font,
++                      whiteSpace: 'nowrap',
++                    }}
++                  >
++                    <Icon name="download" size={14} />️ Download PDF
++                  </button>
++                )}
+             </div>
+           )}
+ 
++          {selectedApp && !isBookingMode && (
++            <div className="doctor-workspace-switch" role="group" aria-label="Patient workspace">
++              <button type="button" aria-pressed={workspacePanel === 'encounter'}
++                aria-controls="doctor-encounter-panel" onClick={() => setWorkspacePanel('encounter')}>
++                <Icon name="medical_services" size={18} /> Encounter
++              </button>
++              <button type="button" aria-pressed={workspacePanel === 'documents'}
++                aria-controls="doctor-document-panel" onClick={() => setWorkspacePanel('documents')}>
++                <Icon name="description" size={18} /> Documents
++              </button>
++            </div>
++          )}
++
+           {/* ── IN-CONSULTATION DIAGNOSTIC LABS & ATTACHMENT PREVIEW ── */}
+-          {selectedApp && activePatientAttachments.length > 0 && (
++          {selectedApp && (workspacePanel === 'encounter' || isBookingMode) && activePatientAttachments.length > 0 && (
+             <div
+               style={{
+                 background: T.infoSoft,
+@@ -2109,8 +2014,8 @@
+           )}
+ 
+           {/* ── INTERACTIVE ODONTOGRAM ───────────────────────── */}
+-          {selectedApp && isDentalVisit && !isBookingMode && (
+-            <div
++          {selectedApp && isDentalVisit && !isBookingMode && workspacePanel === 'encounter' && (
++            <div id="doctor-dental-chart"
+               style={{
+                 background: T.surface,
+                 border: `1.5px solid ${T.tonalTealFg}`,
+@@ -2382,7 +2287,7 @@
+             </div>
+           )}
+ 
+-          {/* Two-column workspace — QUEUE ONLY (bookings are view-only) */}
++          {/* Bookings stay read-only until check-in */}
+           {selectedApp && (isBookingMode ? (
+             <div
+               style={{
+@@ -2403,18 +2308,11 @@
+             </div>
+           ) : (
+           <div className="doctor-workspace">
+-            {/* LEFT: Document issuance */}
+-            <section className="doctor-panel">
++            <section id="doctor-document-panel" className="doctor-panel doctor-document-panel"
++              aria-labelledby="doctor-document-title" hidden={workspacePanel !== 'documents'}>
+               <div className="doctor-panel-header">
+-                <h3
+-                  style={{
+-                    margin: 0,
+-                    color: T.primary,
+-                    fontSize: 16,
+-                    fontWeight: 800,
+-                  }}
+-                >
+-                  Official document issuance
++                <h3 id="doctor-document-title" className="doctor-panel-title">
++                  Document issuance
+                 </h3>
+                 <div
+                   style={{
+@@ -2455,61 +2353,6 @@
+                   })}
+                 </div>
+               </div>
+-
+-              {/* Shared issuance feedback banner */}
+-              {feedbackMsg && (
+-                <div
+-                  style={{
+-                    marginBottom: 16,
+-                    padding: '12px 16px',
+-                    borderRadius: T.radius.md,
+-                    fontSize: 12.5,
+-                    fontWeight: 600,
+-                    background:
+-                      feedbackMsg.type === 'success' ? T.successSoft : T.dangerSoft,
+-                    color: feedbackMsg.type === 'success' ? T.success : T.danger,
+-                    border: `1px solid ${
+-                      feedbackMsg.type === 'success'
+-                        ? T.successBorder
+-                        : T.dangerBorder
+-                    }`,
+-                    wordBreak: 'break-all',
+-                    lineHeight: 1.5,
+-                    display: 'flex',
+-                    justifyContent: 'space-between',
+-                    alignItems: 'center',
+-                    gap: 12,
+-                    flexWrap: 'wrap',
+-                  }}
+-                >
+-                  <span style={{ flex: '1 1 260px' }}>{feedbackMsg.text}</span>
+-
+-                  {feedbackMsg.type === 'success' &&
+-                    feedbackMsg.pdfKind &&
+-                    feedbackMsg.pdfId && (
+-                      <button
+-                        type="button"
+-                        onClick={() =>
+-                          handleDownloadPdf(feedbackMsg.pdfKind!, feedbackMsg.pdfId!)
+-                        }
+-                        style={{
+-                          padding: '6px 14px',
+-                          borderRadius: T.radius.pill,
+-                          background: T.primary,
+-                          color: T.textOnPrimary,
+-                          border: 'none',
+-                          fontSize: 11.5,
+-                          fontWeight: 700,
+-                          cursor: 'pointer',
+-                          fontFamily: T.font,
+-                          whiteSpace: 'nowrap',
+-                        }}
+-                      >
+-                        <Icon name="download" size={14} />️ Download PDF
+-                      </button>
+-                    )}
+-                </div>
+-              )}
+ 
+               {docType === 'rx' ? (
+                 <PrescriptionGenerator
+@@ -2716,17 +2559,10 @@
+               )}
+             </section>
+ 
+-            {/* RIGHT: Encounter diagnosis & vitals */}
+-            <section className="doctor-panel">
+-              <h3
+-                style={{
+-                  margin: '0 0 16px 0',
+-                  color: T.info,
+-                  fontSize: 16,
+-                  fontWeight: 800,
+-                }}
+-              >
+-                <Icon name="medical_services" size={14} /> Encounter diagnosis & vitals
++            <section id="doctor-encounter-panel" className="doctor-panel doctor-encounter-panel"
++              aria-labelledby="doctor-encounter-title" hidden={workspacePanel !== 'encounter'}>
++              <h3 id="doctor-encounter-title" className="doctor-panel-title">
++                <Icon name="medical_services" size={14} /> Clinical encounter
+               </h3>
+ 
+               {isArchivedMode && (
+@@ -2764,31 +2600,14 @@
+                 </div>
+               )}
+ 
+-              <form onSubmit={handleFinishConsultation}>
++              <form className="doctor-encounter-form" onSubmit={handleFinishConsultation}>
+                 {/* Vitals grid */}
+-                <div
+-                  style={{
+-                    background: T.sage50,
+-                    padding: 14,
+-                    borderRadius: T.radius.md,
+-                    marginBottom: 16,
+-                    border: `1px solid ${T.borderSoft}`,
+-                  }}
+-                >
+-                  <div
+-                    style={{
+-                      fontSize: 10.5,
+-                      fontWeight: 800,
+-                      letterSpacing: 1.4,
+-                      color: T.textSub,
+-                      textTransform: 'uppercase',
+-                      marginBottom: 10,
+-                    }}
+-                  >
+-                    Nurse-recorded vitals (read-only)
++                <section className="doctor-vitals-strip" aria-labelledby="doctor-vitals-title">
++                  <div className="doctor-vitals-heading">
++                    <h4 id="doctor-vitals-title">Nurse-recorded vitals</h4>
++                    <span><Icon name="lock" size={13} /> Read only</span>
+                   </div>
+-
+-                  <div className="doctor-vitals-grid">
++                  <dl className="doctor-vitals-grid">
+                     {[
+                       { label: 'BP systolic', value: bpSystolic },
+                       { label: 'BP diastolic', value: bpDiastolic },
+@@ -2796,128 +2615,102 @@
+                       { label: 'Pulse bpm', value: pulseRate },
+                       { label: 'SpO₂ %', value: spo2 },
+                       { label: 'Resp cpm', value: respRate },
+-                      {
+-                        label: 'Height cm',
+-                        value: height,
+-                      },
+-                      {
+-                        label: 'Weight kg',
+-                        value: weight,
+-                      },
+-                    ].map((f) => (
+-                      <div key={f.label}>
+-                        <label
+-                          style={{
+-                            fontSize: 10.5,
+-                            color: T.textSub,
+-                            fontWeight: 600,
+-                          }}
+-                        >
+-                          {f.label}
+-                        </label>
+-                        <output
+-                          aria-label={`${f.label}, read only`}
+-                          style={{
+-                            display: 'block',
+-                            boxSizing: 'border-box',
+-                            width: '100%',
+-                            marginTop: 4,
+-                            padding: '8px 10px',
+-                            fontSize: 13,
+-                            color: f.value ? T.text : T.textSub,
+-                            background: T.sage100,
+-                            border: `1px solid ${T.borderSoft}`,
+-                            borderRadius: T.radius.md,
+-                          }}
+-                        >
+-                          {f.value || 'Not recorded'}
+-                        </output>
++                      { label: 'Height cm', value: height },
++                      { label: 'Weight kg', value: weight },
++                    ].map(({ label, value }) => (
++                      <div key={label}>
++                        <dt>{label}</dt>
++                        <dd data-missing={!value}>{value || 'Not recorded'}</dd>
+                       </div>
+                     ))}
++                  </dl>
++                </section>
++
++                <div className="doctor-writing-grid">
++                  <div className="doctor-writing-field">
++                    <label htmlFor="encounter-complaint"
++                      style={{
++                        display: 'block',
++                        fontSize: 12,
++                        fontWeight: 700,
++                        color: T.textSub,
++                        marginBottom: 6,
++                      }}
++                    >
++                      Chief complaint
++                    </label>
++                    <textarea
++                      rows={2}
++                      disabled={isArchivedMode}
++                      readOnly={isArchivedMode}
++                      style={{
++                        ...inputStyle,
++                        resize: 'vertical',
++                        fontFamily: T.font,
++                      }}
++                      id="encounter-complaint" value={chiefComplaint}
++                      onChange={(e) => setChiefComplaint(e.target.value)}
++
++                    />
++                  </div>
++
++                  <div className="doctor-writing-field">
++                    <label htmlFor="encounter-diagnosis"
++                      style={{
++                        display: 'block',
++                        fontSize: 12,
++                        fontWeight: 700,
++                        color: T.textSub,
++                        marginBottom: 6,
++                      }}
++                    >
++                      Clinical diagnosis
++                    </label>
++                    <input
++                      style={inputStyle}
++                      disabled={isArchivedMode}
++                      readOnly={isArchivedMode}
++                      id="encounter-diagnosis" value={diagnosis}
++
++                      onChange={(e) => setDiagnosis(e.target.value)}
++                    />
++                  </div>
++
++                  <div className="doctor-writing-field">
++                    <label htmlFor="encounter-plan"
++                      style={{
++                        display: 'block',
++                        fontSize: 12,
++                        fontWeight: 700,
++                        color: T.textSub,
++                        marginBottom: 6,
++                      }}
++                    >
++                      Treatment plan
++                    </label>
++                    <textarea
++                      rows={3}
++                      disabled={isArchivedMode}
++                      readOnly={isArchivedMode}
++                      style={{
++                        ...inputStyle,
++                        resize: 'vertical',
++                        fontFamily: T.font,
++                      }}
++                      id="encounter-plan" value={treatmentPlan}
++
++                      onChange={(e) => setTreatmentPlan(e.target.value)}
++                    />
++                  </div>
++
++                  <div className="doctor-writing-field">
++                    <label htmlFor="encounter-notes" className="doctor-notes-label">
++                      Clinical notes
++                    </label>
++                    <textarea id="encounter-notes" value={clinicalNotes} rows={3} readOnly={isArchivedMode}
++                      style={inputStyle} onChange={(event) => setClinicalNotes(event.target.value)} />
+                   </div>
+                 </div>
+-
+-                <div style={{ marginBottom: 14 }}>
+-                  <label htmlFor="encounter-complaint"
+-                    style={{
+-                      display: 'block',
+-                      fontSize: 12,
+-                      fontWeight: 700,
+-                      color: T.textSub,
+-                      marginBottom: 6,
+-                    }}
+-                  >
+-                    Chief complaint
+-                  </label>
+-                  <textarea
+-                    rows={2}
+-                    disabled={isArchivedMode}
+-                    readOnly={isArchivedMode}
+-                    style={{
+-                      ...inputStyle,
+-                      resize: 'vertical',
+-                      fontFamily: T.font,
+-                    }}
+-                    id="encounter-complaint" value={chiefComplaint}
+-                    onChange={(e) => setChiefComplaint(e.target.value)}
+-
+-                  />
+-                </div>
+-
+-                <div style={{ marginBottom: 14 }}>
+-                  <label htmlFor="encounter-diagnosis"
+-                    style={{
+-                      display: 'block',
+-                      fontSize: 12,
+-                      fontWeight: 700,
+-                      color: T.textSub,
+-                      marginBottom: 6,
+-                    }}
+-                  >
+-                    Clinical diagnosis
+-                  </label>
+-                  <input
+-                    style={inputStyle}
+-                    disabled={isArchivedMode}
+-                    readOnly={isArchivedMode}
+-                    id="encounter-diagnosis" value={diagnosis}
+-
+-                    onChange={(e) => setDiagnosis(e.target.value)}
+-                  />
+-                </div>
+-
+-                <div style={{ marginBottom: 14 }}>
+-                  <label htmlFor="encounter-plan"
+-                    style={{
+-                      display: 'block',
+-                      fontSize: 12,
+-                      fontWeight: 700,
+-                      color: T.textSub,
+-                      marginBottom: 6,
+-                    }}
+-                  >
+-                    Treatment plan
+-                  </label>
+-                  <textarea
+-                    rows={3}
+-                    disabled={isArchivedMode}
+-                    readOnly={isArchivedMode}
+-                    style={{
+-                      ...inputStyle,
+-                      resize: 'vertical',
+-                      fontFamily: T.font,
+-                    }}
+-                    id="encounter-plan" value={treatmentPlan}
+-
+-                    onChange={(e) => setTreatmentPlan(e.target.value)}
+-                  />
+-                </div>
+-
+-                <label htmlFor="encounter-notes" style={{ display: 'block', fontWeight: 700, marginBottom: 6 }}>
+-                  Clinical notes
+-                </label>
+-                <textarea id="encounter-notes" value={clinicalNotes} rows={3} readOnly={isArchivedMode}
+-                  style={{ ...inputStyle, marginBottom: 14 }} onChange={(event) => setClinicalNotes(event.target.value)} />
+ 
+                 {!isArchivedMode && (
+                   <div
+@@ -3030,7 +2823,8 @@
+             </section>
+           </div>
+           ))}
+-        </>
++          </div>
++        </div>
+       )}
+ 
+       {encounterConfirmation && selectedApp && (
+diff --git a/desktop/src/components/DoctorConsole.css b/desktop/src/components/DoctorConsole.css
+--- a/desktop/src/components/DoctorConsole.css
++++ b/desktop/src/components/DoctorConsole.css
+@@ -3,35 +3,142 @@
+   width: 100%;
+ }
+ 
++.doctor-console {
++  container: doctor-clinic / inline-size;
++  max-width: 1500px;
++  margin-inline: auto;
++}
++
+ .doctor-console .doctor-header {
+-  display: flex;
++  display: grid;
++  grid-template-columns: auto minmax(0, 1fr) auto;
++  align-items: center;
++  gap: 14px;
++  margin-bottom: 22px;
++  padding: 0 0 16px;
++  border-bottom: 1px solid var(--border);
++}
++
++.doctor-console .doctor-header .vd-page-head {
++  gap: 0;
++  margin: 0;
++}
++
++.doctor-console .doctor-header h1 {
++  font-size: clamp(20px, 3cqi, 29px);
++  font-weight: 750;
++  letter-spacing: -.035em;
++}
++
++.doctor-console .doctor-header p {
++  margin-top: 3px;
++}
++
++.doctor-console .doctor-heading-icon,
++.doctor-console .doctor-patient-monogram {
++  display: grid;
++  flex: none;
++  place-items: center;
++  width: 46px;
++  aspect-ratio: 1;
++  border-radius: 15px;
++  background: var(--primary-tint);
++  color: var(--primary);
++}
++
++.doctor-console .doctor-signature-button,
++.doctor-console .doctor-roster-toggle {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  gap: 6px;
++  min-height: 36px;
++  padding: 6px 11px;
++  color: var(--primary);
++  border: 1px solid var(--border);
++  border-radius: var(--r-md);
++  background: var(--surface);
++  font: inherit;
++  font-weight: 650;
++  cursor: pointer;
++}
++
++.doctor-console :is(.doctor-signature-button, .doctor-roster-toggle):hover {
++  background: var(--primary-tint);
++}
++
++.doctor-console .doctor-clinic-layout {
++  display: grid;
++  grid-template-columns: clamp(215px, 24cqi, 285px) minmax(0, 1fr);
++  align-items: start;
++  gap: clamp(14px, 2cqi, 26px);
++}
++
++.doctor-console .doctor-roster,
++.doctor-console .doctor-directory {
++  min-width: 0;
++  padding: 12px;
++  border: 1px solid var(--border);
++  border-radius: var(--r-xl);
++  background: var(--surface-2);
++}
++
++.doctor-console .doctor-directory {
++  padding: clamp(14px, 2.2cqi, 26px);
++  background: var(--surface);
++}
++
++.doctor-console .doctor-roster-heading {
++  display: flex;
++  align-items: center;
+   justify-content: space-between;
+-  align-items: flex-start;
+-  flex-wrap: wrap;
+-  gap: 12px 20px;
+-  margin-bottom: 20px;
+-  padding-bottom: 16px;
+-  border-bottom: 1px solid var(--border-soft);
+-}
+-
+-.doctor-console .doctor-queue-grid,
+-.doctor-console .doctor-vitals-grid {
+-  display: grid;
+-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
+-  gap: 12px;
+-}
+-
+-.doctor-console .doctor-vitals-grid {
+-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 6rem), 1fr));
+-  gap: 10px;
++  gap: 8px;
++  padding: 3px 6px 11px;
++}
++
++.doctor-console .doctor-roster-heading h2 {
++  margin: 0;
++  font-size: 15px;
++  font-weight: 750;
++}
++
++.doctor-console .doctor-roster-heading span,
++.doctor-console .doctor-roster-empty {
++  color: var(--text-sub);
++  font-size: 12px;
++}
++
++.doctor-console .doctor-roster-empty {
++  margin: 2px 6px 6px;
++}
++
++.doctor-console .doctor-roster-toggle {
++  display: none;
++}
++
++.doctor-console .doctor-queue-grid {
++  display: grid;
++  gap: 6px;
++  max-height: min(65vh, 650px);
++  margin: 0;
++  padding: 3px 4px 4px;
++  overflow-y: auto;
++  list-style: none;
++  scrollbar-width: thin;
++  overscroll-behavior: contain;
+ }
+ 
+ .doctor-console .doctor-queue-item {
+-  min-width: 0;
+-  padding: 14px 16px;
+-  border: 1px solid var(--border);
++  display: flex;
++  flex-direction: column;
++  align-items: stretch;
++  width: 100%;
++  min-width: 0;
++  gap: 3px;
++  padding: 8px 10px;
++  border: 1px solid transparent;
+   border-radius: var(--r-lg);
+-  background: var(--surface);
++  background: transparent;
+   color: var(--text);
+   text-align: left;
+   font: inherit;
+@@ -40,32 +147,428 @@
+ }
+ 
+ .doctor-console .doctor-queue-item:hover {
++  background: var(--surface);
++  border-color: var(--border);
++}
++
++.doctor-console .doctor-queue-item[aria-pressed='true'] {
++  border-color: var(--border);
++  background: var(--surface);
++  box-shadow: inset 3px 0 var(--primary-soft), var(--shadow-xs);
++}
++
++.doctor-console .doctor-queue-top {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  justify-content: space-between;
++  gap: 4px 8px;
++}
++
++.doctor-console .doctor-queue-ticket {
++  color: var(--primary);
++  font-size: 11px;
++  font-weight: 750;
++  font-variant-numeric: tabular-nums;
++}
++
++.doctor-console .doctor-queue-status {
++  padding: 2px 6px;
++  border-radius: var(--r-pill);
++  font-size: 10px;
++  font-weight: 700;
++}
++
++.doctor-console .doctor-queue-name {
++  font-size: 13.5px;
++  line-height: 1.35;
++}
++
++.doctor-console .doctor-queue-type,
++.doctor-console .doctor-queue-date {
++  color: var(--text-sub);
++  font-size: 11.5px;
++}
++
++.doctor-console .doctor-patient-workspace {
++  min-width: 0;
++}
++
++.doctor-console .doctor-workspace-empty {
++  display: grid;
++  justify-items: center;
++  gap: 8px;
++  padding: 40px 16px;
++  border: 1px dashed var(--border);
++  border-radius: var(--r-xl);
++  color: var(--text-sub);
++  text-align: center;
++}
++
++.doctor-console .doctor-workspace-empty :is(h2, p) {
++  margin: 0;
++}
++
++.doctor-console .doctor-workspace-empty h2 {
++  color: var(--text);
++  font-size: 16px;
++}
++
++.doctor-console .doctor-patient-card {
++  margin-bottom: 12px;
++  padding: clamp(12px, 1.8cqi, 20px);
++  border: 1px solid var(--border);
++  border-radius: var(--r-xl);
++  background:
++    radial-gradient(ellipse at 100% 0, var(--primary-tint), transparent 58%),
++    var(--surface);
++}
++
++.doctor-console .doctor-patient-heading {
++  display: flex;
++  align-items: center;
++  flex-wrap: wrap;
++  gap: 10px 12px;
++}
++
++.doctor-console .doctor-patient-monogram {
++  width: 48px;
++  font-size: 17px;
++  font-weight: 750;
++  letter-spacing: .04em;
++  text-transform: uppercase;
++}
++
++.doctor-console .doctor-patient-title {
++  flex: 1 1 170px;
++  min-width: 0;
++}
++
++.doctor-console .doctor-patient-title h2 {
++  margin: 0;
++  color: var(--text);
++  font-size: clamp(20px, 3.1cqi, 31px);
++  line-height: 1.12;
++  font-weight: 750;
++  letter-spacing: -.032em;
++}
++
++.doctor-console .doctor-patient-meta,
++.doctor-console .doctor-patient-facts {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 5px 14px;
++  color: var(--text-sub);
++  font-size: 12px;
++}
++
++.doctor-console .doctor-patient-meta {
++  margin-top: 4px;
++}
++
++.doctor-console .doctor-patient-facts {
++  margin-top: 9px;
++  line-height: 1.55;
++}
++
++.doctor-console .doctor-patient-safety {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 8px;
++  margin-top: 12px;
++}
++
++.doctor-console .doctor-safety-item {
++  display: flex;
++  flex: 1 1 176px;
++  min-width: 0;
++  align-items: flex-start;
++  gap: 8px;
++  padding: 7px 10px;
++  border: 1px solid var(--border-soft);
++  border-radius: var(--r-md);
++  background: var(--surface-muted);
++  color: var(--text-sub);
++  font-size: 12px;
++}
++
++.doctor-console .doctor-safety-item .material-symbols-outlined {
++  color: var(--primary);
++}
++
++.doctor-console .doctor-safety-item strong {
++  margin-right: 7px;
++  color: var(--text);
++}
++
++.doctor-console .doctor-safety-item [data-alert='true'] {
++  color: var(--danger);
++  font-weight: 700;
++}
++
++.doctor-console .doctor-patient-actions {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  gap: 6px;
++  padding-top: 11px;
++  margin-top: 11px;
++  border-top: 1px solid var(--border-soft);
++}
++
++.doctor-console .doctor-record-action {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  gap: 6px;
++  min-height: 36px;
++  padding: 6px 10px;
++  color: var(--text);
++  border: 1px solid var(--border);
++  border-radius: var(--r-md);
++  background: var(--surface-muted);
++  font: inherit;
++  font-size: 12px;
++  font-weight: 650;
++  cursor: pointer;
++}
++
++.doctor-console .doctor-record-action .material-symbols-outlined {
++  color: var(--primary);
++}
++
++.doctor-console .doctor-record-action:hover {
++  background: var(--primary-tint);
+   border-color: var(--primary-soft);
+-  background: var(--sage-50);
+-}
+-
+-.doctor-console .doctor-queue-item[aria-pressed='true'] {
+-  border-color: var(--primary);
++}
++
++.doctor-console .doctor-workspace-switch {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 4px;
++  padding: 0 0 0 3px;
++  margin-bottom: 12px;
++  border-bottom: 1px solid var(--border);
++}
++
++.doctor-console .doctor-workspace-switch button {
++  display: flex;
++  align-items: center;
++  gap: 7px;
++  padding: 8px 12px;
++  color: var(--text-sub);
++  border: 0;
++  border-bottom: 2px solid transparent;
++  border-radius: var(--r-md) var(--r-md) 0 0;
++  background: transparent;
++  font: inherit;
++  font-weight: 700;
++  cursor: pointer;
++}
++
++.doctor-console .doctor-workspace-switch button:hover,
++.doctor-console .doctor-workspace-switch button[aria-pressed='true'] {
++  color: var(--primary);
+   background: var(--primary-tint);
+-  box-shadow: inset 3px 0 var(--primary);
+-}
+-
+-.doctor-console .doctor-queue-item:focus-visible,
+-.doctor-console .doctor-dental-arch button:focus-visible,
++}
++
++.doctor-console .doctor-workspace-switch button[aria-pressed='true'] {
++  border-bottom-color: var(--primary);
++}
++
++.doctor-console .doctor-panel[hidden] {
++  display: none;
++}
++
++.doctor-console .doctor-panel-title {
++  margin: 0;
++  color: var(--text);
++  font-size: 19px;
++  font-weight: 750;
++  letter-spacing: -.02em;
++}
++
++.doctor-console .doctor-panel-title .material-symbols-outlined {
++  color: var(--primary);
++}
++
++.doctor-console .doctor-encounter-panel > .doctor-panel-title {
++  margin-bottom: 13px;
++}
++
++.doctor-console .doctor-vitals-strip {
++  margin-bottom: 16px;
++  padding: 12px;
++  border: 1px solid var(--border-soft);
++  border-radius: var(--r-lg);
++  background: var(--surface-muted);
++}
++
++.doctor-console .doctor-vitals-heading {
++  display: flex;
++  justify-content: space-between;
++  align-items: center;
++  flex-wrap: wrap;
++  gap: 4px 12px;
++  margin-bottom: 8px;
++  color: var(--text-sub);
++}
++
++.doctor-console .doctor-vitals-heading h4 {
++  margin: 0;
++  font-size: 12px;
++}
++
++.doctor-console .doctor-vitals-heading span {
++  display: flex;
++  align-items: center;
++  gap: 4px;
++  font-size: 11px;
++}
++
++.doctor-console .doctor-vitals-grid {
++  display: grid;
++  grid-template-columns: repeat(auto-fit, minmax(min(100%, 77px), 1fr));
++  gap: 6px;
++  margin: 0;
++}
++
++.doctor-console .doctor-vitals-grid > div {
++  min-width: 0;
++  padding: 7px 8px;
++  border-radius: var(--r-md);
++  background: var(--surface-3);
++  overflow-wrap: anywhere;
++}
++
++.doctor-console .doctor-vitals-grid dt {
++  color: var(--text-sub);
++  font-size: 10.5px;
++}
++
++.doctor-console .doctor-vitals-grid dd {
++  display: flex;
++  align-items: center;
++  min-height: 24px;
++  margin: 2px 0 0;
++  color: var(--text);
++  font-size: 16px;
++  font-weight: 700;
++  font-variant-numeric: tabular-nums;
++}
++
++.doctor-console .doctor-vitals-grid dd[data-missing='true'] {
++  color: var(--text-sub);
++  font-size: 10.5px;
++  font-weight: 500;
++}
++
++.doctor-console .doctor-writing-grid {
++  display: grid;
++  gap: 12px 16px;
++  margin-bottom: 14px;
++}
++
++.doctor-console .doctor-writing-field {
++  min-width: 0;
++}
++
++.doctor-console .doctor-notes-label {
++  display: block;
++  margin-bottom: 6px;
++  color: var(--text-sub);
++  font-size: 12px;
++  font-weight: 700;
++}
++
++@container doctor-clinic (min-width: 940px) {
++  .doctor-console .doctor-writing-grid {
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++  }
++
++  .doctor-console .doctor-writing-field textarea {
++    min-height: 68px;
++  }
++}
++
++.doctor-console :is(.doctor-queue-item, .doctor-roster-toggle, .doctor-signature-button, .doctor-patient-actions button, .doctor-workspace-switch button, .doctor-dental-arch button):focus-visible,
+ .doctor-console .doctor-panel :is(button, input, select, textarea):focus-visible {
+   outline: 2px solid var(--primary);
+-  outline-offset: 3px;
++  outline-offset: 2px;
+ }
+ 
+ .doctor-console .doctor-dental-arch button:focus-visible {
+   outline-offset: 1px;
+ }
+ 
+-.doctor-console .doctor-workspace {
+-  display: grid;
+-  align-items: start;
+-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 27rem), 1fr));
+-  gap: 16px;
++@container doctor-clinic (max-width: 740px) {
++  .doctor-console .doctor-clinic-layout {
++    grid-template-columns: minmax(0, 1fr);
++  }
++
++  .doctor-console .doctor-roster {
++    display: grid;
++    grid-template-columns: minmax(0, 1fr) auto;
++    align-items: center;
++    gap: 6px;
++    padding: 8px;
++  }
++
++  .doctor-console .doctor-roster-heading {
++    justify-content: flex-start;
++    gap: 8px;
++    padding: 0 4px;
++  }
++
++  .doctor-console .doctor-roster-toggle {
++    display: inline-flex;
++  }
++
++  .doctor-console #doctor-roster-list {
++    grid-column: 1 / -1;
++  }
++
++  .doctor-console .doctor-roster[data-expanded='false'] #doctor-roster-list {
++    display: none;
++  }
++
++  .doctor-console .doctor-queue-grid {
++    max-height: 245px;
++  }
++}
++
++@container doctor-clinic (max-width: 420px) {
++  .doctor-console .doctor-header {
++    grid-template-columns: minmax(0, 1fr) auto;
++    align-items: start;
++    gap: 7px;
++    margin-bottom: 12px;
++    padding-bottom: 10px;
++  }
++
++  .doctor-console .doctor-heading-icon {
++    display: none;
++  }
++
++  .doctor-console .doctor-header p {
++    font-size: 12px;
++  }
++
++  .doctor-console .doctor-signature-label {
++    display: none;
++  }
++
++  .doctor-console .doctor-signature-button {
++    width: 36px;
++    padding: 0;
++  }
++
++  .doctor-console .doctor-patient-actions {
++    display: grid;
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++    align-items: stretch;
++  }
++
+ }
+ 
+ .doctor-console .doctor-archive {
+@@ -104,7 +607,6 @@
+ }
+ 
+ .doctor-console .doctor-patient-identity {
+-  flex: 1 1 16rem;
+   min-width: 0;
+   overflow-wrap: anywhere;
+ }
+@@ -138,9 +640,9 @@
+   min-width: 0;
+   padding: clamp(14px, 2vw, 22px);
+   border: 1px solid var(--border);
+-  border-radius: var(--r-lg);
++  border-radius: var(--r-2xl);
+   background: var(--surface);
+-  box-shadow: var(--shadow-sm);
++  box-shadow: var(--shadow-xs);
+ }
+ 
+ .doctor-console .doctor-panel-header {
+diff --git a/desktop/src/components/AGENTS-parts/AGENTS-02.md b/desktop/src/components/AGENTS-parts/AGENTS-02.md
+--- a/desktop/src/components/AGENTS-parts/AGENTS-02.md
++++ b/desktop/src/components/AGENTS-parts/AGENTS-02.md
+@@ -7,7 +7,7 @@
+ - Queue & consult: `fetchAppointments` L308 (`GET /api/appointments/today?filter=active|history|scheduled` L312-314), `handleConflict` L376, `selectPatient` L407, `handleStartConsultation` L557 (status → in-progress L562), `handleFinishConsultation` L588 (complete L643 + EMR + attachments upload L662).
+ - Patient data: the consultation strip requests attachment metadata only. Past EMR History and the archive timeline use `usePatientHistory` for 25-record pages and the offline SQLite fallback. Patient search uses `/api/appointments/patients/search?query=`.
+ - `ClinicalReview` shows the values to be saved for encounters, prescriptions and clearances. Edit actions focus the corresponding input. Queue refreshes preserve the selected encounter's draft. The issuer history reads saved details even when a PDF is pending.
+-- `DoctorConsole.css` lets the archive and prescription fields wrap within the available workspace. The dental arches scroll horizontally to keep the tooth order and button size. Reselecting the current appointment and refreshing the queue preserve the draft and keyboard focus.
++- The Doctor/Dentist console places the patient rail beside the selected record on wide screens. In a narrow console the queue collapses after selection. Encounter and Documents are separate views. Keep both workspace panels mounted so draft values survive view changes. `DoctorConsole.css` lets the archive and prescription fields wrap within the available workspace. The dental arches scroll horizontally to keep the tooth order and button size. Reselecting the current appointment and refreshing the queue preserve the draft and keyboard focus.
+ - Rx/clearance: rx history L752 (`/api/documents/prescriptions/patient/:id`), clearance history L788, print clearance L1085 (`POST /api/documents/clearances`).
+ - Immunizations: open modal L883, quick-add L928, custom L940, remove L961, save L965 (`GET/POST /api/profile/patient/:id/immunizations` L895/L976).
+ - PDFs: `handleDownloadPdf` L1009, `openIssuedPdf` L1051 (`GET /api/documents/:kind/:id/pdf`).
+diff --git a/desktop/src/components/codeslice/DT-01-DoctorConsole-parts/DT-01-DoctorConsole-01.md b/desktop/src/components/codeslice/DT-01-DoctorConsole-parts/DT-01-DoctorConsole-01.md
+--- a/desktop/src/components/codeslice/DT-01-DoctorConsole-parts/DT-01-DoctorConsole-01.md
++++ b/desktop/src/components/codeslice/DT-01-DoctorConsole-parts/DT-01-DoctorConsole-01.md
+@@ -4,7 +4,7 @@
+ Desktop component slice map · [index](../../CODESLICE.md) · base commit `93b4172` · check from repo root: `python3 scripts/verify_codeslice.py desktop/src/components/codeslice .`
+ 
+ ## DT-01 · desktop/src/components/DoctorConsole.tsx
+-**LOC:** 4241 · **Anchor base:** 2727901 + current changes · **Role:** Doctor/Dentist EMR console: consultation queue, encounters, e-Rx, clearances, dental chart, immunizations
++**LOC:** 4035 · **Anchor base:** 2727901 + current changes · **Role:** Doctor/Dentist EMR console: consultation queue, encounters, e-Rx, clearances, dental chart, immunizations
+ **Mounted by:** desktop/src/App.tsx L955-961, rendered when activeRoleView is DOCTOR or DENTIST (props viewMode, onViewModeChange, currentRole)
+ **API surface:** GET /api/signature/me/status (L293); GET /api/appointments/today (L366); GET /api/appointments/patient/:id/history (paged via `usePatientHistory`, attachment view L527); GET /api/documents/attachments/:id/download (L556); PATCH /api/appointments/:id/status (L611); POST /api/appointments/:id/complete (L692); POST /api/documents/emr/:id/attachments (L711); GET /api/documents/prescriptions/patient/:id (L781); GET /api/documents/clearances/patient/:id (L808); GET /api/appointments/patients/search (L836); GET+PUT /api/profile/patient/:id/immunizations (L888,L967); GET /api/documents/:kind/:id/pdf (L1009,L1048); POST /api/documents/clearances (L1083)
+ **Socket events:** on appointment:booked (L410), appointment:status_changed (L411), queue:updated (L420), appointment:cancelled (L421); no emits
+@@ -19,19 +19,19 @@
+ | 5 | 172-193 | UPPER_TEETH | UPPER_TEETH/LOWER_TEETH arrays; recognition of legacy sample text; stripLegacyOdontogram helpers |
+ | 6 | 195-220 | export default function DoctorConsole | component entry; showSignature/signatureStatus state; isDentist via prop or JWT roles fallback |
+ | 7 | 221-273 | dentalChartData | state: appointments, selectedApp; encounter form; attachments; dentalChartData; vitals fields |
+-| 8 | 274-314 | checkSignatureStatus | issuance tab state; useEffect GET /api/signature/me/status sets signatureStatus enrolled/missing/error |
+-| 9 | 315-354 | showHistoryModal | modal state: EMR, Rx and clearance history, archive directory search, immunization records |
+-| 10 | 355-395 | fetchAppointments | fetchAppointments GET /api/appointments/today?filter=active,scheduled,history; dedupe; selectPatient |
+-| 11 | 397-422 | appointment:booked | shared desktop socket subscription; on appointment:booked, appointment:status_changed, queue:updated, cancelled |
+-| 12 | 424-440 | offline-sync-conflict | useEffect listens for offline-sync-conflict window event; sets error feedbackMsg |
+-| 13 | 442-454 | resetForm | resetForm clears encounter fields, dental chart, attachments, feedback |
+-| 14 | 456-518 | selectPatient | selectPatient hydrates the encounter and reads nurse vitals from the first triage note line |
+-| 15 | 520-541 | fetchActivePatientAttachments | fetchActivePatientAttachments requests the attachment-only view and guards patient changes |
+-| 16 | 543-584 | handleOpenAttachment | handleOpenAttachment GET /api/documents/attachments/:id/download; blob preview modal; close revokes URL |
+-| 17 | 586-600 | handleToothConditionChange | handleToothConditionChange sets condition on selectedTooth in dentalChartData |
+-| 18 | 602-635 | handleStartConsultation | handleStartConsultation PATCH /api/appointments/:id/status to serving; refetches queue |
+-| 19 | 637-754 | handleFinishConsultation | finish consultation: review entered values, offline queue, POST /complete, POST emr attachments, feedback |
+-| 20 | 756-762 | handleViewPatientHistory | handleViewPatientHistory opens the paged history hook with a SQLite fallback |
+-| 21 | 764-819 | openPrescriptionHistory | openPrescriptionHistory + openClearanceHistory: GET issuer-only per-patient document lists |
+-| 22 | 821-862 | handleSearchPatientDirectory | handleSearchPatientDirectory GET /api/appointments/patients/search; offlineSearchPatients fallback |
+-| 23 | 864-866 | loadPatientTimeline | loadPatientTimeline selects the patient for the same paged history hook |
++| 8 | 274-317 | checkSignatureStatus | issuance tab state; useEffect GET /api/signature/me/status sets signatureStatus enrolled/missing/error |
++| 9 | 318-357 | showHistoryModal | modal state: EMR, Rx and clearance history, archive directory search, immunization records |
++| 10 | 358-398 | fetchAppointments | fetchAppointments GET /api/appointments/today?filter=active,scheduled,history; dedupe; selectPatient |
++| 11 | 400-425 | appointment:booked | shared desktop socket subscription; on appointment:booked, appointment:status_changed, queue:updated, cancelled |
++| 12 | 427-443 | offline-sync-conflict | useEffect listens for offline-sync-conflict window event; sets error feedbackMsg |
++| 13 | 445-457 | resetForm | resetForm clears encounter fields, dental chart, attachments, feedback |
++| 14 | 459-522 | selectPatient | selectPatient hydrates the encounter and reads nurse vitals from the first triage note line |
++| 15 | 524-545 | fetchActivePatientAttachments | fetchActivePatientAttachments requests the attachment-only view and guards patient changes |
++| 16 | 547-588 | handleOpenAttachment | handleOpenAttachment GET /api/documents/attachments/:id/download; blob preview modal; close revokes URL |
++| 17 | 590-604 | handleToothConditionChange | handleToothConditionChange sets condition on selectedTooth in dentalChartData |
++| 18 | 606-639 | handleStartConsultation | handleStartConsultation PATCH /api/appointments/:id/status to serving; refetches queue |
++| 19 | 641-758 | handleFinishConsultation | finish consultation: review entered values, offline queue, POST /complete, POST emr attachments, feedback |
++| 20 | 760-766 | handleViewPatientHistory | handleViewPatientHistory opens the paged history hook with a SQLite fallback |
++| 21 | 768-823 | openPrescriptionHistory | openPrescriptionHistory + openClearanceHistory: GET issuer-only per-patient document lists |
++| 22 | 825-866 | handleSearchPatientDirectory | handleSearchPatientDirectory GET /api/appointments/patients/search; offlineSearchPatients fallback |
++| 23 | 868-870 | loadPatientTimeline | loadPatientTimeline selects the patient for the same paged history hook |
+diff --git a/desktop/src/components/codeslice/DT-01-DoctorConsole-parts/DT-01-DoctorConsole-02.md b/desktop/src/components/codeslice/DT-01-DoctorConsole-parts/DT-01-DoctorConsole-02.md
+--- a/desktop/src/components/codeslice/DT-01-DoctorConsole-parts/DT-01-DoctorConsole-02.md
++++ b/desktop/src/components/codeslice/DT-01-DoctorConsole-parts/DT-01-DoctorConsole-02.md
+@@ -1,46 +1,47 @@
+ <!-- split from desktop/src/components/codeslice/DT-01-DoctorConsole.md — part 02 of 02 -->
+-| 24 | 868-952 | openImmunizationModal | immunization modal handlers: open GET profile immunizations; quick-add, custom, remove (dedupe) |
+-| 25 | 954-992 | handleSaveImmunizations | handleSaveImmunizations PUT /api/profile/patient/:id/immunizations merged list |
+-| 26 | 994-1036 | handleDownloadPdf | handleDownloadPdf GET /api/documents/:kind/:id/pdf; blob anchor download |
+-| 27 | 1038-1068 | openIssuedPdf | openIssuedPdf fetches issued PDF into previewModal object URL; alerts on failure |
+-| 28 | 1070-1134 | handlePrintClearance | handlePrintClearance POST /api/documents/clearances; SIGNATURE_NOT_ENROLLED opens enrollment |
+-| 29 | 1136-1174 | isArchivedMode | derived: isArchivedMode, isBookingMode, isDentalVisit; headerTitle/headerSub per viewMode |
+-| 30 | 1176-1197 | vd-page-head | responsive page header: title and signature button (setShowSignature) |
+-| 31 | 1198-1232 | Save signature | signature warning banner when signatureStatus missing or error |
+-| 32 | 1233-1239 | EmergencyAlertBanner | mounts EmergencyAlertBanner (SOS alerts; self-hides via 403 for non-responders) |
+-| 33 | 1240-1366 | queue_ticket | queue cards, initial loading and empty states, stable selection during realtime refresh |
+-| 34 | 1367-1396 | AnalyticsDashboard | analytics view mounts AnalyticsDashboard; archive tab patient search form |
+-| 35 | 1397-1469 | Matched patients | responsive archive results panel with selected patient state and empty search feedback |
+-| 36 | 1470-1564 | selectedDirectoryPatient | archive patient card: blood/allergies; My prescriptions and My clearances buttons |
+-| 37 | 1565-1649 | No prior encounters on record. | archive timeline header and encounter cards (date, doctor, complaint, diagnosis, plan) |
+-| 38 | 1650-1732 | item.vitals | timeline vitals, diagnostic attachments and older encounter controls |
+-| 39 | 1734-1883 | Patient safety strip | patient safety strip: identity, status pill, blood/allergies/conditions/sex/DOB/BMI |
+-| 40 | 1884-2026 | Begin consultation | action row: history buttons (EMR, Rx, clearance, immunizations); dental toggle; Begin consultation |
+-| 41 | 2028-2109 | Prior Diagnostic Records | prior diagnostic records strip: attachment chips open decrypted preview |
+-| 42 | 2111-2171 | Adult Dental Chart | odontogram panel header (Universal Numbering System); Reset Chart button |
+-| 43 | 2172-2246 | Maxillary Arch | scrollable upper arch with teeth 1–16 and accessible selection |
+-| 44 | 2247-2313 | Mandibular Arch | lower teeth 32-17 grid buttons; condition letter codes |
+-| 45 | 2314-2383 | Set Finding for Tooth | selected-tooth finding picker pills (handleToothConditionChange) |
+-| 46 | 2385-2403 | View-only booking | isBookingMode view-only warning card |
+-| 47 | 2404-2457 | Official document issuance | workspace grid; issuance section header; rx vs clearance tab toggle (docType) |
+-| 48 | 2459-2512 | Shared issuance feedback banner | feedbackMsg banner plus Download PDF button (handleDownloadPdf) |
+-| 49 | 2514-2550 | PrescriptionGenerator | mounts PrescriptionGenerator; onPrescriptionIssued triggers openIssuedPdf preview |
+-| 50 | 2551-2652 | Clearance purpose | clearance form: purpose select; expiry date with +30d/+6mo/+1y shortcut buttons |
+-| 51 | 2653-2716 | Clinical fitness statement | clearance remarks textarea; Issue, sign and print button (handlePrintClearance) |
+-| 52 | 2717-2766 | Encounter diagnosis & vitals | encounter column header; archived-record and not-yet-triaged notices |
+-| 53 | 2767-2838 | Nurse-recorded vitals | read-only vitals output grid: BP/temp/pulse/SpO2/resp/height/weight/sex/BMI |
+-| 54 | 2839-2987 | Chief complaint | chief complaint, diagnosis, treatment plan inputs; attach lab result file input |
+-| 55 | 2988-3032 | Finish consultation & discharge | submit button states: submitting, archived, awaiting triage (handleFinishConsultation) |
+-| 56 | 3033-3045 | — | encounter and clearance reviews with field edit actions |
+-| 57 | 3047-3131 | Prescriptions you issued | Rx history modal: header, error, loading and empty states |
+-| 58 | 3132-3268 | OUTSIDE Rx | Rx history cards: items dosage/frequency/route, OUTSIDE Rx badge, Download PDF |
+-| 59 | 3270-3354 | Clearances you issued | clearance history modal: header, error, loading and empty states |
+-| 60 | 3355-3460 | isPastExpiry | clearance cards: approved/expired/revoked status, purpose, validity, Download PDF |
+-| 61 | 3462-3531 | No prior encounters recorded. | Past EMR History portal to document.body keeps the backdrop above the sticky top bar. Header, loading and empty states. |
+-| 62 | 3532-3658 | doctor_license | EMR history cards, prescription notes, lab attachments and older encounter controls |
+-| 63 | 3660-3741 | Immunization records | immunization modal header with patient identity |
+-| 64 | 3743-3863 | Quick-add common vaccines | current immunization chips; COMMON_VACCINES quick-add buttons |
+-| 65 | 3865-4003 | Pending additions | custom immunization input; pending additions chips; feedback banner |
+-| 66 | 4006-4064 | Records are appended | immunization modal footer: Cancel and Save N records (handleSaveImmunizations) |
+-| 67 | 4066-4206 | Save to PC | attachment preview modal: header, Save to PC download, PDF iframe or image |
+-| 68 | 4208-4241 | SignatureEnrollment | signature enrollment overlay; onSaved sets signatureStatus enrolled |
++| 24 | 872-956 | openImmunizationModal | immunization modal handlers: open GET profile immunizations; quick-add, custom, remove (dedupe) |
++| 25 | 958-996 | handleSaveImmunizations | handleSaveImmunizations PUT /api/profile/patient/:id/immunizations merged list |
++| 26 | 998-1040 | handleDownloadPdf | handleDownloadPdf GET /api/documents/:kind/:id/pdf; blob anchor download |
++| 27 | 1042-1072 | openIssuedPdf | openIssuedPdf fetches issued PDF into previewModal object URL; alerts on failure |
++| 28 | 1074-1138 | handlePrintClearance | handlePrintClearance POST /api/documents/clearances; SIGNATURE_NOT_ENROLLED opens enrollment |
++| 29 | 1140-1178 | isArchivedMode | derived: isArchivedMode, isBookingMode, isDentalVisit; headerTitle/headerSub per viewMode |
++| 30 | 1180-1205 | vd-page-head | responsive page header: title and signature button (setShowSignature) |
++| 31 | 1206-1240 | Save signature | signature warning banner when signatureStatus missing or error |
++| 32 | 1241-1247 | EmergencyAlertBanner | mounts EmergencyAlertBanner (SOS alerts; self-hides via 403 for non-responders) |
++| 33 | 1249-1269 | AnalyticsDashboard | analytics view mounts AnalyticsDashboard; archive tab patient search form |
++| 34 | 1270-1342 | Matched patients | responsive archive results panel with selected patient state and empty search feedback |
++| 35 | 1343-1437 | selectedDirectoryPatient | archive patient card: blood/allergies; My prescriptions and My clearances buttons |
++| 36 | 1438-1522 | No prior encounters on record. | archive timeline header and encounter cards (date, doctor, complaint, diagnosis, plan) |
++| 37 | 1523-1605 | item.vitals | timeline vitals, diagnostic attachments and older encounter controls |
++| 38 | 1610-1666 | doctor-roster | patient rail with selection, appointment status and narrow-screen disclosure |
++| 39 | 1675-1753 | Patient safety strip | patient profile with identity, clinical status and safety details |
++| 40 | 1754-1864 | Begin consultation | patient history, immunizations, dental chart and consultation actions |
++| 41 | 1865-1918 | Encounter and issuance feedback | shared status messages and PDF download action |
++| 42 | 1920-1931 | doctor-workspace-switch | encounter and document buttons preserve both drafts |
++| 43 | 1933-2014 | Prior Diagnostic Records | prior diagnostic records strip: attachment chips open decrypted preview |
++| 44 | 2016-2076 | Adult Dental Chart | odontogram panel header (Universal Numbering System); Reset Chart button |
++| 45 | 2077-2151 | Maxillary Arch | scrollable upper arch with teeth 1–16 and accessible selection |
++| 46 | 2152-2218 | Mandibular Arch | lower teeth 32-17 grid buttons; condition letter codes |
++| 47 | 2219-2288 | Set Finding for Tooth | selected-tooth finding picker pills (handleToothConditionChange) |
++| 48 | 2290-2308 | View-only booking | isBookingMode view-only warning card |
++| 49 | 2309-2355 | Document issuance | document panel with prescription and clearance controls |
++| 50 | 2357-2393 | PrescriptionGenerator | mounts PrescriptionGenerator; onPrescriptionIssued triggers openIssuedPdf preview |
++| 51 | 2394-2495 | Clearance purpose | clearance form: purpose select; expiry date with +30d/+6mo/+1y shortcut buttons |
++| 52 | 2496-2559 | Clinical fitness statement | clearance remarks textarea; Issue, sign and print button (handlePrintClearance) |
++| 53 | 2560-2602 | — | encounter column header; archived-record and not-yet-triaged notices |
++| 54 | 2603-2713 | Nurse-recorded vitals | read-only vitals output grid: BP/temp/pulse/SpO2/resp/height/weight/sex/BMI |
++| 55 | 2714-2780 | — | chief complaint, diagnosis, treatment plan inputs; attach lab result file input |
++| 56 | 2781-2825 | Finish consultation & discharge | submit button states: submitting, archived, awaiting triage (handleFinishConsultation) |
++| 57 | 2826-2839 | — | encounter and clearance reviews with field edit actions |
++| 58 | 2841-2925 | Prescriptions you issued | Rx history modal: header, error, loading and empty states |
++| 59 | 2926-3062 | OUTSIDE Rx | Rx history cards: items dosage/frequency/route, OUTSIDE Rx badge, Download PDF |
++| 60 | 3064-3148 | Clearances you issued | clearance history modal: header, error, loading and empty states |
++| 61 | 3149-3254 | isPastExpiry | clearance cards: approved/expired/revoked status, purpose, validity, Download PDF |
++| 62 | 3256-3325 | No prior encounters recorded. | Past EMR History portal to document.body keeps the backdrop above the sticky top bar. Header, loading and empty states. |
++| 63 | 3326-3452 | doctor_license | EMR history cards, prescription notes, lab attachments and older encounter controls |
++| 64 | 3454-3535 | Immunization records | immunization modal header with patient identity |
++| 65 | 3537-3657 | Quick-add common vaccines | current immunization chips; COMMON_VACCINES quick-add buttons |
++| 66 | 3659-3797 | Pending additions | custom immunization input; pending additions chips; feedback banner |
++| 67 | 3800-3858 | Records are appended | immunization modal footer: Cancel and Save N records (handleSaveImmunizations) |
++| 68 | 3860-4000 | Save to PC | attachment preview modal: header, Save to PC download, PDF iframe or image |
++| 69 | 4002-4035 | SignatureEnrollment | signature enrollment overlay; onSaved sets signatureStatus enrolled |
+diff --git a/desktop/src/components/PrescriptionGenerator.tsx b/desktop/src/components/PrescriptionGenerator.tsx
+--- a/desktop/src/components/PrescriptionGenerator.tsx
++++ b/desktop/src/components/PrescriptionGenerator.tsx
+@@ -79,7 +79,7 @@
+       onClick={onClick}
+       disabled={disabled}
+       style={{
+-        flex: 1,
++        flex: '1 1 145px', minWidth: 0,
+         padding: '9px 12px',
+         border: `1px solid ${active ? T.primary : 'transparent'}`,
+         borderRadius: T.radius.pill,
+@@ -91,7 +91,7 @@
+         fontFamily: T.font,
+         boxShadow: active ? T.shadow.xs : 'none',
+         transition: 'all 120ms ease',
+-        whiteSpace: 'nowrap',
++        whiteSpace: 'normal', overflowWrap: 'anywhere',
+       }}
+     >
+       {children}
+@@ -526,7 +526,7 @@
+               <b style={{ color: T.textSub }}>Sex:</b> {verifiedPatient.sex}
+             </span>
+           )}
+-          {verifiedPatient.allergies && verifiedPatient.allergies !== 'None' && (
++          {verifiedPatient.allergies?.trim() && !/^(none|none reported)$/i.test(verifiedPatient.allergies.trim()) && (
+             <span style={{ color: T.danger, fontWeight: 700 }}>
+               ⚠ Allergies: {verifiedPatient.allergies}
+             </span>
+@@ -537,12 +537,12 @@
+       {/* ── Medication source: infirmary formulary vs outside pharmacy ── */}
+       <div
+         style={{
+-          display: 'flex',
++          display: 'flex', flexWrap: 'wrap',
+           gap: 6,
+           padding: 4,
+           background: T.sage100,
+           border: `1px solid ${T.border}`,
+-          borderRadius: T.radius.pill,
++          borderRadius: T.radius.lg,
+         }}
+       >
+         <ModePill

@@ -5,10 +5,13 @@
 // creation, which never connects until a query is issued).
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 process.env.ENCRYPTION_KEY ||= 'x'.repeat(40);
 process.env.ENCRYPTION_SALT ||= 'responder-test-salt-0123456789';
 process.env.DB_PASSWORD ||= 'responder-test-db-password';
+process.env.JWT_SECRET ||= 'responder-test-jwt-secret'.repeat(3);
 
 const {
   resolveResponderTier,
@@ -19,6 +22,57 @@ const {
   LEGACY_RESPONDER_ROLES,
   CLINICAL_ROLES,
 } = await import('../src/utils/responderAccess.js');
+
+test('the self capability reflects live access while the alert list still rejects a denied user', async (t) => {
+  const { pool } = await import('../src/db.js');
+  const keyPath = fileURLToPath(new URL('../serviceAccountKey.json', import.meta.url));
+  const existsSync = fs.existsSync;
+  const hideKey = t.mock.method(fs, 'existsSync', (path) => path !== keyPath && existsSync(path));
+  const { default: emergencyRoutes } = await import('../src/routes/emergency.js');
+  hideKey.mock.restore();
+
+  const router = emergencyRoutes();
+  const getRoute = (path) => router.stack.find(({ route }) => route?.path === path).route;
+  const capability = getRoute('/responder-access').stack.at(-1).handle;
+  const requireActiveAccess = getRoute('/active').stack[1].handle;
+  const req = { user: { user_id: 42 }, query: { userId: 99 } };
+  let flagged = false;
+  let role = 'DENTIST';
+  t.mock.method(pool, 'query', async (sql, params) => {
+    assert.deepEqual(params, [42]);
+    return sql.includes('is_qualified_responder')
+      ? [[{ is_active: 1, deleted_at: null, is_qualified_responder: flagged }]]
+      : [[{ code: role }]];
+  });
+  const check = async (expected) => {
+    const headers = {};
+    let body;
+    await capability(req, {
+      set(name, value) { headers[name] = value; },
+      json(value) { body = value; },
+    });
+    assert.deepEqual(body, { authorized: expected });
+    assert.equal(headers['Cache-Control'], 'no-store');
+  };
+
+  await check(false);
+  const denied = await new Promise((resolve, reject) => {
+    requireActiveAccess(req, {
+      status(code) {
+        assert.equal(code, 403);
+        return this;
+      },
+      json(body) { resolve(body); },
+    }, () => reject(new Error('Unflagged dentist passed the alert-list guard')));
+  });
+  assert.equal(denied.code, 'RESPONDER_ACCESS_DENIED');
+  flagged = true;
+  await check(true);
+  flagged = false;
+  await check(false);
+  role = 'DOCTOR';
+  await check(true);
+});
 
 // ── Tier resolution ────────────────────────────────────────────────────────
 test('tier: clinical role wins even without the flag', () => {

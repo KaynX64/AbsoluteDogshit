@@ -1,8 +1,8 @@
 // desktop/src/components/ResponderConsole.tsx
 import { useEffect, useState } from 'react';
-import { io } from 'socket.io-client';
+import { subscribeToDesktopEvents, useDesktopSocket } from '../services/desktopRealtime';
 import { T, btnPrimary, btnGhost } from '../theme';
-import { API_BASE_URL, SOCKET_URL } from '../config/api';
+import { API_BASE_URL } from '../config/api';
 import { CLIENT_INSTANCE_ID } from '../services/clientInstance';
 import Icon from './Icon';
 
@@ -42,45 +42,44 @@ export default function ResponderConsole() {
     }
   };
 
+  const socket = useDesktopSocket();
   useEffect(() => {
     fetchAlerts(false);
 
-    const token = localStorage.getItem('valetudo_token');
-    const socket = io(SOCKET_URL, {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-    });
-
-    socket.on('emergency:new_alert', (newAlert: any) => {
-      playEmergencyAlarm();
-      if (window.electronAPI?.showNotification) {
-        window.electronAPI.showNotification({
-          title: `SOS: ${newAlert.patientName || 'Campus incident'}`,
-          body: `Location: ${newAlert.latitude?.toFixed(5)}, ${newAlert.longitude?.toFixed(5)}. Blood: ${newAlert.bloodType}. Allergies: ${newAlert.allergies}`,
-        });
-      }
-      fetchAlerts(true);
-    });
-
-    socket.on('emergency:status_change', (data: { alertId: number; status: string }) => {
-      setActiveAlerts((prev) => {
-        if (data.status === 'resolved' || data.status === 'false_alarm') {
-          return prev.filter((a) => Number(a.alert_id) !== Number(data.alertId));
+    const unsubscribe = subscribeToDesktopEvents(socket, (on) => {
+      on('emergency:new_alert', (newAlert: any) => {
+        playEmergencyAlarm();
+        if (window.electronAPI?.showNotification) {
+          window.electronAPI.showNotification({
+            title: `SOS: ${newAlert.patientName || 'Campus incident'}`,
+            body: `Location: ${newAlert.latitude?.toFixed(5)}, ${newAlert.longitude?.toFixed(5)}. Blood: ${newAlert.bloodType}. Allergies: ${newAlert.allergies}`,
+          });
         }
-        return prev.map((a) =>
-          Number(a.alert_id) === Number(data.alertId) ? { ...a, status: data.status } : a
-        );
+        fetchAlerts(true);
       });
-      fetchAlerts(true);
+
+      on('emergency:status_change', (data: { alertId: number; status: string }) => {
+        setActiveAlerts((prev) => {
+          if (data.status === 'resolved' || data.status === 'false_alarm') {
+            return prev.filter((a) => Number(a.alert_id) !== Number(data.alertId));
+          }
+          return prev.map((a) =>
+            Number(a.alert_id) === Number(data.alertId) ? { ...a, status: data.status } : a
+          );
+        });
+        fetchAlerts(true);
+      });
+
+      on('reconnect', () => fetchAlerts(true));
     });
 
     const interval = setInterval(() => fetchAlerts(true), 3000);
 
     return () => {
       clearInterval(interval);
-      socket.disconnect();
+      unsubscribe();
     };
-  }, []);
+  }, [socket]);
 
   const updateStatus = async (alertId: number, status: string) => {
     setActiveAlerts((prev) =>

@@ -190,7 +190,10 @@ ipcMain.handle('offline-mark-failed', async (event, { client_mutation_id, sync_s
 
 ipcMain.handle('offline-cache-bootstrap', async (event, { patients, emrRecords }) => {
   if (!sqliteDb) return { success: false };
+  let transactionOpen = false;
   try {
+    sqliteDb.exec('BEGIN IMMEDIATE');
+    transactionOpen = true;
     if (Array.isArray(patients)) {
       const pStmt = sqliteDb.prepare(`
         INSERT OR REPLACE INTO CACHED_PATIENTS
@@ -228,8 +231,16 @@ ipcMain.handle('offline-cache-bootstrap', async (event, { patients, emrRecords }
       }
     }
 
+    sqliteDb.exec('COMMIT');
     return { success: true };
   } catch (err) {
+    if (transactionOpen) {
+      try {
+        sqliteDb.exec('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('[SQLite Bootstrap Rollback Error]:', rollbackError.code);
+      }
+    }
     console.error('[SQLite Bootstrap Error]:', err);
     return { success: false, error: err.message };
   }

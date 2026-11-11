@@ -1,8 +1,8 @@
 // desktop/src/components/InventoryManager.tsx
 import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { io } from 'socket.io-client';
+import { subscribeToDesktopEvents, useDesktopSocket } from '../services/desktopRealtime';
 import { T, btnPrimary, btnGhost, calloutDanger, calloutInfo, calloutSuccess, inputStyle } from '../theme';
-import { API_BASE_URL, SOCKET_URL } from '../config/api';
+import { API_BASE_URL } from '../config/api';
 import Icon from './Icon';
 import './InventoryManager.css';
 
@@ -200,31 +200,34 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
     return readStatus[resource] === 'error' ? 'Unable to load this inventory data.' : 'Loading inventory data…';
   };
 
+  const socket = useDesktopSocket();
   useEffect(() => {
     fetchBatches();
     fetchMedicines();
     fetchReorderAndAlerts();
     if (initialTab === 'logs') fetchLogs();
 
-    // ── Real-Time WebSocket Synchronization ─────────────────
-    const token = localStorage.getItem('valetudo_token');
-    const socket = io(SOCKET_URL, {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-    });
+    const unsubscribe = subscribeToDesktopEvents(socket, (on) => {
+      on('inventory:updated', async () => {
+        const results = await Promise.all([fetchBatches(), fetchMedicines(), fetchReorderAndAlerts(), fetchLogs()]);
+        if (results.flat().every(Boolean)) {
+          setNotice((current) => current ?? { tone: 'info', text: 'Inventory synchronized with the latest changes.' });
+        }
+      });
 
-    socket.on('inventory:updated', async () => {
-      const results = await Promise.all([fetchBatches(), fetchMedicines(), fetchReorderAndAlerts(), fetchLogs()]);
-      if (results.flat().every(Boolean)) {
-        setNotice((current) => current ?? { tone: 'info', text: 'Inventory synchronized with the latest changes.' });
-      }
+      on('reconnect', () => {
+        fetchBatches();
+        fetchMedicines();
+        fetchReorderAndAlerts();
+        fetchLogs();
+      });
     });
 
     return () => {
-      socket.disconnect();
+      unsubscribe();
       Object.values(readRequests.current).forEach((request) => request.abort());
     };
-  }, []);
+  }, [socket]);
 
   // ── USB HID Hardware Barcode Scanner Listener ──────────────
   const processScannedCode = useCallback((code: string, isHardwareHID = false) => {

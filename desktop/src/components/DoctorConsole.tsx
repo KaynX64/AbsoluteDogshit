@@ -1,13 +1,13 @@
 // desktop/src/components/DoctorConsole.tsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import PrescriptionGenerator from './PrescriptionGenerator';
-import { io } from 'socket.io-client';
+import { subscribeToDesktopEvents, useDesktopSocket } from '../services/desktopRealtime';
 import AnalyticsDashboard from './AnalyticsDashboard';
 import EmergencyAlertBanner from './EmergencyAlertBanner';
 import { queueOfflineMutation } from '../services/offlineSync';
 import { T, btnPrimary, btnGhost, inputStyle } from '../theme';
-import { API_BASE_URL, SOCKET_URL } from '../config/api';
+import { API_BASE_URL } from '../config/api';
 import SignatureEnrollment from './SignatureEnrollment';
 import Icon from './Icon';
 import ClinicalReview, { type ReviewField } from './ClinicalReview';
@@ -260,7 +260,6 @@ export default function DoctorConsole({
   /* ── Odontogram state ──────────────────────────────────────── */
   const [dentalChartData, setDentalChartData] = useState<Record<number, ToothRecord>>({});
   const [selectedTooth, setSelectedTooth] = useState<number | null>(null);
-  const [forceShowDentalChart, setForceShowDentalChart] = useState(false);
 
   /* ── Vitals state ──────────────────────────────────────────── */
   const [bpSystolic, setBpSystolic] = useState('');
@@ -274,10 +273,24 @@ export default function DoctorConsole({
 
   /* ── Issuance tab state ────────────────────────────────────── */
   const [docType, setDocType] = useState<'rx' | 'clearance'>('rx');
+  const [workspacePanel, setWorkspacePanel] = useState<'encounter' | 'documents' | 'dental'>('encounter');
+  const [queueExpanded, setQueueExpanded] = useState(false);
+  const queueToggle = useRef<HTMLButtonElement>(null);
+  const patientHeading = useRef<HTMLHeadingElement>(null);
+  const pendingPatientFocus = useRef<number | null>(null);
+  const workspaceStart = useRef<HTMLDivElement>(null);
+  const encounterFileInput = useRef<HTMLInputElement>(null);
   const [clearancePurpose, setClearancePurpose] = useState('');
   const [clearanceRemarks, setClearanceRemarks] = useState('');
   const [isIssuingClearance, setIsIssuingClearance] = useState(false);
   const [clearanceExpiryDate, setClearanceExpiryDate] = useState('');
+
+  useLayoutEffect(() => {
+    if (!selectedApp || pendingPatientFocus.current !== selectedApp.appointment_id) return;
+    pendingPatientFocus.current = null;
+    patientHeading.current?.focus({ preventScroll: true });
+    patientHeading.current?.scrollIntoView({ block: 'start' });
+  }, [selectedApp?.appointment_id]);
 
   useEffect(() => {
     let active = true;
@@ -394,33 +407,32 @@ export default function DoctorConsole({
     }
   };
 
+  const socket = useDesktopSocket();
   useEffect(() => {
     fetchAppointments(viewMode, false);
-    const token = localStorage.getItem('valetudo_token');
-    const socket = io(SOCKET_URL, {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-    });
+    const unsubscribe = subscribeToDesktopEvents(socket, (on) => {
+      on('appointment:booked', () => fetchAppointments(viewMode, true));
+      on('appointment:status_changed', (evt: any) => {
+        fetchAppointments(viewMode, true);
+        if (evt?.status === 'checked_in' && window.electronAPI?.showNotification) {
+          window.electronAPI.showNotification({
+            title: 'Patient Triaged & Ready',
+            body: 'A student booked under your care has been checked in by the triage nurse.',
+          });
+        }
+      });
+      on('queue:updated', () => fetchAppointments(viewMode, true));
+      on('appointment:cancelled', () => fetchAppointments(viewMode, true));
 
-    socket.on('appointment:booked', () => fetchAppointments(viewMode, true));
-    socket.on('appointment:status_changed', (evt: any) => {
-      fetchAppointments(viewMode, true);
-      if (evt?.status === 'checked_in' && window.electronAPI?.showNotification) {
-        window.electronAPI.showNotification({
-          title: 'Patient Triaged & Ready',
-          body: 'A student booked under your care has been checked in by the triage nurse.',
-        });
-      }
+      on('reconnect', () => fetchAppointments(viewMode, true));
     });
-    socket.on('queue:updated', () => fetchAppointments(viewMode, true));
-    socket.on('appointment:cancelled', () => fetchAppointments(viewMode, true));
 
     return () => {
       appointmentRequest.current += 1;
-      socket.disconnect();
+      unsubscribe();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode]);
+  }, [viewMode, socket]);
 
   useEffect(() => {
   const handleConflict = (e: Event) => {
@@ -451,11 +463,11 @@ export default function DoctorConsole({
     setDentalChartData({});
     setSelectedTooth(null);
     setPriorAttachments(null);
-    setForceShowDentalChart(false);
   };
 
   const selectPatient = (app: AppointmentItem) => {
     selectedAppointmentId.current = app.appointment_id;
+    setWorkspacePanel('encounter');
     setSelectedApp(app);
     setClearanceConfirmation(false);
     setClearancePurpose('');
@@ -488,7 +500,6 @@ export default function DoctorConsole({
     setAttachedFile(null);
     setFeedbackMsg(null);
     setSelectedTooth(null);
-    setForceShowDentalChart(false);
 
     /* Restore dentist-only odontogram when the server provided one */
     setDentalChartData(isDentist && app.past_dental_chart ? app.past_dental_chart : {});
@@ -1148,15 +1159,8 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
   const isBookingMode =
     viewMode === 'scheduled' || selectedApp?.status === 'scheduled';
 
-  const isDentalVisit =
-    isDentist &&
-    Boolean(
-      selectedApp?.appointment_type?.toLowerCase().includes('dent') ||
-        selectedApp?.appointment_type?.toLowerCase().includes('tooth') ||
-        selectedApp?.appointment_type?.toLowerCase().includes('oral') ||
-        selectedApp?.appointment_type?.toLowerCase().includes('prophylaxis') ||
-        forceShowDentalChart
-    );
+  const canViewDentalChart = isDentist && !isBookingMode;
+  const activeWorkspacePanel = workspacePanel === 'dental' && !canViewDentalChart ? 'encounter' : workspacePanel;
 
   const headerTitle: Record<DoctorViewMode, string> = {
     active: 'My consultation queue',
@@ -1179,22 +1183,26 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
   /* ═══════════════════════════════════════════════════════════ */
 
   return (
-    <div className="doctor-console">
+    <div className="doctor-console" data-clinic-workspace={viewMode !== 'archive' && viewMode !== 'analytics'}>
       {/* ── Page header ─────────────────────────────────────── */}
       {viewMode !== 'analytics' && (
-        <div className="doctor-header">
-          <div className="vd-page-head" style={{ marginBottom: 0 }}>
+        <header className="doctor-header">
+          <div className="doctor-heading-icon" aria-hidden="true">
+            <Icon name={isDentist ? 'dentistry' : 'medical_services'} size={22} />
+          </div>
+          <div className="vd-page-head">
             <h1 className="vd-page-head-title">{headerTitle[viewMode]}</h1>
-            <p className="vd-page-head-sub">{headerSub[viewMode]}</p>
+            {viewMode !== 'active' && <p className="vd-page-head-sub">{headerSub[viewMode]}</p>}
           </div>
           <button
             type="button"
-            style={btnGhost}
+            className="doctor-signature-button" aria-label="My signature" title="My signature"
             onClick={() => setShowSignature(true)}
           >
-            <Icon name="edit_note" size={14} /> My signature
+            <Icon name="edit_note" size={18} />
+            <span className="doctor-signature-label">My signature</span>
           </button>
-        </div>
+        </header>
       )}
 
       {(signatureStatus === 'missing' || signatureStatus === 'error') && (
@@ -1234,152 +1242,17 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
 
       {/* ── ACTIVE SOS BANNER (Doctor & Dentist console) ─────────────
           Mounted for the whole console — DENTIST shares it (App.tsx routes
-          both roles here). Delivery is decided server-side: an unlabelled
-          DENTIST gets 403 on /active and the banner renders nothing, while
-          a labelled one receives the full clinical payload. */}
+          both roles here). The banner checks live responder eligibility
+          before fetching alerts. Authorized dentists receive the clinical
+          payload under the same server-side access rules. */}
       <EmergencyAlertBanner />
-
-      {/* ── Queue grid (hidden on analytics/archive) ────────── */}
-      {viewMode !== 'analytics' && viewMode !== 'archive' && (
-        <div
-          style={{
-            background: T.surface,
-            border: `1px solid ${T.border}`,
-            borderRadius: T.radius.lg,
-            padding: 22,
-            marginBottom: 22,
-            boxShadow: T.shadow.xs,
-          }}
-        >
-          {loadingAppointments ? (
-            <div
-              style={{
-                padding: 24,
-                textAlign: 'center',
-                color: T.textSub,
-                fontSize: 13,
-              }}
-            >
-              Loading roster…
-            </div>
-          ) : appointments.length === 0 ? (
-            <div
-              style={{
-                padding: '28px 20px',
-                textAlign: 'center',
-                color: T.textSub,
-                fontSize: 13,
-                lineHeight: 1.6,
-              }}
-            >
-              {viewMode === 'active'
-                ? 'No patients currently waiting in your consultation queue.'
-                : viewMode === 'scheduled'
-                ? 'No pending mobile bookings assigned to your schedule.'
-                : 'No archived consultations found for your department.'}
-            </div>
-          ) : (
-            <div className="doctor-queue-grid">
-              {appointments.map((app) => {
-                const isSelected = selectedApp?.appointment_id === app.appointment_id;
-                const badge = STATUS_STYLE(app.status);
-                return (
-                  <button
-                    key={app.appointment_id}
-                    type="button"
-                    className="doctor-queue-item"
-                    aria-pressed={isSelected}
-                    onClick={() => { if (!isSelected) selectPatient(app); }}
-                  >
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        marginBottom: 10,
-                      }}
-                    >
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          fontFamily: T.mono,
-                          fontSize: 11.5,
-                          fontWeight: 700,
-                          color: T.primary,
-                          background: T.surface,
-                          padding: '3px 8px',
-                          borderRadius: T.radius.xs,
-                          border: `1px solid ${T.primaryTint}`,
-                        }}
-                      >
-                        <Icon name="confirmation_number" size={14} /> {app.queue_ticket || (app.status === 'completed' ? 'DONE' : 'WAITING')}
-                      </span>
-                      <span
-                        style={{
-                          padding: '3px 10px',
-                          borderRadius: T.radius.pill,
-                          background: badge.bg,
-                          color: badge.color,
-                          fontSize: 10,
-                          fontWeight: 800,
-                          letterSpacing: 0.3,
-                        }}
-                      >
-                        {badge.text}
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 15,
-                        fontWeight: 700,
-                        color: T.text,
-                        marginBottom: 4,
-                      }}
-                    >
-                      {app.first_name} {app.last_name}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        color: T.textSub,
-                        marginBottom: 2,
-                      }}
-                    >
-                      {app.appointment_type}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: T.textMuted,
-                        fontFamily: T.mono,
-                      }}
-                    >
-                         <Icon name="calendar_month" size={14} /> {app.date_str} · ⏰ {app.time_slot}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* ── Analytics tab ───────────────────────────────────── */}
       {viewMode === 'analytics' && <AnalyticsDashboard />}
 
       {/* ── Archive (patient EMR directory) ────────────────── */}
       {viewMode === 'archive' && (
-        <div
-          style={{
-            background: T.surface,
-            border: `1px solid ${T.border}`,
-            borderRadius: T.radius.lg,
-            padding: 22,
-            boxShadow: T.shadow.xs,
-          }}
-        >
+        <section className="doctor-directory" aria-label="Patient directory">
           <form
             onSubmit={handleSearchPatientDirectory}
             className="doctor-archive-search"
@@ -1729,389 +1602,353 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
               )}
             </div>
           </div>
-        </div>
+        </section>
       )}
 
       {/* ── Active / Scheduled / History ───────────────────── */}
       {viewMode !== 'analytics' && viewMode !== 'archive' && (
-        <>
-          {/* Patient safety strip */}
-          {selectedApp && (
-            <div
+        <div className="doctor-clinic-layout">
+          <aside className="doctor-context" aria-label="Patient context and queue">
+            {/* Patient safety strip */}
+            {selectedApp && (
+              <section key={selectedApp.appointment_id} className="doctor-patient-card" aria-labelledby="doctor-patient-name">
+                <div className="doctor-patient-identity">
+                  <div className="doctor-patient-heading">
+                    <div className="doctor-patient-monogram" aria-hidden="true">
+                      {selectedApp.first_name?.trim().charAt(0)}{selectedApp.last_name?.trim().charAt(0)}
+                    </div>
+                    <div className="doctor-patient-title">
+                      <h2 id="doctor-patient-name" ref={patientHeading} tabIndex={-1}>
+                        {selectedApp.first_name} {selectedApp.last_name}
+                      </h2>
+                      <div className="doctor-patient-meta">
+                        <span>{selectedApp.student_no || 'Staff'}</span>
+                        <span>{selectedApp.course || 'PSU Lingayen'}</span>
+                      </div>
+                    </div>
+                    <span
+                      style={{
+                        background: STATUS_STYLE(selectedApp.status).bg,
+                        color: STATUS_STYLE(selectedApp.status).color,
+                        fontSize: 10.5,
+                        fontWeight: 800,
+                        letterSpacing: 0.3,
+                        padding: '3px 10px',
+                        borderRadius: T.radius.pill,
+                      }}
+                    >
+                      {STATUS_STYLE(selectedApp.status).text}
+                    </span>
+                  </div>
+
+                  <div className="doctor-patient-safety">
+                    {([
+                      ['Allergies', 'health_and_safety', selectedApp.allergies?.trim() || 'None reported'],
+                      ['Conditions', 'medical_information', selectedApp.chronic_conditions?.trim() || 'None'],
+                    ] as const).map(([label, icon, value]) => {
+                      const alert = label === 'Allergies' && !/^(none|none reported)$/i.test(value);
+                      return (
+                        <div key={label} className="doctor-safety-item">
+                          <Icon name={icon} size={16} />
+                          {value.length > 56 ? (
+                            <details className="doctor-safety-details">
+                              <summary>
+                                <strong>{label}</strong>
+                                <span className="doctor-safety-preview" data-alert={alert}>{value.slice(0, 56)}…</span>
+                              </summary>
+                              <p data-alert={alert}>{value}</p>
+                            </details>
+                          ) : (
+                            <div><strong>{label}</strong> <span data-alert={alert}>{value}</span></div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <details className="doctor-patient-details">
+                    <summary>Patient details</summary>
+                    <div className="doctor-patient-facts">
+                      <span><b>Blood type</b> {selectedApp.blood_type || 'Not recorded'}</span>
+                      <span>
+                        <b style={{ color: T.textSub }}>H:</b>{' '}
+                        {selectedApp.height ? `${selectedApp.height} cm` : '—'}
+                      </span>
+                      <span>
+                        <b style={{ color: T.textSub }}>W:</b>{' '}
+                        {selectedApp.weight ? `${selectedApp.weight} kg` : '—'}
+                      </span>
+                      <span>
+                        <b style={{ color: T.textSub }}>Sex:</b>{' '}
+                        {selectedApp.sex || 'Not recorded'}
+                      </span>
+                      <span>
+                        <b style={{ color: T.textSub }}>DOB / Age:</b>{' '}
+                        {selectedApp.date_of_birth
+                          ? `${selectedApp.date_of_birth.split('T')[0]}${selectedApp.age != null ? ` (${selectedApp.age} yrs)` : ''}`
+                          : 'Not recorded'}
+                      </span>
+                      <span>
+                        <b style={{ color: T.textSub }}>BMI:</b>{' '}
+                        {selectedApp.bmi
+                          ? `${selectedApp.bmi} · ${selectedApp.bmi_category || ''}`
+                          : 'Not available'}
+                      </span>
+                      {selectedApp.health_profile_updated_at && (
+                        <span style={{ color: T.textMuted, fontStyle: 'italic' }}>
+                          Last verified:{' '}
+                          {new Date(
+                            selectedApp.health_profile_updated_at
+                          ).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+                  </details>
+                </div>
+
+                <details className="doctor-patient-details">
+                  <summary>Patient records</summary>
+                  <div className="doctor-patient-actions">
+                    <button
+                      type="button"
+                      onClick={handleViewPatientHistory}
+                      className="doctor-record-action"
+                    >
+                      <Icon name="article" size={14} /> Past EMR history
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openPrescriptionHistory(
+                          selectedApp.patient_id,
+                          `${selectedApp.first_name} ${selectedApp.last_name}`
+                        )
+                      }
+                      className="doctor-record-action"
+                      title="Prescriptions you issued to this patient"
+                    >
+                      <Icon name="medication" size={14} /> My prescriptions
+                    </button>
+
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openClearanceHistory(
+                          selectedApp.patient_id,
+                          `${selectedApp.first_name} ${selectedApp.last_name}`
+                        )
+                      }
+                      className="doctor-record-action"
+                      title="Clearances you issued to this patient"
+                    >
+                      <Icon name="description" size={14} /> My clearances
+                    </button>
+
+                    {!isBookingMode && (
+                      <button
+                        type="button"
+                        onClick={openImmunizationModal}
+                        className="doctor-record-action"
+                        title="View and append immunization records"
+                      >
+                        <Icon name="vaccines" size={14} /> Immunizations
+                      </button>
+                    )}
+
+                  </div>
+                </details>
+                <section className="doctor-vitals-strip" aria-labelledby="doctor-vitals-title">
+                  <div className="doctor-vitals-heading">
+                    <h3 id="doctor-vitals-title">Nurse-recorded vitals</h3>
+                    <span><Icon name="lock" size={13} /> Read only</span>
+                  </div>
+                  <dl className="doctor-vitals-grid">
+                    {[
+                      { label: 'BP sys', fullLabel: 'Systolic blood pressure', value: bpSystolic },
+                      { label: 'BP dia', fullLabel: 'Diastolic blood pressure', value: bpDiastolic },
+                      { label: 'Temp (°C)', value: temperature },
+                      { label: 'Pulse bpm', value: pulseRate },
+                      { label: 'SpO₂ %', value: spo2 },
+                      { label: 'Resp cpm', value: respRate },
+                      { label: 'Height cm', value: height },
+                      { label: 'Weight kg', value: weight },
+                    ].map(({ label, fullLabel, value }) => (
+                      <div key={label}>
+                        <dt>{fullLabel ? <abbr title={fullLabel}>{label}</abbr> : label}</dt>
+                        <dd data-missing={!value}>{value || 'Not recorded'}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </section>
+                {!isArchivedMode && !isBookingMode && selectedApp.status !== 'serving' && (
+                    <button
+                      type="button"
+                      onClick={handleStartConsultation}
+                      style={{ ...btnPrimary }}
+                    >
+                      ▶ Begin consultation
+                    </button>
+                )}
+              </section>
+            )}
+
+            <section className="doctor-roster" aria-labelledby="doctor-roster-title" data-expanded={queueExpanded || !selectedApp}>
+              <div className="doctor-roster-heading">
+                <h2 id="doctor-roster-title">Patients</h2>
+                {!loadingAppointments && <span>{appointments.length} {appointments.length === 1 ? 'record' : 'records'}</span>}
+              </div>
+              {selectedApp && (
+                <button type="button" ref={queueToggle} className="doctor-roster-toggle" aria-controls="doctor-roster-list"
+                  aria-expanded={queueExpanded} onClick={() => setQueueExpanded((expanded) => !expanded)}>
+                  {queueExpanded ? 'Hide queue' : 'Change patient'}
+                  <Icon name={queueExpanded ? 'expand_less' : 'expand_more'} size={18} />
+                </button>
+              )}
+              <div id="doctor-roster-list">
+                {loadingAppointments ? (
+                  <p className="doctor-roster-empty" role="status">Loading patients…</p>
+                ) : appointments.length === 0 ? (
+                  <p className="doctor-roster-empty">
+                    {viewMode === 'active' ? 'The consultation queue is empty.'
+                      : viewMode === 'scheduled' ? 'No upcoming bookings.'
+                      : 'No archived consultations.'}
+                  </p>
+                ) : (
+                  <ul className="doctor-queue-grid">
+                    {appointments.map((app) => {
+                      const isSelected = selectedApp?.appointment_id === app.appointment_id;
+                      const badge = STATUS_STYLE(app.status);
+                      return (
+                        <li key={app.appointment_id}>
+                          <button type="button" className="doctor-queue-item" aria-pressed={isSelected}
+                            onClick={() => {
+                              const toggle = queueToggle.current;
+                              const collapsible = Boolean(toggle?.getClientRects().length);
+                              if (isSelected && !collapsible) return;
+                              if (isSelected) {
+                                toggle?.focus();
+                              } else {
+                                pendingPatientFocus.current = app.appointment_id;
+                                selectPatient(app);
+                              }
+                              setQueueExpanded(false);
+                            }}>
+                            <span className="doctor-queue-top">
+                              <strong className="doctor-queue-name">{app.first_name} {app.last_name}</strong>
+                              <span className="doctor-queue-status" style={{ background: badge.bg, color: badge.color }}>
+                                {badge.text}
+                              </span>
+                            </span>
+                            <span className="doctor-queue-meta">
+                              {app.queue_ticket && <span className="doctor-queue-ticket">{app.queue_ticket}</span>}
+                              <span>{app.appointment_type}</span>
+                              <span>{[app.date_str, app.time_slot].filter(Boolean).join(' · ')}</span>
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            </section>
+          </aside>
+          <div className="doctor-patient-workspace">
+          {!selectedApp && !loadingAppointments && (
+            <div className="doctor-workspace-empty">
+              <Icon name="person_search" size={26} />
+              <h2>No patient selected</h2>
+              <p>{appointments.length ? 'Choose a patient from the list to open their record.' : 'Patient records will open here when available.'}</p>
+            </div>
+          )}
+          {/* Encounter and issuance feedback */}
+          {feedbackMsg && (
+            <div role={feedbackMsg.type === 'error' ? 'alert' : 'status'}
               style={{
-                background: T.surface,
-                border: `1px solid ${T.border}`,
-                borderLeft: `5px solid ${
-                  selectedApp.status === 'scheduled'
-                    ? T.warning
-                    : selectedApp.status === 'completed'
-                    ? T.success
-                    : T.info
+                marginBottom: 16,
+                padding: '12px 16px',
+                borderRadius: T.radius.md,
+                fontSize: 12.5,
+                fontWeight: 600,
+                background:
+                  feedbackMsg.type === 'success' ? T.successSoft : T.dangerSoft,
+                color: feedbackMsg.type === 'success' ? T.success : T.danger,
+                border: `1px solid ${
+                  feedbackMsg.type === 'success'
+                    ? T.successBorder
+                    : T.dangerBorder
                 }`,
-                borderRadius: T.radius.lg,
-                padding: '18px 22px',
-                marginBottom: 20,
+                overflowWrap: 'anywhere',
+                lineHeight: 1.5,
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
+                gap: 12,
                 flexWrap: 'wrap',
-                gap: 16,
-                boxShadow: T.shadow.xs,
               }}
             >
-              <div className="doctor-patient-identity">
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    flexWrap: 'wrap',
-                  }}
-                >
-                  <h3
+              <span style={{ flex: '1 1 260px' }}>{feedbackMsg.text}</span>
+
+              {feedbackMsg.type === 'success' &&
+                feedbackMsg.pdfKind &&
+                feedbackMsg.pdfId && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleDownloadPdf(feedbackMsg.pdfKind!, feedbackMsg.pdfId!)
+                    }
                     style={{
-                      margin: 0,
-                      fontSize: 17,
-                      fontWeight: 800,
-                      color: T.text,
-                    }}
-                  >
-                    {selectedApp.first_name} {selectedApp.last_name}
-                    <span
-                      style={{
-                        color: T.textSub,
-                        fontSize: 13,
-                        fontWeight: 600,
-                        marginLeft: 8,
-                      }}
-                    >
-                      {selectedApp.student_no || 'Staff'}
-                    </span>
-                  </h3>
-                  <span
-                    style={{
-                      background: T.sage100,
-                      color: T.textSub,
+                      padding: '6px 14px',
+                      borderRadius: T.radius.pill,
+                      background: T.primary,
+                      color: T.textOnPrimary,
+                      border: 'none',
                       fontSize: 11.5,
                       fontWeight: 700,
-                      padding: '3px 10px',
-                      borderRadius: T.radius.pill,
+                      cursor: 'pointer',
+                      fontFamily: T.font,
+                      whiteSpace: 'nowrap',
                     }}
                   >
-                    {selectedApp.course || 'PSU Lingayen'}
-                  </span>
-                  <span
-                    style={{
-                      background: STATUS_STYLE(selectedApp.status).bg,
-                      color: STATUS_STYLE(selectedApp.status).color,
-                      fontSize: 10.5,
-                      fontWeight: 800,
-                      letterSpacing: 0.3,
-                      padding: '3px 10px',
-                      borderRadius: T.radius.pill,
-                    }}
-                  >
-                    {STATUS_STYLE(selectedApp.status).text}
-                  </span>
-                </div>
-
-                <div
-                  style={{
-                    display: 'flex',
-                    gap: 18,
-                    marginTop: 10,
-                    fontSize: 12.5,
-                    flexWrap: 'wrap',
-                  }}
-                >
-                  <span>
-                    <b style={{ color: T.textSub }}>Blood:</b>{' '}
-                    {selectedApp.blood_type || 'Not recorded'}
-                  </span>
-                  <span>
-                    <b style={{ color: T.textSub }}>Allergies:</b>{' '}
-                    <span
-                      style={{
-                        color:
-                          selectedApp.allergies && selectedApp.allergies !== 'None'
-                            ? T.danger
-                            : T.success,
-                        fontWeight: 700,
-                      }}
-                    >
-                      {selectedApp.allergies
-                        ? `${selectedApp.allergies}`
-                        : 'None reported'}
-                    </span>
-                  </span>
-                  <span>
-                    <b style={{ color: T.textSub }}>Conditions:</b>{' '}
-                    {selectedApp.chronic_conditions || 'None'}
-                  </span>
-                  <span>
-                    <b style={{ color: T.textSub }}>H:</b>{' '}
-                    {selectedApp.height ? `${selectedApp.height} cm` : '—'}
-                  </span>
-                  <span>
-                    <b style={{ color: T.textSub }}>W:</b>{' '}
-                    {selectedApp.weight ? `${selectedApp.weight} kg` : '—'}
-                  </span>
-                  <span>
-                    <b style={{ color: T.textSub }}>Sex:</b>{' '}
-                    {selectedApp.sex || 'Not recorded'}
-                  </span>
-                  <span>
-                    <b style={{ color: T.textSub }}>DOB / Age:</b>{' '}
-                    {selectedApp.date_of_birth
-                      ? `${selectedApp.date_of_birth}${selectedApp.age != null ? ` (${selectedApp.age} yrs)` : ''}`
-                      : 'Not recorded'}
-                  </span>
-                  <span>
-                    <b style={{ color: T.textSub }}>BMI:</b>{' '}
-                    {selectedApp.bmi
-                      ? `${selectedApp.bmi} · ${selectedApp.bmi_category || ''}`
-                      : 'Not available'}
-                  </span>
-                  {selectedApp.health_profile_updated_at && (
-                    <span style={{ color: T.textMuted, fontStyle: 'italic' }}>
-                      Last verified:{' '}
-                      {new Date(
-                        selectedApp.health_profile_updated_at
-                      ).toLocaleDateString()}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div
-                style={{
-                  display: 'flex',
-                  gap: 10,
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={handleViewPatientHistory}
-                  style={{
-                    ...btnGhost,
-                    color: T.info,
-                    borderColor: T.infoBorder,
-                  }}
-                >
-                  <Icon name="article" size={14} /> Past EMR history
-                </button>
-                
-                <button
-                  type="button"
-                  onClick={() =>
-                    openPrescriptionHistory(
-                      selectedApp.patient_id,
-                      `${selectedApp.first_name} ${selectedApp.last_name}`
-                    )
-                  }
-                  style={{
-                    ...btnGhost,
-                    color: T.primary,
-                    borderColor: T.primaryTint,
-                  }}
-                  title="Prescriptions you issued to this patient"
-                >
-                  <Icon name="medication" size={14} /> My prescriptions
-                </button>
-
-                
-                <button
-                  type="button"
-                  onClick={() =>
-                    openClearanceHistory(
-                      selectedApp.patient_id,
-                      `${selectedApp.first_name} ${selectedApp.last_name}`
-                    )
-                  }
-                  style={{
-                    ...btnGhost,
-                    color: T.primary,
-                    borderColor: T.primaryTint,
-                  }}
-                  title="Clearances you issued to this patient"
-                >
-                  <Icon name="description" size={14} /> My clearances
-                </button>
-
-                {!isBookingMode && (
-                  <button
-                    type="button"
-                    onClick={openImmunizationModal}
-                    style={{
-                      ...btnGhost,
-                      color: T.primary,
-                      borderColor: T.primaryTint,
-                    }}
-                    title="View and append immunization records"
-                  >
-                    <Icon name="vaccines" size={14} /> Immunizations
+                    <Icon name="download" size={14} />️ Download PDF
                   </button>
                 )}
-
-                {isDentist && !isBookingMode && (
-                  <button
-                    type="button"
-                    onClick={() => setForceShowDentalChart((prev) => !prev)}
-                    style={{
-                      ...btnGhost,
-                      color: isDentalVisit ? T.tonalTealFg : T.textSub,
-                      borderColor: isDentalVisit ? '#9FD9CB' : T.border,
-                      background: isDentalVisit ? T.tonalTealBg : T.surface,
-                    }}
-                    title="Toggle Dental Odontogram"
-                  >
-                    <Icon name="dentistry" size={14} /> {isDentalVisit ? 'Odontogram Active' : 'Dental Chart'}
-                  </button>
-                )}
-
-                {selectedApp.status === 'completed' ? (
-                  <span
-                    style={{
-                      background: T.successSoft,
-                      color: T.success,
-                      padding: '10px 16px',
-                      borderRadius: T.radius.pill,
-                      fontWeight: 700,
-                      fontSize: 12.5,
-                      border: `1px solid ${T.successBorder}`,
-                    }}
-                  >
-                    <Icon name="check_circle" size={14} /> Encounter discharged
-                  </span>
-                ) : selectedApp.status === 'scheduled' ? (
-                  <span
-                    style={{
-                      background: T.warningSoft,
-                      color: T.warning,
-                      padding: '10px 16px',
-                      borderRadius: T.radius.pill,
-                      fontWeight: 700,
-                      fontSize: 12.5,
-                      border: `1px solid ${T.warningBorder}`,
-                    }}
-                  >
-                    ⏳ Awaiting nurse triage
-                  </span>
-                ) : selectedApp.status === 'serving' ? (
-                  <span
-                    style={{
-                      background: T.successSoft,
-                      color: T.success,
-                      padding: '10px 16px',
-                      borderRadius: T.radius.pill,
-                      fontWeight: 700,
-                      fontSize: 13,
-                      border: `1px solid ${T.successBorder}`,
-                    }}
-                  >
-                    <Icon name="medical_services" size={14} /> In consultation
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleStartConsultation}
-                    style={{ ...btnPrimary }}
-                  >
-                    ▶ Begin consultation
-                  </button>
-                )}
-              </div>
             </div>
           )}
 
-          {/* ── IN-CONSULTATION DIAGNOSTIC LABS & ATTACHMENT PREVIEW ── */}
-          {selectedApp && activePatientAttachments.length > 0 && (
-            <div
-              style={{
-                background: T.infoSoft,
-                border: `1px solid ${T.infoBorder}`,
-                borderRadius: T.radius.lg,
-                padding: '14px 18px',
-                marginBottom: 20,
-                boxShadow: T.shadow.xs,
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: 10,
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 800,
-                    color: T.info,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                  }}
-                >
-                  <Icon name="folder_open" size={14} /> Prior Diagnostic Records & Lab Imaging on File (
-                  {activePatientAttachments.length})
-                </span>
-                <span style={{ fontSize: 11, color: T.info, fontWeight: 600 }}>
-                  Click to open/inspect attachment
-                </span>
-              </div>
-
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {activePatientAttachments.map((att: any, idx: number) => (
-                  <button
-                    key={att.attachment_id || idx}
-                    type="button"
-                    className="doctor-attachment"
-                    onClick={() =>
-                      handleOpenAttachment(att.attachment_id, att.file_name, att.mime_type)
-                    }
-                    disabled={openingAttachmentId === att.attachment_id}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      padding: '6px 14px',
-                      background: T.surface,
-                      border: `1px solid ${T.infoBorder}`,
-                      borderRadius: T.radius.pill,
-                      fontSize: 12,
-                      fontWeight: 700,
-                      color: T.info,
-                      cursor: 'pointer',
-                      boxShadow: T.shadow.xs,
-                      fontFamily: T.font,
-                    }}
-                  >
-                    <Icon name="draft" size={14} /> {att.file_name}
-                    <span
-                      style={{
-                        fontSize: 10.5,
-                        color: T.textMuted,
-                        fontWeight: 500,
-                      }}
-                    >
-                      ({new Date(att.encounter_date).toLocaleDateString()})
-                    </span>
-                    <span style={{ fontSize: 11, color: T.info }}>
-                      {openingAttachmentId === att.attachment_id ? '⏳' : '️'}
-                    </span>
+          {selectedApp && !isBookingMode && (
+            <>
+              <div ref={workspaceStart} aria-hidden="true" />
+              <div className="doctor-workspace-switch" role="group" aria-label="Patient workspace">
+                {([
+                  ['encounter', 'medical_services', 'Encounter'],
+                  ['documents', 'description', 'Documents'],
+                  ['dental', 'dentistry', 'Dental chart'],
+                ] as const).filter(([panel]) => panel !== 'dental' || canViewDentalChart).map(([panel, icon, label]) => (
+                  <button key={panel} type="button" aria-pressed={activeWorkspacePanel === panel}
+                    aria-controls={panel === 'documents' ? 'doctor-document-panel' : `doctor-${panel}-panel`}
+                    onClick={(event) => {
+                      if (activeWorkspacePanel === panel) return;
+                      const switchTop = event.currentTarget.parentElement?.getBoundingClientRect().top;
+                      const start = workspaceStart.current;
+                      if (start && switchTop !== undefined) {
+                        const offset = start.getBoundingClientRect().top - switchTop;
+                        if (offset < -1) start.closest('.app-content')?.scrollBy({ top: offset });
+                      }
+                      setWorkspacePanel(panel);
+                    }}>
+                    <Icon name={icon} size={18} /> {label}
                   </button>
                 ))}
               </div>
-            </div>
+            </>
           )}
 
           {/* ── INTERACTIVE ODONTOGRAM ───────────────────────── */}
-          {selectedApp && isDentalVisit && !isBookingMode && (
-            <div
+          {selectedApp && canViewDentalChart && (
+            <section id="doctor-dental-panel" aria-labelledby="doctor-dental-title"
+              hidden={activeWorkspacePanel !== 'dental'}
               style={{
                 background: T.surface,
                 border: `1.5px solid ${T.tonalTealFg}`,
@@ -2132,7 +1969,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                 }}
               >
                 <div>
-                  <h4
+                  <h3 id="doctor-dental-title"
                     style={{
                       margin: 0,
                       fontSize: 15,
@@ -2144,7 +1981,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                     }}
                   >
                     <Icon name="dentistry" size={14} /> Adult Dental Chart (Odontogram) · Universal Numbering System
-                  </h4>
+                  </h3>
                   <p style={{ margin: '3px 0 0', fontSize: 12, color: T.textSub }}>
                     Click a tooth (Upper 1–16, Lower 32–17) to record or update findings.
                     Automatically appended to the clinical plan upon discharge.
@@ -2380,10 +2217,10 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                   </div>
                 </div>
               )}
-            </div>
+            </section>
           )}
 
-          {/* Two-column workspace — QUEUE ONLY (bookings are view-only) */}
+          {/* Bookings stay read-only until check-in */}
           {selectedApp && (isBookingMode ? (
             <div
               style={{
@@ -2404,18 +2241,11 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
             </div>
           ) : (
           <div className="doctor-workspace">
-            {/* LEFT: Document issuance */}
-            <section className="doctor-panel">
+            <section id="doctor-document-panel" className="doctor-panel doctor-document-panel"
+              aria-labelledby="doctor-document-title" hidden={activeWorkspacePanel !== 'documents'}>
               <div className="doctor-panel-header">
-                <h3
-                  style={{
-                    margin: 0,
-                    color: T.primary,
-                    fontSize: 16,
-                    fontWeight: 800,
-                  }}
-                >
-                  Official document issuance
+                <h3 id="doctor-document-title" className="doctor-panel-title">
+                  Document issuance
                 </h3>
                 <div
                   style={{
@@ -2456,61 +2286,6 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                   })}
                 </div>
               </div>
-
-              {/* Shared issuance feedback banner */}
-              {feedbackMsg && (
-                <div
-                  style={{
-                    marginBottom: 16,
-                    padding: '12px 16px',
-                    borderRadius: T.radius.md,
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    background:
-                      feedbackMsg.type === 'success' ? T.successSoft : T.dangerSoft,
-                    color: feedbackMsg.type === 'success' ? T.success : T.danger,
-                    border: `1px solid ${
-                      feedbackMsg.type === 'success'
-                        ? T.successBorder
-                        : T.dangerBorder
-                    }`,
-                    wordBreak: 'break-all',
-                    lineHeight: 1.5,
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: 12,
-                    flexWrap: 'wrap',
-                  }}
-                >
-                  <span style={{ flex: '1 1 260px' }}>{feedbackMsg.text}</span>
-
-                  {feedbackMsg.type === 'success' &&
-                    feedbackMsg.pdfKind &&
-                    feedbackMsg.pdfId && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleDownloadPdf(feedbackMsg.pdfKind!, feedbackMsg.pdfId!)
-                        }
-                        style={{
-                          padding: '6px 14px',
-                          borderRadius: T.radius.pill,
-                          background: T.primary,
-                          color: T.textOnPrimary,
-                          border: 'none',
-                          fontSize: 11.5,
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                          fontFamily: T.font,
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        <Icon name="download" size={14} />️ Download PDF
-                      </button>
-                    )}
-                </div>
-              )}
 
               {docType === 'rx' ? (
                 <PrescriptionGenerator
@@ -2717,17 +2492,10 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
               )}
             </section>
 
-            {/* RIGHT: Encounter diagnosis & vitals */}
-            <section className="doctor-panel">
-              <h3
-                style={{
-                  margin: '0 0 16px 0',
-                  color: T.info,
-                  fontSize: 16,
-                  fontWeight: 800,
-                }}
-              >
-                <Icon name="medical_services" size={14} /> Encounter diagnosis & vitals
+            <section id="doctor-encounter-panel" className="doctor-panel doctor-encounter-panel"
+              aria-labelledby="doctor-encounter-title" hidden={activeWorkspacePanel !== 'encounter'}>
+              <h3 id="doctor-encounter-title" className="doctor-panel-title">
+                <Icon name="medical_services" size={14} /> Clinical encounter
               </h3>
 
               {isArchivedMode && (
@@ -2765,273 +2533,181 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                 </div>
               )}
 
-              <form onSubmit={handleFinishConsultation}>
-                {/* Vitals grid */}
-                <div
-                  style={{
-                    background: T.sage50,
-                    padding: 14,
-                    borderRadius: T.radius.md,
-                    marginBottom: 16,
-                    border: `1px solid ${T.borderSoft}`,
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 10.5,
-                      fontWeight: 800,
-                      letterSpacing: 1.4,
-                      color: T.textSub,
-                      textTransform: 'uppercase',
-                      marginBottom: 10,
-                    }}
-                  >
-                    Nurse-recorded vitals (read-only)
-                  </div>
-
-                  <div className="doctor-vitals-grid">
-                    {[
-                      { label: 'BP systolic', value: bpSystolic },
-                      { label: 'BP diastolic', value: bpDiastolic },
-                      { label: 'Temp (°C)', value: temperature },
-                      { label: 'Pulse bpm', value: pulseRate },
-                      { label: 'SpO₂ %', value: spo2 },
-                      { label: 'Resp cpm', value: respRate },
-                      {
-                        label: 'Height cm',
-                        value: height,
-                      },
-                      {
-                        label: 'Weight kg',
-                        value: weight,
-                      },
-                    ].map((f) => (
-                      <div key={f.label}>
-                        <label
-                          style={{
-                            fontSize: 10.5,
-                            color: T.textSub,
-                            fontWeight: 600,
-                          }}
-                        >
-                          {f.label}
-                        </label>
-                        <output
-                          aria-label={`${f.label}, read only`}
-                          style={{
-                            display: 'block',
-                            boxSizing: 'border-box',
-                            width: '100%',
-                            marginTop: 4,
-                            padding: '8px 10px',
-                            fontSize: 13,
-                            color: f.value ? T.text : T.textSub,
-                            background: T.sage100,
-                            border: `1px solid ${T.borderSoft}`,
-                            borderRadius: T.radius.md,
-                          }}
-                        >
-                          {f.value || 'Not recorded'}
-                        </output>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div style={{ marginBottom: 14 }}>
-                  <label htmlFor="encounter-complaint"
-                    style={{
-                      display: 'block',
-                      fontSize: 12,
-                      fontWeight: 700,
-                      color: T.textSub,
-                      marginBottom: 6,
-                    }}
-                  >
-                    Chief complaint
-                  </label>
-                  <textarea
-                    rows={2}
-                    disabled={isArchivedMode}
-                    readOnly={isArchivedMode}
-                    style={{
-                      ...inputStyle,
-                      resize: 'vertical',
-                      fontFamily: T.font,
-                    }}
-                    id="encounter-complaint" value={chiefComplaint}
-                    onChange={(e) => setChiefComplaint(e.target.value)}
-
-                  />
-                </div>
-
-                <div style={{ marginBottom: 14 }}>
-                  <label htmlFor="encounter-diagnosis"
-                    style={{
-                      display: 'block',
-                      fontSize: 12,
-                      fontWeight: 700,
-                      color: T.textSub,
-                      marginBottom: 6,
-                    }}
-                  >
-                    Clinical diagnosis
-                  </label>
-                  <input
-                    style={inputStyle}
-                    disabled={isArchivedMode}
-                    readOnly={isArchivedMode}
-                    id="encounter-diagnosis" value={diagnosis}
-
-                    onChange={(e) => setDiagnosis(e.target.value)}
-                  />
-                </div>
-
-                <div style={{ marginBottom: 14 }}>
-                  <label htmlFor="encounter-plan"
-                    style={{
-                      display: 'block',
-                      fontSize: 12,
-                      fontWeight: 700,
-                      color: T.textSub,
-                      marginBottom: 6,
-                    }}
-                  >
-                    Treatment plan
-                  </label>
-                  <textarea
-                    rows={3}
-                    disabled={isArchivedMode}
-                    readOnly={isArchivedMode}
-                    style={{
-                      ...inputStyle,
-                      resize: 'vertical',
-                      fontFamily: T.font,
-                    }}
-                    id="encounter-plan" value={treatmentPlan}
-
-                    onChange={(e) => setTreatmentPlan(e.target.value)}
-                  />
-                </div>
-
-                <label htmlFor="encounter-notes" style={{ display: 'block', fontWeight: 700, marginBottom: 6 }}>
-                  Clinical notes
-                </label>
-                <textarea id="encounter-notes" value={clinicalNotes} rows={3} readOnly={isArchivedMode}
-                  style={{ ...inputStyle, marginBottom: 14 }} onChange={(event) => setClinicalNotes(event.target.value)} />
-
-                {!isArchivedMode && (
-                  <div
-                    style={{
-                      marginBottom: 16,
-                      padding: 14,
-                      background: T.sage50,
-                      border: `1px dashed ${T.border}`,
-                      borderRadius: T.radius.md,
-                    }}
-                  >
-                    <label
+              <form className="doctor-encounter-form" onSubmit={handleFinishConsultation}>
+                <div className="doctor-writing-grid">
+                  <div className="doctor-writing-field">
+                    <label htmlFor="encounter-complaint"
                       style={{
                         display: 'block',
-                        fontSize: 12.5,
+                        fontSize: 12,
                         fontWeight: 700,
                         color: T.textSub,
-                        marginBottom: 8,
+                        marginBottom: 6,
                       }}
                     >
-                      <Icon name="attach_file" size={14} /> Attach diagnostic lab result (CBC, urinalysis, X-ray
-                      PDF/image)
+                      Chief complaint
+                    </label>
+                    <textarea
+                      rows={2}
+                      disabled={isArchivedMode}
+                      readOnly={isArchivedMode}
+                      style={{
+                        ...inputStyle,
+                        resize: 'vertical',
+                        fontFamily: T.font,
+                      }}
+                      id="encounter-complaint" value={chiefComplaint}
+                      onChange={(e) => setChiefComplaint(e.target.value)}
+
+                    />
+                  </div>
+
+                  <div className="doctor-writing-field">
+                    <label htmlFor="encounter-diagnosis"
+                      style={{
+                        display: 'block',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: T.textSub,
+                        marginBottom: 6,
+                      }}
+                    >
+                      Clinical diagnosis
                     </label>
                     <input
-                      key={selectedApp?.appointment_id || 'no-patient'}
-                      type="file"
-                      accept=".pdf,image/png,image/jpeg,.jpg"
-                      onChange={(e) => {
-                        if (e.target.files && e.target.files[0])
-                          setAttachedFile(e.target.files[0]);
-                      }}
-                      style={{ fontSize: 12, color: T.textSub }}
+                      style={inputStyle}
+                      disabled={isArchivedMode}
+                      readOnly={isArchivedMode}
+                      id="encounter-diagnosis" value={diagnosis}
+
+                      onChange={(e) => setDiagnosis(e.target.value)}
                     />
-                    {attachedFile && (
-                      <div
-                        style={{
-                          fontSize: 12,
-                          color: T.primary,
-                          fontWeight: 700,
-                          marginTop: 8,
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 10,
-                        }}
-                      >
-                        <span>
-                          <Icon name="draft" size={14} /> {attachedFile.name} (
-                          {(attachedFile.size / 1024).toFixed(1)} KB)
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setAttachedFile(null)}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            color: T.danger,
-                            cursor: 'pointer',
-                            fontWeight: 700,
-                            fontSize: 12,
-                          }}
-                        >
-                          <Icon name="close" size={14} /> Remove
-                        </button>
-                      </div>
-                    )}
+                  </div>
+
+                  <div className="doctor-writing-field">
+                    <label htmlFor="encounter-plan"
+                      style={{
+                        display: 'block',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: T.textSub,
+                        marginBottom: 6,
+                      }}
+                    >
+                      Treatment plan
+                    </label>
+                    <textarea
+                      rows={3}
+                      disabled={isArchivedMode}
+                      readOnly={isArchivedMode}
+                      style={{
+                        ...inputStyle,
+                        resize: 'vertical',
+                        fontFamily: T.font,
+                      }}
+                      id="encounter-plan" value={treatmentPlan}
+
+                      onChange={(e) => setTreatmentPlan(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="doctor-writing-field">
+                    <label htmlFor="encounter-notes" className="doctor-notes-label">
+                      Clinical notes
+                    </label>
+                    <textarea id="encounter-notes" value={clinicalNotes} rows={3} readOnly={isArchivedMode}
+                      style={inputStyle} onChange={(event) => setClinicalNotes(event.target.value)} />
+                  </div>
+                </div>
+
+                {!isArchivedMode && (
+                  <div className="doctor-encounter-actions">
+                    <div className="doctor-encounter-attachment">
+                      <input
+                        key={selectedApp.appointment_id}
+                        ref={encounterFileInput}
+                        type="file"
+                        accept=".pdf,image/png,image/jpeg,.jpg"
+                        hidden
+                        onChange={(event) => setAttachedFile(event.currentTarget.files?.[0] ?? null)}
+                      />
+                      <button type="button" className="doctor-record-action" onClick={() => encounterFileInput.current?.click()}>
+                        <Icon name="attach_file" size={16} /> {attachedFile ? 'Replace lab result' : 'Attach lab result'}
+                      </button>
+                      {attachedFile && (
+                        <div className="doctor-attached-file">
+                          <span>{attachedFile.name}</span>
+                          <button type="button" className="doctor-record-action" aria-label="Remove lab result"
+                            onClick={() => {
+                              setAttachedFile(null);
+                              if (encounterFileInput.current) encounterFileInput.current.value = '';
+                            }}>
+                            <Icon name="close" size={16} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <button type="submit" disabled={isSubmittingEMR} style={btnPrimary}>
+                      {isSubmittingEMR ? 'Finalizing encounter…' : 'Finish consultation & discharge'}
+                    </button>
                   </div>
                 )}
-
-                <button
-                  type="submit"
-                  disabled={
-                    isSubmittingEMR ||
-                    !selectedApp ||
-                    selectedApp.status === 'scheduled' ||
-                    isArchivedMode
-                  }
-                  style={{
-                    ...btnPrimary,
-                    width: '100%',
-                    padding: 13,
-                    background:
-                      isArchivedMode ||
-                      !selectedApp ||
-                      selectedApp.status === 'scheduled'
-                        ? T.sage400
-                        : T.primary,
-                    opacity:
-                      isArchivedMode ||
-                      !selectedApp ||
-                      selectedApp.status === 'scheduled'
-                        ? 0.6
-                        : 1,
-                    cursor:
-                      isArchivedMode ||
-                      !selectedApp ||
-                      selectedApp.status === 'scheduled'
-                        ? 'not-allowed'
-                        : 'pointer',
-                  }}
-                >
-                  {isSubmittingEMR
-                    ? 'Finalizing encounter & uploading to MinIO…'
-                    : isArchivedMode
-                    ? 'Encounter already finalized & discharged'
-                    : selectedApp?.status === 'scheduled'
-                    ? '⏳ Patient not triaged by nurse'
-                    : 'Finish consultation & discharge'}
-                </button>
               </form>
             </section>
           </div>
           ))}
-        </>
+          {/* ── IN-CONSULTATION DIAGNOSTIC LABS & ATTACHMENT PREVIEW ── */}
+          {selectedApp && (activeWorkspacePanel === 'encounter' || isBookingMode) && activePatientAttachments.length > 0 && (
+            <details className="doctor-prior-attachments">
+              <summary>
+                <Icon name="folder_open" size={16} /> Prior diagnostic records ({activePatientAttachments.length})
+              </summary>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {activePatientAttachments.map((att: any, idx: number) => (
+                  <button
+                    key={att.attachment_id || idx}
+                    type="button"
+                    className="doctor-attachment"
+                    onClick={() =>
+                      handleOpenAttachment(att.attachment_id, att.file_name, att.mime_type)
+                    }
+                    disabled={openingAttachmentId === att.attachment_id}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '6px 14px',
+                      background: T.surface,
+                      border: `1px solid ${T.infoBorder}`,
+                      borderRadius: T.radius.pill,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: T.info,
+                      cursor: 'pointer',
+                      boxShadow: T.shadow.xs,
+                      fontFamily: T.font,
+                    }}
+                  >
+                    <Icon name="draft" size={14} /> {att.file_name}
+                    <span
+                      style={{
+                        fontSize: 10.5,
+                        color: T.textMuted,
+                        fontWeight: 500,
+                      }}
+                    >
+                      ({new Date(att.encounter_date).toLocaleDateString()})
+                    </span>
+                    <span style={{ fontSize: 11, color: T.info }}>
+                      {openingAttachmentId === att.attachment_id ? '⏳' : '️'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </details>
+          )}
+          </div>
+        </div>
       )}
 
       {encounterConfirmation && selectedApp && (

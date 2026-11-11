@@ -22,8 +22,8 @@ import type { CSSProperties, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import QrIntakeScanner from './QrIntakeScanner';
 import InventoryManager from './InventoryManager';
-import { io } from 'socket.io-client';
-import { API_BASE_URL, SOCKET_URL } from '../config/api';
+import { subscribeToDesktopEvents, useDesktopSocket } from '../services/desktopRealtime';
+import { API_BASE_URL } from '../config/api';
 import { CLIENT_INSTANCE_ID } from '../services/clientInstance';
 import { T, iconBtn, rgba, softBadge, liveObject } from '../theme';
 import Icon from './Icon';
@@ -667,6 +667,7 @@ export default function NurseConsole({
     }
   };
 
+  const socket = useDesktopSocket();
   useEffect(() => {
     fetchLiveQueue();
     fetchActiveSosCount();
@@ -676,56 +677,57 @@ export default function NurseConsole({
     // before, so the count read 0 until a nurse happened to open it.
     fetchExpected();
 
-    const token = localStorage.getItem('valetudo_token');
-    const socket = io(SOCKET_URL, {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-    });
+    const unsubscribe = subscribeToDesktopEvents(socket, (on) => {
+      on('queue:updated', () => {
+        fetchLiveQueue();
+        fetchActiveSosCount();
+        fetchNoShowCount();
+      });
 
-    socket.on('queue:updated', () => {
-      fetchLiveQueue();
-      fetchActiveSosCount();
-      fetchNoShowCount();
-    });
+      on('emergency:new_alert', () => {
+        fetchLiveQueue();
+        fetchActiveSosCount();
+      });
 
-    socket.on('emergency:new_alert', () => {
-      fetchLiveQueue();
-      fetchActiveSosCount();
-    });
+      on('emergency:status_change', () => {
+        fetchLiveQueue();
+        fetchActiveSosCount();
+      });
 
-    socket.on('emergency:status_change', () => {
-      fetchLiveQueue();
-      fetchActiveSosCount();
-    });
+      on('inventory:updated', () => {
+        fetchInventoryStats();
+      });
 
-    socket.on('inventory:updated', () => {
-      fetchInventoryStats();
-    });
+      // The reminder worker flips appointments to 'no_show' every 60s and
+      // emits appointment:status_changed. Keep the tile live as that happens.
+      on('appointment:status_changed', (evt: { status?: string }) => {
+        if (evt?.status === 'no_show') fetchNoShowCount();
+        if (viewMode === 'expected') fetchExpected();
+      });
 
-    // The reminder worker flips appointments to 'no_show' every 60s and
-    // emits appointment:status_changed. Keep the tile live as that happens.
-    socket.on('appointment:status_changed', (evt: { status?: string }) => {
-      if (evt?.status === 'no_show') fetchNoShowCount();
-    });
+      on('appointment:booked', () => {
+        if (window.electronAPI?.showNotification) {
+          window.electronAPI.showNotification({
+            title: 'New appointment in system',
+            body: 'Open Expected arrivals to review the booking.',
+          });
+        }
+        fetchExpected();
+      });
 
-    socket.on('appointment:booked', () => {
-      if (window.electronAPI?.showNotification) {
-        window.electronAPI.showNotification({
-          title: 'New appointment in system',
-          body: 'Open Expected arrivals to review the booking.',
-        });
-      }
-      fetchExpected();
-    });
-
-    socket.on('appointment:status_changed', () => {
-      if (viewMode === 'expected') fetchExpected();
+      on('reconnect', () => {
+        fetchLiveQueue();
+        fetchActiveSosCount();
+        fetchNoShowCount();
+        fetchInventoryStats();
+        fetchExpected();
+      });
     });
 
     return () => {
-      socket.disconnect();
+      unsubscribe();
     };
-  }, [viewMode]);
+  }, [viewMode, socket]);
 
   useEffect(() => {
     if (viewMode === 'expected') fetchExpected();

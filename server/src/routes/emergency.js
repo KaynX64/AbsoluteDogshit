@@ -13,6 +13,7 @@ import { redis, isRedisActive, invalidateCache } from '../utils/redisClient.js';
 import { getServerPolicy } from '../config/serverPolicy.js';
 import {
   requireResponderAccess,
+  resolveResponderAccess,
   redactForTier,
   getResponderAudience,
   roleLabelFor,
@@ -257,6 +258,16 @@ export default function emergencyRouter(io) {
   // ===========================================================================
   // 2. GET /api/emergency/active - Retrieve Active Alerts
   // ===========================================================================
+  router.get('/responder-access', authenticateToken, async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    try {
+      const { authorized } = await resolveResponderAccess(req.user.user_id);
+      return res.json({ authorized });
+    } catch {
+      return res.status(500).json({ error: 'Responder access lookup failed.' });
+    }
+  });
+
   router.get('/active', authenticateToken, requireResponderAccess, async (req, res) => {
     try {
       const tier = req.responderTier;

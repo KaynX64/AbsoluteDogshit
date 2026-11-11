@@ -1,7 +1,7 @@
 // desktop/src/components/EmergencyAlertBanner.tsx
 import React, { useEffect, useState } from 'react';
-import { io, Socket } from 'socket.io-client';
-import { API_BASE_URL, SOCKET_URL } from '../config/api';
+import { subscribeToDesktopEvents, useDesktopSocket } from '../services/desktopRealtime';
+import { API_BASE_URL } from '../config/api';
 import { CLIENT_INSTANCE_ID } from '../services/clientInstance';
 import { T } from '../theme';
 import Icon from './Icon';
@@ -21,6 +21,7 @@ interface EmergencyAlert {
   emergencyContact?: string;
   latitude: number;
   longitude: number;
+  formattedAddress?: string;
   googleMapsUrl: string;
   status: string;
   createdAt: string;
@@ -31,10 +32,8 @@ interface EmergencyAlert {
 
 export default function EmergencyAlertBanner() {
   const [alerts, setAlerts] = useState<EmergencyAlert[]>([]);
-  // 403 on /active means this account is not an active qualified responder —
-  // an unlabelled dentist or a revoked flagged account. Render nothing then:
-  // delivery rules are decided server-side, never guessed client-side.
-  const [authorized, setAuthorized] = useState(true);
+  const [authorized, setAuthorized] = useState(false);
+  const socket = useDesktopSocket();
 
   // Synthesize an audible emergency alert chime using Web Audio API
   const playEmergencyAlarm = () => {
@@ -52,24 +51,58 @@ export default function EmergencyAlertBanner() {
   };
 
   useEffect(() => {
-    let cancelled = false;
+    const token = localStorage.getItem('valetudo_token');
+    if (!token) return;
 
-    // 1. Fetch initial active alerts from DB.
-    // roleLabel comes from the SERVER (same map as the mobile payload) —
-    // the banner no longer maintains its own role mapping.
+    let accessGranted = false;
+    let request: AbortController | undefined;
+    let alertVersion = 0;
+
+    const clearAccess = () => {
+      accessGranted = false;
+      setAuthorized(false);
+      setAlerts([]);
+    };
+
     const fetchActiveAlerts = async () => {
-      const token = localStorage.getItem('valetudo_token');
-      if (!token) return;
+      request?.abort();
+      const controller = new AbortController();
+      request = controller;
+      const options = {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      };
       try {
-        const res = await fetch(`${API_BASE_URL}/api/emergency/active`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.status === 403) {
-          if (!cancelled) setAuthorized(false);
+        const access = await fetch(`${API_BASE_URL}/api/emergency/responder-access`, options);
+        if (controller.signal.aborted) return;
+        if (!access.ok) {
+          clearAccess();
           return;
         }
+        const capability = await access.json();
+        if (controller.signal.aborted) return;
+        if (capability?.authorized !== true) {
+          clearAccess();
+          return;
+        }
+
+        accessGranted = true;
+        setAuthorized(true);
+        const snapshotVersion = alertVersion;
+        const res = await fetch(`${API_BASE_URL}/api/emergency/active`, options);
+        if (controller.signal.aborted) return;
+        if (res.status === 401 || res.status === 403) {
+          clearAccess();
+          return;
+        }
+        if (!res.ok) return;
         const data = await res.json();
-        if (Array.isArray(data) && !cancelled) {
+        if (controller.signal.aborted) return;
+        if (snapshotVersion !== alertVersion) {
+          void fetchActiveAlerts();
+          return;
+        }
+        if (Array.isArray(data)) {
           setAlerts(
             data.map((a: any) => ({
               alertId: a.alert_id,
@@ -96,56 +129,48 @@ export default function EmergencyAlertBanner() {
       } catch (_) {}
     };
 
-    fetchActiveAlerts();
+    void fetchActiveAlerts();
+    const unsubscribe = subscribeToDesktopEvents(socket, (on) => {
+      on('reconnect', fetchActiveAlerts);
+      on('responder:status_changed', () => {
+        clearAccess();
+        void fetchActiveAlerts();
+      });
+      on('emergency:new_alert', (newAlert: EmergencyAlert) => {
+        if (!accessGranted) return;
+        alertVersion += 1;
+        playEmergencyAlarm();
 
-    // 2. Connect Socket.IO with token authentication. The server places this
-    // socket in its per-user room (user:<id>); alerts arrive tiered for the
-    // account's responder level.
-    const token = localStorage.getItem('valetudo_token');
-    const socket: Socket = io(SOCKET_URL, {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-    });
+        // Trigger native OS system tray notification. Lock-screen privacy: the
+        // OS notification carries the location only — no medical details and no
+        // blood/allergy data for ANY recipient tier.
+        if ((window as any).electronAPI?.showNotification) {
+          (window as any).electronAPI.showNotification({
+            title: `SOS: ${newAlert.patientName} (${newAlert.roleLabel || 'PSU Member'})`,
+            body: `Location: ${newAlert.formattedAddress || `${Number(newAlert.latitude).toFixed(5)}, ${Number(newAlert.longitude).toFixed(5)}`}. Open the console for details.`,
+          });
+        }
 
-    socket.on('connect', () => {
-      console.log('[EmergencyAlertBanner] Live Socket connected:', socket.id);
-    });
+        // Immediately display the red banner at the top of the UI
+        setAlerts((prev) => [newAlert, ...prev.filter((a) => a.alertId !== newAlert.alertId)]);
+      });
 
-    socket.on('connect_error', (err) => {
-      console.error('[EmergencyAlertBanner] Socket error:', err.message);
-    });
-
-    socket.on('emergency:new_alert', (newAlert: EmergencyAlert) => {
-      console.log('[EmergencyAlertBanner] New SOS received in real-time:', newAlert);
-      playEmergencyAlarm();
-
-      // Trigger native OS system tray notification. Lock-screen privacy: the
-      // OS notification carries the location only — no medical details and no
-      // blood/allergy data for ANY recipient tier.
-      if ((window as any).electronAPI?.showNotification) {
-        (window as any).electronAPI.showNotification({
-          title: `SOS: ${newAlert.patientName} (${newAlert.roleLabel || 'PSU Member'})`,
-          body: `Location: ${newAlert.formattedAddress || `${Number(newAlert.latitude).toFixed(5)}, ${Number(newAlert.longitude).toFixed(5)}`}. Open the console for details.`,
-        });
-      }
-
-      // Immediately display the red banner at the top of the UI
-      setAlerts((prev) => [newAlert, ...prev.filter((a) => a.alertId !== newAlert.alertId)]);
-    });
-
-    socket.on('emergency:status_change', ({ alertId, status }: { alertId: number; status: string }) => {
-      setAlerts((prev) =>
-        prev
-          .map((a) => (Number(a.alertId) === Number(alertId) ? { ...a, status } : a))
-          .filter((a) => (status !== 'resolved' && status !== 'false_alarm' ? true : Number(a.alertId) !== Number(alertId)))
-      );
+      on('emergency:status_change', ({ alertId, status }: { alertId: number; status: string }) => {
+        if (!accessGranted) return;
+        alertVersion += 1;
+        setAlerts((prev) =>
+          prev
+            .map((a) => (Number(a.alertId) === Number(alertId) ? { ...a, status } : a))
+            .filter((a) => (status !== 'resolved' && status !== 'false_alarm' ? true : Number(a.alertId) !== Number(alertId)))
+        );
+      });
     });
 
     return () => {
-      cancelled = true;
-      socket.disconnect();
+      request?.abort();
+      unsubscribe();
     };
-  }, []);
+  }, [socket]);
 
   const updateStatus = async (alertId: number, status: string) => {
     const token = localStorage.getItem('valetudo_token');
@@ -164,7 +189,7 @@ export default function EmergencyAlertBanner() {
     }
   };
 
-  // Not an active qualified responder (server said 403) — render nothing.
+  // Display alerts only after live responder access has been confirmed.
   if (!authorized) return null;
 
   return (

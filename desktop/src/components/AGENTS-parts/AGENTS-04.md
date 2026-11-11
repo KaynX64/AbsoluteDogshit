@@ -1,9 +1,9 @@
 <!-- split from desktop/src/components/AGENTS.md — part 04 of 04 -->
 
-### PrescriptionGenerator.tsx — 1,077 lines / 38 KB / 18 useState. e-Prescription form
-- **Slice map:** `codeslice/DT-07-PrescriptionGenerator.md` (28 slices, verified @ 93b4172).
+### PrescriptionGenerator.tsx — e-Prescription form
+- **Slice map:** `codeslice/DT-07-PrescriptionGenerator.md` has the current line ranges.
 - Props: `patientUserId`, `appointmentId?`, `verifiedPatient {first_name,last_name,student_no,course,allergies,date_of_birth?,age?,sex?}`, `initialNotes?`, `isArchived?`, `onPrescriptionIssued?`, `onPrescriptionError?`.
-- Medicine catalog L332 (`GET /api/inventory/medicines`); `handleSelectMedicine` L383 auto-fills dosage from `strength`; `rxMode` `inventory|outside` (L392) — outside mode dosage defaults to "As per packaging"; expiry `getExpiresAtDate` L306; save+print L404 → `POST /api/documents/prescriptions` L435. Drug-interaction banner via `InteractionWarning` L829.
+- The catalog (`GET /api/inventory/medicines`) provides `strength` and `form`. The selected entry supplies the read-only Dosage and Dosage Type for formulary prescriptions. Outside pharmacy prescriptions retain manual dosage. `handleSaveAndPrintPrescription` reviews the draft and posts to `/api/documents/prescriptions` after stock and interaction checks.
 
 ### AnalyticsDashboard.tsx — 1,350 lines / 43 KB. Read-only dashboards + exports
 - **Slice map:** `codeslice/DT-06-AnalyticsDashboard.md` (30 slices, verified @ 93b4172).

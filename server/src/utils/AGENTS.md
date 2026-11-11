@@ -16,7 +16,7 @@
 | analyticsStats.js | analytics aggregation (tested) |
 | passwordPolicy.js | password rules |
 | mailer.js | nodemailer (SMTP_* env) |
-| fcmNotifier.js | FCM push |
+| fcmNotifier.js · fcmCredential.js | FCM push and scoped Google Auth JWT credential. The backend reads the configured service-account file, with simulation mode when it is absent. |
 | reminderWorker.js | Reminders and no-show transitions. Locks eligible appointments, skips locked rows and emits only after commit. |
 | queueTickets.js | Reserves daily ticket numbers per counter inside the intake transaction. The first reservation starts after any existing tickets. |
 | dbStudioGuard.js | DB-studio access guard (tested) |

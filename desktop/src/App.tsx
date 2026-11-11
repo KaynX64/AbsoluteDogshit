@@ -6,6 +6,7 @@ import AdminConsole from './components/AdminConsole';
 import type { AdminTab } from './components/AdminConsole';
 import ResponderConsole from './components/ResponderConsole';
 import { useBookingBadge } from './hooks/useBookingBadge';
+import { DesktopSocketContext, useDesktopSocketSession } from './services/desktopRealtime';
 import {
   getOfflineQueue,
   replayOfflineQueue,
@@ -685,14 +686,6 @@ function AppShell() {
   // ── Session Logout & Token Invalidation ───────────────────────
   const handleSignOut = async () => {
     const token = localStorage.getItem('valetudo_token');
-    if (token) {
-      try {
-        await fetch(`${API_BASE_URL}/api/auth/logout`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      } catch (_) {}
-    }
     localStorage.removeItem('valetudo_token');
     localStorage.removeItem('token');
     resetThemeAfterLogout();
@@ -702,6 +695,14 @@ function AppShell() {
     setEmail('');
     setActiveRoleView('');
     setUser(null);
+    if (token) {
+      try {
+        await fetch(`${API_BASE_URL}/api/auth/logout`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } catch (_) {}
+    }
   };
 
   const isResponder =
@@ -709,7 +710,8 @@ function AppShell() {
     (user?.roles?.length === 1 && user.roles[0] === 'EMERGENCY_RESPONDER');
   useSessionTimeout(Boolean(user) && !isResponder, 480);
 
-  const bookingBadge = useBookingBadge(activeRoleView, Boolean(user));
+  const desktopSocket = useDesktopSocketSession(user ? localStorage.getItem('valetudo_token') : null);
+  const bookingBadge = useBookingBadge(activeRoleView, Boolean(user), desktopSocket);
   const badgeKey =
     activeRoleView === 'NURSE' ? 'expected'
     : (activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST') ? 'scheduled'
@@ -868,6 +870,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
   }
 
   return (
+    <DesktopSocketContext.Provider value={desktopSocket}>
     <div className="app-shell" data-theme-mode={mode} data-theme-preset={preset}>
       <Sidebar
         role={activeRoleView}
@@ -1082,6 +1085,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
         </div>
       )}
     </div>
+    </DesktopSocketContext.Provider>
   );
 }
 

@@ -14,9 +14,8 @@
 // UNIQUE(alert_id) on INCIDENT_REPORTS plus the emergency:incident_reported
 // event dismiss the popup everywhere else.
 import { useEffect, useRef, useState } from 'react';
-import { io, Socket } from 'socket.io-client';
-import { API_BASE_URL, SOCKET_URL } from '../config/api';
-import { CLIENT_INSTANCE_ID } from '../services/clientInstance';
+import { subscribeToDesktopEvents, useDesktopSocket } from '../services/desktopRealtime';
+import { API_BASE_URL } from '../config/api';
 import { T, btnPrimary, btnGhost } from '../theme';
 import Icon from './Icon';
 
@@ -152,41 +151,36 @@ export default function IncidentReportModal() {
   }, [openAlertId]);
 
   /* ── Socket wiring ────────────────────────────────────────────────── */
+  const socket = useDesktopSocket();
   useEffect(() => {
-    const token = localStorage.getItem('valetudo_token');
-    if (!token) return;
+    const unsubscribe = subscribeToDesktopEvents(socket, (on) => {
+      // The server sends this only to the desktop window that resolved the SOS.
+      on(
+        'emergency:incident_report_required',
+        ({ alertId }: { alertId: number }) => {
+          if (alertId) openFor(Number(alertId), true);
+        }
+      );
 
-    const socket: Socket = io(SOCKET_URL, {
-      auth: { token, clientInstanceId: CLIENT_INSTANCE_ID },
-      transports: ['websocket', 'polling'],
+      // Another console filed the report first → dismiss everywhere else.
+      on(
+        'emergency:incident_reported',
+        ({ alertId }: { alertId: number }) => {
+          const id = Number(alertId);
+          reportedAlertIdsRef.current.add(id);
+          setQueue((q) => q.filter((a) => a !== id));
+          if (openAlertRef.current === id) {
+            closePopupRef.current(false);
+          }
+        }
+      );
     });
 
-    // The server sends this only to the desktop window that resolved the SOS.
-    socket.on(
-      'emergency:incident_report_required',
-      ({ alertId }: { alertId: number }) => {
-        if (alertId) openFor(Number(alertId), true);
-      }
-    );
-
-    // Another console filed the report first → dismiss everywhere else.
-    socket.on(
-      'emergency:incident_reported',
-      ({ alertId }: { alertId: number }) => {
-        const id = Number(alertId);
-        reportedAlertIdsRef.current.add(id);
-        setQueue((q) => q.filter((a) => a !== id));
-        if (openAlertRef.current === id) {
-          closePopupRef.current(false);
-        }
-      }
-    );
-
     return () => {
-      socket.disconnect();
+      unsubscribe();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [socket]);
 
   /* ── Close / advance the queue ────────────────────────────────────── */
   const closePopup = (markDismissed: boolean) => {

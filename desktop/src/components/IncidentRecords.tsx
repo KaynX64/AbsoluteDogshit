@@ -6,8 +6,8 @@
 
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { io } from 'socket.io-client';
-import { API_BASE_URL, SOCKET_URL } from '../config/api';
+import { subscribeToDesktopEvents, useDesktopSocket } from '../services/desktopRealtime';
+import { API_BASE_URL } from '../config/api';
 import { T, btnPrimary, btnGhost, btnSubtle } from '../theme';
 import Icon from './Icon';
 
@@ -84,24 +84,22 @@ export default function IncidentRecords() {
     }
   };
 
+  const socket = useDesktopSocket();
   useEffect(() => {
     fetchRecords(search);
 
-    // Live Socket listener for newly submitted incident reports
-    const token = localStorage.getItem('valetudo_token');
-    const socket = io(SOCKET_URL, {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-    });
+    const unsubscribe = subscribeToDesktopEvents(socket, (on) => {
+      on('emergency:incident_reported', () => {
+        fetchRecords(search);
+      });
 
-    socket.on('emergency:incident_reported', () => {
-      fetchRecords(search);
+      on('reconnect', () => fetchRecords(search));
     });
 
     return () => {
-      socket.disconnect();
+      unsubscribe();
     };
-  }, []);
+  }, [socket]);
 
   // ── PDF Blob Fetcher ───────────────────────────────────────────────────────
   const fetchPdfBlob = async (reportId: number): Promise<Blob> => {
