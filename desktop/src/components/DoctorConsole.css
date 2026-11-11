@@ -1,0 +1,155 @@
+/* Doctor and Dentist console layout */
+.doctor-console {
+  width: 100%;
+}
+
+.doctor-console .doctor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.doctor-console .doctor-queue-grid,
+.doctor-console .doctor-vitals-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
+  gap: 12px;
+}
+
+.doctor-console .doctor-vitals-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 6rem), 1fr));
+  gap: 10px;
+}
+
+.doctor-console .doctor-queue-item {
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.doctor-console .doctor-queue-item:hover {
+  border-color: var(--primary-soft);
+  background: var(--sage-50);
+}
+
+.doctor-console .doctor-queue-item[aria-pressed='true'] {
+  border-color: var(--primary);
+  background: var(--primary-tint);
+  box-shadow: inset 3px 0 var(--primary);
+}
+
+.doctor-console .doctor-queue-item:focus-visible,
+.doctor-console .doctor-dental-arch button:focus-visible,
+.doctor-console .doctor-panel :is(button, input, select, textarea):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.doctor-console .doctor-dental-arch button:focus-visible {
+  outline-offset: 1px;
+}
+
+.doctor-console .doctor-workspace {
+  display: grid;
+  align-items: start;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 27rem), 1fr));
+  gap: 16px;
+}
+
+.doctor-console .doctor-archive {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.doctor-console .doctor-archive > aside {
+  flex: 1 1 208px;
+  min-width: 0;
+  padding: 12px;
+  background: var(--sage-50);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-lg);
+  overflow-wrap: anywhere;
+}
+
+.doctor-console .doctor-archive > div {
+  flex: 3 1 400px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.doctor-console .doctor-archive-search {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.doctor-console .doctor-archive-search > input {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.doctor-console .doctor-patient-identity {
+  flex: 1 1 16rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.doctor-console .doctor-attachment {
+  max-width: 100%;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.doctor-console .doctor-prescription-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+  gap: 12px;
+}
+
+.doctor-console .doctor-prescription-fields > * {
+  min-width: 0;
+}
+
+.doctor-console .doctor-dental-arch {
+  display: grid;
+  grid-template-columns: repeat(16, minmax(36px, 1fr));
+  gap: 4px;
+  overflow-x: auto;
+  padding: 3px;
+}
+
+.doctor-console .doctor-panel {
+  min-width: 0;
+  padding: clamp(14px, 2vw, 22px);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.doctor-console .doctor-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-soft);
+}

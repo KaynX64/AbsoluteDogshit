@@ -9,6 +9,7 @@ import { logPhiAccess } from '../utils/phiLogger.js';
 import { validateDentalChart } from '../utils/dentalValidator.js';
 import { assertAppointmentInQueue } from '../utils/signatory.js';
 import { validateVitals, VITAL_RULES } from '../utils/vitals.js';
+import { readEncounterText } from '../utils/encounterText.js';
 
 const router = express.Router();
 
@@ -164,10 +165,6 @@ router.post('/replay', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NUR
         if (table_name === 'EMR_RECORDS' && action === 'CREATE') {
           const {
             patient_user_id,
-            chief_complaint,
-            diagnosis,
-            treatment_plan,
-            notes,
             appointment_id,
             vitals: submittedVitals,
             dental_chart,
@@ -184,6 +181,7 @@ router.post('/replay', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NUR
           const { values: vitals, errors } = validateVitals(submittedVitals);
           const vitalError = Object.values(errors)[0];
           if (vitalError) throw new Error(vitalError);
+          const { chief_complaint, diagnosis, treatment_plan, notes } = readEncounterText(payload);
 
           // Check if appointment was already processed while this PC was offline
           if (appointment_id) {
@@ -250,9 +248,10 @@ router.post('/replay', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NUR
           }
         } 
         else if (table_name === 'EMR_RECORDS' && action === 'UPDATE') {
-          const { emr_id, chief_complaint, diagnosis, treatment_plan, notes } = payload;
+          const { emr_id } = payload;
           if (!emr_id) throw new Error('emr_id is required for UPDATE');
           assertClinicalAuthor(req.user);
+          const { chief_complaint, diagnosis, treatment_plan, notes } = readEncounterText(payload);
 
           // Only the clinician who authored the EMR may edit it.
           const [updateResult] = await connection.query(

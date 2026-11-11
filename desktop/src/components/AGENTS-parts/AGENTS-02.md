@@ -6,6 +6,8 @@
 - Sockets L351-374: `appointment:booked`, `appointment:status_changed`, `queue:updated`, `appointment:cancelled`.
 - Queue & consult: `fetchAppointments` L308 (`GET /api/appointments/today?filter=active|history|scheduled` L312-314), `handleConflict` L376, `selectPatient` L407, `handleStartConsultation` L557 (status → in-progress L562), `handleFinishConsultation` L588 (complete L643 + EMR + attachments upload L662).
 - Patient data: the consultation strip requests attachment metadata only. Past EMR History and the archive timeline use `usePatientHistory` for 25-record pages and the offline SQLite fallback. Patient search uses `/api/appointments/patients/search?query=`.
+- `ClinicalReview` shows the values to be saved for encounters, prescriptions and clearances. Edit actions focus the corresponding input. Queue refreshes preserve the selected encounter's draft. The issuer history reads saved details even when a PDF is pending.
+- `DoctorConsole.css` lets the archive and prescription fields wrap within the available workspace. The dental arches scroll horizontally to keep the tooth order and button size. Reselecting the current appointment and refreshing the queue preserve the draft and keyboard focus.
 - Rx/clearance: rx history L752 (`/api/documents/prescriptions/patient/:id`), clearance history L788, print clearance L1085 (`POST /api/documents/clearances`).
 - Immunizations: open modal L883, quick-add L928, custom L940, remove L961, save L965 (`GET/POST /api/profile/patient/:id/immunizations` L895/L976).
 - PDFs: `handleDownloadPdf` L1009, `openIssuedPdf` L1051 (`GET /api/documents/:kind/:id/pdf`).

@@ -24,7 +24,7 @@ interface ActiveTicket {
 
 export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerProps) {
   const [scanMode, setScanMode] = useState<'camera' | 'search' | 'manual'>('camera');
-  const [searchQuery, setSearchQuery] = useState('22-LN-0123');
+  const [searchQuery, setSearchQuery] = useState('');
   const [verifiedPatient, setVerifiedPatient] = useState<any>(null);
   const [scanStatus, setScanStatus] = useState('');
 
@@ -54,13 +54,13 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
   const [isCheckingIn, setIsCheckingIn] = useState(false);
   const submittingIntake = useRef(false);
   const vitalFields = {
-    blood_pressure: { label: 'Blood pressure (mmHg)', value: bp, set: setBp, placeholder: '120/80' },
-    temperature: { label: 'Temp (°C)', value: temp, set: setTemp, placeholder: '36.6' },
-    pulse: { label: 'Pulse (bpm)', value: pulse, set: setPulse, placeholder: '78' },
-    spo2: { label: 'SpO₂ (%)', value: spo2, set: setSpo2, placeholder: '98' },
-    resp_rate: { label: 'Resp (breaths/min)', value: respRate, set: setRespRate, placeholder: '18' },
-    height: { label: 'Height (cm)', value: height, set: setHeight, placeholder: '162.5' },
-    weight: { label: 'Weight (kg)', value: weight, set: setWeight, placeholder: '54.0' },
+    blood_pressure: { label: 'Blood pressure (mmHg)', value: bp, set: setBp },
+    temperature: { label: 'Temp (°C)', value: temp, set: setTemp },
+    pulse: { label: 'Pulse (bpm)', value: pulse, set: setPulse },
+    spo2: { label: 'SpO₂ (%)', value: spo2, set: setSpo2 },
+    resp_rate: { label: 'Resp (breaths/min)', value: respRate, set: setRespRate },
+    height: { label: 'Height (cm)', value: height, set: setHeight },
+    weight: { label: 'Weight (kg)', value: weight, set: setWeight },
   };
   const triageVitals = validateTriageVitals({ blood_pressure: bp, temperature: temp, pulse, spo2, resp_rate: respRate, height, weight });
   const vitalErrors = { ...triageVitals.errors, ...rejectedVitals };
@@ -179,8 +179,6 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
         setSex(data.patient?.sex || '');
         onPatientVerified(data.patient, tokenToVerify.trim());
         setScanStatus('Patient identity verified.');
-        setHeight(data.patient?.height ? String(data.patient.height) : '');
-        setWeight(data.patient?.weight ? String(data.patient.weight) : '');
         setLastVerifiedAt(data.patient?.health_profile_updated_at || '');
         stopCamera();
         // Fetch active ticket + pending appointment in parallel
@@ -225,8 +223,6 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
         });
         setPendingAppointment(app);
         setScanStatus(`Patient record located: ${app.first_name} ${app.last_name}`);
-        setHeight(app.height ? String(app.height) : '');
-        setWeight(app.weight ? String(app.weight) : '');
         setSex(app.sex || '');
         setLastVerifiedAt(app.health_profile_updated_at || '');
         await checkActiveTicket(app.user_id);
@@ -275,8 +271,6 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
       if (Array.isArray(data) && data.length > 0) {
         setPendingAppointment(data[0]);
         if (data[0]?.health_profile_updated_at) setLastVerifiedAt(data[0].health_profile_updated_at);
-        if (data[0]?.height && !height) setHeight(String(data[0].height));
-        if (data[0]?.weight && !weight) setWeight(String(data[0].weight));
         if (data[0]?.sex) setSex(data[0].sex);
       } else {
         setPendingAppointment(null);
@@ -344,7 +338,6 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
         body: JSON.stringify({
           patient_user_id: verifiedPatient.user_id,
           visit_type: 'Walk-in Consultation',
-          notes: `Walk-in triage vitals · Sex ${sex || '—'}, BP ${bloodPressure ?? '—'}, Temp ${measurements.temperature ?? '—'}°C, Pulse ${measurements.pulse ?? '—'} bpm, SpO2 ${measurements.spo2 ?? '—'}%, Resp ${measurements.resp_rate ?? '—'} cpm`,
           sex: sex || null,
           vitals: triageVitals.values,
         }),
@@ -497,6 +490,12 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
         Triage vitals
       </div>
       <p style={{ margin: '0 0 10px', fontSize: 12, color: C.textSub }}>Leave any unmeasured readings blank.</p>
+      {(verifiedPatient?.height || verifiedPatient?.weight) && (
+        <p style={{ margin: '0 0 10px', fontSize: 12, color: C.textSub }}>
+          Saved profile measurements{verifiedPatient.height ? ' · Height ' + verifiedPatient.height + ' cm' : ''}
+          {verifiedPatient.weight ? ' · Weight ' + verifiedPatient.weight + ' kg' : ''}
+        </p>
+      )}
       <label style={{ display: 'block', marginBottom: 10, fontSize: 10.5, color: C.textSub, fontWeight: 600 }}>
         Patient sex
         <select
@@ -529,7 +528,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
         }}
       >
         {(Object.keys(vitalFields) as TriageVitalField[]).map((field) => {
-          const { label, value, placeholder } = vitalFields[field];
+          const { label, value } = vitalFields[field];
           const id = vitalId + '-' + field;
           const error = rejectedVitals[field] || (touchedVitals[field] ? vitalErrors[field] : undefined);
           const rejectedBlank = rejectedVitals[field] && !value.trim();
@@ -543,7 +542,6 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
                 form={`${vitalId}-intake`}
                 type="text"
                 inputMode={field === 'blood_pressure' ? 'text' : VITAL_RULES[field].integer ? 'numeric' : 'decimal'}
-                placeholder={placeholder}
                 autoComplete="off" disabled={isCheckingIn || isRegisteringWalkIn}
                 aria-invalid={Boolean(error)}
                 aria-describedby={error ? id + '-error' : undefined}
@@ -1037,7 +1035,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
             {[
               {
                 label: 'Blood type',
-                value: verifiedPatient.blood_type || 'O+',
+                value: verifiedPatient.blood_type || 'Not recorded',
                 color: C.text,
               },
               {

@@ -24,6 +24,7 @@ import {
 import { getServerPolicy } from '../config/serverPolicy.js';
 import { readServerPolicy } from '../utils/serverPolicyStore.js';
 import { reserveQueueTicket } from '../utils/queueTickets.js';
+import { readEncounterText } from '../utils/encounterText.js';
 import { validateDentalChart } from '../utils/dentalValidator.js';
 import { getBmiCategory } from '../utils/bmi.js';
 import { SignerError, assertAppointmentInQueue } from '../utils/signatory.js';
@@ -1270,10 +1271,6 @@ export default function appointmentRoutes(io) {
     const doctorUserId = req.user.user_id;
     const {
       patient_user_id,
-      chief_complaint,
-      diagnosis,
-      treatment_plan,
-      notes,
       vitals: submittedVitals,
       dental_chart,
     } = req.body;
@@ -1291,9 +1288,13 @@ export default function appointmentRoutes(io) {
     const vitalError = Object.values(errors)[0];
     if (vitalError) return res.status(400).json({ error: vitalError });
 
-    if (!diagnosis || !chief_complaint) {
-      return res.status(400).json({ error: 'Chief complaint and diagnosis are required.' });
+    let encounterText;
+    try {
+      encounterText = readEncounterText(req.body);
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
     }
+    const { chief_complaint, diagnosis, treatment_plan, notes } = encounterText;
 
     // ── Dental Odontogram Schema Validation ───────────────────────────────────
     if (dental_chart !== undefined && dental_chart !== null && (req.user.roles || []).includes('DENTIST')) {

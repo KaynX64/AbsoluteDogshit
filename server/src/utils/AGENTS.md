@@ -12,6 +12,7 @@
 | interactionChecker.js | drug-interaction logic |
 | dentalValidator.js | dental chart validation |
 | vitals.js | shared desktop and API measurement validation and check-in note formatting |
+| encounterText.js | required encounter text and optional blanks for online finalization and offline replay |
 | analyticsStats.js | analytics aggregation (tested) |
 | passwordPolicy.js | password rules |
 | mailer.js | nodemailer (SMTP_* env) |

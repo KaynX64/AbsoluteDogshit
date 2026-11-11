@@ -25,6 +25,7 @@ import { logPhiAccess } from '../utils/phiLogger.js';
 import { JWT_SECRET } from '../utils/secrets.js';
 import { redis, isRedisActive } from '../utils/redisClient.js';
 import { getServerPolicy } from '../config/serverPolicy.js';
+import { isCalendarDate } from '../config/appointmentRules.js';
 import {
   SignerError,
   assertValidSigner,
@@ -40,6 +41,12 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function quantityInt(value, minimum = 1) {
+  if (typeof value !== 'number' && (typeof value !== 'string' || !/^\d+$/.test(value.trim()))) return null;
+  const number = Number(value);
+  return Number.isInteger(number) && number >= minimum && number <= 2147483647 ? number : null;
+}
+
 export default function documentRoutes(io) {
   const router = express.Router();
 
@@ -48,34 +55,62 @@ export default function documentRoutes(io) {
   // =============================================================================
 
   router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST'), async (req, res) => {
-    const { emr_id, patient_user_id, items, notes, appointment_id, expires_at } = req.body;
+    const { emr_id, patient_user_id, items, notes: rawNotes, appointment_id, expires_at } = req.body;
     const doctorUserId = req.user.user_id;
 
     if (!patient_user_id || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'patient_user_id and at least one medication item are required.' });
     }
 
-    // ── Classify line items: formulary vs outside (non-formulary) drugs ──────
-    // An item is an OUTSIDE drug when it carries no medicine_id. Outside items
-    // are purchased by the patient at an external pharmacy: no FEFO deduction,
-    // no stock checks, no formulary interaction lookups. They are still signed,
-    // QR-tokened and audited exactly like formulary items.
+    if (!isCalendarDate(expires_at)) {
+      return res.status(400).json({ error: 'Enter a valid prescription expiry date.' });
+    }
+    if (rawNotes != null && typeof rawNotes !== 'string') {
+      return res.status(400).json({ error: 'Prescription notes must be text.' });
+    }
+    const notes = rawNotes?.trim() || '';
+
     const formularyItems = [];
     const outsideItems = [];
     for (const item of items) {
+      if (!item || typeof item !== 'object') {
+        return res.status(400).json({ error: 'Each prescription item must contain its dosing details.' });
+      }
+      const { dosage, frequency, route, duration_days, instructions } = item;
+      for (const [label, value, max] of [['Dosage', dosage, 100], ['Frequency', frequency, 100], ['Route', route, 50]]) {
+        if (typeof value !== 'string' || !value.trim() || value.trim().length > max) {
+          return res.status(400).json({ error: label + ' is required and must be at most ' + max + ' characters.' });
+        }
+      }
+      const duration = quantityInt(duration_days);
+      const quantity = quantityInt(item.quantity_prescribed ?? item.quantity_dispensed ?? item.quantity);
+      if (!duration || !quantity) {
+        return res.status(400).json({ error: 'Duration and quantity must be positive whole numbers.' });
+      }
+      if (instructions != null && typeof instructions !== 'string') {
+        return res.status(400).json({ error: 'Prescription instructions must be text.' });
+      }
+      const normalized = {
+        ...item,
+        dosage: dosage.trim(),
+        frequency: frequency.trim(),
+        route: route.trim(),
+        duration_days: duration,
+        quantity_prescribed: quantity,
+        instructions: instructions?.trim() || '',
+      };
       if (item.medicine_id === null || item.medicine_id === undefined || item.medicine_id === '') {
-        const outsideName = String(item.outside_drug_name || item.outside_name || '').trim();
-        if (!outsideName) {
-          return res.status(400).json({
-            error: 'Outside (non-formulary) items require an outside_drug_name.',
-          });
+        const name = item.outside_drug_name ?? item.outside_name;
+        if (typeof name !== 'string' || !name.trim() || name.trim().length > 200) {
+          return res.status(400).json({ error: 'Outside drug name is required and must be at most 200 characters.' });
         }
-        if (outsideName.length > 200) {
-          return res.status(400).json({ error: 'Outside drug name must be 200 characters or fewer.' });
-        }
-        outsideItems.push({ ...item, outside_drug_name: outsideName });
+        outsideItems.push({ ...normalized, outside_drug_name: name.trim() });
       } else {
-        formularyItems.push(item);
+        const dispensed = quantityInt(item.quantity_dispensed ?? quantity, 0);
+        if (dispensed === null) {
+          return res.status(400).json({ error: 'Dispensed quantity must be a non-negative whole number.' });
+        }
+        formularyItems.push({ ...normalized, quantity_dispensed: dispensed });
       }
     }
 
@@ -100,10 +135,7 @@ export default function documentRoutes(io) {
       const formularyDispenseLines = [];
       for (const item of formularyItems) {
         const medId = Number(item.medicine_id);
-        const qty = parseInt(item.quantity_prescribed, 10) || parseInt(item.quantity_dispensed, 10) || parseInt(item.quantity, 10) || 1;
-        if (isNaN(qty) || qty <= 0) {
-          throw new Error(`Quantity prescribed for all formulary items must be a positive integer.`);
-        }
+        const qty = item.quantity_prescribed;
         requestedByMedicine[medId] = (requestedByMedicine[medId] || 0) + qty;
         formularyDispenseLines.push({
           medicine_id: medId,
@@ -111,14 +143,6 @@ export default function documentRoutes(io) {
           prescription_item_id: null,
         });
       }
-      for (const item of outsideItems) {
-        // Advisory quantity for an external-pharmacy purchase (not deducted).
-        const qty = parseInt(item.quantity_prescribed, 10) || parseInt(item.quantity_dispensed, 10) || parseInt(item.quantity, 10) || 1;
-        if (isNaN(qty) || qty <= 0) {
-          throw new Error(`Quantity for outside drug "${item.outside_drug_name}" must be a positive integer.`);
-        }
-      }
-
       // ── DRUG INTERACTION CHECK (read-only; blocks contraindicated combos) ────
       // Runs before any writes so a blocked pair cannot leave orphan records.
       // Only formulary items participate — outside drugs are not in the
@@ -231,15 +255,10 @@ export default function documentRoutes(io) {
           [
             patient_user_id,
             doctorUserId,
-            encrypt(notes ? `Chief Complaint: ${notes}` : 'Prescription Request / Medical Evaluation'),
-            encrypt('Clinical Medication Order'),
-            encrypt(
-              `Prescribed ${items.length} medication item(s)` +
-                (outsideItems.length > 0
-                  ? ` (includes ${outsideItems.length} outside-pharmacy item(s) not dispensed by the infirmary)`
-                  : '')
-            ),
-            encrypt('Issued via Digital Prescription System'),
+            encrypt(''),
+            encrypt(''),
+            encrypt(''),
+            encrypt(''),
           ]
         );
         targetEmrId = emrResult.insertId;
@@ -299,10 +318,8 @@ export default function documentRoutes(io) {
 
       // ── Persist prescription line items ─────────────────────────────────────
       for (const [index, item] of formularyItems.entries()) {
-        const qtyPrescribed = parseInt(item.quantity_prescribed, 10) || parseInt(item.quantity_dispensed, 10) || parseInt(item.quantity, 10) || 1;
-        const qtyDispensed = item.quantity_dispensed !== undefined && item.quantity_dispensed !== null
-          ? parseInt(item.quantity_dispensed, 10)
-          : qtyPrescribed;
+        const qtyPrescribed = item.quantity_prescribed;
+        const qtyDispensed = item.quantity_dispensed;
 
         const [itemResult] = await connection.query(
           `INSERT INTO PRESCRIPTION_ITEMS 
@@ -311,20 +328,20 @@ export default function documentRoutes(io) {
           [
             prescriptionId,
             item.medicine_id,
-            item.dosage || '500mg',
-            item.frequency || 'Every 6 hours',
-            item.route || 'Oral',
-            item.duration_days || 3,
+            item.dosage,
+            item.frequency,
+            item.route,
+            item.duration_days,
             qtyPrescribed,
             qtyDispensed,
-            encrypt(item.instructions || 'Take after meals'),
+            encrypt(item.instructions),
           ]
         );
         formularyDispenseLines[index].prescription_item_id = itemResult.insertId;
         formularyDispenseLines[index].quantity_to_link = qtyPrescribed;
       }
       for (const item of outsideItems) {
-        const qtyPrescribed = parseInt(item.quantity_prescribed, 10) || parseInt(item.quantity_dispensed, 10) || parseInt(item.quantity, 10) || 1;
+        const qtyPrescribed = item.quantity_prescribed;
         // Outside drug: medicine_id stays NULL; quantity_dispensed is 0 because the infirmary does NOT dispense it.
         await connection.query(
           `INSERT INTO PRESCRIPTION_ITEMS 
@@ -333,13 +350,13 @@ export default function documentRoutes(io) {
           [
             prescriptionId,
             item.outside_drug_name,
-            item.dosage || 'As per packaging',
-            item.frequency || 'As needed',
-            item.route || 'Oral',
-            item.duration_days || 3,
+            item.dosage,
+            item.frequency,
+            item.route,
+            item.duration_days,
             qtyPrescribed,
             0,
-            encrypt(item.instructions || 'Purchase from an external pharmacy and take as directed'),
+            encrypt(item.instructions),
           ]
         );
       }
@@ -566,48 +583,31 @@ export default function documentRoutes(io) {
 
       try {
         const [rows] = await pool.query(
-          `SELECT p.prescription_id, p.emr_id, p.issued_at, p.expires_at, p.status, p.notes, p.pdf_s3_key,
-                  JSON_ARRAYAGG(
-                    JSON_OBJECT(
-                      'item_id', pi.item_id,
-                      'medicine_name', COALESCE(m.name, pi.outside_name),
-                      'generic_name', m.generic_name,
-                      'is_outside', pi.medicine_id IS NULL,
-                      'dosage', pi.dosage,
-                      'frequency', pi.frequency,
-                      'route', pi.route,
-                      'duration_days', pi.duration_days,
-                      'quantity_prescribed', pi.quantity_prescribed,
-                      'quantity_dispensed', pi.quantity_dispensed,
-                      'instructions', pi.instructions
-                    )
-                  ) AS items
-           FROM PRESCRIPTIONS p
-           LEFT JOIN PRESCRIPTION_ITEMS pi ON p.prescription_id = pi.prescription_id
-           LEFT JOIN MEDICINES m ON pi.medicine_id = m.medicine_id
-           WHERE p.patient_user_id = ?
-             AND p.doctor_user_id = ?
-             AND p.deleted_at IS NULL
-           GROUP BY p.prescription_id
-           ORDER BY p.issued_at DESC`,
+          `SELECT prescription_id, emr_id, issued_at, expires_at, status, notes, pdf_s3_key
+           FROM PRESCRIPTIONS
+           WHERE patient_user_id = ? AND doctor_user_id = ? AND deleted_at IS NULL
+           ORDER BY issued_at DESC, prescription_id DESC`,
           [patientId, req.user.user_id]
         );
 
-        const history = rows.map((rx) => {
-          const rawItems = typeof rx.items === 'string' ? JSON.parse(rx.items) : rx.items || [];
-          return {
-            prescription_id: rx.prescription_id,
-            emr_id: rx.emr_id,
-            issued_at: rx.issued_at,
-            expires_at: rx.expires_at,
-            status: rx.status,
-            notes: decrypt(rx.notes),
-            pdfAvailable: Boolean(rx.pdf_s3_key),
-            items: rawItems
-              .filter((it) => it && it.item_id !== null)
-              .map((it) => ({ ...it, instructions: decrypt(it.instructions) })),
-          };
-        });
+        const history = new Map(rows.map(({ pdf_s3_key, ...rx }) => [rx.prescription_id, {
+          ...rx, notes: decrypt(rx.notes), pdfAvailable: Boolean(pdf_s3_key), items: [],
+        }]));
+        if (history.size) {
+          const [items] = await pool.query(
+            `SELECT pi.prescription_id, pi.item_id, COALESCE(m.name, pi.outside_name) AS medicine_name,
+                    m.generic_name, pi.medicine_id IS NULL AS is_outside, pi.dosage, pi.frequency,
+                    pi.route, pi.duration_days, pi.quantity_prescribed, pi.quantity_dispensed, pi.instructions
+             FROM PRESCRIPTION_ITEMS pi
+             LEFT JOIN MEDICINES m ON m.medicine_id = pi.medicine_id
+             WHERE pi.prescription_id IN (?) AND pi.deleted_at IS NULL
+             ORDER BY pi.item_id`,
+            [[...history.keys()]]
+          );
+          for (const { prescription_id, ...item } of items) {
+            history.get(prescription_id).items.push({ ...item, instructions: decrypt(item.instructions) });
+          }
+        }
 
         logPhiAccess({
           viewerUserId: req.user.user_id,
@@ -618,7 +618,7 @@ export default function documentRoutes(io) {
           ipAddress: req.ip,
         });
 
-        res.json(history);
+        res.json([...history.values()]);
       } catch (error) {
         console.error('[Documents] Error fetching issuer prescription history:', error);
         res.status(500).json({ error: 'Failed to retrieve prescription history.' });
@@ -791,13 +791,18 @@ export default function documentRoutes(io) {
   // =============================================================================
 
   router.post('/clearances', authenticateToken, requireRoles('DOCTOR', 'DENTIST'), async (req, res) => {
-    const { user_id, purpose, expires_at, remarks, appointment_id } = req.body;
+    const { user_id, purpose: rawPurpose, expires_at, remarks: rawRemarks, appointment_id } = req.body;
+    const purpose = typeof rawPurpose === 'string' ? rawPurpose.trim() : '';
+    const remarks = typeof rawRemarks === 'string' ? rawRemarks.trim() : '';
     const issuerId = req.user.user_id;
 
-    if (!user_id || !purpose) {
-      return res.status(400).json({ error: 'user_id and purpose are required.' });
+    if (!user_id || !purpose || purpose.length > 100) {
+      return res.status(400).json({ error: 'Select a patient and enter a purpose of at most 100 characters.' });
     }
-    if (!remarks || !String(remarks).trim()) {
+    if (!isCalendarDate(expires_at)) {
+      return res.status(400).json({ error: 'Enter a valid clearance expiry date.' });
+    }
+    if (!remarks) {
       return res.status(400).json({ error: 'Clinical remarks are required before a clearance can be signed.' });
     }
 
@@ -824,7 +829,7 @@ export default function documentRoutes(io) {
         signed_at: new Date().toISOString(),
         algorithm: 'SHA-256',
         document_sha256: crypto.createHash('sha256').update(`${user_id}:${purpose}:${token}`).digest('hex'),
-        clinical_remarks: String(remarks).trim(),
+        clinical_remarks: remarks,
         signature_s3_key: sg?.signature_s3_key || null,
         signature_sha256: sg?.signature_sha256 || null,
       };
@@ -931,15 +936,12 @@ export default function documentRoutes(io) {
            WHERE user_id = ?
              AND issued_by = ?
              AND deleted_at IS NULL
-           ORDER BY issued_at DESC`,
+           ORDER BY issued_at DESC, clearance_id DESC`,
           [patientId, req.user.user_id]
         );
 
         const history = rows.map((row) => {
-          const meta =
-            typeof row.signature_metadata === 'string'
-              ? JSON.parse(row.signature_metadata)
-              : row.signature_metadata || {};
+          const meta = parseMetadata(row.signature_metadata);
           return {
             clearance_id: row.clearance_id,
             purpose: row.purpose,

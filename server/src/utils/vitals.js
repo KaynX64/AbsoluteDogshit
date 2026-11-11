@@ -86,6 +86,14 @@ export function triageDraftError(field, draft) {
 
 export function formatTriageNote(vitals) {
   const { systolic_bp, diastolic_bp, temperature, pulse, spo2, resp_rate, height, weight } = vitals;
-  const pressure = systolic_bp === undefined || diastolic_bp === undefined ? '—' : `${systolic_bp}/${diastolic_bp}`;
-  return `[TRIAGE VITALS] BP: ${pressure}, Temp: ${temperature ?? '—'}°C, Pulse: ${pulse ?? '—'} bpm, SpO2: ${spo2 ?? '—'}%, Resp: ${resp_rate ?? '—'} cpm, Height: ${height ?? '—'} cm, Weight: ${weight ?? '—'} kg\n`;
+  const readings = [
+    systolic_bp !== undefined && diastolic_bp !== undefined && `BP: ${systolic_bp}/${diastolic_bp}`,
+    temperature !== undefined && `Temp: ${temperature}°C`,
+    pulse !== undefined && `Pulse: ${pulse} bpm`,
+    spo2 !== undefined && `SpO2: ${spo2}%`,
+    resp_rate !== undefined && `Resp: ${resp_rate} cpm`,
+    height !== undefined && `Height: ${height} cm`,
+    weight !== undefined && `Weight: ${weight} kg`,
+  ].filter(Boolean);
+  return readings.length ? `[TRIAGE VITALS] ${readings.join(', ')}\n` : '';
 }

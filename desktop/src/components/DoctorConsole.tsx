@@ -10,6 +10,8 @@ import { T, btnPrimary, btnGhost, inputStyle } from '../theme';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
 import SignatureEnrollment from './SignatureEnrollment';
 import Icon from './Icon';
+import ClinicalReview, { type ReviewField } from './ClinicalReview';
+import './DoctorConsole.css';
 import { usePatientHistory } from '../hooks/usePatientHistory';
 
 function HistoryPageControls({ page }: { page: ReturnType<typeof usePatientHistory> }) {
@@ -170,11 +172,11 @@ const CONDITION_COLORS: Record<
 const UPPER_TEETH = Array.from({ length: 16 }, (_, i) => i + 1); // 1-16
 const LOWER_TEETH = Array.from({ length: 16 }, (_, i) => 32 - i); // 32-17
 
-const DEFAULT_CHIEF_COMPLAINT =
+const LEGACY_SAMPLE_COMPLAINT =
   'Moderate grade fever (38.4 C), sore throat, rhinorrhea, and non-productive hacking cough x 3 days.';
-const DEFAULT_DIAGNOSIS =
+const LEGACY_SAMPLE_DIAGNOSIS =
   'Acute Viral Upper Respiratory Tract Infection / Pharyngitis (ICD-10 J06.9).';
-const DEFAULT_TREATMENT_PLAN = [
+const LEGACY_SAMPLE_TREATMENT = [
   '1. Paracetamol 500mg tab 1 tab q4h PRN for fever > 37.8 C.',
   '2. Cetirizine 10mg tab once daily at bedtime x 5 days.',
   '3. Warm salt water gargles TID; increase oral hydration to 2.5L/day.',
@@ -187,7 +189,7 @@ function stripLegacyOdontogram(text: string): string {
 }
 
 function isDefaultDiagnosis(text: string): boolean {
-  return text.trim().replace(/[.\s]+$/, '') === DEFAULT_DIAGNOSIS.replace(/[.\s]+$/, '');
+  return text.trim().replace(/[.\s]+$/, '') === LEGACY_SAMPLE_DIAGNOSIS.replace(/[.\s]+$/, '');
 }
 
 export default function DoctorConsole({
@@ -221,13 +223,16 @@ export default function DoctorConsole({
   const [appointments, setAppointments] = useState<AppointmentItem[]>([]);
   const [selectedApp, setSelectedApp] = useState<AppointmentItem | null>(null);
   const [loadingAppointments, setLoadingAppointments] = useState(false);
+  const selectedAppointmentId = useRef<number | null>(null);
+  const appointmentRequest = useRef(0);
 
   /* ── Encounter form state ───────────────────────────────────── */
   const [chiefComplaint, setChiefComplaint] = useState('');
   const [diagnosis, setDiagnosis] = useState('');
   const [treatmentPlan, setTreatmentPlan] = useState('');
   const [clinicalNotes, setClinicalNotes] = useState('');
-  const [encounterConfirmation, setEncounterConfirmation] = useState<string[] | null>(null);
+  const [encounterConfirmation, setEncounterConfirmation] = useState(false);
+  const [clearanceConfirmation, setClearanceConfirmation] = useState(false);
   const [isSubmittingEMR, setIsSubmittingEMR] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<{
     text: string;
@@ -269,18 +274,10 @@ export default function DoctorConsole({
 
   /* ── Issuance tab state ────────────────────────────────────── */
   const [docType, setDocType] = useState<'rx' | 'clearance'>('rx');
-  const [clearancePurpose, setClearancePurpose] = useState(
-    'On-the-Job Training (OJT) Medical Clearance'
-  );
-  const [clearanceRemarks, setClearanceRemarks] = useState(
-    'Physically fit to undergo university practicum requirements.'
-  );
+  const [clearancePurpose, setClearancePurpose] = useState('');
+  const [clearanceRemarks, setClearanceRemarks] = useState('');
   const [isIssuingClearance, setIsIssuingClearance] = useState(false);
-  const [clearanceExpiryDate, setClearanceExpiryDate] = useState<string>(() => {
-    const d = new Date();
-    d.setMonth(d.getMonth() + 6);
-    return d.toISOString().split('T')[0];
-  });
+  const [clearanceExpiryDate, setClearanceExpiryDate] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -337,7 +334,7 @@ export default function DoctorConsole({
 
   /* ── Archive (patient directory) state ────────────────────── */
   const [patientSearchQuery, setPatientSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<any[] | null>(null);
   const [isSearchingPatients, setIsSearchingPatients] = useState(false);
   const [selectedDirectoryPatient, setSelectedDirectoryPatient] = useState<any | null>(null);
   const timelinePage = usePatientHistory(selectedDirectoryPatient?.user_id);
@@ -360,8 +357,9 @@ export default function DoctorConsole({
   /* ═══════════════════════════════════════════════════════════ */
 
   const fetchAppointments = async (mode = viewMode, retainSelection = true) => {
-    if (mode === 'analytics') return;
-    setLoadingAppointments(true);
+    if (mode === 'analytics' || mode === 'archive') return;
+    const request = ++appointmentRequest.current;
+    if (!retainSelection) setLoadingAppointments(true);
     const token = localStorage.getItem('valetudo_token');
     let url = `${API_BASE_URL}/api/appointments/today?filter=active`;
     if (mode === 'history') url = `${API_BASE_URL}/api/appointments/today?filter=history`;
@@ -372,6 +370,7 @@ export default function DoctorConsole({
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
+      if (request !== appointmentRequest.current) return;
       if (Array.isArray(data)) {
         const unique = Array.from(
           new Map(data.map((item: AppointmentItem) => [item.appointment_id, item])).values()
@@ -379,15 +378,11 @@ export default function DoctorConsole({
         setAppointments(unique);
 
         if (unique.length > 0) {
-          if (!retainSelection || !selectedApp) {
-            selectPatient(unique[0]);
-          } else {
-            const updated = unique.find(
-              (a) => a.appointment_id === selectedApp.appointment_id
-            );
-            selectPatient(updated || unique[0]);
-          }
+          const updated = retainSelection && unique.find((a) => a.appointment_id === selectedAppointmentId.current);
+          if (updated) setSelectedApp(updated);
+          else selectPatient(unique[0]);
         } else {
+          selectedAppointmentId.current = null;
           setSelectedApp(null);
           resetForm();
         }
@@ -395,7 +390,7 @@ export default function DoctorConsole({
     } catch (err) {
       console.error('Error fetching appointments:', err);
     } finally {
-      setLoadingAppointments(false);
+      if (request === appointmentRequest.current) setLoadingAppointments(false);
     }
   };
 
@@ -421,6 +416,7 @@ export default function DoctorConsole({
     socket.on('appointment:cancelled', () => fetchAppointments(viewMode, true));
 
     return () => {
+      appointmentRequest.current += 1;
       socket.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -449,7 +445,7 @@ export default function DoctorConsole({
     setDiagnosis('');
     setTreatmentPlan('');
     setClinicalNotes('');
-    setEncounterConfirmation(null);
+    setEncounterConfirmation(false);
     setAttachedFile(null);
     setFeedbackMsg(null);
     setDentalChartData({});
@@ -459,31 +455,36 @@ export default function DoctorConsole({
   };
 
   const selectPatient = (app: AppointmentItem) => {
+    selectedAppointmentId.current = app.appointment_id;
     setSelectedApp(app);
+    setClearanceConfirmation(false);
+    setClearancePurpose('');
+    setClearanceRemarks('');
+    setClearanceExpiryDate('');
 
     let rawComplaint = app.past_chief_complaint || app.notes || '';
     if (rawComplaint.includes('[TRIAGE VITALS]')) {
       rawComplaint = rawComplaint.replace(/\[TRIAGE VITALS\][^\n]*\n?/, '').trim();
     }
     setChiefComplaint(
-      rawComplaint.trim() === DEFAULT_CHIEF_COMPLAINT ? '' : rawComplaint
+      rawComplaint.trim() === LEGACY_SAMPLE_COMPLAINT ? '' : rawComplaint
     );
     const pastDiagnosis = app.past_diagnosis || '';
     setDiagnosis(isDefaultDiagnosis(pastDiagnosis) ? '' : pastDiagnosis);
     const pastTreatment = stripLegacyOdontogram(app.past_treatment || '');
     setTreatmentPlan(
-      pastTreatment.trim() === DEFAULT_TREATMENT_PLAN ? '' : pastTreatment
+      pastTreatment.trim() === LEGACY_SAMPLE_TREATMENT ? '' : pastTreatment
     );
     setClinicalNotes(app.past_clinical_notes || '');
-    setEncounterConfirmation(null);
+    setEncounterConfirmation(false);
     setBpSystolic('');
     setBpDiastolic('');
     setTemperature('');
     setPulseRate('');
     setSpo2('');
     setRespRate('');
-    setHeight(app.height ? String(app.height) : '');
-    setWeight(app.weight ? String(app.weight) : '');
+    setHeight('');
+    setWeight('');
     setAttachedFile(null);
     setFeedbackMsg(null);
     setSelectedTooth(null);
@@ -641,15 +642,11 @@ export default function DoctorConsole({
     e?.preventDefault();
     if (!selectedApp || isBookingMode) return;
     if (!confirmed) {
-      const defaultedFields = [
-        !chiefComplaint.trim() && `Chief complaint: ${DEFAULT_CHIEF_COMPLAINT}`,
-        !diagnosis.trim() && `Clinical diagnosis: ${DEFAULT_DIAGNOSIS}`,
-        !treatmentPlan.trim() && `Treatment plan: ${DEFAULT_TREATMENT_PLAN}`,
-      ].filter((field): field is string => Boolean(field));
-      setEncounterConfirmation(defaultedFields);
+      setEncounterConfirmation(true);
       return;
     }
-    setEncounterConfirmation(null);
+    if (encounterFields.some(({ error }) => error)) return;
+    setEncounterConfirmation(false);
     setIsSubmittingEMR(true);
     setFeedbackMsg(null);
     const token = localStorage.getItem('valetudo_token');
@@ -661,10 +658,10 @@ export default function DoctorConsole({
     const encounterPayload = {
       patient_user_id: selectedApp.patient_id,
       appointment_id: selectedApp.appointment_id,
-      chief_complaint: chiefComplaint.trim() || DEFAULT_CHIEF_COMPLAINT,
-      diagnosis: diagnosis.trim() || DEFAULT_DIAGNOSIS,
-      treatment_plan: treatmentPlan.trim() || DEFAULT_TREATMENT_PLAN,
-      notes: clinicalNotes,
+      chief_complaint: chiefComplaint.trim(),
+      diagnosis: diagnosis.trim(),
+      treatment_plan: treatmentPlan.trim(),
+      notes: clinicalNotes.trim(),
       dental_chart:
         isDentist && chartedTeeth.length > 0 ? dentalChartData : undefined,
     };
@@ -779,7 +776,7 @@ export default function DoctorConsole({
     try {
       const res = await fetch(
         `${API_BASE_URL}/api/documents/prescriptions/patient/${patientId}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' }
       );
       const data = await res.json().catch(() => null);
       if (!res.ok || !Array.isArray(data)) {
@@ -806,7 +803,7 @@ export default function DoctorConsole({
     try {
       const res = await fetch(
         `${API_BASE_URL}/api/documents/clearances/patient/${patientId}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' }
       );
       const data = await res.json().catch(() => null);
       if (!res.ok || !Array.isArray(data)) {
@@ -1075,8 +1072,25 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
   /* CLEARANCE ISSUANCE                                          */
   /* ═══════════════════════════════════════════════════════════ */
 
+  const patientReviewName = [selectedApp?.first_name, selectedApp?.last_name].filter(Boolean).join(' ');
+  const encounterFields: ReviewField[] = [
+    { label: 'Chief complaint', value: chiefComplaint.trim(), input: 'encounter-complaint', error: chiefComplaint.trim() ? undefined : 'Enter a chief complaint.' },
+    { label: 'Diagnosis', value: diagnosis.trim(), input: 'encounter-diagnosis', error: diagnosis.trim() ? undefined : 'Enter a diagnosis.' },
+    { label: 'Treatment plan', value: treatmentPlan.trim(), input: 'encounter-plan' },
+    { label: 'Clinical notes', value: clinicalNotes.trim(), input: 'encounter-notes' },
+    { label: 'Attachment', value: attachedFile?.name || '' },
+    ...(isDentist ? [{ label: 'Dental chart', value: Object.values(dentalChartData)
+      .filter(({ condition }) => condition !== 'sound').map(({ number, condition }) => 'Tooth ' + number + ' · ' + condition).join('\n') }] : []),
+  ];
+  const clearanceFields: ReviewField[] = [
+    { label: 'Purpose', value: clearancePurpose.trim(), input: 'clearance-purpose', error: clearancePurpose.trim() ? undefined : 'Select a purpose.' },
+    { label: 'Clinical fitness statement', value: clearanceRemarks.trim(), input: 'clearance-remarks', error: clearanceRemarks.trim() ? undefined : 'Enter a clinical fitness statement.' },
+    { label: 'Expiry date', value: clearanceExpiryDate, input: 'clearance-expiry', error: clearanceExpiryDate ? undefined : 'Enter an expiry date.' },
+  ];
+
   const handlePrintClearance = async () => {
-    if (!selectedApp || isBookingMode) return;
+    if (!selectedApp || isBookingMode || clearanceFields.some(({ error }) => error)) return;
+    setClearanceConfirmation(false);
     setIsIssuingClearance(true);
     const token = localStorage.getItem('valetudo_token');
     try {
@@ -1089,8 +1103,8 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
         body: JSON.stringify({
           user_id: selectedApp.patient_id,
           appointment_id: selectedApp.appointment_id,
-          purpose: clearancePurpose,
-          remarks: clearanceRemarks,
+          purpose: clearancePurpose.trim(),
+          remarks: clearanceRemarks.trim(),
           expires_at: clearanceExpiryDate,
         }),
       });
@@ -1101,7 +1115,8 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
       }
 
       const clearanceId = data.clearanceId;
-      await openIssuedPdf('clearances', clearanceId);
+      if (showClrHistoryModal) void openClearanceHistory(selectedApp.patient_id, patientReviewName);
+      if (data.pdfAvailable) await openIssuedPdf('clearances', clearanceId);
 
       setFeedbackMsg({
         text: `Clearance #${clearanceId} (Expires: ${clearanceExpiryDate}) issued!`,
@@ -1164,20 +1179,11 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
   /* ═══════════════════════════════════════════════════════════ */
 
   return (
-    <div style={{ width: '100%' }}>
+    <div className="doctor-console">
       {/* ── Page header ─────────────────────────────────────── */}
       {viewMode !== 'analytics' && (
-        <div
-          style={{
-            marginBottom: 20,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            gap: 16,
-          }}
-        >
+        <div className="doctor-header">
           <div className="vd-page-head" style={{ marginBottom: 0 }}>
-            <div className="vd-page-head-eyebrow">Consultation</div>
             <h1 className="vd-page-head-title">{headerTitle[viewMode]}</h1>
             <p className="vd-page-head-sub">{headerSub[viewMode]}</p>
           </div>
@@ -1273,13 +1279,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                 : 'No archived consultations found for your department.'}
             </div>
           ) : (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-                gap: 12,
-              }}
-            >
+            <div className="doctor-queue-grid">
               {appointments.map((app) => {
                 const isSelected = selectedApp?.appointment_id === app.appointment_id;
                 const badge = STATUS_STYLE(app.status);
@@ -1287,18 +1287,9 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                   <button
                     key={app.appointment_id}
                     type="button"
-                    onClick={() => selectPatient(app)}
-                    style={{
-                      textAlign: 'left',
-                      padding: '14px 16px',
-                      borderRadius: T.radius.lg,
-                      border: `1.5px solid ${isSelected ? T.primary : T.border}`,
-                      background: isSelected ? T.primaryTint : T.surface,
-                      cursor: 'pointer',
-                      fontFamily: T.font,
-                      transition: 'all 120ms ease',
-                      boxShadow: isSelected ? T.shadow.sm : 'none',
-                    }}
+                    className="doctor-queue-item"
+                    aria-pressed={isSelected}
+                    onClick={() => { if (!isSelected) selectPatient(app); }}
                   >
                     <div
                       style={{
@@ -1391,11 +1382,12 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
         >
           <form
             onSubmit={handleSearchPatientDirectory}
-            style={{ display: 'flex', gap: 12, marginBottom: 20 }}
+            className="doctor-archive-search"
           >
             <input
-              style={{ ...inputStyle, flex: 1 }}
-              placeholder="Student ID (e.g. 22-LN-0451), first/last name, or email"
+              style={inputStyle}
+              aria-label="Find a patient by ID, name, or email"
+              placeholder="Patient ID, name, or email"
               value={patientSearchQuery}
               onChange={(e) => setPatientSearchQuery(e.target.value)}
             />
@@ -1404,8 +1396,8 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
             </button>
           </form>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 24 }}>
-            <aside style={{ borderRight: `1px solid ${T.border}`, paddingRight: 18 }}>
+          <div className="doctor-archive">
+            <aside>
               <div
                 style={{
                   fontSize: 11,
@@ -1416,11 +1408,11 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                   marginBottom: 10,
                 }}
               >
-                Matched patients ({searchResults.length})
+                Matched patients ({searchResults?.length ?? 0})
               </div>
-              {searchResults.length === 0 ? (
+              {!searchResults?.length ? (
                 <p style={{ fontSize: 12, color: T.textMuted, lineHeight: 1.5 }}>
-                  Type a query and press Search. Leave empty to list all.
+                  {searchResults ? 'No matching patients.' : 'Search for a patient to see results.'}
                 </p>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1430,6 +1422,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                       <button
                         key={p.user_id}
                         type="button"
+                        aria-pressed={isSel}
                         onClick={() => loadPatientTimeline(p)}
                         style={{
                           textAlign: 'left',
@@ -1766,7 +1759,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                 boxShadow: T.shadow.xs,
               }}
             >
-              <div style={{ minWidth: 260 }}>
+              <div className="doctor-patient-identity">
                 <div
                   style={{
                     display: 'flex',
@@ -1833,7 +1826,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                 >
                   <span>
                     <b style={{ color: T.textSub }}>Blood:</b>{' '}
-                    {selectedApp.blood_type || 'O+'}
+                    {selectedApp.blood_type || 'Not recorded'}
                   </span>
                   <span>
                     <b style={{ color: T.textSub }}>Allergies:</b>{' '}
@@ -2037,8 +2030,8 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
           {selectedApp && activePatientAttachments.length > 0 && (
             <div
               style={{
-                background: '#F0F9FF',
-                border: '1px solid #BAE6FD',
+                background: T.infoSoft,
+                border: `1px solid ${T.infoBorder}`,
                 borderRadius: T.radius.lg,
                 padding: '14px 18px',
                 marginBottom: 20,
@@ -2057,7 +2050,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                   style={{
                     fontSize: 13,
                     fontWeight: 800,
-                    color: '#0369A1',
+                    color: T.info,
                     display: 'flex',
                     alignItems: 'center',
                     gap: 6,
@@ -2076,6 +2069,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                   <button
                     key={att.attachment_id || idx}
                     type="button"
+                    className="doctor-attachment"
                     onClick={() =>
                       handleOpenAttachment(att.attachment_id, att.file_name, att.mime_type)
                     }
@@ -2085,8 +2079,8 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                       alignItems: 'center',
                       gap: 6,
                       padding: '6px 14px',
-                      background: '#FFFFFF',
-                      border: '1px solid #7DD3FC',
+                      background: T.surface,
+                      border: `1px solid ${T.infoBorder}`,
                       borderRadius: T.radius.pill,
                       fontSize: 12,
                       fontWeight: 700,
@@ -2106,7 +2100,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                     >
                       ({new Date(att.encounter_date).toLocaleDateString()})
                     </span>
-                    <span style={{ fontSize: 11, color: '#0369A1' }}>
+                    <span style={{ fontSize: 11, color: T.info }}>
                       {openingAttachmentId === att.attachment_id ? '⏳' : '️'}
                     </span>
                   </button>
@@ -2199,13 +2193,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                   >
                     Maxillary Arch (Upper Teeth 1–16)
                   </div>
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(16, 1fr)',
-                      gap: 4,
-                    }}
-                  >
+                  <div className="doctor-dental-arch">
                     {UPPER_TEETH.map((tNum) => {
                       const tData = dentalChartData[tNum] || {
                         number: tNum,
@@ -2217,6 +2205,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                         <button
                           key={tNum}
                           type="button"
+                          aria-pressed={isSel}
                           onClick={() => setSelectedTooth(tNum)}
                           title={`Tooth #${tNum} (${conf.label})`}
                           style={{
@@ -2228,7 +2217,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                             border: isSel
                               ? `2px solid ${T.primary}`
                               : `1px solid ${conf.border}`,
-                            background: isSel ? '#E2EBE1' : conf.bg,
+                            background: conf.bg,
                             cursor: isArchivedMode ? 'default' : 'pointer',
                             fontFamily: T.mono,
                           }}
@@ -2271,13 +2260,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                   >
                     Mandibular Arch (Lower Teeth 32–17)
                   </div>
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(16, 1fr)',
-                      gap: 4,
-                    }}
-                  >
+                  <div className="doctor-dental-arch">
                     {LOWER_TEETH.map((tNum) => {
                       const tData = dentalChartData[tNum] || {
                         number: tNum,
@@ -2289,6 +2272,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                         <button
                           key={tNum}
                           type="button"
+                          aria-pressed={isSel}
                           onClick={() => setSelectedTooth(tNum)}
                           title={`Tooth #${tNum} (${conf.label})`}
                           style={{
@@ -2300,7 +2284,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                             border: isSel
                               ? `2px solid ${T.primary}`
                               : `1px solid ${conf.border}`,
-                            background: isSel ? '#E2EBE1' : conf.bg,
+                            background: conf.bg,
                             cursor: isArchivedMode ? 'default' : 'pointer',
                             fontFamily: T.mono,
                           }}
@@ -2400,7 +2384,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
           )}
 
           {/* Two-column workspace — QUEUE ONLY (bookings are view-only) */}
-          {isBookingMode ? (
+          {selectedApp && (isBookingMode ? (
             <div
               style={{
                 padding: '18px 22px',
@@ -2419,28 +2403,10 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
               patient.
             </div>
           ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.15fr', gap: 20 }}>
+          <div className="doctor-workspace">
             {/* LEFT: Document issuance */}
-            <section
-              aria-disabled={!selectedApp}
-              inert={!selectedApp}
-              style={{
-                background: T.surface,
-                border: `1px solid ${T.border}`,
-                borderRadius: T.radius.lg,
-                padding: 22,
-                boxShadow: T.shadow.xs,
-                opacity: selectedApp ? 1 : 0.45,
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: 18,
-                }}
-              >
+            <section className="doctor-panel">
+              <div className="doctor-panel-header">
                 <h3
                   style={{
                     margin: 0,
@@ -2469,6 +2435,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                       <button
                         key={tab.id}
                         type="button"
+                        aria-pressed={isActive}
                         onClick={() => setDocType(tab.id)}
                         style={{
                           padding: '6px 14px',
@@ -2548,19 +2515,19 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
               {docType === 'rx' ? (
                 <PrescriptionGenerator
                   key={selectedApp?.appointment_id}
-                  patientUserId={selectedApp?.patient_id || 5}
+                  patientUserId={selectedApp?.patient_id ?? 0}
                   appointmentId={selectedApp?.appointment_id}
                   verifiedPatient={{
-                    first_name: selectedApp?.first_name || 'Daniella',
-                    last_name: selectedApp?.last_name || 'Movida',
-                    student_no: selectedApp?.student_no || '22-LN-0123',
-                    course: selectedApp?.course || 'BS Information Technology',
+                    first_name: selectedApp?.first_name || '',
+                    last_name: selectedApp?.last_name || '',
+                    student_no: selectedApp?.student_no || '',
+                    course: selectedApp?.course || '',
                     allergies: selectedApp?.allergies || 'None',
                     date_of_birth: selectedApp?.date_of_birth,
                     age: selectedApp?.age,
                     sex: selectedApp?.sex,
                   }}
-                  initialNotes={selectedApp?.past_dietary_notes}
+                  initialNotes={isArchivedMode ? selectedApp?.past_dietary_notes : undefined}
                   isArchived={isArchivedMode}
                   signatureEnrolled={
                     signatureStatus === 'checking' || signatureStatus === 'error'
@@ -2575,7 +2542,8 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                       pdfKind: 'prescriptions',
                       pdfId: info.prescriptionId,
                     });
-                    void openIssuedPdf('prescriptions', info.prescriptionId);
+                    if (showRxHistoryModal && selectedApp) void openPrescriptionHistory(selectedApp.patient_id, patientReviewName);
+                    if (info.pdfAvailable) void openIssuedPdf('prescriptions', info.prescriptionId);
                   }}
                   onPrescriptionError={(message) => {
                     setFeedbackMsg({ text: message, type: 'error' });
@@ -2596,11 +2564,12 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                       Clearance purpose
                     </label>
                     <select
-                      value={clearancePurpose}
+                      id="clearance-purpose" value={clearancePurpose}
                       disabled={isArchivedMode}
                       onChange={(e) => setClearancePurpose(e.target.value)}
                       style={inputStyle}
                     >
+                      <option value="">Select a purpose</option>
                       <option value="On-the-Job Training (OJT) Medical Clearance">
                         On-the-Job Training (OJT) Medical Clearance
                       </option>
@@ -2674,7 +2643,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                     </div>
                     <input
                       type="date"
-                      value={clearanceExpiryDate}
+                      id="clearance-expiry" value={clearanceExpiryDate}
                       disabled={isArchivedMode}
                       readOnly={isArchivedMode}
                       onChange={(e) => setClearanceExpiryDate(e.target.value)}
@@ -2684,7 +2653,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                   </div>
 
                   <div>
-                    <label
+                    <label htmlFor="clearance-remarks"
                       style={{
                         display: 'block',
                         fontSize: 12,
@@ -2697,7 +2666,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                     </label>
                     <textarea
                       rows={5}
-                      value={clearanceRemarks}
+                      id="clearance-remarks" value={clearanceRemarks}
                       disabled={isArchivedMode}
                       readOnly={isArchivedMode}
                       onChange={(e) => setClearanceRemarks(e.target.value)}
@@ -2711,7 +2680,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
 
                   <button
                     type="button"
-                    onClick={handlePrintClearance}
+                    onClick={() => setClearanceConfirmation(true)}
                     disabled={
                       !selectedApp ||
                       isIssuingClearance ||
@@ -2749,18 +2718,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
             </section>
 
             {/* RIGHT: Encounter diagnosis & vitals */}
-            <section
-              aria-disabled={!selectedApp}
-              inert={!selectedApp}
-              style={{
-                background: T.surface,
-                border: `1px solid ${T.border}`,
-                borderRadius: T.radius.lg,
-                padding: 22,
-                boxShadow: T.shadow.xs,
-                opacity: selectedApp ? 1 : 0.45,
-              }}
-            >
+            <section className="doctor-panel">
               <h3
                 style={{
                   margin: '0 0 16px 0',
@@ -2831,13 +2789,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                     Nurse-recorded vitals (read-only)
                   </div>
 
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(4, 1fr)',
-                      gap: 10,
-                    }}
-                  >
+                  <div className="doctor-vitals-grid">
                     {[
                       { label: 'BP systolic', value: bpSystolic },
                       { label: 'BP diastolic', value: bpDiastolic },
@@ -2852,16 +2804,6 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                       {
                         label: 'Weight kg',
                         value: weight,
-                      },
-                      {
-                        label: 'Patient sex',
-                        value: selectedApp?.sex || '',
-                      },
-                      {
-                        label: 'BMI',
-                        value: selectedApp?.bmi
-                          ? `${selectedApp.bmi} · ${selectedApp.bmi_category || ''}`
-                          : '',
                       },
                     ].map((f) => (
                       <div key={f.label}>
@@ -2897,7 +2839,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                 </div>
 
                 <div style={{ marginBottom: 14 }}>
-                  <label
+                  <label htmlFor="encounter-complaint"
                     style={{
                       display: 'block',
                       fontSize: 12,
@@ -2917,14 +2859,14 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                       resize: 'vertical',
                       fontFamily: T.font,
                     }}
-                    value={chiefComplaint}
+                    id="encounter-complaint" value={chiefComplaint}
                     onChange={(e) => setChiefComplaint(e.target.value)}
-                    placeholder={DEFAULT_CHIEF_COMPLAINT}
+
                   />
                 </div>
 
                 <div style={{ marginBottom: 14 }}>
-                  <label
+                  <label htmlFor="encounter-diagnosis"
                     style={{
                       display: 'block',
                       fontSize: 12,
@@ -2939,14 +2881,14 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                     style={inputStyle}
                     disabled={isArchivedMode}
                     readOnly={isArchivedMode}
-                    value={diagnosis}
-                    placeholder={DEFAULT_DIAGNOSIS}
+                    id="encounter-diagnosis" value={diagnosis}
+
                     onChange={(e) => setDiagnosis(e.target.value)}
                   />
                 </div>
 
                 <div style={{ marginBottom: 14 }}>
-                  <label
+                  <label htmlFor="encounter-plan"
                     style={{
                       display: 'block',
                       fontSize: 12,
@@ -2966,11 +2908,17 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                       resize: 'vertical',
                       fontFamily: T.font,
                     }}
-                    value={treatmentPlan}
-                    placeholder={DEFAULT_TREATMENT_PLAN}
+                    id="encounter-plan" value={treatmentPlan}
+
                     onChange={(e) => setTreatmentPlan(e.target.value)}
                   />
                 </div>
+
+                <label htmlFor="encounter-notes" style={{ display: 'block', fontWeight: 700, marginBottom: 6 }}>
+                  Clinical notes
+                </label>
+                <textarea id="encounter-notes" value={clinicalNotes} rows={3} readOnly={isArchivedMode}
+                  style={{ ...inputStyle, marginBottom: 14 }} onChange={(event) => setClinicalNotes(event.target.value)} />
 
                 {!isArchivedMode && (
                   <div
@@ -3082,55 +3030,19 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
               </form>
             </section>
           </div>
-          )}
+          ))}
         </>
       )}
 
-      {encounterConfirmation && (
-        <div className="modal-backdrop" onClick={() => setEncounterConfirmation(null)}>
-          <div
-            className="modal-card"
-            style={{ maxWidth: 560 }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 style={{ margin: '0 0 10px', color: T.primary, fontSize: 17 }}>
-              Confirm encounter details
-            </h3>
-            {encounterConfirmation.length > 0 ? (
-              <>
-                <p style={{ margin: '0 0 10px', color: T.warning, fontSize: 13, fontWeight: 700 }}>
-                  Some fields are blank. The default text below will be recorded unless you go back and edit.
-                </p>
-                <ul style={{ margin: '0 0 18px', paddingLeft: 22, color: T.textSub, fontSize: 12.5 }}>
-                  {encounterConfirmation.map((field) => (
-                    <li key={field} style={{ whiteSpace: 'pre-line', marginBottom: 6 }}>{field}</li>
-                  ))}
-                </ul>
-              </>
-            ) : (
-              <p style={{ margin: '0 0 18px', color: T.textSub, fontSize: 13 }}>
-                Review the encounter details before finalizing and discharging the patient.
-              </p>
-            )}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <button
-                type="button"
-                style={btnGhost}
-                onClick={() => setEncounterConfirmation(null)}
-              >
-                Go back and edit
-              </button>
-              <button
-                type="button"
-                style={btnPrimary}
-                disabled={isSubmittingEMR}
-                onClick={() => void handleFinishConsultation(undefined, true)}
-              >
-                Confirm and finalize
-              </button>
-            </div>
-          </div>
-        </div>
+      {encounterConfirmation && selectedApp && (
+        <ClinicalReview title="Review encounter" patient={patientReviewName} fields={encounterFields}
+          action="Confirm and finalize" onClose={() => setEncounterConfirmation(false)}
+          onConfirm={() => void handleFinishConsultation(undefined, true)} />
+      )}
+      {clearanceConfirmation && selectedApp && (
+        <ClinicalReview title="Review clearance" patient={patientReviewName} fields={clearanceFields}
+          action="Sign and issue clearance" onClose={() => setClearanceConfirmation(false)}
+          onConfirm={() => void handlePrintClearance()} />
       )}
 
             {/* ── Prescription history modal (issuer-only) ─────────── */}
@@ -3672,18 +3584,18 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                         <b>Clinical notes:</b> {item.notes}
                       </div>
                     )}
-                    {item.prescriptions?.[0]?.notes && (
-                      <div
+                    {item.prescriptions?.filter((rx: any) => rx.notes).map((rx: any) => (
+                      <div key={rx.prescription_id}
                         style={{
                           fontSize: 13,
                           color: T.primary,
                           marginBottom: 4,
                         }}
                       >
-                        <b>Physician dietary / Rx notes:</b>{' '}
-                        {item.prescriptions[0].notes}
+                        <b>Rx #{rx.prescription_id} notes:</b>{' '}
+                        {rx.notes}
                       </div>
-                    )}
+                    ))}
 
                     {item.attachments && item.attachments.length > 0 && (
                       <div

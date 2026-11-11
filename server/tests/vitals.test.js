@@ -37,7 +37,8 @@ test('triage normalizes units-free values and preserves explicitly recorded zero
 test('missing measurements remain blank in triage notes and do not invent readings', () => {
   const result = validateTriageVitals({ blood_pressure: '  ', temperature: null, pulse: '' });
   assert.deepEqual(result, { values: {}, errors: {} });
-  assert.match(formatTriageNote(result.values), /^\[TRIAGE VITALS\] BP: —, Temp: —°C, Pulse: — bpm/);
+  assert.equal(formatTriageNote(result.values), '');
+  assert.equal(formatTriageNote({ height: 162.5 }), '[TRIAGE VITALS] Height: 162.5 cm\n');
 });
 
 test('blood pressure requires a valid pair in intake and correct ordering wherever both are present', () => {

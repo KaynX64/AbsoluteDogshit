@@ -1,6 +1,7 @@
 // desktop/src/components/PrescriptionGenerator.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import Icon from './Icon';
+import ClinicalReview, { type ReviewField } from './ClinicalReview';
 import { T, btnPrimary, btnGhost, inputStyle } from '../theme';
 import { API_BASE_URL } from '../config/api';
 import InteractionWarning from './InteractionWarning';
@@ -8,16 +9,6 @@ import {
   checkDrugInteractions,
   type InteractionCheckResult,
 } from '../services/interactionService';
-
-const DEFAULT_FREQUENCY = 'Every 4-6 hours as needed';
-const DEFAULT_INSTRUCTIONS = 'Take 1 tablet after meals when fever exceeds 37.8°C.';
-const DEFAULT_DOCTOR_NOTES =
-  'Take Paracetamol every 4 to 6 hours as needed for fever and throat discomfort.';
-
-function getInitialDoctorNotes(initialNotes?: string, isArchived = false): string {
-  const notes = initialNotes?.trim() === DEFAULT_DOCTOR_NOTES ? '' : initialNotes;
-  return notes || (isArchived ? 'None recorded' : '');
-}
 
 interface MedicineMaster {
   medicine_id: number;
@@ -45,16 +36,16 @@ interface PrescriptionGeneratorProps {
   initialNotes?: string;
   isArchived?: boolean;
   signatureEnrolled?: boolean | null;
-  onPrescriptionIssued?: (info: { prescriptionId: number; qrToken: string; emrId: number }) => void;
+  onPrescriptionIssued?: (info: { prescriptionId: number; qrToken: string; emrId: number; pdfAvailable: boolean }) => void;
   onPrescriptionError?: (message: string) => void;
   onSignatureRequired?: () => void;
 }
 
 /* ── Hoisted Form Field Wrapper (Must stay outside to preserve focus) ── */
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, inputId, children }: { label: string; inputId?: string; children: React.ReactNode }) {
   return (
     <div>
-      <label
+      <label htmlFor={inputId}
         style={{
           display: 'block',
           fontSize: 11.5,
@@ -137,6 +128,7 @@ function FormularySelect({
   return (
     <div ref={wrapperRef} style={{ position: 'relative' }}>
       <button
+        id="rx-formulary"
         type="button"
         disabled={disabled}
         onClick={() => !disabled && setOpen((v) => !v)}
@@ -293,24 +285,17 @@ export default function PrescriptionGenerator({
   onSignatureRequired,
 }: PrescriptionGeneratorProps) {
   const [medicines, setMedicines] = useState<MedicineMaster[]>([]);
-  const [selectedMedicineId, setSelectedMedicineId] = useState<number>(1);
-  const [rxMedName, setRxMedName] = useState('Biogesic (Paracetamol)');
-  const [rxDosage, setRxDosage] = useState('500mg');
+  const [selectedMedicineId, setSelectedMedicineId] = useState<number>(0);
+  const [rxDosage, setRxDosage] = useState('');
   const [rxFrequency, setRxFrequency] = useState('');
-  const [rxDurationDays, setRxDurationDays] = useState('5');
-  const [rxValidityDays, setRxValidityDays] = useState('30');
-  const [rxQuantity, setRxQuantity] = useState('10');
+  const [rxRoute, setRxRoute] = useState('');
+  const [rxDurationDays, setRxDurationDays] = useState('');
+  const [rxValidityDays, setRxValidityDays] = useState('');
+  const [rxQuantity, setRxQuantity] = useState('');
   const [rxInstructions, setRxInstructions] = useState('');
-  const [doctorNotes, setDoctorNotes] = useState(() =>
-    getInitialDoctorNotes(initialNotes, isArchived)
-  );
+  const [doctorNotes, setDoctorNotes] = useState(initialNotes || '');
   const [isSaving, setIsSaving] = useState(false);
   const [showIssueConfirmation, setShowIssueConfirmation] = useState(false);
-
-  const getExpiresAtDate = (daysStr: string) => {
-    const days = Math.max(1, Math.min(180, Number(daysStr) || 30));
-    return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-  };
 
   /* ── Outside-drug mode state ──────────────────────────────────── */
   const [rxMode, setRxMode] = useState<'formulary' | 'outside'>('formulary');
@@ -328,10 +313,9 @@ export default function PrescriptionGenerator({
   const [checkingInteractions, setCheckingInteractions] = useState(false);
 
   useEffect(() => {
-    setDoctorNotes(getInitialDoctorNotes(initialNotes, isArchived));
+    setDoctorNotes(initialNotes || '');
   }, [initialNotes, isArchived]);
 
-  const hasInitializedRef = useRef(false);
 
   const fetchCatalog = async (attempt = 0) => {
     const token = localStorage.getItem('valetudo_token');
@@ -342,12 +326,6 @@ export default function PrescriptionGenerator({
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: MedicineMaster[] = await res.json();
       setMedicines(data);
-      if (data.length > 0 && !hasInitializedRef.current) {
-        hasInitializedRef.current = true;
-        setSelectedMedicineId(data[0].medicine_id);
-        setRxMedName(`${data[0].name} (${data[0].generic_name})`);
-        setRxDosage(data[0].strength);
-      }
     } catch (err) {
       if (attempt < 2) {
         window.setTimeout(() => fetchCatalog(attempt + 1), 1500 * (attempt + 1));
@@ -386,205 +364,112 @@ export default function PrescriptionGenerator({
 
   const handleSelectMedicine = (medId: number) => {
     setSelectedMedicineId(medId);
-    const chosen = medicines.find((m) => m.medicine_id === medId);
-    if (chosen) {
-      setRxMedName(`${chosen.name} (${chosen.generic_name})`);
-      setRxDosage(chosen.strength);
-    }
+    setRxDosage('');
   };
 
   const handleSwitchMode = (mode: 'formulary' | 'outside') => {
-    if (isArchived) return;
+    if (isArchived || mode === rxMode) return;
     setRxMode(mode);
-    if (mode === 'outside') {
-      setInteractionResult(null);
-      setStockError(null);
-      setRxDosage('');
-    } else if (selectedMed) {
-      setRxDosage(selectedMed.strength);
-    }
+    setInteractionResult(null);
+    setStockError(null);
+    setRxDosage('');
   };
 
+  const wholeNumber = (value: string, max: number) =>
+    /^\d+$/.test(value.trim()) && Number(value) >= 1 && Number(value) <= max;
+  const quantity = Number(rxQuantity);
+  const duration = Number(rxDurationDays);
+  const validity = Number(rxValidityDays);
+  const validExpiry = wholeNumber(rxValidityDays, 180);
+  const expiresAt = validExpiry ? new Date(Date.now() + validity * 86400000).toISOString().slice(0, 10) : '';
+  const outside = rxMode === 'outside';
+  const medicineName = outside ? outsideName.trim() : selectedMed ? selectedMed.name + ' · ' + selectedMed.strength : '';
+  const prescriptionDraft = {
+    patient_user_id: patientUserId,
+    appointment_id: appointmentId,
+    expires_at: expiresAt,
+    notes: doctorNotes.trim(),
+    items: [{
+      medicine_id: outside ? null : selectedMedicineId,
+      outside_drug_name: outside ? outsideName.trim() : undefined,
+      dosage: rxDosage.trim(),
+      frequency: rxFrequency.trim(),
+      route: rxRoute.trim(),
+      duration_days: duration,
+      quantity_prescribed: quantity,
+      quantity_dispensed: outside ? 0 : quantity,
+      instructions: rxInstructions.trim(),
+    }],
+  };
+  const item = prescriptionDraft.items[0];
+  const reviewFields: ReviewField[] = [
+    { label: 'Medicine', value: medicineName, input: outside ? 'rx-outside-name' : 'rx-formulary', error: medicineName ? undefined : 'Choose or enter a medicine.' },
+    { label: 'Dosage', value: item.dosage, input: 'rx-dosage', error: item.dosage ? undefined : 'Enter a dosage.' },
+    { label: 'Frequency', value: item.frequency, input: 'rx-frequency', error: item.frequency ? undefined : 'Enter a frequency.' },
+    { label: 'Route', value: item.route, input: 'rx-route', error: item.route ? undefined : 'Enter an administration route.' },
+    { label: 'Duration (days)', value: rxDurationDays, input: 'rx-duration', error: wholeNumber(rxDurationDays, 2147483647) ? undefined : 'Enter a positive whole number.' },
+    { label: 'Quantity', value: rxQuantity, input: 'rx-quantity', error: wholeNumber(rxQuantity, 2147483647) ? undefined : 'Enter a positive whole number.' },
+    { label: 'Expiry date', value: expiresAt, input: 'rx-validity', error: validExpiry ? undefined : 'Enter a validity period from 1 to 180 days.' },
+    { label: 'Instructions', value: item.instructions, input: 'rx-instructions' },
+    { label: 'Physician notes', value: prescriptionDraft.notes, input: 'rx-notes' },
+  ];
+
   const handleSaveAndPrintPrescription = async (confirmed = false) => {
+    if (isSaving || isArchived) return;
     if (signatureEnrolled === false) {
       onSignatureRequired?.();
-      onPrescriptionError?.(
-        'Save your handwritten signature before issuing a prescription. The patient would otherwise receive it without your signature.'
-      );
+      onPrescriptionError?.('Save your handwritten signature before issuing a prescription.');
       return;
     }
-
-    if (!patientUserId) {
-      if (onPrescriptionError) {
-        onPrescriptionError('No patient selected. Please choose a patient from the queue first.');
-      }
+    if (!patientUserId || !appointmentId) {
+      onPrescriptionError?.('Select a patient from the consultation queue first.');
       return;
     }
-
-    if (rxMode === 'outside') {
-      const trimmedName = outsideName.trim();
-      if (!trimmedName) {
-        if (onPrescriptionError) {
-          onPrescriptionError('Please enter the name of the outside drug before issuing.');
-        }
-        return;
-      }
-      const outsideQty = Number(rxQuantity);
-      if (!Number.isFinite(outsideQty) || outsideQty < 1) {
-        if (onPrescriptionError) {
-          onPrescriptionError('Quantity to purchase must be at least 1.');
-        }
-        return;
-      }
-      if (!confirmed) {
-        setShowIssueConfirmation(true);
-        return;
-      }
-
-      setIsSaving(true);
-      const token = localStorage.getItem('valetudo_token');
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/documents/prescriptions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({
-            patient_user_id: patientUserId,
-            appointment_id: appointmentId,
-            expires_at: getExpiresAtDate(rxValidityDays),
-            notes: doctorNotes.trim() || DEFAULT_DOCTOR_NOTES,
-            items: [
-              {
-                medicine_id: null,
-                outside_drug_name: trimmedName,
-                dosage: rxDosage || 'As per packaging',
-                frequency: rxFrequency.trim() || DEFAULT_FREQUENCY,
-                route: 'Oral',
-                duration_days: Number(rxDurationDays) || 3,
-                quantity_prescribed: outsideQty,
-                quantity_dispensed: 0,
-                instructions: rxInstructions.trim() || DEFAULT_INSTRUCTIONS,
-              },
-            ],
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          if (data.code === 'SIGNATURE_NOT_ENROLLED') onSignatureRequired?.();
-          throw new Error(data.error || 'Failed to issue outside prescription.');
-        }
-        if (onPrescriptionIssued) {
-          onPrescriptionIssued({
-            prescriptionId: data.prescriptionId,
-            qrToken: data.qrToken,
-            emrId: data.emrId,
-          });
-        }
-      } catch (err: any) {
-        if (onPrescriptionError) {
-          onPrescriptionError('Error issuing outside prescription: ' + err.message);
-        } else {
-          console.error('[Prescription Generator - Outside]', err);
-        }
-      } finally {
-        setIsSaving(false);
-      }
-      return;
-    }
-
     if (!confirmed) {
       setShowIssueConfirmation(true);
       return;
     }
-
-    if (selectedMed && selectedMed.available_stock !== undefined) {
-      if (selectedMed.available_stock <= 0) {
-        if (onPrescriptionError) {
-          onPrescriptionError(`Cannot issue prescription: "${selectedMed.name}" is OUT OF STOCK in the infirmary.`);
-        }
-        return;
-      }
-      if (Number(rxQuantity) > selectedMed.available_stock) {
-        if (onPrescriptionError) {
-          onPrescriptionError(
-            `Insufficient stock: Requested ${rxQuantity} ${selectedMed.unit || 'pcs'}, but only ${selectedMed.available_stock} unexpired units are available.`
-          );
-        }
-        return;
-      }
-    }
-
+    if (reviewFields.some(({ error }) => error) || (!outside && (isBlocked || isOutOfStock || isOverStock))) return;
+    setShowIssueConfirmation(false);
     setIsSaving(true);
     const token = localStorage.getItem('valetudo_token');
 
     try {
-      const preCheck = await checkDrugInteractions([selectedMedicineId]);
-      if (preCheck?.blocking) {
-        setInteractionResult(preCheck);
-        setIsSaving(false);
-        if (onPrescriptionError) {
-          onPrescriptionError(
-            'Prescription blocked: a CONTRAINDICATED drug interaction was detected. Review the warning panel.'
-          );
+      if (!outside) {
+        const preCheck = await checkDrugInteractions([selectedMedicineId]).catch(() => null);
+        if (preCheck?.hasInteractions) setInteractionResult(preCheck);
+        if (preCheck?.blocking) {
+          onPrescriptionError?.('Prescription blocked by a contraindicated drug interaction.');
+          return;
         }
-        return;
       }
-      if (preCheck?.hasInteractions) setInteractionResult(preCheck);
-    } catch (_) {
-      /* Interaction service unreachable — do not block clinical issuance. */
-    }
-
-    try {
       const res = await fetch(`${API_BASE_URL}/api/documents/prescriptions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          patient_user_id: patientUserId,
-          appointment_id: appointmentId,
-          expires_at: getExpiresAtDate(rxValidityDays),
-          notes: doctorNotes.trim() || DEFAULT_DOCTOR_NOTES,
-          items: [
-            {
-              medicine_id: selectedMedicineId,
-              dosage: rxDosage,
-              frequency: rxFrequency.trim() || DEFAULT_FREQUENCY,
-              route: 'Oral',
-              duration_days: Number(rxDurationDays) || 3,
-              quantity_prescribed: Number(rxQuantity) || 10,
-              quantity_dispensed: Number(rxQuantity) || 10,
-              instructions: rxInstructions.trim() || DEFAULT_INSTRUCTIONS,
-            },
-          ],
-        }),
+        body: JSON.stringify(prescriptionDraft),
       });
       const data = await res.json();
       if (!res.ok) {
         if (data.code === 'SIGNATURE_NOT_ENROLLED') onSignatureRequired?.();
         if (data.code === 'INSUFFICIENT_STOCK') {
           setStockError({
-            medicine: data.medicine || rxMedName,
+            medicine: data.medicine || medicineName,
             available: Number(data.available ?? 0),
-            requested: Number(data.requested ?? rxQuantity ?? 0),
+            requested: Number(data.requested ?? quantity),
           });
           return;
         }
         throw new Error(data.error || 'Failed to issue prescription.');
       }
-      const realQrToken = data.qrToken;
-      const prescriptionId = data.prescriptionId;
-      const emrId = data.emrId;
-
-      await fetchCatalog();
-
-      if (onPrescriptionIssued) {
-        onPrescriptionIssued({ prescriptionId, qrToken: realQrToken, emrId });
-      }
-
-    } catch (err: any) {
-      if (onPrescriptionError) {
-        onPrescriptionError('Error issuing prescription: ' + err.message);
-      } else {
-        console.error('[Prescription Generator]', err);
-      }
+      onPrescriptionIssued?.({
+        prescriptionId: data.prescriptionId,
+        qrToken: data.qrToken,
+        emrId: data.emrId,
+        pdfAvailable: data.pdfAvailable,
+      });
+      if (!outside) void fetchCatalog();
+    } catch (err) {
+      onPrescriptionError?.('Error issuing prescription: ' + (err instanceof Error ? err.message : 'Request failed'));
     } finally {
       setIsSaving(false);
     }
@@ -603,13 +488,6 @@ export default function PrescriptionGenerator({
     Number(rxQuantity) > selectedMed.available_stock;
   const isBlocked = rxMode === 'formulary' && (interactionResult?.blocking ?? false);
   const isOutsideNameMissing = rxMode === 'outside' && !outsideName.trim();
-  const issueDefaults = [
-    rxMode === 'outside' && !rxDosage.trim() && 'Dosage: As per packaging',
-    !rxFrequency.trim() && `Frequency: ${DEFAULT_FREQUENCY}`,
-    !rxInstructions.trim() && `Instructions: ${DEFAULT_INSTRUCTIONS}`,
-    !doctorNotes.trim() && `Physician notes: ${DEFAULT_DOCTOR_NOTES}`,
-  ].filter((item): item is string => Boolean(item));
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {/* ── Verified Patient Demographic / Clinical Safety Bar ── */}
@@ -684,7 +562,7 @@ export default function PrescriptionGenerator({
       </div>
 
       {rxMode === 'formulary' ? (
-        <Field label="Medicine (formulary)">
+        <Field label="Medicine (formulary)" inputId="rx-formulary">
           <FormularySelect
             medicines={medicines}
             value={selectedMedicineId}
@@ -693,15 +571,15 @@ export default function PrescriptionGenerator({
           />
         </Field>
       ) : (
-        <Field label="Outside drug name (brand or generic)">
+        <Field label="Outside drug name (brand or generic)" inputId="rx-outside-name">
           <input
             style={{
               ...inputStyle,
               borderColor: isOutsideNameMissing ? T.danger : undefined,
             }}
             disabled={isArchived}
-            placeholder="e.g. Cetirizine 10mg or any non-formulary medicine"
-            value={outsideName}
+
+            id="rx-outside-name" value={outsideName}
             onChange={(e) => setOutsideName(e.target.value)}
             maxLength={200}
           />
@@ -721,14 +599,13 @@ export default function PrescriptionGenerator({
         </Field>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <Field label="Dosage">
+      <div className="doctor-prescription-fields">
+        <Field label="Dosage" inputId="rx-dosage">
           <input
             style={inputStyle}
             disabled={isArchived}
-            readOnly={rxMode === 'formulary'}
-            placeholder={rxMode === 'outside' ? 'As per packaging' : undefined}
-            value={rxDosage}
+
+            id="rx-dosage" maxLength={100} value={rxDosage}
             onChange={(e) => setRxDosage(e.target.value)}
           />
         </Field>
@@ -744,7 +621,7 @@ export default function PrescriptionGenerator({
                   : undefined,
             }}
             disabled={isArchived}
-            value={rxQuantity}
+            id="rx-quantity" value={rxQuantity}
             onChange={(e) => setRxQuantity(e.target.value)}
           />
           {rxMode === 'formulary' && selectedMed && selectedMed.available_stock !== undefined && (
@@ -766,31 +643,35 @@ export default function PrescriptionGenerator({
         </Field>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-        <Field label="Frequency">
+      <div className="doctor-prescription-fields">
+        <Field label="Frequency" inputId="rx-frequency">
           <input
             style={inputStyle}
             disabled={isArchived}
-            placeholder={DEFAULT_FREQUENCY}
-            value={rxFrequency}
+
+            id="rx-frequency" maxLength={100} value={rxFrequency}
             onChange={(e) => setRxFrequency(e.target.value)}
           />
         </Field>
-        <Field label="Duration (days)">
+        <Field label="Route" inputId="rx-route">
+          <input id="rx-route" maxLength={50} style={inputStyle} disabled={isArchived}
+            value={rxRoute} onChange={(event) => setRxRoute(event.target.value)} />
+        </Field>
+        <Field label="Duration (days)" inputId="rx-duration">
           <input
             type="number"
             min="1"
             style={inputStyle}
             disabled={isArchived}
-            value={rxDurationDays}
+            id="rx-duration" value={rxDurationDays}
             onChange={(e) => setRxDurationDays(e.target.value)}
           />
         </Field>
-        <Field label="Prescription validity">
+        <Field label="Prescription validity" inputId="rx-validity">
           <select
             style={{ ...inputStyle, cursor: isArchived ? 'not-allowed' : 'pointer' }}
             disabled={isArchived}
-            value={rxValidityDays}
+            id="rx-validity" value={rxValidityDays}
             onChange={(e) => setRxValidityDays(e.target.value)}
           >
             <option value="7">7 days (1 week)</option>
@@ -808,18 +689,18 @@ export default function PrescriptionGenerator({
           rows={2}
           style={{ ...inputStyle, resize: 'vertical', fontFamily: T.font }}
           disabled={isArchived}
-          placeholder={DEFAULT_INSTRUCTIONS}
-          value={rxInstructions}
+
+          id="rx-instructions" value={rxInstructions}
           onChange={(e) => setRxInstructions(e.target.value)}
         />
       </Field>
 
-      <Field label="Physician dietary / clinical notes">
+      <Field label="Physician dietary / clinical notes" inputId="rx-notes">
         <input
           style={inputStyle}
           disabled={isArchived}
-          placeholder={DEFAULT_DOCTOR_NOTES}
-          value={doctorNotes}
+
+          id="rx-notes" value={doctorNotes}
           onChange={(e) => setDoctorNotes(e.target.value)}
         />
       </Field>
@@ -856,8 +737,7 @@ export default function PrescriptionGenerator({
           isArchived ||
           isBlocked ||
           Boolean(isOutOfStock) ||
-          Boolean(isOverStock) ||
-          isOutsideNameMissing
+          Boolean(isOverStock)
         }
         style={{
           ...btnPrimary,
@@ -1025,52 +905,10 @@ export default function PrescriptionGenerator({
       )}
 
       {showIssueConfirmation && (
-        <div className="modal-backdrop" onClick={() => setShowIssueConfirmation(false)}>
-          <div
-            className="modal-card"
-            style={{ maxWidth: 560 }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 style={{ margin: '0 0 10px', color: T.primary, fontSize: 17 }}>
-              Confirm prescription
-            </h3>
-            {issueDefaults.length > 0 ? (
-              <>
-                <p style={{ margin: '0 0 10px', color: T.warning, fontSize: 13, fontWeight: 700 }}>
-                  Some fields are blank. The defaults below will be included in the prescription.
-                  Review them or go back to edit.
-                </p>
-                <ul style={{ margin: '0 0 18px', paddingLeft: 22, color: T.textSub, fontSize: 12.5 }}>
-                  {issueDefaults.map((item) => <li key={item}>{item}</li>)}
-                </ul>
-              </>
-            ) : (
-              <p style={{ margin: '0 0 18px', color: T.textSub, fontSize: 13 }}>
-                Review the prescription details before issuing.
-              </p>
-            )}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <button
-                type="button"
-                style={btnGhost}
-                onClick={() => setShowIssueConfirmation(false)}
-              >
-                Go back and edit
-              </button>
-              <button
-                type="button"
-                style={btnPrimary}
-                disabled={isSaving}
-                onClick={() => {
-                  setShowIssueConfirmation(false);
-                  void handleSaveAndPrintPrescription(true);
-                }}
-              >
-                Confirm and issue
-              </button>
-            </div>
-          </div>
-        </div>
+        <ClinicalReview title="Review prescription" fields={reviewFields}
+          patient={[verifiedPatient?.first_name, verifiedPatient?.last_name].filter(Boolean).join(' ')}
+          action="Sign and issue prescription" onClose={() => setShowIssueConfirmation(false)}
+          onConfirm={() => void handleSaveAndPrintPrescription(true)} />
       )}
     </div>
   );
