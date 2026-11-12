@@ -2,7 +2,7 @@ import { pool } from '../../db/pool.js';
 import { requirePermission, resolveAdminPermissions } from '../../middleware/rbac.js';
 import { logAudit } from '../../utils/auditLogger.js';
 import { decrypt } from '../../utils/cryptoVault.js';
-import { requireSuperAdminCaller } from './accountPermissions.js';
+import { requireSuperAdminCaller } from '../../admin/accounts/permissions.js';
 
 export function registerUserDirectoryRoutes(router, io) {
   // 1. GET /api/admin/users - Comprehensive User Accounts, Roles & Sub-profiles

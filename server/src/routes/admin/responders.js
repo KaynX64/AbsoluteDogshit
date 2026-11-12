@@ -1,9 +1,9 @@
 import { pool } from '../../db/pool.js';
 import { requirePermission } from '../../middleware/rbac.js';
 import { logAudit } from '../../utils/auditLogger.js';
-import { fail } from '../../utils/dbStudioGuard.js';
+import { fail } from '../../utils/httpError.js';
 import { parseQualifiedResponderBody } from '../../emergency/responderAccess.js';
-import { requireSuperAdminCaller, getUserRoleCode } from './accountPermissions.js';
+import { requireSuperAdminCaller, getUserRoleCode } from '../../admin/accounts/permissions.js';
 
 export function registerResponderManagementRoutes(router, io) {
   // 3.4 PUT /api/admin/users/:id/qualified-responder — Qualified Responder flag

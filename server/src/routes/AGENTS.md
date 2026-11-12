@@ -20,13 +20,13 @@ Each API area exports a router or a factory. Feature folders compose their route
 
 | Area | Modules |
 |---|---|
-| Appointments | `booking/reads.js` for clinicians, slots and personal bookings, with `booking/create.js` and `booking/cancellation.js` for writes. `dailyQueue.js` for daily lists and queue status. `intake/lookup.js`, `intake/checkIn.js` and `intake/walkIn.js` own intake reads and write workflows. `consultations.js` owns status and finalization. `patientHistory.js` serves history and patient search. |
+| Appointments | `booking/reads.js` for clinicians, slots and personal bookings, with `booking/create.js` and `booking/cancellation.js` for writes. `dailyQueue.js` and `consultations.js` delegate reads, transitions and encounter writes to `src/appointments/`. `queueNotifications.js` runs after the transaction releases its connection. `intake/` handles intake reads and writes, and `patientHistory.js` serves history and patient search. |
 | Documents | `prescriptions/issuance.js`, `prescriptions/history.js`, and `prescriptions/cancellation.js` for issuing, reading, and cancelling prescriptions with stock restoration. `clearances.js` owns clearance issuance, history and lifecycle. `verification/public.js` serves public QR reads and `verification/details.js` applies the staff gate. `attachments.js` handles upload and token-based download. `pdfs.js` handles protected prescription, clearance and incident report PDFs. |
-| Admin | `userDirectory.js` for account reads and archival, `userUpdates/roles.js` for role assignment, `userUpdates/profile.js` for full account edits, and `accountCredentials.js` for credential operations. `permissions.js` and `responders.js` for grants and responder eligibility. `audit.js` for access logs and telemetry. `databaseStudio/` separates schema lookups, reads and writes behind a shared access gate. `serverPolicy.js` handles Super Admin policy read, preview and versioned save. |
+| Admin | `userDirectory.js` for account reads and archival, `userUpdates/` for role assignment and full account edits through `src/admin/accounts/`, and `accountCredentials.js` for credential operations. `permissions.js` and `responders.js` for grants and responder eligibility. `audit.js` for access logs and telemetry. `databaseStudio/` separates schema lookups, reads, writes and table policy behind a shared access gate. `serverPolicy.js` handles Super Admin policy read, preview and versioned save. |
 | Profile | `self.js` for personal profile reads and edits, `clinicalHealth.js` for clinical health-profile routes, and `preferences.js` for theme and device tokens. |
-| Sync | `bootstrap.js` loads workstation cache data, `replay.js` calls the transaction service in `src/sync/`, and `status.js` returns sync telemetry. |
-| Emergency | `sos.js` for SOS creation, rate limiting and dispatch notifications. `alerts.js` for live responder access, active alerts and status changes. `incidentReports/workflow.js` handles pending reports and filing. `incidentReports/archive.js` handles archived reports and PDF download. |
-| Analytics | `dashboard.js` for summary and department metrics. `exports.js` for CSV, Excel, and PDF downloads. The entry point applies the shared analytics access gate. |
+| Sync | `bootstrap.js` loads legacy or paged workstation cache data via `src/sync/bootstrapReads.js`. `replay.js` calls the transaction service in `src/sync/`, and `status.js` returns sync telemetry. |
+| Emergency | `sos.js` for SOS creation, rate limiting and dispatch notifications. `alerts.js` for live responder access, active alerts and status changes. `incidentReports/workflow.js` maps pending-report and filing requests. `src/emergency/fileIncidentReport.js` owns the filing transaction. `incidentReports/archive.js` handles archived reports and PDF download. |
+| Analytics | `dashboard.js` and `exports.js` share `src/analytics/reportQueries.js`. CSV, Excel, and PDF rendering lives in `src/analytics/reports/`. The entry point applies the shared analytics access gate. |
 | Inventory | `overview.js` for catalog, stock views and logs. `receiving.js` for deliveries. `formulary.js` for catalog writes. `stock.js` for deductions and adjustments. |
 
 Use `rg -n '<route path>' server/src/routes/<area>` to locate a handler. Feature registrars attach to the same router in the order set by `index.js`. Admin applies authentication and the ADMIN role gate before registering its routes. The server-policy router applies its own Super Admin gate.
@@ -47,12 +47,14 @@ The admin directory lists archived accounts with `GET /users?archived=true`. Its
 ## Appointment read queries
 
 - Booking and availability compare `date_time` directly to the clinic day's bounds so MySQL can use `idx_app_doctor_datetime`.
+- The roster selects the latest live EMR and prescription by date and ID and returns one row per appointment. Arrival and no-show counts use date ranges backed by `idx_app_status_datetime`.
 - `GET /api/appointments/patient/:patientId/history?limit=25` returns `{ records, nextCursor }`. Pass the returned cursor as `before` with the same limit to load older encounters. The limit accepts 1–50. A request without paging parameters returns the legacy array.
 - History is ordered by encounter date and ID, newest first. The encounter query joins the dental chart for dentists. Vitals, attachment metadata and prescriptions are loaded in one batch query each. The consultation attachment strip uses `?view=attachments` and reads only live attachment metadata.
 
 ## Clinical inputs and issuer history
 
 - Finalization and offline replay share encounter text validation. Complaint and diagnosis require entered text. Optional fields accept blanks. The check-in note contains only readings recorded for that visit.
+- Online completion and replay lock the appointment before writing the EMR, vitals and queue status. The caller owns the transaction and audit entry. Queue status writes lock the linked appointment before the ticket. Repeat status changes are idempotent.
 - Prescription issuance validates medication directions and quantities before starting a transaction. Optional instructions and notes stay blank when omitted. Clearance issuance requires a purpose, clinical statement and expiry.
 - `services/prescriptions/issuePrescription.js` owns the transaction and post-commit PDF orchestration. Its `stock.js` helper locks FEFO lots, applies deductions, and links them to prescription items using the same connection. The route validates HTTP input and maps the workflow result to the existing response.
 - Issuer history reads saved prescription items and clearance remarks independently of PDF availability. Prescription items are loaded in one batch for the signed-in clinician's records.

@@ -3,7 +3,7 @@ import { requirePermission, resolveAdminPermissions } from '../../middleware/rba
 import { logAudit } from '../../utils/auditLogger.js';
 import { evaluatePasswordStrength } from '../../utils/passwordPolicy.js';
 import bcrypt from 'bcryptjs';
-import { validatePermissionCodes, setAdminPermissionGrants } from './accountPermissions.js';
+import { validatePermissionCodes, setAdminPermissionGrants } from '../../admin/accounts/permissions.js';
 
 export function registerAccountCredentialRoutes(router) {
   // 3.2 POST /api/admin/users/:id/reset-password - Admin Password Reset

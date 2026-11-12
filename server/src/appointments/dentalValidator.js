@@ -1,4 +1,4 @@
-// server/src/utils/dentalValidator.js
+// server/src/appointments/dentalValidator.js
 
 export const VALID_TOOTH_CONDITIONS = new Set([
   'sound',

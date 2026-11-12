@@ -1,6 +1,6 @@
 import { pool } from '../../../db/pool.js';
 import { authenticateToken } from '../../../auth/middleware.js';
-import { logAudit } from '../../../utils/auditLogger.js';
+import { fileIncidentReport, IncidentReportError } from '../../../emergency/fileIncidentReport.js';
 import { generateAndStoreIncidentReportPDF } from '../../../documents/documentService.js';
 import { requireResponderAccess, getResponderAudience, roleLabelFor } from '../../../emergency/responderAccess.js';
 
@@ -163,80 +163,9 @@ export function registerIncidentWorkflowRoutes(router, io) {
         }
       }
 
-      const [alertRows] = await pool.query(
-        'SELECT user_id, status, created_at, resolved_at FROM EMERGENCY_ALERTS WHERE alert_id = ?',
-        [alertId]
-      );
-      if (alertRows.length === 0) {
-        return res.status(404).json({ error: 'Alert not found.' });
-      }
-      if (alertRows[0].status !== 'resolved') {
-        return res.status(409).json({
-          error: `Incident reports are filed for resolved incidents only (current status: ${alertRows[0].status}).`,
-          code: 'ALERT_NOT_RESOLVED',
-        });
-      }
-
-      // Date & time the incident was resolved. The popup pre-fills this from
-      // the stored resolved_at; the operator may correct it, bounded by the
-      // alert lifetime (never before it was triggered, never in the future).
-      let resolvedAt;
-      if (raw.resolved_at === undefined || raw.resolved_at === null || String(raw.resolved_at).trim() === '') {
-        resolvedAt = new Date(alertRows[0].resolved_at);
-      } else {
-        resolvedAt = new Date(String(raw.resolved_at));
-      }
-      if (isNaN(resolvedAt.getTime())) {
-        return res.status(400).json({ error: 'Invalid resolved_at — provide an ISO 8601 date-time.' });
-      }
-      if (resolvedAt.getTime() < new Date(alertRows[0].created_at).getTime() - 60000) {
-        return res.status(400).json({ error: 'resolved_at cannot be before the alert was triggered.' });
-      }
-      if (resolvedAt.getTime() > Date.now() + 5 * 60 * 1000) {
-        return res.status(400).json({ error: 'resolved_at cannot be in the future.' });
-      }
-
-      const connection = await pool.getConnection();
-      let reportId;
-      try {
-        await connection.beginTransaction();
-
-        const [insertResult] = await connection.query(
-          `INSERT INTO INCIDENT_REPORTS (alert_id, patient_user_id, resolved_at, incident_details, treatment_notes, documented_by)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [alertId, alertRows[0].user_id, resolvedAt, incidentDetails, treatmentNotes, responderId]
-        );
-        reportId = insertResult.insertId;
-
-        await logAudit(connection, {
-          userId: responderId,
-          action: 'CREATE',
-          table: 'INCIDENT_REPORTS',
-          recordId: Number(reportId),
-          oldValue: null,
-          newValue: {
-            operation: 'SOS_INCIDENT_REPORT',
-            alertId: Number(alertId),
-            patientUserId: Number(alertRows[0].user_id),
-            resolvedAt: resolvedAt.toISOString(),
-          },
-          ipAddress: req.ip,
-        });
-
-        await connection.commit();
-      } catch (err) {
-        await connection.rollback();
-        // UNIQUE(alert_id): another console filed the report first.
-        if (err && err.code === 'ER_DUP_ENTRY') {
-          return res.status(409).json({
-            error: 'This incident has already been documented by another console.',
-            code: 'REPORT_ALREADY_FILED',
-          });
-        }
-        throw err;
-      } finally {
-        connection.release();
-      }
+      const reportId = await fileIncidentReport({
+        alertId, responderId, incidentDetails, treatmentNotes, resolution: raw.resolved_at, ipAddress: req.ip,
+      });
 
       // Tell every connected console the documentation is in — popups for
       // this alert dismiss themselves instead of asking for a second report.
@@ -268,7 +197,10 @@ export function registerIncidentWorkflowRoutes(router, io) {
         reportId: Number(reportId),
       });
     } catch (error) {
-      console.error('[Incident Report Save Error]:', error);
+      if (error instanceof IncidentReportError) {
+        return res.status(error.status).json({ error: error.message, code: error.code });
+      }
+      console.error('[Incident Report Save Error]:', error.code || error.name);
       res.status(500).json({ error: 'Failed to save the incident report.' });
     }
   });

@@ -10,7 +10,7 @@
 | ../documents/documentService.js · ../documents/pdf/ | Document storage orchestration, shared PDF drawing helpers and document templates |
 | ../documents/signing/ | stored signatures and signatory data |
 | interactionChecker.js | drug-interaction logic |
-| dentalValidator.js | dental chart validation |
+| ../appointments/dentalValidator.js | dental chart validation shared by online completion and replay |
 | ../appointments/vitals.js | shared desktop and API measurement validation and check-in note formatting |
 | ../appointments/encounterText.js | required encounter text and optional blanks for online finalization and offline replay |
 | ../analytics/analyticsStats.js | analytics aggregation (tested) |
@@ -19,7 +19,8 @@
 | fcmNotifier.js · fcmCredential.js | FCM push and scoped Google Auth JWT credential. The backend reads the configured service-account file, with simulation mode when it is absent. |
 | ../appointments/noShow.js | Locks eligible appointments, skips locked rows, and commits the no-show transition. `../workers/noShowWorker.js` broadcasts after commit. |
 | ../appointments/queueTickets.js | Reserves daily ticket numbers per counter inside the intake transaction. The first reservation starts after any existing tickets. |
-| dbStudioGuard.js | DB-studio access guard (tested) |
+| httpError.js | shared status-bearing errors |
+| ../routes/admin/databaseStudio/tablePolicy.js | Database Studio table protections and audit masking |
 
 Changing `cryptoVault.js` → run `node --test tests/cryptoVault.test.js tests/reencrypt.test.js`. Never alter the ciphertext format without a re-encrypt migration.
 

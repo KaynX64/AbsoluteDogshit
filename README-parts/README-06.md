@@ -36,10 +36,9 @@ AbsoluteDogshit/
 │   │   │   ├── admin/  analytics/  appointments/  documents/
 │   │   │   ├── emergency/  healthPass.js  interactions.js  inventory/
 │   │   │   └── privacy.js  profile/  signature.js  sync/
-│   │   ├── appointments/ analytics/ bootstrap/ documents/ emergency/ sync/ workers/
+│   │   ├── admin/ analytics/ appointments/ bootstrap/ documents/ emergency/ sync/ workers/
 │   │   └── utils/                # shared infrastructure, encryption and logging
-│   ├── tests/                    # backend test suite (see §8)
-│   └── valetudo_healthlink/      # auxiliary project directory
+│   └── tests/                    # backend test suite (see §8)
 │
 ├── desktop/                      # valetudo-desktop
 │   ├── AGENTS.md                 # 3.68 KB

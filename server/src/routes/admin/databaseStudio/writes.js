@@ -1,6 +1,7 @@
 import { pool } from '../../../db/pool.js';
 import { logAudit } from '../../../utils/auditLogger.js';
-import { fail, normalizeValue, auditSafe, assertKnownColumns, assertPrimaryKey, protectValues, planDelete, shouldBumpVersion } from '../../../utils/dbStudioGuard.js';
+import { fail } from '../../../utils/httpError.js';
+import { normalizeValue, auditSafe, assertKnownColumns, assertPrimaryKey, protectValues, planDelete, shouldBumpVersion } from './tablePolicy.js';
 import { getTableColumns } from './schema.js';
 
 export function registerDatabaseStudioWrites(router, requireDatabaseAccess, requireWritableTable) {

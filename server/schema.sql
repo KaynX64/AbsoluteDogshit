@@ -255,6 +255,7 @@ CREATE TABLE `APPOINTMENTS` (
   INDEX `idx_app_doctor_datetime` (`doctor_user_id`, `date_time`),
   INDEX `idx_app_patient_datetime` (`patient_user_id`, `date_time`),
   INDEX `idx_app_reminder` (`status`, `reminder_sent`, `date_time`),
+  INDEX `idx_app_status_datetime` (`status`, `date_time`, `deleted_at`),
   CONSTRAINT `fk_app_patient` FOREIGN KEY (`patient_user_id`) REFERENCES `USERS` (`user_id`),
   CONSTRAINT `fk_app_doctor` FOREIGN KEY (`doctor_user_id`) REFERENCES `USERS` (`user_id`)
 ) ENGINE=InnoDB;

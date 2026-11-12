@@ -1,3 +1,4 @@
+import { listActiveRoles, listConsultationsByDepartment, listInventoryAlerts } from '../../analytics/reportQueries.js';
 import { pool } from '../../db/pool.js';
 import { decrypt } from '../../utils/cryptoVault.js';
 import { getDiagnosisCounts, getRiskCounts } from '../../analytics/analyticsStats.js';
@@ -27,16 +28,7 @@ export function registerAnalyticsDashboard(router) {
       );
 
       // 4. Role Distribution (Headcount per role)
-      const [roleDistribution] = await pool.query(
-        `SELECT r.code AS role_code, 
-              r.name AS role_name, 
-              COUNT(u.user_id) AS count
-       FROM ROLES r
-       LEFT JOIN USER_ROLES ur ON r.role_id = ur.role_id
-       LEFT JOIN USERS u ON ur.user_id = u.user_id AND u.is_active = TRUE AND u.deleted_at IS NULL
-       GROUP BY r.role_id, r.code, r.name
-       ORDER BY count DESC`
-      );
+      const roleDistribution = (await listActiveRoles()).map(({ code, name, count }) => ({ role_code: code, role_name: name, count }));
 
       // 5. 14-Day Consultation Timeline
       const [dailyTimeline] = await pool.query(
@@ -99,19 +91,8 @@ export function registerAnalyticsDashboard(router) {
       const topDiagnoses = await getDiagnosisCounts();
 
       // 8. Consultation Volume per Department
-      const [deptBreakdown] = await pool.query(
-        `SELECT department, COUNT(*) as consultations_count
-       FROM (
-         SELECT COALESCE(sp.course, fp.department, 'General Walk-in') AS department
-         FROM APPOINTMENTS a
-         LEFT JOIN STUDENT_PROFILES sp ON a.patient_user_id = sp.user_id
-         LEFT JOIN FACULTY_PROFILES fp ON a.patient_user_id = fp.user_id
-         WHERE a.status = 'completed' AND a.deleted_at IS NULL
-       ) AS dept_sub
-       GROUP BY department
-       ORDER BY consultations_count DESC
-       LIMIT 6`
-      );
+      const deptBreakdown = (await listConsultationsByDepartment({ limit: 6 }))
+        .map(({ department, count }) => ({ department, consultations_count: count }));
 
       // 9. Flu / Respiratory Surveillance
       const [fluEmrs] = await pool.query(
@@ -155,16 +136,7 @@ export function registerAnalyticsDashboard(router) {
 
     
       // 11. Low Stock & Near Expiry Pharmacy Batches
-      const [lowStockMeds] = await pool.query(
-        `SELECT b.batch_id, m.name, m.generic_name, b.batch_no, b.quantity_on_hand, m.reorder_level,
-              DATE_FORMAT(b.expiry_date, '%Y-%m-%d') as expiry_date,
-              DATEDIFF(b.expiry_date, CURDATE()) as days_until_expiry
-       FROM MEDICINE_BATCHES b
-       JOIN MEDICINES m ON b.medicine_id = m.medicine_id
-       WHERE b.deleted_at IS NULL AND (b.quantity_on_hand < 25 OR DATEDIFF(b.expiry_date, CURDATE()) <= 90)
-       ORDER BY b.quantity_on_hand ASC
-       LIMIT 6`
-      );
+      const lowStockMeds = await listInventoryAlerts(6);
 
       res.json({
         totalConsultations: consultations[0]?.total || 0,
@@ -194,18 +166,8 @@ export function registerAnalyticsDashboard(router) {
   // 2. GET /api/analytics/by-department
   router.get('/by-department', async (req, res) => {
     try {
-      const [breakdown] = await pool.query(
-        `SELECT department, COUNT(*) as consultation_count
-       FROM (
-         SELECT COALESCE(sp.course, fp.department, 'Other / Walk-in') as department
-         FROM APPOINTMENTS a
-         LEFT JOIN STUDENT_PROFILES sp ON a.patient_user_id = sp.user_id
-         LEFT JOIN FACULTY_PROFILES fp ON a.patient_user_id = fp.user_id
-         WHERE a.status = 'completed' AND a.deleted_at IS NULL
-       ) as d_sub
-       GROUP BY department
-       ORDER BY consultation_count DESC`
-      );
+      const breakdown = (await listConsultationsByDepartment({ fallback: 'Other / Walk-in' }))
+        .map(({ department, count }) => ({ department, consultation_count: count }));
       res.json(breakdown);
     } catch (error) {
       res.status(500).json({ error: 'Failed to aggregate departmental consultation data.' });

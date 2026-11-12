@@ -1,5 +1,5 @@
 import { requirePermission, resolveAdminPermissions } from '../../../middleware/rbac.js';
-import { isReadOnlyTable, isSecurityTable, readOnlyMessage, securityTableMessage } from '../../../utils/dbStudioGuard.js';
+import { isReadOnlyTable, isSecurityTable, readOnlyMessage, securityTableMessage } from './tablePolicy.js';
 import { registerDatabaseStudioReads } from './reads.js';
 import { registerDatabaseStudioWrites } from './writes.js';
 

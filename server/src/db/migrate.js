@@ -2,11 +2,12 @@ import { createHash } from 'node:crypto';
 import foundation from './migrations/001-foundation.js';
 import clinicalDocuments from './migrations/002-clinical-documents.js';
 import responders from './migrations/003-qualified-responders.js';
+import appointmentDayIndex from './migrations/004-appointment-day-index.js';
 
-const migrations = [foundation, clinicalDocuments, responders];
+const migrations = [foundation, clinicalDocuments, responders, appointmentDayIndex];
 const requiredTables = [
   'USERS', 'ROLES', 'USER_ROLES', 'STAFF_PROFILES', 'HEALTH_PROFILES', 'EMERGENCY_ALERTS',
-  'PRESCRIPTIONS', 'PRESCRIPTION_ITEMS', 'INVENTORY_LOGS', 'MEDICAL_CLEARANCES', 'AUDIT_LOGS',
+  'PRESCRIPTIONS', 'PRESCRIPTION_ITEMS', 'INVENTORY_LOGS', 'MEDICAL_CLEARANCES', 'AUDIT_LOGS', 'APPOINTMENTS',
 ];
 
 async function initializeLedger(connection) {

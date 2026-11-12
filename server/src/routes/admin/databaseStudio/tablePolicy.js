@@ -1,9 +1,10 @@
-// server/src/utils/dbStudioGuard.js
+// server/src/routes/admin/databaseStudio/tablePolicy.js
 //
 // Pure helpers for the Admin "Database Studio" (Audit Issue #3).
 // Kept free of DB access so they can be unit-tested (see server/tests/dbStudioGuard.test.js).
 import crypto from 'crypto';
-import { encrypt, decrypt } from './cryptoVault.js';
+import { encrypt, decrypt } from '../../../utils/cryptoVault.js';
+import { fail } from '../../../utils/httpError.js';
 
 export const REDACTED = '[REDACTED]';
 export const DECRYPT_FAILED_MARKER = '[ENCRYPTED PHI - INTEGRITY VERIFICATION FAILED]';
@@ -87,11 +88,6 @@ export function securityTableMessage(table) {
   return `${table} is an account-security table. Only a Super Admin can modify it from Database Studio — use User Management instead.`;
 }
 
-export function fail(message, status = 400) {
-  const err = new Error(message);
-  err.status = status;
-  return err;
-}
 
 export function isValidCiphertext(value) {
   return typeof value === 'string' && CIPHERTEXT_RE.test(value) && decrypt(value) !== DECRYPT_FAILED_MARKER;

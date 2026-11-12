@@ -1,5 +1,5 @@
 import { pool } from '../../../db/pool.js';
-import { fail } from '../../../utils/dbStudioGuard.js';
+import { fail } from '../../../utils/httpError.js';
 
 export async function getWhitelistedTables() {
   const [rows] = await pool.query(

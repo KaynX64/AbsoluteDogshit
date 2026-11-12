@@ -9,6 +9,7 @@
 - Provision a new, empty database using `schema.sql`, then run the migration command. The schema script drops and recreates tables and is reserved for fresh provisioning and disposable fixtures.
 - Upgrade an existing database with the migration command. The runner checks the base tables, serializes migration sessions, and records each started and completed version in `SCHEMA_MIGRATIONS`. A failure reports the migration number and prevents the new process from listening.
 - The responder and prescription-quantity steps save their backfill decisions before altering the schema. A pre-existing responder flag column is treated as already adopted so a legacy upgrade cannot overwrite an administrator's revocation. Inspect ambiguous partially upgraded installations against a known-good backup before making manual eligibility corrections.
+- Migration 004 adds the appointment status and date index for queue reads. Rehearse its DDL on a staging copy with representative appointment volume.
 
 ## Rehearsal and recovery
 

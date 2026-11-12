@@ -30,8 +30,8 @@ export function requireRoles(...allowedRoles) {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /** Fetch a user's raw granted admin-permission codes (empty array = legacy full access). */
-export async function getAdminPermissionCodes(userId) {
-  const [rows] = await pool.query(
+export async function getAdminPermissionCodes(userId, connection = pool) {
+  const [rows] = await connection.query(
     `SELECT ap.code
      FROM ADMIN_PERMISSIONS ap
      INNER JOIN USER_ADMIN_PERMISSIONS uap ON ap.permission_id = uap.permission_id
@@ -47,8 +47,8 @@ export async function getAdminPermissionCodes(userId) {
  *   isSuper = true  → full access (no grant rows at all, or SUPER_ADMIN granted)
  *   isSuper = false → limited to `codes` (never includes SUPER_ADMIN)
  */
-export async function resolveAdminPermissions(userId) {
-  const codes = await getAdminPermissionCodes(userId);
+export async function resolveAdminPermissions(userId, connection = pool) {
+  const codes = await getAdminPermissionCodes(userId, connection);
   const isSuper = codes.length === 0 || codes.includes('SUPER_ADMIN');
   return { isSuper, codes: isSuper ? ['SUPER_ADMIN'] : codes.filter((c) => c !== 'SUPER_ADMIN') };
 }

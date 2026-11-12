@@ -1,4 +1,4 @@
-import { decrypt } from '../../utils/cryptoVault.js';
+import { decrypt } from '../utils/cryptoVault.js';
 
 // Odontogram helpers
 export function stripLegacyOdontogram(text) {

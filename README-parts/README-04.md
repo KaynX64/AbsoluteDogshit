@@ -18,7 +18,7 @@
 
 ### Core flows
 
-- **Offline write:** renderer queues an `OfflineMutation` → IPC → SQLite `LOCAL_SYNC_LOGS` → replay to `/api/sync/*` when online; `/api/sync/bootstrap?lastSyncedAt=…` pre-populates the workstation cache.
+- **Offline write:** renderer queues an `OfflineMutation` → IPC → SQLite `LOCAL_SYNC_LOGS` → replay to `/api/sync/*` when online. Updated desktops page through `/api/sync/bootstrap?paging=1` and advance their checkpoint after SQLite saves every page.
 - **SOS → incident:** mobile sends coordinates → `EMERGENCY_ALERTS` → FCM + Socket.IO → responder action → `INCIDENT_REPORTS` → `documentService` PDF → MinIO → `IncidentRecords` review/save/print.
 - **Document verification:** PDF/signature stored in MinIO → QR points at `PUBLIC_API_BASE_URL` → public verification page → Redis nonce claimed atomically → single successful verification.
 

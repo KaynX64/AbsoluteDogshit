@@ -5,7 +5,7 @@ import { requirePrivacyConsent } from '../../middleware/consent.js';
 import { decrypt } from '../../utils/cryptoVault.js';
 import { logPhiAccess } from '../../utils/phiLogger.js';
 import { isCalendarDate } from '../../config/appointmentRules.js';
-import { stripLegacyOdontogram, readDentalChart } from './clinicalHistory.js';
+import { stripLegacyOdontogram, readDentalChart } from '../../appointments/clinicalHistory.js';
 
 export function registerPatientHistoryRoutes(router) {
   // ===========================================================================

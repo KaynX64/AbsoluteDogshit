@@ -4,6 +4,9 @@
 // formatSignatory / formatIssuedBy are pure. The assert* guards take an open
 // connection so they can run inside the caller's transaction.
 
+import { assertAppointmentInQueue as assertClinicalAppointment } from '../../appointments/eligibility.js';
+import { AppointmentTransitionError } from '../../appointments/transitions.js';
+
 export const SIGNER_ROLES = ['DOCTOR', 'DENTIST'];
 const PATIENT_ROLES = ['STUDENT', 'FACULTY', 'NON_TEACHING'];
 const DESIGNATION = { DOCTOR: 'Physician', DENTIST: 'Dentist' };
@@ -153,42 +156,14 @@ export async function assertEmrBelongsToPatient(conn, emrId, patientId) {
 }
 
 
-// Documents may only be issued for a patient who is IN THE QUEUE (triaged:
-// checked_in / serving) and assigned to the signing practitioner.
-// Bookings ('scheduled') are view-only.
 export async function assertAppointmentInQueue(conn, appointmentId, patientId, signerId) {
-  const id = Number(appointmentId);
-  if (!Number.isInteger(id) || id <= 0) {
-    throw new SignerError(
-      'appointment_id is required. Documents can only be issued from the consultation queue.',
-      400,
-      'APPOINTMENT_REQUIRED'
-    );
-  }
-
-  const [rows] = await conn.query(
-    `SELECT status
-       FROM APPOINTMENTS
-      WHERE appointment_id = ?
-        AND patient_user_id = ?
-        AND doctor_user_id = ?
-        AND deleted_at IS NULL`,
-    [id, patientId, signerId]
-  );
-
-  if (rows.length === 0) {
-    throw new SignerError(
-      'Appointment not found for this patient under your care.',
-      404,
-      'APPOINTMENT_NOT_FOUND'
-    );
-  }
-  if (!['checked_in', 'serving'].includes(rows[0].status)) {
-    throw new SignerError(
-      'Documents can only be issued while the patient is in the consultation queue (triaged and checked in). Bookings are view-only.',
-      409,
-      'NOT_IN_QUEUE'
-    );
+  try {
+    return await assertClinicalAppointment(conn, appointmentId, patientId, signerId);
+  } catch (error) {
+    if (error instanceof AppointmentTransitionError) {
+      throw new SignerError(error.message, error.status, error.code);
+    }
+    throw error;
   }
 }
 

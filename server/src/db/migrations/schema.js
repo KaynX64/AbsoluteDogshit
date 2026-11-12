@@ -42,6 +42,7 @@ export async function ensureEnum(connection, table, column, values, defaultValue
 }
 
 export async function ensureIndex(connection, table, index, column) {
+  const columns = Array.isArray(column) ? column : [column];
   const [rows] = await connection.query(
     `SELECT COLUMN_NAME FROM information_schema.STATISTICS
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?
@@ -49,8 +50,8 @@ export async function ensureIndex(connection, table, index, column) {
     [table, index],
   );
   if (!rows.length) {
-    await connection.query(`ALTER TABLE \`${table}\` ADD INDEX \`${index}\` (\`${column}\`)`);
-  } else if (rows.length !== 1 || rows[0].COLUMN_NAME !== column) {
+    await connection.query(`ALTER TABLE ?? ADD INDEX ?? (${columns.map(() => '??').join(', ')})`, [table, index, ...columns]);
+  } else if (rows.length !== columns.length || rows.some((row, i) => row.COLUMN_NAME !== columns[i])) {
     throw new Error('Unexpected definition for ' + table + '.' + index + '.');
   }
 }

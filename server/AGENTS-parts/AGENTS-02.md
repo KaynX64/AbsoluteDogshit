@@ -8,11 +8,13 @@
 
 ## Domain modules and shared utilities
 
-- `src/appointments/` owns shared encounter text, vital validation, ticket reservation, and the transactional no-show transition. `src/analytics/` owns aggregations. `src/emergency/` owns responder eligibility and redaction.
+- `src/appointments/` owns queue reads and transitions, shared encounter completion, vital and dental chart validation, ticket reservation, and the transactional no-show transition. `src/analytics/` owns report queries and renderers. `src/emergency/` owns responder eligibility, redaction, and the incident report filing transaction.
+- `src/admin/accounts/` owns the account-update workflow, role and grant transitions, and the associated role and health-profile writes.
 - `src/documents/` owns signing helpers, per-document generation, PDF rendering, and public links. `documentService.js` exports the generators, which persist PDFs through shared storage.
 - `src/workers/` has separate jobs for appointment reminders, no-shows, prescription expiry, and PDF backfill. `scheduler.js` skips busy ticks and can run an opted-in job at startup. No-shows and prescription expiry run at startup. The expiry service locks eligible prescriptions before changing status and writes its audit entry inside the transaction.
 - The reminder worker holds a database-scoped MySQL session lock across each scan. It records SMTP acceptance in `reminder_sent` before attempting push and realtime notifications. A crash after SMTP acceptance and before the database update can cause another email attempt.
 - `src/sync/` owns offline mutation dispatch, per-mutation transactions, conflicts, and duplicate outcomes. Keep HTTP response mapping in `src/routes/sync/`.
+- Paged bootstrap uses a user-bound cursor, a MySQL time watermark for EMRs, and a maximum user ID for roster pages. Updated desktops save all pages before advancing the paged checkpoint. Older clients can still request the legacy one-page response.
 - `src/utils/` retains shared infrastructure such as secrets validation, encryption, Redis, S3, SMTP, FCM, and audit logging. [Shared helper map](../src/utils/AGENTS.md)
 
 ## Database — src/db/ + schema.sql

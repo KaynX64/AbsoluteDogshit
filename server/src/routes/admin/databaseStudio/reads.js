@@ -1,7 +1,7 @@
 import { pool } from '../../../db/pool.js';
 import { resolveAdminPermissions } from '../../../middleware/rbac.js';
 import { logPhiAccess } from '../../../utils/phiLogger.js';
-import { isReadOnlyTable, isSecurityTable, isSecretCol, phiPatientSource, maskRowForDisplay } from '../../../utils/dbStudioGuard.js';
+import { isReadOnlyTable, isSecurityTable, isSecretCol, phiPatientSource, maskRowForDisplay } from './tablePolicy.js';
 import { getWhitelistedTables } from './schema.js';
 
 async function resolvePhiTargets(table, rows, pkCols) {

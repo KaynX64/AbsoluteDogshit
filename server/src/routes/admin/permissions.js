@@ -1,8 +1,8 @@
 import { pool } from '../../db/pool.js';
 import { requirePermission, resolveAdminPermissions, getAdminPermissionCodes } from '../../middleware/rbac.js';
 import { logAudit } from '../../utils/auditLogger.js';
-import { fail } from '../../utils/dbStudioGuard.js';
-import { validatePermissionCodes, setAdminPermissionGrants } from './accountPermissions.js';
+import { fail } from '../../utils/httpError.js';
+import { validatePermissionCodes, setAdminPermissionGrants } from '../../admin/accounts/permissions.js';
 
 export function registerPermissionReadRoutes(router) {
   // 1a. GET /api/admin/permissions - Admin archetype permission catalog

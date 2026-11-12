@@ -1,5 +1,5 @@
 import { resolveAdminPermissions } from '../../middleware/rbac.js';
-import { fail } from '../../utils/dbStudioGuard.js';
+import { fail } from '../../utils/httpError.js';
 
 /* ═════════════════════════════════════════════════════════════════════════
    ADMIN ARCHETYPE PERMISSIONS — shared helpers (local to this router)
