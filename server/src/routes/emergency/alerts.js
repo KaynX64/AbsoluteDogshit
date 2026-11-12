@@ -1,9 +1,9 @@
 import { pool } from '../../db/pool.js';
-import { authenticateToken } from '../../auth.js';
+import { authenticateToken } from '../../auth/middleware.js';
 import { decrypt } from '../../utils/cryptoVault.js';
 import { logAudit } from '../../utils/auditLogger.js';
 import { invalidateCache } from '../../utils/redisClient.js';
-import { requireResponderAccess, resolveResponderAccess, getResponderAudience, roleLabelFor } from '../../utils/responderAccess.js';
+import { requireResponderAccess, resolveResponderAccess, getResponderAudience, roleLabelFor } from '../../emergency/responderAccess.js';
 
 export function registerAlertRoutes(router, io) {
   // ===========================================================================

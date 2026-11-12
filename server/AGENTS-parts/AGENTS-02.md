@@ -1,14 +1,19 @@
 <!-- split from server/AGENTS.md — part 02 of 02 -->
 
-## Auth model — src/auth.js
+## Auth model — src/auth/
 
-- Login: bcrypt `compare` with a `DUMMY_HASH` timing equalizer (unknown user ⇒ identical latency), MySQL role join, JWT `{sub, email, roles, jti}`, `expiresIn: '24h'`.
-- Logout: writes `token:blacklist:<jti>` to Redis; the Socket.IO handshake checks the same denylist. HTTP middleware and socket handshakes also verify that the account is still active and not soft-deleted, so archived/suspended accounts cannot continue using existing JWTs.
-- Documents use separate short-lived **download tokens** (`DOWNLOAD_TOKEN_TTL_SECONDS`), single-use, replay-checked in Redis.
+- `login.js` owns login rate limiting, the bcrypt timing equalizer, role lookup, and the 24-hour JWT with `user_id`, `email`, `roles`, and `jti`.
+- `middleware.js` authenticates HTTP requests. It shares the Redis denylist key and active-account query in `session.js` with Socket.IO. `logout.js` and `password.js` write revocations using the same key.
+- `attachmentTokens.js` issues short-lived, attachment-bound, single-use download tokens and checks for replays.
 
-## Utils — src/utils/*.js
+## Domain modules and shared utilities
 
-`secrets.js` env validation (boot-fatal when crypto keys missing) · `cryptoVault.js` AES field encryption · `redisClient.js` (`initRedis`, `isRedisActive()`) · `s3Vault.js` MinIO/S3 · `phiLogger.js` + `auditLogger.js` structured logging (no PHI) · `src/documents/documentService.js` and `src/documents/pdf/` document rendering and storage · `mailer.js` nodemailer SMTP · `interactionChecker.js` drug interactions · `reminderWorker.js` scheduler: reminders + auto no-show after `NOSHOW_GRACE_MINUTES`, emits `appointment:status_changed`, `prescription:status_changed`, `queue:updated` · `fcmNotifier.js` Firebase push · `passwordPolicy.js` · `dentalValidator.js` · `analyticsStats.js` · `dbStudioGuard.js`.
+- `src/appointments/` owns shared encounter text, vital validation, ticket reservation, and the transactional no-show transition. `src/analytics/` owns aggregations. `src/emergency/` owns responder eligibility and redaction.
+- `src/documents/` owns signing helpers, per-document generation, PDF rendering, and public links. `documentService.js` exports the generators, which persist PDFs through shared storage.
+- `src/workers/` has separate jobs for appointment reminders, no-shows, prescription expiry, and PDF backfill. `scheduler.js` skips busy ticks and can run an opted-in job at startup. No-shows and prescription expiry run at startup. The expiry service locks eligible prescriptions before changing status and writes its audit entry inside the transaction.
+- The reminder worker holds a database-scoped MySQL session lock across each scan. It records SMTP acceptance in `reminder_sent` before attempting push and realtime notifications. A crash after SMTP acceptance and before the database update can cause another email attempt.
+- `src/sync/` owns offline mutation dispatch, per-mutation transactions, conflicts, and duplicate outcomes. Keep HTTP response mapping in `src/routes/sync/`.
+- `src/utils/` retains shared infrastructure such as secrets validation, encryption, Redis, S3, SMTP, FCM, and audit logging. [Shared helper map](../src/utils/AGENTS.md)
 
 ## Database — src/db/ + schema.sql
 
@@ -24,6 +29,8 @@ Crypto: `ENCRYPTION_KEY`, `JWT_SECRET`, `ENCRYPTION_SALT` (required) · DB: host
 ## Tests & scripts
 
 Run the full suite with `node --test` from `server/`. `tests/appRoutes.test.js` assembles the actual API with a fake realtime dependency and uses an ephemeral loopback port. It stubs database queries and needs no running MySQL, Redis, MinIO, or Firebase service.
+
+Set `VALETUDO_MIGRATION_TEST_PORT` and `VALETUDO_MIGRATION_TEST_PASSWORD` for a disposable MySQL 8 instance to include the migration and concurrency tests. The concurrency suite covers startup, prescription expiry, reminder claims, and replay.
 
 `node --test tests/<file>.test.js` from `server/` — available: `cryptoVault` (12), `analyticsStats` (4), `dbStudioGuard` (35), `bmi` (2), `signatory` (2). The cryptoVault suite spawns isolated child processes so a real `.env` is never loaded; the other suites inject a throwaway ENCRYPTION_KEY + ENCRYPTION_SALT before importing (analyticsStats also sets a dummy DB_PASSWORD — mysql2 pools connect lazily, so no MySQL is touched). `reencrypt.test.js` was removed with its module (the v1→v2 migration is complete; the vault is v2-only). `scripts/encrypt-plaintext-health-profiles.js` is a one-off tool for encrypting legacy plaintext rows.
 

@@ -1,6 +1,6 @@
 import { pool } from '../../db/pool.js';
 import { decrypt } from '../../utils/cryptoVault.js';
-import { getDiagnosisCounts, getRiskCounts } from '../../utils/analyticsStats.js';
+import { getDiagnosisCounts, getRiskCounts } from '../../analytics/analyticsStats.js';
 
 export function registerAnalyticsDashboard(router) {
   // 1. GET /api/analytics/summary

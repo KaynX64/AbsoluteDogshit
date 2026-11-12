@@ -1,4 +1,4 @@
-// server/src/utils/responderAccess.js
+// server/src/emergency/responderAccess.js
 import { pool } from '../db/pool.js';
 
 /* ═════════════════════════════════════════════════════════════════════════

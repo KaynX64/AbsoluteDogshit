@@ -1,4 +1,4 @@
-// server/src/utils/analyticsStats.js
+// server/src/analytics/analyticsStats.js
 //
 // Fix for Audit Part 2, Issue #5 (Denial-of-Service & In-Memory PHI Decryption).
 //
@@ -21,8 +21,8 @@
 // Long-term: store a coded, non-identifying `diagnosis_category` (e.g. ICD-10 chapter)
 // at write time so this becomes a plain SQL GROUP BY with no decryption at all.
 import { pool } from '../db/pool.js';
-import { decrypt } from './cryptoVault.js';
-import { getCache, setCache } from './redisClient.js';
+import { decrypt } from '../utils/cryptoVault.js';
+import { getCache, setCache } from '../utils/redisClient.js';
 
 const BATCH_SIZE = Number(process.env.ANALYTICS_BATCH_SIZE) || 1000;
 const CACHE_TTL_SECONDS = Number(process.env.ANALYTICS_CACHE_TTL) || 600; // 10 min

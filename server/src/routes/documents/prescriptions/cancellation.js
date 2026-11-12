@@ -1,5 +1,5 @@
 import { pool } from '../../../db/pool.js';
-import { authenticateToken } from '../../../auth.js';
+import { authenticateToken } from '../../../auth/middleware.js';
 import { requireRoles } from '../../../middleware/rbac.js';
 import { logAudit } from '../../../utils/auditLogger.js';
 import { encrypt, decrypt } from '../../../utils/cryptoVault.js';

@@ -11,7 +11,7 @@ process.env.ENCRYPTION_SALT ||= 'analytics-test-salt-0123456789';
 // the tests inject their own in-memory query function.
 process.env.DB_PASSWORD ||= 'analytics-test-db-password';
 const { encrypt } = await import('../src/utils/cryptoVault.js');
-const { countDiagnoses, countRiskGroups } = await import('../src/utils/analyticsStats.js');
+const { countDiagnoses, countRiskGroups } = await import('../src/analytics/analyticsStats.js');
 
 function fakeTable(rows, idCol) {
   const calls = { n: 0, maxRows: 0 };

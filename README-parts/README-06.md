@@ -28,18 +28,17 @@ AbsoluteDogshit/
 │   ├── scripts/                  # PHI encryption migration utility
 │   ├── src/
 │   │   ├── index.js              # HTTPS + Express + Socket.IO entry point
-│   │   ├── auth.js               # JWT, bcrypt, password policy, login throttle
+│   │   ├── auth/                 # login, session checks, logout, password changes and download tokens
 │   │   ├── db/                   # pool and versioned migrations
 │   │   ├── config/               # appointment rules, rate limits
 │   │   ├── middleware/           # RBAC, consent
 │   │   ├── routes/               # 12 route modules + AGENTS.md
 │   │   │   ├── admin/  analytics/  appointments/  documents/
 │   │   │   ├── emergency/  healthPass.js  interactions.js  inventory/
-│   │   │   └── privacy.js  profile.js  signature.js  sync.js
-│   │   └── utils/                # cryptoVault, s3Vault, documentService,
-│   │                             # responderAccess, redisClient, mailer,
-│   │                             # fcmNotifier, reminderWorker, auditLogger, …
-│   ├── tests/                    # 7 test files (see §8)
+│   │   │   └── privacy.js  profile/  signature.js  sync/
+│   │   ├── appointments/ analytics/ bootstrap/ documents/ emergency/ sync/ workers/
+│   │   └── utils/                # shared infrastructure, encryption and logging
+│   ├── tests/                    # backend test suite (see §8)
 │   └── valetudo_healthlink/      # auxiliary project directory
 │
 ├── desktop/                      # valetudo-desktop

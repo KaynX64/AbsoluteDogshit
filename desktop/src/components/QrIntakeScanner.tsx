@@ -4,8 +4,8 @@ import jsQR from 'jsqr';
 import { API_BASE_URL } from '../config/api';
 import { T } from '../theme';
 import Icon from './Icon';
-import { triageDraftError, validateTriageVitals, VITAL_RULES } from '../../../server/src/utils/vitals.js';
-import type { TriageVitalField } from '../../../server/src/utils/vitals.js';
+import { triageDraftError, validateTriageVitals, VITAL_RULES } from '../../../server/src/appointments/vitals.js';
+import type { TriageVitalField } from '../../../server/src/appointments/vitals.js';
 
 interface QrIntakeScannerProps {
   onPatientVerified: (patient: any, token: string) => void;

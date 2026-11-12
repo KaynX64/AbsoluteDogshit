@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { formatTriageNote, triageDraftError, validateTriageVitals, validateVitals, VITAL_RULES } from '../src/utils/vitals.js';
+import { formatTriageNote, triageDraftError, validateTriageVitals, validateVitals, VITAL_RULES } from '../src/appointments/vitals.js';
 
 test('intake rejects every reported malformed or above-limit edit in full', () => {
   const examples = { blood_pressure: '121ggreterlertlriert', temperature: '4234244', pulse: '131131',

@@ -21,7 +21,7 @@ const {
   parseQualifiedResponderBody,
   LEGACY_RESPONDER_ROLES,
   CLINICAL_ROLES,
-} = await import('../src/utils/responderAccess.js');
+} = await import('../src/emergency/responderAccess.js');
 
 test('the self capability reflects live access while the alert list still rejects a denied user', async (t) => {
   const { pool } = await import('../src/db/pool.js');

@@ -1,5 +1,6 @@
 import { pool } from '../../db/pool.js';
-import { authenticateToken, authenticateAttachmentDownload, issueAttachmentDownloadToken } from '../../auth.js';
+import { authenticateToken } from '../../auth/middleware.js';
+import { authenticateAttachmentDownload, issueAttachmentDownloadToken } from '../../auth/attachmentTokens.js';
 import { requireRoles } from '../../middleware/rbac.js';
 import { logAudit } from '../../utils/auditLogger.js';
 import { requirePrivacyConsent } from '../../middleware/consent.js';

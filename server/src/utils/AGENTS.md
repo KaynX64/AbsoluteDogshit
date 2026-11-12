@@ -8,24 +8,24 @@
 | redisClient.js | `initRedis`, `isRedisActive`, `getCache`, `setCache`, `invalidateCache` |
 | s3Vault.js | `uploadToS3`, `getFromS3`, `getBufferFromS3`, `deleteFromS3`, `ensureBucketExists` |
 | ../documents/documentService.js · ../documents/pdf/ | Document storage orchestration, shared PDF drawing helpers and document templates |
-| signatureVault.js · signatory.js | stored signatures, signatory data |
+| ../documents/signing/ | stored signatures and signatory data |
 | interactionChecker.js | drug-interaction logic |
 | dentalValidator.js | dental chart validation |
-| vitals.js | shared desktop and API measurement validation and check-in note formatting |
-| encounterText.js | required encounter text and optional blanks for online finalization and offline replay |
-| analyticsStats.js | analytics aggregation (tested) |
+| ../appointments/vitals.js | shared desktop and API measurement validation and check-in note formatting |
+| ../appointments/encounterText.js | required encounter text and optional blanks for online finalization and offline replay |
+| ../analytics/analyticsStats.js | analytics aggregation (tested) |
 | passwordPolicy.js | password rules |
 | mailer.js | nodemailer (SMTP_* env) |
 | fcmNotifier.js · fcmCredential.js | FCM push and scoped Google Auth JWT credential. The backend reads the configured service-account file, with simulation mode when it is absent. |
-| reminderWorker.js | Reminders and no-show transitions. Locks eligible appointments, skips locked rows and emits only after commit. |
-| queueTickets.js | Reserves daily ticket numbers per counter inside the intake transaction. The first reservation starts after any existing tickets. |
+| ../appointments/noShow.js | Locks eligible appointments, skips locked rows, and commits the no-show transition. `../workers/noShowWorker.js` broadcasts after commit. |
+| ../appointments/queueTickets.js | Reserves daily ticket numbers per counter inside the intake transaction. The first reservation starts after any existing tickets. |
 | dbStudioGuard.js | DB-studio access guard (tested) |
 
 Changing `cryptoVault.js` → run `node --test tests/cryptoVault.test.js tests/reencrypt.test.js`. Never alter the ciphertext format without a re-encrypt migration.
 
 ## Vital-sign entry
 
-`vitals.js` is the source of truth for booked and walk-in intake, structured encounter submissions, and offline EMR replay. The desktop bundles this pure module at build time. Intake rejects malformed and above-limit edits in full and blocks submission until the field is corrected or cleared. BMI uses two validated readings and gives separate feedback for missing and invalid measurements. Leave unmeasured values blank. Record an explicit zero where the field allows it. The Doctor/Dentist encounter displays nurse-recorded readings.
+`../appointments/vitals.js` is the source of truth for booked and walk-in intake, structured encounter submissions, and offline EMR replay. The desktop bundles this pure module at build time. Intake rejects malformed and above-limit edits in full and blocks submission until the field is corrected or cleared. BMI uses two validated readings and gives separate feedback for missing and invalid measurements. Leave unmeasured values blank. Record an explicit zero where the field allows it. The Doctor/Dentist encounter displays nurse-recorded readings.
 
 | Measurement | Entry limit |
 |---|---|

@@ -1,14 +1,14 @@
 import { pool } from '../../db/pool.js';
-import { authenticateToken } from '../../auth.js';
+import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';
 import { logAudit } from '../../utils/auditLogger.js';
 import { encrypt } from '../../utils/cryptoVault.js';
 import { invalidateCache } from '../../utils/redisClient.js';
 import { sendPushToUser } from '../../utils/fcmNotifier.js';
-import { readEncounterText } from '../../utils/encounterText.js';
+import { readEncounterText } from '../../appointments/encounterText.js';
 import { validateDentalChart } from '../../utils/dentalValidator.js';
-import { SignerError, assertAppointmentInQueue } from '../../utils/signatory.js';
-import { validateVitals, VITAL_RULES } from '../../utils/vitals.js';
+import { SignerError, assertAppointmentInQueue } from '../../documents/signing/signatory.js';
+import { validateVitals, VITAL_RULES } from '../../appointments/vitals.js';
 
 export function registerConsultationRoutes(router, io) {
   router.patch('/:id/status', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {

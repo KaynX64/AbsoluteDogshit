@@ -74,8 +74,8 @@ export async function sendAppointmentEmail({ toEmail, patientName, doctorName, s
   try {
     // If running in development without real SMTP credentials, log the email
     if (!process.env.SMTP_HOST) {
-      console.log(`[Email Dispatch Simulation] To: ${toEmail} | Subject: ${subject}`);
-      return;
+      console.log(`[Email Dispatch Simulation] ${type}`);
+      return true;
     }
     await transporter.sendMail({
       from: '"PSU Lingayen HealthLink" <no-reply@psu.edu.ph>',
@@ -83,7 +83,9 @@ export async function sendAppointmentEmail({ toEmail, patientName, doctorName, s
       subject,
       html,
     });
+    return true;
   } catch (err) {
-    console.error('[Email Dispatch Error]:', err.message);
+    console.error('[Email Dispatch Error]:', err.code || err.name);
+    return false;
   }
 }

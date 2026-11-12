@@ -1,5 +1,5 @@
 import { pool } from '../../db/pool.js';
-import { authenticateToken } from '../../auth.js';
+import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';
 import { decrypt } from '../../utils/cryptoVault.js';
 import { getCache, setCache, invalidateCache } from '../../utils/redisClient.js';

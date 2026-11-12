@@ -10,16 +10,16 @@
 
 import express from 'express';
 import { pool } from '../db/pool.js';
-import { authenticateToken } from '../auth.js';
+import { authenticateToken } from '../auth/middleware.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { logAudit } from '../utils/auditLogger.js';
-import { assertValidSigner, SignerError } from '../utils/signatory.js';
+import { assertValidSigner, SignerError } from '../documents/signing/signatory.js';
 import {
   storeSignature,
   loadSignature,
   SignatureError,
   MAX_SIGNATURE_BYTES,
-} from '../utils/signatureVault.js';
+} from '../documents/signing/signatureVault.js';
 
 const router = express.Router();
 const signerOnly = requireRoles('DOCTOR', 'DENTIST');

@@ -2,7 +2,7 @@
 import express from 'express';
 import crypto from 'crypto';
 import { pool } from '../db/pool.js';
-import { authenticateToken } from '../auth.js';
+import { authenticateToken } from '../auth/middleware.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
 import { getBmiCategory } from '../utils/bmi.js';

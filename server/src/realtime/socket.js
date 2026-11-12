@@ -2,7 +2,7 @@ import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '../utils/secrets.js';
 import { redis, isRedisActive } from '../utils/redisClient.js';
-import { pool } from '../db/pool.js';
+import { isSessionAccountActive, sessionBlocklistKey } from '../auth/session.js';
 
 export function attachRealtime(server, { isHttps, isOriginAllowed }) {
   // Mount Secure WebSockets (WSS over HTTPS)
@@ -36,9 +36,7 @@ export function attachRealtime(server, { isHttps, isOriginAllowed }) {
       // Check Redis token revocation blacklist
       if (isRedisActive()) {
         try {
-          const blacklistKey = user.jti
-            ? `token:blacklist:${user.jti}`
-            : `token:blacklist:${token}`;
+          const blacklistKey = sessionBlocklistKey(user, token);
           const isRevoked = await redis.get(blacklistKey);
           if (isRevoked) {
             return next(new Error('WebSocket session revoked. Please re-authenticate.'));
@@ -49,11 +47,7 @@ export function attachRealtime(server, { isHttps, isOriginAllowed }) {
       }
 
       try {
-        const [accountRows] = await pool.query(
-          'SELECT is_active, deleted_at FROM USERS WHERE user_id = ?',
-          [user.user_id]
-        );
-        if (accountRows.length === 0 || !accountRows[0].is_active || accountRows[0].deleted_at) {
+        if (!(await isSessionAccountActive(user.user_id))) {
           return next(new Error('WebSocket account is no longer active.'));
         }
       } catch (accountErr) {

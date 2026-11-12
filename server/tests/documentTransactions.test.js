@@ -11,7 +11,7 @@ const { default: documentRoutes } = await import('../src/routes/documents/index.
 const { issuePrescription } = await import('../src/services/prescriptions/issuePrescription.js');
 const { planStock, applyStockDeductions } = await import('../src/services/prescriptions/stock.js');
 const { encrypt } = await import('../src/utils/cryptoVault.js');
-const { readEncounterText } = await import('../src/utils/encounterText.js');
+const { readEncounterText } = await import('../src/appointments/encounterText.js');
 const expires_at = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
 
 const cases = [

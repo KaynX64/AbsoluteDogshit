@@ -1,4 +1,4 @@
-import { formatSignatory } from '../../../utils/signatory.js';
+import { formatSignatory } from '../../signing/signatory.js';
 import {
   BRAND_GREEN,
   BRAND_SOFT,

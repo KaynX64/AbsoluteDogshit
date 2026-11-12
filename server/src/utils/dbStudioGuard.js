@@ -71,10 +71,10 @@ const BCRYPT_RE = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/;
 const CIPHERTEXT_RE = /^enc:v[12]:[0-9a-f]{24}:[0-9a-f]{32}:[0-9a-f]+$/;
 
 export const isReadOnlyTable = (table) => READ_ONLY_TABLES.includes(table.toUpperCase());
-export const isSecurityTable = (table) => SECURITY_TABLES.includes(table);
-export const isEncryptedCol = (table, col) => (ENCRYPTED_COLUMNS[table] || []).includes(col);
-export const isSecretCol = (table, col) => (SECRET_COLUMNS[table] || []).includes(col);
-export const phiPatientSource = (table) => PHI_PATIENT_SOURCE[table] || null;
+export const isSecurityTable = (table) => SECURITY_TABLES.includes(table.toUpperCase());
+export const isEncryptedCol = (table, col) => (ENCRYPTED_COLUMNS[table.toUpperCase()] || []).includes(col);
+export const isSecretCol = (table, col) => (SECRET_COLUMNS[table.toUpperCase()] || []).includes(col);
+export const phiPatientSource = (table) => PHI_PATIENT_SOURCE[table.toUpperCase()] || null;
 
 export function readOnlyMessage(table) {
   if (table.toUpperCase() === 'SERVER_POLICY') return 'Use the Server Policy editor to change server policy.';
@@ -109,7 +109,7 @@ export function normalizeValue(v) {
 // Secrets are shown as [REDACTED]. Encrypted columns are already ciphertext in the DB.
 export function maskRowForDisplay(table, row) {
   const out = { ...row };
-  for (const col of SECRET_COLUMNS[table] || []) {
+  for (const col of SECRET_COLUMNS[table.toUpperCase()] || []) {
     if (out[col] !== null && out[col] !== undefined) out[col] = REDACTED;
   }
   return out;

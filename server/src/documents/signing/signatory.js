@@ -1,4 +1,4 @@
-// server/src/utils/signatory.js
+// server/src/documents/signing/signatory.js
 //
 // Single source of truth for "who may sign a clinical document".
 // formatSignatory / formatIssuedBy are pure. The assert* guards take an open

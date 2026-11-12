@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { assertSignatureEnrolled, SignerError } from '../src/utils/signatory.js';
+import { assertSignatureEnrolled, SignerError } from '../src/documents/signing/signatory.js';
 
 test('assertSignatureEnrolled returns the saved signature metadata', async () => {
   const signature = { signature_s3_key: 'signatures/test.png', signature_sha256: 'abc123' };

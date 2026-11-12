@@ -3,7 +3,8 @@ import { registerPrescriptionIssuance } from './prescriptions/issuance.js';
 import { registerPrescriptionHistory } from './prescriptions/history.js';
 import { registerPrescriptionCancellation } from './prescriptions/cancellation.js';
 import { registerClearanceRoutes } from './clearances.js';
-import { registerVerificationRoutes } from './verification.js';
+import { registerPublicVerificationRoutes } from './verification/public.js';
+import { registerVerificationDetailsRoute } from './verification/details.js';
 import { registerAttachmentRoutes } from './attachments.js';
 import { registerPdfRoutes } from './pdfs.js';
 
@@ -14,7 +15,8 @@ export default function documentRoutes(io) {
   registerPrescriptionHistory(router);
   registerPrescriptionCancellation(router, io);
   registerClearanceRoutes(router);
-  registerVerificationRoutes(router);
+  registerPublicVerificationRoutes(router);
+  registerVerificationDetailsRoute(router);
   registerAttachmentRoutes(router);
   registerPdfRoutes(router);
 

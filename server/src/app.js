@@ -1,8 +1,11 @@
 import express from 'express';
 import cors from 'cors';
-import { loginUser, authenticateToken, changePassword, loginRateLimit, logoutUser } from './auth.js';
+import { loginUser, loginRateLimit } from './auth/login.js';
+import { authenticateToken } from './auth/middleware.js';
+import { changePassword } from './auth/password.js';
+import { logoutUser } from './auth/logout.js';
 import privacyRouter from './routes/privacy.js';
-import profileRoutes from './routes/profile.js';
+import profileRoutes from './routes/profile/index.js';
 import healthPassRoutes from './routes/healthPass.js';
 import appointmentRoutes from './routes/appointments/index.js';
 import emergencyRouter from './routes/emergency/index.js';
@@ -10,7 +13,7 @@ import inventoryRoutes from './routes/inventory/index.js';
 import documentRoutes from './routes/documents/index.js';
 import adminRoutes from './routes/admin/index.js';
 import analyticsRoutes from './routes/analytics/index.js';
-import syncRoutes from './routes/sync.js';
+import syncRoutes from './routes/sync/index.js';
 import interactionsRoutes from './routes/interactions.js';
 import signatureRoutes from './routes/signature.js';
 

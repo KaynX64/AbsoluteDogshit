@@ -1,8 +1,8 @@
 import { pool } from '../../../db/pool.js';
-import { authenticateToken } from '../../../auth.js';
+import { authenticateToken } from '../../../auth/middleware.js';
 import { logAudit } from '../../../utils/auditLogger.js';
 import { generateAndStoreIncidentReportPDF } from '../../../documents/documentService.js';
-import { requireResponderAccess, getResponderAudience, roleLabelFor } from '../../../utils/responderAccess.js';
+import { requireResponderAccess, getResponderAudience, roleLabelFor } from '../../../emergency/responderAccess.js';
 
 export function registerIncidentWorkflowRoutes(router, io) {
   // ===========================================================================

@@ -52,7 +52,7 @@ export const VERIFY_LIMIT = {
 // NO-SHOW GRACE PERIOD — how long past the appointment time the auto worker
 // waits before flipping status from 'scheduled' to 'no_show'.
 //
-// Read by server/src/utils/reminderWorker.js. The worker runs every 60s, so
+// Read by server/src/workers/noShowWorker.js. The worker runs every 60s, so
 // a patient is marked no-show within ~1 minute of crossing this threshold.
 //
 // Default 20 minutes matches the original hardcoded value. Set it to 15 for

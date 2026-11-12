@@ -2,7 +2,7 @@ import { pool } from '../../db/pool.js';
 import { requirePermission } from '../../middleware/rbac.js';
 import { logAudit } from '../../utils/auditLogger.js';
 import { fail } from '../../utils/dbStudioGuard.js';
-import { parseQualifiedResponderBody } from '../../utils/responderAccess.js';
+import { parseQualifiedResponderBody } from '../../emergency/responderAccess.js';
 import { requireSuperAdminCaller, getUserRoleCode } from './accountPermissions.js';
 
 export function registerResponderManagementRoutes(router, io) {

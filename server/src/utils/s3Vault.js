@@ -33,13 +33,13 @@ export const s3 = new S3Client({
 /**
  * Ensures the target bucket exists on startup
  */
-export async function ensureBucketExists() {
+export async function ensureBucketExists(abortSignal) {
   try {
-    await s3.send(new HeadBucketCommand({ Bucket: BUCKET_NAME }));
+    await s3.send(new HeadBucketCommand({ Bucket: BUCKET_NAME }), { abortSignal });
   } catch (err) {
     if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
       try {
-        await s3.send(new CreateBucketCommand({ Bucket: BUCKET_NAME }));
+        await s3.send(new CreateBucketCommand({ Bucket: BUCKET_NAME }), { abortSignal });
         console.log(`📦 [MinIO S3] Bucket "${BUCKET_NAME}" created successfully.`);
       } catch (createErr) {
         console.error('❌ [MinIO S3] Failed to create bucket:', createErr.message);

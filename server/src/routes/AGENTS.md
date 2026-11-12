@@ -1,5 +1,5 @@
 # server/src/routes/
-Each API area exports a router or a factory. The appointments, documents, admin, and emergency folders compose their feature modules in `index.js`. These four areas and inventory use factories that receive `io`.
+Each API area exports a router or a factory. Feature folders compose their routes in `index.js`. Appointments, documents, admin, emergency, and inventory use factories that receive `io`.
 
 | File | Area | Size |
 |---|---|---|
@@ -8,11 +8,11 @@ Each API area exports a router or a factory. The appointments, documents, admin,
 | admin/index.js | users, roles, admin permissions, audit, database studio and server policy | |
 | inventory/index.js | medicines, batches, logs | |
 | emergency/index.js | SOS alerts, responder access and incident reports (Socket.IO + FCM) | |
-| analytics/index.js | dashboard and exports (uses `utils/analyticsStats.js`) | |
+| analytics/index.js | dashboard and exports (uses `src/analytics/analyticsStats.js`) | |
 | healthPass.js | dynamic QR health pass (HMAC) | |
-| profile.js | user/health profile | |
+| profile/index.js | self-profile, clinical health profile, theme and device tokens | |
 | privacy.js | consent records | |
-| sync.js | offline mutation sync from desktop | |
+| sync/index.js | offline bootstrap, mutation replay and status from desktop | |
 | interactions.js | drug-interaction check | |
 | signature.js | e-signature enroll/use | |
 
@@ -20,9 +20,11 @@ Each API area exports a router or a factory. The appointments, documents, admin,
 
 | Area | Modules |
 |---|---|
-| Appointments | `booking.js` for clinicians, slots, personal bookings and cancellation. `dailyQueue.js` for daily lists and queue status. `intake.js` for lookup, check-in, walk-ins and active tickets. `consultations.js` for status and finalization. `patientHistory.js` for history and patient search. |
-| Documents | `prescriptions/issuance.js`, `prescriptions/history.js`, and `prescriptions/cancellation.js` for issuing, reading, and cancelling prescriptions with stock restoration. `clearances.js` owns clearance issuance, history and lifecycle. `verification.js` serves public and authorized QR reads. `attachments.js` handles upload and token-based download. `pdfs.js` handles protected prescription, clearance and incident report PDFs. |
-| Admin | `userDirectory.js`, `userUpdates.js` and `accountCredentials.js` for account operations. `permissions.js` and `responders.js` for grants and responder eligibility. `audit.js` for access logs and telemetry. `databaseStudio.js` for database tools. `serverPolicy.js` for Super Admin policy read, preview and versioned save. |
+| Appointments | `booking/reads.js` for clinicians, slots and personal bookings, with `booking/create.js` and `booking/cancellation.js` for writes. `dailyQueue.js` for daily lists and queue status. `intake/lookup.js`, `intake/checkIn.js` and `intake/walkIn.js` own intake reads and write workflows. `consultations.js` owns status and finalization. `patientHistory.js` serves history and patient search. |
+| Documents | `prescriptions/issuance.js`, `prescriptions/history.js`, and `prescriptions/cancellation.js` for issuing, reading, and cancelling prescriptions with stock restoration. `clearances.js` owns clearance issuance, history and lifecycle. `verification/public.js` serves public QR reads and `verification/details.js` applies the staff gate. `attachments.js` handles upload and token-based download. `pdfs.js` handles protected prescription, clearance and incident report PDFs. |
+| Admin | `userDirectory.js` for account reads and archival, `userUpdates/roles.js` for role assignment, `userUpdates/profile.js` for full account edits, and `accountCredentials.js` for credential operations. `permissions.js` and `responders.js` for grants and responder eligibility. `audit.js` for access logs and telemetry. `databaseStudio/` separates schema lookups, reads and writes behind a shared access gate. `serverPolicy.js` handles Super Admin policy read, preview and versioned save. |
+| Profile | `self.js` for personal profile reads and edits, `clinicalHealth.js` for clinical health-profile routes, and `preferences.js` for theme and device tokens. |
+| Sync | `bootstrap.js` loads workstation cache data, `replay.js` calls the transaction service in `src/sync/`, and `status.js` returns sync telemetry. |
 | Emergency | `sos.js` for SOS creation, rate limiting and dispatch notifications. `alerts.js` for live responder access, active alerts and status changes. `incidentReports/workflow.js` handles pending reports and filing. `incidentReports/archive.js` handles archived reports and PDF download. |
 | Analytics | `dashboard.js` for summary and department metrics. `exports.js` for CSV, Excel, and PDF downloads. The entry point applies the shared analytics access gate. |
 | Inventory | `overview.js` for catalog, stock views and logs. `receiving.js` for deliveries. `formulary.js` for catalog writes. `stock.js` for deductions and adjustments. |

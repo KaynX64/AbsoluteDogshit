@@ -1,5 +1,5 @@
 import { pool } from '../../db/pool.js';
-import { authenticateToken } from '../../auth.js';
+import { authenticateToken } from '../../auth/middleware.js';
 import { getBufferFromS3 } from '../../utils/s3Vault.js';
 import {
   generateAndStorePrescriptionPDF,

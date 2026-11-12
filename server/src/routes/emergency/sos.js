@@ -1,11 +1,11 @@
 import { pool } from '../../db/pool.js';
-import { authenticateToken } from '../../auth.js';
+import { authenticateToken } from '../../auth/middleware.js';
 import { decrypt } from '../../utils/cryptoVault.js';
 import { sendPushToUsers } from '../../utils/fcmNotifier.js';
 import { logAudit } from '../../utils/auditLogger.js';
 import { redis, isRedisActive, invalidateCache } from '../../utils/redisClient.js';
 import { getServerPolicy } from '../../config/serverPolicy.js';
-import { redactForTier, getResponderAudience, roleLabelFor } from '../../utils/responderAccess.js';
+import { redactForTier, getResponderAudience, roleLabelFor } from '../../emergency/responderAccess.js';
 
 // ── Rate Limiter Middleware para sa SOS ─────────────────────────────
 function sosRateLimitKey(userIdOrIp) {

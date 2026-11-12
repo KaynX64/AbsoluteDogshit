@@ -1,10 +1,10 @@
 import { pool } from '../../../db/pool.js';
-import { authenticateToken } from '../../../auth.js';
+import { authenticateToken } from '../../../auth/middleware.js';
 import { requireRoles } from '../../../middleware/rbac.js';
 import { logPhiAccess } from '../../../utils/phiLogger.js';
 import { generateAndStoreIncidentReportPDF } from '../../../documents/documentService.js';
 import { getBufferFromS3 } from '../../../utils/s3Vault.js';
-import { roleLabelFor } from '../../../utils/responderAccess.js';
+import { roleLabelFor } from '../../../emergency/responderAccess.js';
 
 export function registerIncidentArchiveRoutes(router) {
   // ===========================================================================

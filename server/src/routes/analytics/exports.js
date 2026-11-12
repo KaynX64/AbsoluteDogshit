@@ -1,5 +1,5 @@
 import { pool } from '../../db/pool.js';
-import { getDiagnosisCounts } from '../../utils/analyticsStats.js';
+import { getDiagnosisCounts } from '../../analytics/analyticsStats.js';
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 

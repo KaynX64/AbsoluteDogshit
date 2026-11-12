@@ -13,7 +13,7 @@ import {
   assertEmrBelongsToPatient,
   assertAppointmentInQueue,
   resolveExpiryDate,
-} from '../../utils/signatory.js';
+} from '../../documents/signing/signatory.js';
 
 export async function issuePrescription({
   doctorUserId, patient_user_id, appointment_id, emr_id, expires_at, notes,

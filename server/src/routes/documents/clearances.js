@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { pool } from '../../db/pool.js';
-import { authenticateToken } from '../../auth.js';
+import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';
 import { logAudit } from '../../utils/auditLogger.js';
 import { requirePrivacyConsent } from '../../middleware/consent.js';
@@ -14,7 +14,7 @@ import {
   assertValidPatient,
   assertAppointmentInQueue,
   resolveExpiryDate,
-} from '../../utils/signatory.js';
+} from '../../documents/signing/signatory.js';
 import { parseMetadata } from './signatureMetadata.js';
 
 export function registerClearanceRoutes(router) {

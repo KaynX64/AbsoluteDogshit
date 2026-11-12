@@ -11,7 +11,7 @@
 
 import express from 'express';
 import { pool } from '../db/pool.js';
-import { authenticateToken } from '../auth.js';
+import { authenticateToken } from '../auth/middleware.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { checkInteractionsStandalone } from '../utils/interactionChecker.js';
 

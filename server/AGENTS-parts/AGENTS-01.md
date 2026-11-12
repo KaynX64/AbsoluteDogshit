@@ -8,14 +8,14 @@
 - `src/app.js` builds Express middleware in order: CORS allow-list, JSON parsing, security headers. Its `mountApiRoutes(app, io)` function attaches the API.
 - `src/server.js` attaches Express to the HTTP(S) transport. TLS uses `server/certs/{cert,key}.pem` and exits on missing certs unless `ALLOW_INSECURE_HTTP=true`.
 - `src/realtime/socket.js` attaches Socket.IO to the same server. HTTP and realtime share the origin check. `index.js` exports `io` and mounts API routes before listening.
-- `src/bootstrap/startup.js` runs [versioned migrations](../MIGRATION-PLAN.md), then loads the persisted [server policy](../src/config/SERVER-POLICY.md) before listening. After listening it initializes Redis and MinIO, logs limits, and starts the reminder scheduler.
+- `src/bootstrap/dependencies.js` runs [versioned migrations](../MIGRATION-PLAN.md), loads the persisted [server policy](../src/config/SERVER-POLICY.md), and completes the Redis and MinIO startup checks before `startup.js` opens the listener. Redis and MinIO keep their existing degraded-mode behavior. Workers start after the listener opens. SIGINT and SIGTERM stop scheduling, close Socket.IO and HTTP, and wait for active jobs and requests before closing Redis, S3 and MySQL. Shutdown has a 30-second deadline.
 
 ## Route map — src/routes/ (all mounted under /api in index.js)
 
 | File | Mount | Owns |
 |---|---|---|
 | `privacy.js` | `/api/privacy` | consent records & privacy requests |
-| `profile.js` | `/api/profile` | user & health profiles |
+| `profile/index.js` | `/api/profile` | self-profile, clinical health profile, theme and device tokens |
 | `healthPass.js` | `/api/health-pass` | medical clearances & QR health passes |
 | `appointments/index.js` | `/api/appointments` | booking, queue, intake, consultations and patient history. Emits `appointment:*` and `queue:updated`. |
 | `emergency/index.js` | `/api/emergency` | SOS lifecycle; audience = Qualified Responder flag OR legacy role (`EMERGENCY_RESPONDER`/`NURSE`/`DOCTOR`/`ADMIN`), resolved live per user. Emits `emergency:*` tiered per recipient to `user:<id>` rooms; community responders get a reduced payload (no medical details) but ALL tiers may acknowledge/dispatch/resolve/false-alarm (closing is an atomic conditional UPDATE — second closer gets 409 `ALERT_ALREADY_CLOSED`, so exactly one `status_change` event). The incident-documentation popup is triggered only for the specific desktop window that resolved an alert via `emergency:incident_report_required`; `POST` emits `emergency:incident_reported` so other consoles dismiss; automatically generates and stores official incident report PDFs in MinIO S3 (`/incident-reports/incident-<id>-<hex>.pdf`); serves archived incident records via `GET /incident-reports` and `GET /incident-reports/:id/pdf` |
@@ -23,7 +23,7 @@
 | `documents/index.js` | `/api/documents` | EMR docs, PDFs, attachments, signed one-time download tokens and public `GET /verify/:qrToken`. |
 | `admin/index.js` | `/api/admin` | accounts and health profiles, audited soft archive, granular permissions, qualified responder management, audit, telemetry, database studio and server policy. |
 | `analytics/index.js` | `/api/analytics` | dashboard aggregates |
-| `sync.js` | `/api/sync` | offline-client sync ingestion |
+| `sync/index.js` | `/api/sync` | offline bootstrap, mutation replay and status |
 | `interactions.js` | `/api/interactions` | drug-interaction warnings |
 | `signature.js` | `/api/signature` | signature enrollment / verification |
 

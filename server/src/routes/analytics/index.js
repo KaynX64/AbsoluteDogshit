@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticateToken } from '../../auth.js';
+import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles, requirePermission } from '../../middleware/rbac.js';
 import { registerAnalyticsDashboard } from './dashboard.js';
 import { registerAnalyticsExports } from './exports.js';

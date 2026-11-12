@@ -1,4 +1,4 @@
-// server/src/utils/signatureVault.js
+// server/src/documents/signing/signatureVault.js
 //
 // Stores each doctor's/dentist's handwritten signature as an IMMUTABLE,
 // content-addressed PNG in MinIO:  signatures/user-{id}-{sha12}.png
@@ -8,7 +8,7 @@
 // used inside signature_metadata, so old PDFs keep their original signature.
 
 import crypto from 'crypto';
-import { uploadToS3, getBufferFromS3 } from './s3Vault.js';
+import { uploadToS3, getBufferFromS3 } from '../../utils/s3Vault.js';
 
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 export const MAX_SIGNATURE_BYTES = 300 * 1024; // client sends ~10-40 KB

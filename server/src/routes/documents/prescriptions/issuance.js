@@ -1,7 +1,7 @@
-import { authenticateToken } from '../../../auth.js';
+import { authenticateToken } from '../../../auth/middleware.js';
 import { requireRoles } from '../../../middleware/rbac.js';
 import { isCalendarDate } from '../../../config/appointmentRules.js';
-import { SignerError } from '../../../utils/signatory.js';
+import { SignerError } from '../../../documents/signing/signatory.js';
 import { issuePrescription } from '../../../services/prescriptions/issuePrescription.js';
 
 function quantityInt(value, minimum = 1) {

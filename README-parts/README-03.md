@@ -40,7 +40,7 @@ flowchart LR
     S["Socket.IO WSS<br/>per-user rooms"]
     A["auth.js · rbac.js · consent.js<br/>JWT / roles / privacy consent"]
     R["12 route modules<br/>admin, analytics, appointments,<br/>documents, emergency, healthPass,<br/>interactions, inventory, privacy,<br/>profile, signature, sync"]
-    U["utils/: cryptoVault, s3Vault,<br/>documentService, responderAccess,<br/>redisClient, mailer, fcmNotifier,<br/>reminderWorker, auditLogger, phiLogger"]
+    U["Domain modules: documents, appointments,<br/>analytics, emergency and workers.<br/>Shared utils: encryption, S3, Redis, FCM and audit"]
   end
 
   subgraph Data

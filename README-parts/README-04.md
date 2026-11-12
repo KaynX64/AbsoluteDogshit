@@ -2,7 +2,7 @@
 
 ### Backend
 
-`server/src/index.js` composes Express, HTTPS and Socket.IO. The startup module applies versioned migrations before listening, then starts Redis, the MinIO bucket check and the reminder scheduler. `server/src/db/pool.js` owns the `mysql2` pool. Redis is cache-aside with in-memory rate-limit fallbacks, and MinIO provides path-style S3 storage.
+`server/src/index.js` composes Express, HTTPS and Socket.IO. Startup applies versioned migrations, loads server policy, and checks Redis and MinIO before listening. The listener then starts the appointment reminder, no-show, prescription expiry, and PDF backfill jobs. SIGINT and SIGTERM drain active requests and jobs before closing shared dependencies. Redis is cache-aside with in-memory rate-limit fallbacks, and MinIO provides path-style S3 storage.
 
 `emergency.js` on `Stage1` imports `generateAndStoreIncidentReportPDF`, `getBufferFromS3` and the responder-access helpers. Its SOS limiter increments `ratelimit:sos:<id>`, sets `X-RateLimit-Remaining` and `Retry-After`, and uses `SOS_LIMIT` from `src/config/limits.js`.
 
