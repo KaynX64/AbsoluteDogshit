@@ -92,9 +92,25 @@ export function registerInventoryOverview(router) {
          LEFT JOIN MEDICINE_BATCHES b ON m.medicine_id = b.medicine_id 
               AND b.deleted_at IS NULL 
               AND b.expiry_date > CURDATE()
+         LEFT JOIN (
+           SELECT pi.medicine_id,
+                  SUM(pi.quantity_prescribed) AS quantity_prescribed,
+                  COUNT(DISTINCT pi.prescription_id) AS prescription_count
+           FROM PRESCRIPTION_ITEMS pi
+           JOIN PRESCRIPTIONS p ON p.prescription_id = pi.prescription_id
+           WHERE pi.medicine_id IS NOT NULL
+             AND pi.deleted_at IS NULL
+             AND p.deleted_at IS NULL
+             AND p.status <> 'cancelled'
+           GROUP BY pi.medicine_id
+         ) AS demand ON demand.medicine_id = m.medicine_id
          WHERE m.is_active = TRUE AND m.deleted_at IS NULL
          GROUP BY m.medicine_id, m.name, m.generic_name, m.form, m.strength, m.unit, m.reorder_level
-         ORDER BY total_stock_on_hand ASC`
+         ORDER BY total_stock_on_hand ASC,
+                  MAX(demand.quantity_prescribed) DESC,
+                  MAX(demand.prescription_count) DESC,
+                  m.name ASC,
+                  m.medicine_id ASC`
       );
       res.json(rows);
     } catch (error) {

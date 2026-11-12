@@ -961,7 +961,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
 
       {/* ── ALERTS & REORDER ────────────────────────────── */}
       {activeTab === 'alerts' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+        <div className="inventory-alerts-page" style={{ display: 'flex', flexDirection: 'column' }}>
           {/* Top row: 2 columns for Low stock lots & Expiry alerts */}
           <div className="inventory-split inventory-alerts">
             <div>
@@ -979,7 +979,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                 )}
               </div>
 
-              <div className="inventory-table" style={{ maxHeight: 360, overflowX: 'hidden' }} tabIndex={0} role="region" aria-label="Low stock lots">
+              <div className="inventory-table inventory-alert-table" style={{ overflowX: 'hidden' }} tabIndex={0} role="region" aria-label="Low stock lots">
                 {lowStockLots.length === 0 ? (
                   <div style={{
                     padding: 28, textAlign: 'center',
@@ -1047,7 +1047,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
               }}>
                 <Icon name="schedule" size={14} /> Expiry alerts
               </h4>
-              <div className="inventory-table" style={{ maxHeight: 360 }} tabIndex={0} role="region" aria-label="Expiry alerts">
+              <div className="inventory-table inventory-alert-table" tabIndex={0} role="region" aria-label="Expiry alerts">
                 {expiringLots.length === 0 ? (
                   <div style={{
                     padding: 24, textAlign: 'center',
@@ -1095,14 +1095,14 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
             </div>
           </div>
 
-          <div style={{ maxWidth: 1100, width: '100%', margin: '0 auto' }}>
+          <div className="inventory-reorder-panel">
             <h4 style={{
               margin: '0 0 12px', fontSize: 14, fontWeight: 800, color: T.warning,
               display: 'flex', alignItems: 'center', gap: 8,
             }}>
               <Icon name="trending_down" size={14} /> Automated reorder suggestions
             </h4>
-            <div className="inventory-table" style={{ maxHeight: 360 }} tabIndex={0} role="region" aria-label="Reorder suggestions">
+            <div className="inventory-table inventory-reorder-table" tabIndex={0} role="region" aria-label="Reorder suggestions">
               <table className="tbl" style={{ fontSize: 12 }}>
                 <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
                   <tr>

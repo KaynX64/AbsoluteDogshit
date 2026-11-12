@@ -20,6 +20,21 @@ interface DeptItem {
   consultations_count: number;
 }
 
+interface TopPrescribedMedicine {
+  medicine_id: number;
+  name: string;
+  generic_name: string;
+  form: string;
+  strength: string;
+  unit: string;
+  prescription_count: number;
+  quantity_prescribed: number;
+  total_stock_on_hand: number;
+  reorder_level: number;
+  suggested_reorder_qty: number;
+  stock_status: 'OUT_OF_STOCK' | 'CRITICAL_BUFFER' | 'ADEQUATE';
+}
+
 interface RoleItem {
   role_code: string;
   role_name: string;
@@ -53,6 +68,7 @@ interface AnalyticsData {
     expiry_date: string;
     days_until_expiry: number;
   }[];
+  topPrescribedMedicines: TopPrescribedMedicine[];
 }
 
 /* ================================================================= */
@@ -1169,6 +1185,92 @@ export default function AnalyticsDashboard() {
       </div>
 
       {/* ── 6. Watchlist & critical inventory ────────── */}
+      <div className="my-card" style={{ marginBottom: 22 }}>
+        <div style={{ marginBottom: 14 }}>
+          <h4 className="my-card-title">Top prescribed medicines</h4>
+          <p className="my-card-sub">
+            Formulary demand ranked by prescribed quantity, with reorder guidance from current stock buffers
+          </p>
+        </div>
+        {!data.topPrescribedMedicines || data.topPrescribedMedicines.length === 0 ? (
+          <div
+            style={{
+              padding: '32px 20px',
+              textAlign: 'center',
+              color: T.textMuted,
+              fontSize: 13,
+              background: T.surface2,
+              borderRadius: 20,
+            }}
+          >
+            No formulary medicines have been prescribed yet.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: 10 }}>
+            {data.topPrescribedMedicines.map((medicine, index) => {
+              const needsReorder = medicine.suggested_reorder_qty > 0;
+              return (
+                <div
+                  key={medicine.medicine_id}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '32px minmax(180px, 1.5fr) repeat(3, minmax(90px, 0.7fr))',
+                    gap: 12,
+                    alignItems: 'center',
+                    padding: '12px 14px',
+                    borderRadius: 16,
+                    background: T.surface2,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 28,
+                      height: 28,
+                      display: 'grid',
+                      placeItems: 'center',
+                      borderRadius: '50%',
+                      background: T.primary50,
+                      color: T.primary,
+                      fontSize: 12,
+                      fontWeight: 800,
+                    }}
+                  >
+                    {index + 1}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: T.text }}>
+                      {medicine.name}
+                    </div>
+                    <div style={{ marginTop: 2, fontSize: 11, color: T.textMuted }}>
+                      {medicine.generic_name} · {medicine.strength} {medicine.form}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: T.text }}>
+                      {medicine.quantity_prescribed} {medicine.unit}
+                    </div>
+                    <div style={{ fontSize: 10.5, color: T.textMuted }}>prescribed</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: T.text }}>
+                      {medicine.total_stock_on_hand} {medicine.unit}
+                    </div>
+                    <div style={{ fontSize: 10.5, color: T.textMuted }}>on hand</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: needsReorder ? T.warning : T.success }}>
+                      {needsReorder ? `+${medicine.suggested_reorder_qty} ${medicine.unit}` : 'Adequate'}
+                    </div>
+                    <div style={{ fontSize: 10.5, color: T.textMuted }}>order suggestion</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── 7. Watchlist & critical inventory ────────── */}
       <div
         style={{
           display: 'grid',

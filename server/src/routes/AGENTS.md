@@ -27,7 +27,7 @@ Each API area exports a router or a factory. Feature folders compose their route
 | Sync | `bootstrap.js` loads legacy or paged workstation cache data via `src/sync/bootstrapReads.js`. `replay.js` calls the transaction service in `src/sync/`, and `status.js` returns sync telemetry. |
 | Emergency | `sos.js` for SOS creation, rate limiting and dispatch notifications. `alerts.js` for live responder access, active alerts and status changes. `incidentReports/workflow.js` maps pending-report and filing requests. `src/emergency/fileIncidentReport.js` owns the filing transaction. `incidentReports/archive.js` handles archived reports and PDF download. |
 | Analytics | `dashboard.js` and `exports.js` share `src/analytics/reportQueries.js`. CSV, Excel, and PDF rendering lives in `src/analytics/reports/`. The entry point applies the shared analytics access gate. |
-| Inventory | `overview.js` for catalog, stock views and logs. `receiving.js` for deliveries. `formulary.js` for catalog writes. `stock.js` for deductions and adjustments. |
+| Inventory | `overview.js` for catalog, stock views and logs. Reorder suggestions sort by usable stock, lowest first, and use prescription demand for stock ties. `receiving.js` handles deliveries, `formulary.js` catalog writes, and `stock.js` deductions and adjustments. |
 
 Use `rg -n '<route path>' server/src/routes/<area>` to locate a handler. Feature registrars attach to the same router in the order set by `index.js`. Admin applies authentication and the ADMIN role gate before registering its routes. The server-policy router applies its own Super Admin gate.
 

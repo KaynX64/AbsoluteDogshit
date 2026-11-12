@@ -37,18 +37,18 @@ The client and server preserve their existing expiry cutoffs. The formulary's av
 | 19 | 448-495 | const executeCreateMedicine | Formulary creation and distinct duplicate/new-entry confirmations |
 | 20 | 496-515 | const handleDeleteMedicine | Active formulary deletion behind destructive confirmation |
 | 21 | 516-583 | const fieldLabel | Themed workspace heading, six responsive section buttons, and expiry/reorder alert count badge |
-| 22 | 584-596 | {notice && ( | Mutation and sync feedback plus a warning for failed reads |
-| 23 | 597-626 | CATALOG & DISPENSE | Labeled barcode input and Find lot action |
-| 24 | 627-732 | First-expiry-first-out batches | Expiry-ordered batch table, keyboard-operable radios and row selection |
-| 25 | 733-783 | Dispense stock | Selected medicine, strength, lot, stock, quantity and editable reason |
-| 26 | 784-880 | STOCK-IN | Centered stock intake form with native medicine select, dates and supplier |
-| 27 | 881-961 | ADJUST & DISPOSE | Centered removal form with all four existing reasons for adjustment |
-| 28 | 962-1047 | ALERTS & REORDER | Alerts page header and top-left low stock lots |
-| 29 | 1048-1102 | > Expiry alerts | Expired and expiring lots with text labels in the top-right panel |
-| 30 | 1103-1145 | Automated reorder suggestions | Read-only reorder suggestions in the full-width section below |
-| 31 | 1146-1173 | LOGS | Consumption log header, counts and refresh |
-| 32 | 1174-1210 | All actions ( | Action filters, including grouped removals, and text search |
-| 33 | 1211-1292 | {loadingLogs ? ( | Log loading/empty states and transaction table with non-wrapping action labels |
-| 34 | 1293-1390 | FORMULARY MASTER | Medicine registration and native dosage-form options |
-| 35 | 1391-1473 | > Registered formulary drugs | Filterable catalog with evenly spaced columns, available stock and one-line Delete action |
-| 36 | 1474-1531 | CONFIRMATION MODAL | Native modal, Cancel and Confirm, Escape and backdrop dismissal |
+| 22 | 584-594 | {notice && ( | Mutation and sync feedback plus a warning for failed reads |
+| 23 | 595-624 | CATALOG & DISPENSE | Labeled barcode input and Find lot action |
+| 24 | 625-730 | First-expiry-first-out batches | Expiry-ordered batch table, keyboard-operable radios and row selection |
+| 25 | 731-781 | Dispense stock | Selected medicine, strength, lot, stock, quantity and editable reason |
+| 26 | 782-878 | STOCK-IN | Centered stock intake form with native medicine select, dates and supplier |
+| 27 | 879-959 | ADJUST & DISPOSE | Centered removal form with all four existing reasons for adjustment |
+| 28 | 960-1046 | ALERTS & REORDER | Alerts page header and top-left low stock lots |
+| 29 | 1047-1101 | > Expiry alerts | Expired and expiring lots with text labels in the top-right panel |
+| 30 | 1102-1144 | Automated reorder suggestions | Read-only suggestions ordered by usable stock, lowest first. Prescription demand breaks stock ties. |
+| 31 | 1145-1172 | LOGS | Consumption log header, counts and refresh |
+| 32 | 1173-1209 | All actions ( | Action filters, including grouped removals, and text search |
+| 33 | 1210-1291 | {loadingLogs ? ( | Log loading/empty states and transaction table with non-wrapping action labels |
+| 34 | 1292-1389 | FORMULARY MASTER | Medicine registration and native dosage-form options |
+| 35 | 1390-1472 | > Registered formulary drugs | Filterable catalog with evenly spaced columns, available stock and one-line Delete action |
+| 36 | 1473-1531 | CONFIRMATION MODAL | Native modal, Cancel and Confirm, Escape and backdrop dismissal |

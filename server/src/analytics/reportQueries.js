@@ -54,3 +54,42 @@ export async function listInventoryAlerts(limit) {
   );
   return rows;
 }
+
+export async function listTopPrescribedMedicines(limit = 6) {
+  const [rows] = await pool.query(
+    `SELECT m.medicine_id, m.name, m.generic_name, m.form, m.strength, m.unit, m.reorder_level,
+            COUNT(DISTINCT pi.prescription_id) AS prescription_count,
+            COALESCE(SUM(pi.quantity_prescribed), 0) AS quantity_prescribed,
+            COALESCE(stock.total_stock_on_hand, 0) AS total_stock_on_hand,
+            CASE
+              WHEN COALESCE(stock.total_stock_on_hand, 0) <= m.reorder_level
+              THEN GREATEST((m.reorder_level * 2) - COALESCE(stock.total_stock_on_hand, 0), m.reorder_level)
+              ELSE 0
+            END AS suggested_reorder_qty,
+            CASE
+              WHEN COALESCE(stock.total_stock_on_hand, 0) = 0 THEN 'OUT_OF_STOCK'
+              WHEN COALESCE(stock.total_stock_on_hand, 0) <= m.reorder_level THEN 'CRITICAL_BUFFER'
+              ELSE 'ADEQUATE'
+            END AS stock_status
+     FROM PRESCRIPTION_ITEMS pi
+     JOIN PRESCRIPTIONS p ON p.prescription_id = pi.prescription_id
+     JOIN MEDICINES m ON m.medicine_id = pi.medicine_id
+     LEFT JOIN (
+       SELECT medicine_id, SUM(quantity_on_hand) AS total_stock_on_hand
+       FROM MEDICINE_BATCHES
+       WHERE deleted_at IS NULL AND expiry_date > CURDATE()
+       GROUP BY medicine_id
+     ) AS stock ON stock.medicine_id = m.medicine_id
+     WHERE pi.deleted_at IS NULL
+       AND p.deleted_at IS NULL
+       AND p.status <> 'cancelled'
+       AND m.is_active = TRUE
+       AND m.deleted_at IS NULL
+     GROUP BY m.medicine_id, m.name, m.generic_name, m.form, m.strength, m.unit,
+              m.reorder_level, stock.total_stock_on_hand
+     ORDER BY quantity_prescribed DESC, prescription_count DESC, m.name ASC
+     LIMIT ?`,
+    [limit],
+  );
+  return rows;
+}

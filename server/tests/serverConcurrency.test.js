@@ -398,6 +398,48 @@ test('analytics exports and dashboard use the shared department totals', { skip 
   assert.equal(Buffer.from(await pdf.arrayBuffer()).subarray(0, 4).toString(), '%PDF');
 });
 
+test('reorder suggestions put the lowest usable stock ahead of prescription demand', { skip }, async t => {
+  const db = await fixture(t);
+  await db.query(`INSERT INTO MEDICINES (medicine_id, name, generic_name, form, strength, unit, is_active)
+    VALUES (1, 'Top demand', 'Fixture 1', 'Tablet', '10 mg', 'pcs', TRUE),
+           (2, 'Expired only', 'Fixture 2', 'Tablet', '10 mg', 'pcs', TRUE),
+           (3, 'Low stock', 'Fixture 3', 'Tablet', '10 mg', 'pcs', TRUE),
+           (4, 'Low stock with demand', 'Fixture 4', 'Tablet', '10 mg', 'pcs', TRUE),
+           (5, 'No batches', 'Fixture 5', 'Tablet', '10 mg', 'pcs', TRUE),
+           (6, 'Second highest demand', 'Fixture 6', 'Tablet', '10 mg', 'pcs', TRUE),
+           (7, 'Inactive', 'Fixture 7', 'Tablet', '10 mg', 'pcs', FALSE)`);
+  await db.query(`INSERT INTO MEDICINE_BATCHES (medicine_id, batch_no, manufacture_date, expiry_date, quantity_on_hand, deleted_at)
+    VALUES (1, 'a', CURDATE() - INTERVAL 1 YEAR, CURDATE() + INTERVAL 1 MONTH, 100, NULL),
+           (1, 'b', CURDATE() - INTERVAL 1 YEAR, CURDATE() + INTERVAL 1 MONTH, 20, NULL),
+           (2, 'c', CURDATE() - INTERVAL 1 YEAR, CURDATE() - INTERVAL 1 DAY, 200, NULL),
+           (3, 'd', CURDATE() - INTERVAL 1 YEAR, CURDATE() + INTERVAL 1 MONTH, 3, NULL),
+           (4, 'e', CURDATE() - INTERVAL 1 YEAR, CURDATE() + INTERVAL 1 MONTH, 3, NULL),
+           (4, 'f', CURDATE() - INTERVAL 1 YEAR, CURDATE() + INTERVAL 1 MONTH, 50, NOW()),
+           (6, 'g', CURDATE() - INTERVAL 1 YEAR, CURDATE() + INTERVAL 1 MONTH, 20, NULL)`);
+  await db.query(`INSERT INTO EMR_RECORDS (emr_id, patient_user_id, doctor_user_id, chief_complaint, diagnosis)
+    VALUES (1, 5, 2, 'fixture complaint', 'fixture diagnosis')`);
+  await db.query(`INSERT INTO PRESCRIPTIONS
+    (prescription_id, emr_id, patient_user_id, doctor_user_id, expires_at, qr_token, status)
+    VALUES (1, 1, 5, 2, CURDATE(), 'reorder-active', 'active'),
+           (2, 1, 5, 2, CURDATE(), 'reorder-cancelled', 'cancelled')`);
+  await db.query(`INSERT INTO PRESCRIPTION_ITEMS (prescription_id, medicine_id, dosage, frequency, duration_days, quantity_prescribed)
+    VALUES (1, 1, 'fixture', 'fixture', 1, 200), (1, 6, 'fixture', 'fixture', 1, 40),
+           (1, 4, 'fixture', 'fixture', 1, 5), (2, 3, 'fixture', 'fixture', 1, 500)`);
+
+  const { request } = await mountedApi(t);
+  const summary = await request('/analytics/summary');
+  assert.equal(summary.status, 200);
+  assert.deepEqual((await summary.json()).topPrescribedMedicines.map(row => row.medicine_id), [1, 6, 4]);
+
+  const response = await request('/inventory/reorder-suggestions', { userId: 3, roles: ['NURSE'] });
+  assert.equal(response.status, 200);
+  const suggestions = await response.json();
+  assert.deepEqual(suggestions.map(row => row.medicine_id), [2, 5, 4, 3, 6, 1]);
+  assert.deepEqual(suggestions.map(row => Number(row.total_stock_on_hand)), [0, 0, 3, 3, 20, 120]);
+  assert.equal(suggestions[0].stock_status, 'OUT_OF_STOCK');
+  assert.equal(Number(suggestions[2].suggested_reorder_qty), 27);
+});
+
 test('concurrent incident filing publishes a single report after commit', { skip }, async t => {
   const db = await fixture(t);
   await db.query(`INSERT INTO EMERGENCY_ALERTS (alert_id, user_id, location, created_at, resolved_at, status)
