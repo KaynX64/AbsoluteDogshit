@@ -14,6 +14,8 @@ Use the app's active theme tokens and existing Icon component. Split layouts sta
 
 The client and server preserve their existing expiry cutoffs. The formulary's available stock excludes expired stock. Deletion checks all remaining stock, including expired lots. Alert panels and transaction filters keep their existing stock and action groupings.
 
+The Formulary master keeps the registration form and page controls fixed within the viewport; only the registered-drugs list scrolls.
+
 | # | Lines | Anchor | Description |
 |---|-------|--------|-------------|
 | 1 | 1-8 | subscribeToDesktopEvents | Imports shared API, theme helpers, icon and scoped layout CSS |
@@ -23,7 +25,7 @@ The client and server preserve their existing expiry cutoffs. The formulary's av
 | 5 | 60-84 | export default function InventoryManager | Component and dialog, submission, notice, and request state |
 | 6 | 85-102 | stockInMedId, setStockInMedId | Stock-in and adjustment fields and defaults |
 | 7 | 103-118 | reorderSuggestions, setReorderSuggestions | Alerts, logs and formulary state |
-| 8 | 119-160 | useEffect(() => { | Entry tab sync, dialog focus restoration, selected batch and filtered medicine and low-stock data |
+| 8 | 119-160 | useEffect(() => { | Entry tab sync, dialog focus restoration, selected batch, filtered medicine, low-stock data, and derived alert count |
 | 9 | 161-185 | const readInventory | Authenticated reads with per-resource cancellation, retained results and status |
 | 10 | 186-208 | const fetchBatches | Batch, formulary, alerts and log readers. Revalidate the stock-in selection against refreshed data. |
 | 11 | 209-236 | fetchBatches(); | Initial load, socket-triggered refresh and cleanup |
@@ -43,12 +45,12 @@ The client and server preserve their existing expiry cutoffs. The formulary's av
 | 25 | 733-783 | Dispense stock | Selected medicine, strength, lot, stock, quantity and editable reason |
 | 26 | 784-880 | STOCK-IN | Centered stock intake form with native medicine select, dates and supplier |
 | 27 | 881-961 | ADJUST & DISPOSE | Centered removal form with all four existing reasons for adjustment |
-| 28 | 962-1047 | ALERTS & REORDER | Alerts page header and top-left low stock lots |
+| 28 | 962-1047 | ALERTS & REORDER | Equal-height low-stock and expiry panels above an equal-height reorder panel; each list scrolls independently |
 | 29 | 1048-1102 | > Expiry alerts | Expired and expiring lots with text labels in the top-right panel |
 | 30 | 1103-1145 | Automated reorder suggestions | Read-only reorder suggestions in the full-width section below |
-| 31 | 1146-1173 | LOGS | Consumption log header, counts and refresh |
-| 32 | 1174-1210 | All actions ( | Action filters, including grouped removals, and text search |
-| 33 | 1211-1292 | {loadingLogs ? ( | Log loading/empty states and transaction table with non-wrapping action labels |
-| 34 | 1293-1390 | FORMULARY MASTER | Medicine registration and native dosage-form options |
-| 35 | 1391-1473 | > Registered formulary drugs | Filterable catalog with evenly spaced columns, available stock and one-line Delete action |
-| 36 | 1474-1531 | CONFIRMATION MODAL | Native modal, Cancel and Confirm, Escape and backdrop dismissal |
+| 31 | 1147-1166 | LOGS | Consumption log header, counts and refresh |
+| 32 | 1167-1201 | All actions | Icon-led segmented action filters with count badges and text search |
+| 33 | 1202-1283 | {loadingLogs ? ( | Log loading/empty states and transaction table with non-wrapping action labels |
+| 34 | 1284-1380 | FORMULARY MASTER | Compact medicine registration form and native dosage-form options |
+| 35 | 1381-1464 | > Registered formulary drugs | Independently scrollable catalog with evenly spaced columns, available stock and one-line Delete action |
+| 36 | 1465-1523 | CONFIRMATION MODAL | Native modal, Cancel and Confirm, Escape and backdrop dismissal |

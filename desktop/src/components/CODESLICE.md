@@ -13,7 +13,7 @@ Sibling of this directory's `AGENTS.md`. Each desktop monolith has its own slice
 | ID | File | LOC | Commit | Map | Role |
 |---|------|-----|--------|-----|------|
 | DT-01 | `desktop/src/components/DoctorConsole.tsx` | 3918 | 6710f4f | `codeslice/DT-01-DoctorConsole-parts/` | Doctor/Dentist EMR console: consultation queue, encounters, e-Rx, clearances, dental chart, immunizations |
-| DT-02 | `desktop/src/components/AdminConsole.tsx` | 3054 | 93b4172 | `codeslice/DT-02-AdminConsole-parts/` | Admin console: roles mgmt, qualified-responder flag, profile editor, audit, telemetry, analytics, DB Studio |
+| DT-02 | `desktop/src/components/AdminConsole.tsx` | 3332 | 93b4172 | `codeslice/DT-02-AdminConsole-parts/` | Admin console: roles mgmt, qualified-responder flag, profile editor, audit, telemetry, analytics, DB Studio |
 | DT-03 | `desktop/src/components/NurseConsole.tsx` | 1941 | fb9688d | `codeslice/DT-03-NurseConsole.md` | Nurse console: live triage queue, expected-arrivals check-in, active SOS alert handling, inventory stat tiles |
 | DT-04 | `desktop/src/components/InventoryManager.tsx` | 1464 | ed2c817 | `codeslice/DT-04-InventoryManager.md` | Medicine inventory: FEFO catalog/dispense, stock-in, adjust-dispose, alerts, logs, formulary CRUD |
 | DT-05 | `desktop/src/components/QrIntakeScanner.tsx` | 1440 | ee8bbe5 | `codeslice/DT-05-QrIntakeScanner.md` | QR intake desk: webcam/file QR verification, ID search, triage vitals, appointment check-in, walk-in tickets; follows active theme |
