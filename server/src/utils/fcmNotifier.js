@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { initializeApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
-import { pool } from '../db.js';
+import { pool } from '../db/pool.js';
 import { createFcmAppOptions } from './fcmCredential.js';
 
 const __filename = fileURLToPath(import.meta.url);

@@ -2,7 +2,7 @@
 
 ### Backend
 
-`server/src/index.js` boots the Express/HTTPS/Socket.IO server, mounts the 12 routers in `server/src/routes/`, and starts `runAutoMigrations()`, Redis, the MinIO bucket check and the reminder scheduler. `server/src/db.js` owns the `mysql2` pool and adds newer columns/tables on boot. Redis is cache-aside with in-memory/rate-limit fallbacks; MinIO is path-style S3 storage.
+`server/src/index.js` composes Express, HTTPS and Socket.IO. The startup module applies versioned migrations before listening, then starts Redis, the MinIO bucket check and the reminder scheduler. `server/src/db/pool.js` owns the `mysql2` pool. Redis is cache-aside with in-memory rate-limit fallbacks, and MinIO provides path-style S3 storage.
 
 `emergency.js` on `Stage1` imports `generateAndStoreIncidentReportPDF`, `getBufferFromS3` and the responder-access helpers. Its SOS limiter increments `ratelimit:sos:<id>`, sets `X-RateLimit-Remaining` and `Retry-After`, and uses `SOS_LIMIT` from `src/config/limits.js`.
 

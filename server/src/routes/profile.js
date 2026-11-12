@@ -1,6 +1,6 @@
 // server/src/routes/profile.js
 import express from 'express';
-import { pool } from '../db.js';
+import { pool } from '../db/pool.js';
 import { authenticateToken } from '../auth.js';
 import { THEME_MODES, THEME_PRESETS } from '../auth.js';
 import { logAudit } from '../utils/auditLogger.js';

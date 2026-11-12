@@ -11,7 +11,9 @@ export const DECRYPT_FAILED_MARKER = '[ENCRYPTED PHI - INTEGRITY VERIFICATION FA
 // Tables DB Studio may display but never modify. AUDIT_LOGS / PHI_ACCESS_LOGS are the
 // statutory ledgers; INVENTORY_LOGS is the immutable stock-movement trail. The policy
 // table uses its dedicated validator, revision check and audit path.
-export const READ_ONLY_TABLES = ['AUDIT_LOGS', 'PHI_ACCESS_LOGS', 'INVENTORY_LOGS', 'SERVER_POLICY', 'QUEUE_TICKET_COUNTERS'];
+export const READ_ONLY_TABLES = [
+  'AUDIT_LOGS', 'PHI_ACCESS_LOGS', 'INVENTORY_LOGS', 'SERVER_POLICY', 'QUEUE_TICKET_COUNTERS', 'SCHEMA_MIGRATIONS',
+];
 
 // Account-security tables: writable from DB Studio ONLY by Super Admins.
 // A limited admin holding DATABASE_MANAGE must not be able to mint admin
@@ -77,6 +79,7 @@ export const phiPatientSource = (table) => PHI_PATIENT_SOURCE[table] || null;
 export function readOnlyMessage(table) {
   if (table.toUpperCase() === 'SERVER_POLICY') return 'Use the Server Policy editor to change server policy.';
   if (table.toUpperCase() === 'QUEUE_TICKET_COUNTERS') return 'Queue ticket counters are managed by clinic intake.';
+  if (table.toUpperCase() === 'SCHEMA_MIGRATIONS') return 'The migration ledger is managed by the migration runner.';
   return `Statutory compliance violation: ${table} is an append-only ledger and cannot be modified from DB Studio.`;
 }
 

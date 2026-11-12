@@ -1,5 +1,5 @@
 // server/src/utils/reminderWorker.js
-import { pool } from '../db.js';
+import { pool } from '../db/pool.js';
 import { sendAppointmentEmail } from './mailer.js';
 import { logAudit } from './auditLogger.js';
 import { sendPushToUser } from './fcmNotifier.js';
@@ -193,7 +193,7 @@ for (const app of upcoming) {
         generateAndStorePrescriptionPDF,
         generateAndStoreClearancePDF,
         generateAndStoreIncidentReportPDF,
-      } = await import('./documentService.js');
+      } = await import('../documents/documentService.js');
 
       const [missingRx] = await pool.query(
         `SELECT prescription_id FROM PRESCRIPTIONS

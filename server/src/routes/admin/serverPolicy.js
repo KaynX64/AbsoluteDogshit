@@ -1,5 +1,5 @@
 import express from 'express';
-import { pool } from '../../db.js';
+import { pool } from '../../db/pool.js';
 import { resolveAdminPermissions } from '../../middleware/rbac.js';
 import { getServerPolicy, makeServerPolicy, serverPolicyDefaults, serverPolicyFields, validatePolicyOverrides } from '../../config/serverPolicy.js';
 import { readServerPolicy, saveServerPolicy } from '../../utils/serverPolicyStore.js';

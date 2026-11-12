@@ -12,7 +12,7 @@
 //    during the run is skipped, never overwritten
 //  - every new ciphertext is decrypted and compared before it is written
 //  - never prints patient data, only row ids and counts
-import { pool } from '../src/db.js';
+import { pool } from '../src/db/pool.js';
 import { encrypt, decrypt } from '../src/utils/cryptoVault.js';
 
 const APPLY = process.argv.includes('--apply');

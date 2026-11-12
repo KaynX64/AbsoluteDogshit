@@ -1,4 +1,4 @@
-import { pool } from '../../db.js';
+import { pool } from '../../db/pool.js';
 import { requirePermission, resolveAdminPermissions } from '../../middleware/rbac.js';
 import { logAudit } from '../../utils/auditLogger.js';
 import { evaluatePasswordStrength } from '../../utils/passwordPolicy.js';

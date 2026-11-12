@@ -10,7 +10,7 @@ process.env.ENCRYPTION_SALT = 'fixture-encryption-salt';
 process.env.SMTP_HOST = '';
 process.env.SMTP_USER = '';
 
-const { pool } = await import('../src/db.js');
+const { pool } = await import('../src/db/pool.js');
 const { encrypt } = await import('../src/utils/cryptoVault.js');
 const serviceAccount = fileURLToPath(new URL('../serviceAccountKey.json', import.meta.url));
 const existsSync = fs.existsSync;

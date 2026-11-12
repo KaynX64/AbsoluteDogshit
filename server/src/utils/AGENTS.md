@@ -7,7 +7,7 @@
 | phiLogger.js | `logPhiAccess({...})` → PHI_ACCESS_LOGS |
 | redisClient.js | `initRedis`, `isRedisActive`, `getCache`, `setCache`, `invalidateCache` |
 | s3Vault.js | `uploadToS3`, `getFromS3`, `getBufferFromS3`, `deleteFromS3`, `ensureBucketExists` |
-| pdfVault.js · documentService.js | PDF generation / document handling |
+| ../documents/documentService.js · ../documents/pdf/ | Document storage orchestration, shared PDF drawing helpers and document templates |
 | signatureVault.js · signatory.js | stored signatures, signatory data |
 | interactionChecker.js | drug-interaction logic |
 | dentalValidator.js | dental chart validation |

@@ -1,7 +1,7 @@
 // server/src/routes/healthPass.js
 import express from 'express';
 import crypto from 'crypto';
-import { pool } from '../db.js';
+import { pool } from '../db/pool.js';
 import { authenticateToken } from '../auth.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { logPhiAccess } from '../utils/phiLogger.js';

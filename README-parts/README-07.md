@@ -31,7 +31,7 @@ npm run dev        # or: npm start
 
 - The API serves HTTPS on `PORT` (default `5000`); clients use `https://<host>:5000/api/...` and Socket.IO/WSS on the same port.
 - Make `DB_USER`/`DB_PASSWORD` match the Compose MySQL instance. `docker-compose.yml` sets `MYSQL_ROOT_PASSWORD=rootpassword`; `.env.example` defaults to `DB_NAME=valetudo_healthlink`, `DB_PORT=3307` and `DB_USER=valetudo_app`. Create that user or point `DB_USER` at `root`.
-- **Do not run `schema.sql` against an existing database**: it drops all tables. Apply it only to a fresh database; `runAutoMigrations()` then handles newer columns/tables on boot.
+- Provision fresh databases with `schema.sql`, which drops and recreates tables. Upgrade existing databases with `npm run migrate` from `server/`. Startup also applies any pending versions before listening. [Migration rollout guide](../server/MIGRATION-PLAN.md)
 - TLS material belongs in git-ignored `server/certs/`.
 
 ### 3. Run the desktop console
@@ -65,7 +65,7 @@ Set `lib/config/api_config.dart` to an address the device can actually reach —
 | --- | --- | --- |
 | Server | `PORT=5000`, `PUBLIC_API_BASE_URL`, `CORS_ALLOWED_ORIGINS`, `TRUST_PROXY=false` | `PUBLIC_API_BASE_URL` is embedded in generated PDFs/QR codes. Include `null` in the CORS allow-list for packaged `file://` Electron builds. |
 | Secrets | `JWT_SECRET`, `ENCRYPTION_KEY`, `ENCRYPTION_SALT`, `HEALTH_PASS_HMAC_SECRET` | Generate 32-byte secrets with `openssl rand -hex 32` (salt with `openssl rand -hex 16`). Keep the QR HMAC secret distinct from `JWT_SECRET`; back up the encryption key/salt pair. |
-| MySQL | `DB_HOST`, `DB_PORT=3307`, `DB_USER`, `DB_PASSWORD`, `DB_NAME=valetudo_healthlink` | `server/src/db.js` refuses to start without a DB password. |
+| MySQL | `DB_HOST`, `DB_PORT=3307`, `DB_USER`, `DB_PASSWORD`, `DB_NAME=valetudo_healthlink` | `server/src/db/pool.js` refuses to start without a DB password. |
 | Redis | `REDIS_HOST`, `REDIS_PORT=6379`, `REDIS_PASSWORD` | Cache, JWT denylist, rate limits and QR nonces. |
 | MinIO / S3 | `S3_ENDPOINT=http://127.0.0.1:9000`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET=valetudo-attachments` | Path-style access; bucket created on startup if missing. |
 | Mail, push, maps | `SMTP_HOST`, `SMTP_PORT=587`, `SMTP_USER`, `SMTP_PASS`, Firebase service account, optional `GOOGLE_MAPS_API_KEY` | Reminders, SOS push and reverse geocoding. |

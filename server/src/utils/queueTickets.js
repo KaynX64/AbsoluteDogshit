@@ -1,17 +1,3 @@
-export async function ensureQueueTicketCounters(pool) {
-  try {
-    await pool.query('SELECT last_number FROM QUEUE_TICKET_COUNTERS LIMIT 0');
-  } catch (error) {
-    if (error.code !== 'ER_NO_SUCH_TABLE') throw error;
-    await pool.query(`CREATE TABLE IF NOT EXISTS QUEUE_TICKET_COUNTERS (
-      queue_date DATE NOT NULL,
-      counter_id INT NOT NULL,
-      last_number INT NOT NULL,
-      PRIMARY KEY (queue_date, counter_id)
-    ) ENGINE=InnoDB`);
-  }
-}
-
 // Reserve inside the same transaction as the queue insert. The upsert locks
 // the counter until commit, including when this is its first ticket of the day.
 export async function reserveQueueTicket(connection, counterId) {

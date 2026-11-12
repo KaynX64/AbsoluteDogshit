@@ -1,4 +1,4 @@
-import { pool } from '../../db.js';
+import { pool } from '../../db/pool.js';
 import { requirePermission, resolveAdminPermissions } from '../../middleware/rbac.js';
 import { logAudit } from '../../utils/auditLogger.js';
 import { logPhiAccess } from '../../utils/phiLogger.js';
@@ -29,7 +29,7 @@ export function registerDatabaseStudioRoutes(router) {
     const [rows] = await pool.query(
       `SELECT TABLE_NAME as tableName, TABLE_ROWS as estimatedRows
      FROM information_schema.TABLES
-     WHERE TABLE_SCHEMA = DATABASE() AND UPPER(TABLE_NAME) NOT IN ('SERVER_POLICY', 'QUEUE_TICKET_COUNTERS')
+     WHERE TABLE_SCHEMA = DATABASE() AND UPPER(TABLE_NAME) NOT IN ('SERVER_POLICY', 'QUEUE_TICKET_COUNTERS', 'SCHEMA_MIGRATIONS')
      ORDER BY TABLE_NAME ASC`
     );
     return rows;

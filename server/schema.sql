@@ -1,5 +1,6 @@
 -- =============================================================================
 -- Valetudo HealthLink — Full Database Schema
+-- Fresh provisioning or disposable rebuilds. Upgrade existing databases with npm run migrate.
 -- Character Set: utf8mb4 / utf8mb4_unicode_ci
 -- Compliance: R.A. 10173 (Data Privacy Act of 2012)
 -- =============================================================================
@@ -13,6 +14,7 @@ USE `valetudo_healthlink`;
 -- DISABLE FK CHECKS DURING RECREATION
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP TABLE IF EXISTS `SCHEMA_MIGRATIONS`;
 DROP TABLE IF EXISTS `LOCAL_SYNC_LOGS`;
 DROP TABLE IF EXISTS `PHI_ACCESS_LOGS`;
 DROP TABLE IF EXISTS `AUDIT_LOGS`;

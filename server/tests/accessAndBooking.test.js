@@ -10,7 +10,7 @@ process.env.ENCRYPTION_SALT = 'fixture-encryption-salt';
 process.env.SMTP_HOST = '';
 process.env.SMTP_USER = '';
 
-const { pool } = await import('../src/db.js');
+const { pool } = await import('../src/db/pool.js');
 const { requirePermission } = await import('../src/middleware/rbac.js');
 
 function fakeResponse() {

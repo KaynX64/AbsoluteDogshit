@@ -8,7 +8,7 @@
 //   const interactions = await checkInteractions(connection, [1, 2, 3]);
 //   // Returns array of interaction objects, empty if none found.
 
-import { pool } from '../db.js';
+import { pool } from '../db/pool.js';
 
 /**
  * Check all pairwise interactions among the given medicine IDs.

@@ -1,6 +1,30 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderIncidentReportPDF } from '../src/utils/pdfVault.js';
+import { renderIncidentReportPDF } from '../src/documents/pdf/templates/incidentReport.js';
+import { renderPrescriptionPDF } from '../src/documents/pdf/templates/prescription.js';
+import { renderClearancePDF } from '../src/documents/pdf/templates/clearance.js';
+
+test('the prescription and clearance templates render signed-document PDF buffers', async () => {
+  const fixture = {
+    patient: { first_name: 'Fixture', last_name: 'Patient' },
+    doctor: { first_name: 'Fixture', last_name: 'Clinician', role_code: 'DOCTOR', license_no: 'FIXTURE-1' },
+    issued_at: '2026-01-01',
+    expires_at: '2026-02-01',
+    qr_token: 'fixture-token',
+    verification_url: 'https://localhost/verify/fixture-token',
+  };
+  const documents = await Promise.all([
+    renderPrescriptionPDF({ ...fixture, prescription_id: 7, items: [{ medicine_name: 'Fixture medicine',
+      dosage: 'Fixture dose', frequency: 'Fixture frequency', route: 'Fixture route', duration_days: 1,
+      quantity_prescribed: 1, quantity_dispensed: 0, is_outside: true }] }),
+    renderClearancePDF({ ...fixture, clearance_id: 8, purpose: 'Fixture purpose', remarks: 'Fixture statement' }),
+  ]);
+  for (const pdf of documents) {
+    assert.ok(Buffer.isBuffer(pdf));
+    assert.equal(pdf.subarray(0, 5).toString('ascii'), '%PDF-');
+    assert.ok(pdf.length > 500);
+  }
+});
 
 test('renderIncidentReportPDF generates a valid PDF buffer', async () => {
   const sampleData = {

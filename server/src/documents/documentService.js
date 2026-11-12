@@ -1,4 +1,4 @@
-// server/src/utils/documentService.js
+// Document lookup, rendering and storage orchestration.
 //
 // Orchestrates "generate PDF → upload to S3 → persist key in DB"
 // for prescriptions and clearances.
@@ -8,11 +8,13 @@
 // rolls back a clinically valid issuance just because MinIO was down.
 
 import crypto from 'crypto';
-import { pool } from '../db.js';
-import { uploadToS3 } from './s3Vault.js';
-import { decrypt } from './cryptoVault.js';
-import { renderPrescriptionPDF, renderClearancePDF, renderIncidentReportPDF } from './pdfVault.js';
-import { loadSignature } from './signatureVault.js';
+import { pool } from '../db/pool.js';
+import { uploadToS3 } from '../utils/s3Vault.js';
+import { decrypt } from '../utils/cryptoVault.js';
+import { renderPrescriptionPDF } from './pdf/templates/prescription.js';
+import { renderClearancePDF } from './pdf/templates/clearance.js';
+import { renderIncidentReportPDF } from './pdf/templates/incidentReport.js';
+import { loadSignature } from '../utils/signatureVault.js';
 
 const API_BASE_URL = process.env.PUBLIC_API_BASE_URL || 'https://localhost:5000';
 

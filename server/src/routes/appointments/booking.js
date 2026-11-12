@@ -1,4 +1,4 @@
-import { pool } from '../../db.js';
+import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth.js';
 import { requirePrivacyConsent } from '../../middleware/consent.js';
 import { logAudit } from '../../utils/auditLogger.js';

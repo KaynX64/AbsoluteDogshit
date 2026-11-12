@@ -1,5 +1,7 @@
 import express from 'express';
-import { registerPrescriptionRoutes } from './prescriptions.js';
+import { registerPrescriptionIssuance } from './prescriptions/issuance.js';
+import { registerPrescriptionHistory } from './prescriptions/history.js';
+import { registerPrescriptionCancellation } from './prescriptions/cancellation.js';
 import { registerClearanceRoutes } from './clearances.js';
 import { registerVerificationRoutes } from './verification.js';
 import { registerAttachmentRoutes } from './attachments.js';
@@ -8,7 +10,9 @@ import { registerPdfRoutes } from './pdfs.js';
 export default function documentRoutes(io) {
   const router = express.Router();
 
-  registerPrescriptionRoutes(router, io);
+  registerPrescriptionIssuance(router, io);
+  registerPrescriptionHistory(router);
+  registerPrescriptionCancellation(router, io);
   registerClearanceRoutes(router);
   registerVerificationRoutes(router);
   registerAttachmentRoutes(router);

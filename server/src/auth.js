@@ -1,7 +1,7 @@
 // server/src/auth.js
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { pool } from './db.js';
+import { pool } from './db/pool.js';
 import { logAudit } from './utils/auditLogger.js';
 import { JWT_SECRET } from './utils/secrets.js';
 import { redis, isRedisActive } from './utils/redisClient.js';

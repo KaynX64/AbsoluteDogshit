@@ -1,4 +1,4 @@
-import { pool } from '../../db.js';
+import { pool } from '../../db/pool.js';
 import { authenticateToken, authenticateAttachmentDownload, issueAttachmentDownloadToken } from '../../auth.js';
 import { requireRoles } from '../../middleware/rbac.js';
 import { logAudit } from '../../utils/auditLogger.js';

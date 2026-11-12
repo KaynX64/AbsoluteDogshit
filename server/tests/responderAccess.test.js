@@ -1,7 +1,7 @@
 // server/tests/responderAccess.test.js
 // Run with: node --test server/tests/responderAccess.test.js
 // Pure functions only — no MySQL, no Redis (the existing tests inject
-// throwaway env values; responderAccess.js imports db.js lazily via pool
+// throwaway env values; responderAccess.js imports db/pool.js via pool
 // creation, which never connects until a query is issued).
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -24,11 +24,11 @@ const {
 } = await import('../src/utils/responderAccess.js');
 
 test('the self capability reflects live access while the alert list still rejects a denied user', async (t) => {
-  const { pool } = await import('../src/db.js');
+  const { pool } = await import('../src/db/pool.js');
   const keyPath = fileURLToPath(new URL('../serviceAccountKey.json', import.meta.url));
   const existsSync = fs.existsSync;
   const hideKey = t.mock.method(fs, 'existsSync', (path) => path !== keyPath && existsSync(path));
-  const { default: emergencyRoutes } = await import('../src/routes/emergency.js');
+  const { default: emergencyRoutes } = await import('../src/routes/emergency/index.js');
   hideKey.mock.restore();
 
   const router = emergencyRoutes();

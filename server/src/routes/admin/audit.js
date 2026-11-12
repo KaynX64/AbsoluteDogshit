@@ -1,4 +1,4 @@
-import { pool } from '../../db.js';
+import { pool } from '../../db/pool.js';
 import { requirePermission } from '../../middleware/rbac.js';
 import { isRedisActive } from '../../utils/redisClient.js';
 

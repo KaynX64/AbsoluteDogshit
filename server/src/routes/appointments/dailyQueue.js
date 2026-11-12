@@ -1,4 +1,4 @@
-import { pool } from '../../db.js';
+import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth.js';
 import { requireRoles } from '../../middleware/rbac.js';
 import { decrypt } from '../../utils/cryptoVault.js';

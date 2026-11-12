@@ -1,5 +1,5 @@
 // server/src/middleware/rbac.js
-import { pool } from '../db.js';
+import { pool } from '../db/pool.js';
 
 export function requireRoles(...allowedRoles) {
   return (req, res, next) => {

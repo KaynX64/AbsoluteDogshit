@@ -29,12 +29,12 @@ AbsoluteDogshit/
 │   ├── src/
 │   │   ├── index.js              # HTTPS + Express + Socket.IO entry point
 │   │   ├── auth.js               # JWT, bcrypt, password policy, login throttle
-│   │   ├── db.js                 # mysql2 pool + runAutoMigrations()
+│   │   ├── db/                   # pool and versioned migrations
 │   │   ├── config/               # appointment rules, rate limits
 │   │   ├── middleware/           # RBAC, consent
 │   │   ├── routes/               # 12 route modules + AGENTS.md
-│   │   │   ├── admin.js  analytics.js  appointments.js  documents.js
-│   │   │   ├── emergency.js  healthPass.js  interactions.js  inventory.js
+│   │   │   ├── admin/  analytics/  appointments/  documents/
+│   │   │   ├── emergency/  healthPass.js  interactions.js  inventory/
 │   │   │   └── privacy.js  profile.js  signature.js  sync.js
 │   │   └── utils/                # cryptoVault, s3Vault, documentService,
 │   │                             # responderAccess, redisClient, mailer,

@@ -4,5 +4,5 @@
 
 Server guidance is split across the parts below to keep documentation files manageable. Read the part relevant to the task; these parts are authoritative.
 
-- [`AGENTS-parts/AGENTS-01.md`](AGENTS-parts/AGENTS-01.md) — “Boot pipeline (src/index.js)” · “Route map — src/routes/*.js (all mounted under /api in inde…” · “Middleware — src/middleware/”
-- [`AGENTS-parts/AGENTS-02.md`](AGENTS-parts/AGENTS-02.md) — “Auth model — src/auth.js” · “Utils — src/utils/*.js” · “Database — src/db.js + schema.sql” · “Env — copy `.env.example` → `.env` (never commit it)” · …
+- [`AGENTS-parts/AGENTS-01.md`](AGENTS-parts/AGENTS-01.md) — “Boot pipeline (src/index.js)” · “Route map — src/routes/” · “Middleware — src/middleware/”
+- [`AGENTS-parts/AGENTS-02.md`](AGENTS-parts/AGENTS-02.md) — “Auth model — src/auth.js” · “Utils — src/utils/*.js” · “Database — src/db/ + schema.sql” · “Env — copy `.env.example` → `.env` (never commit it)” · …

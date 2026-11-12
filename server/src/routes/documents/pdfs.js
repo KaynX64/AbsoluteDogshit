@@ -1,11 +1,11 @@
-import { pool } from '../../db.js';
+import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth.js';
 import { getBufferFromS3 } from '../../utils/s3Vault.js';
 import {
   generateAndStorePrescriptionPDF,
   generateAndStoreClearancePDF,
   generateAndStoreIncidentReportPDF,
-} from '../../utils/documentService.js';
+} from '../../documents/documentService.js';
 import { logPhiAccess } from '../../utils/phiLogger.js';
 
 export function registerPdfRoutes(router) {

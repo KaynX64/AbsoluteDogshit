@@ -25,7 +25,7 @@ export const LOGIN_LIMIT = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────
-// SOS — panic-button throttle (wired in server/src/routes/emergency.js)
+// SOS — panic-button throttle (wired in server/src/routes/emergency/sos.js)
 // ─────────────────────────────────────────────────────────────────────────
 export const SOS_LIMIT = {
   maxAttempts:   envInt('SOS_RATE_LIMIT_MAX',    10),

@@ -20,7 +20,7 @@
 //
 // Long-term: store a coded, non-identifying `diagnosis_category` (e.g. ICD-10 chapter)
 // at write time so this becomes a plain SQL GROUP BY with no decryption at all.
-import { pool } from '../db.js';
+import { pool } from '../db/pool.js';
 import { decrypt } from './cryptoVault.js';
 import { getCache, setCache } from './redisClient.js';
 

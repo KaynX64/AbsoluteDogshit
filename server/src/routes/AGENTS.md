@@ -1,14 +1,14 @@
 # server/src/routes/
-Each API area exports a router or a factory. The appointments, documents, and admin folders compose their feature modules in `index.js`. These three areas, emergency, and inventory use factories that receive `io`.
+Each API area exports a router or a factory. The appointments, documents, admin, and emergency folders compose their feature modules in `index.js`. These four areas and inventory use factories that receive `io`.
 
 | File | Area | Size |
 |---|---|---|
 | documents/index.js | EMR documents, attachments, PDFs, QR verification | |
 | appointments/index.js | booking, queue, intake, consultations and patient history | |
 | admin/index.js | users, roles, admin permissions, audit, database studio and server policy | |
-| inventory.js | medicines, batches, logs | |
-| emergency.js | SOS alerts, responders (Socket.IO + FCM); incident reports (~700 lines — status PATCH L314, pending L444, report GET/POST L492/L575) | |
-| analytics.js | stats/export (uses `utils/analyticsStats.js`) | |
+| inventory/index.js | medicines, batches, logs | |
+| emergency/index.js | SOS alerts, responder access and incident reports (Socket.IO + FCM) | |
+| analytics/index.js | dashboard and exports (uses `utils/analyticsStats.js`) | |
 | healthPass.js | dynamic QR health pass (HMAC) | |
 | profile.js | user/health profile | |
 | privacy.js | consent records | |
@@ -21,8 +21,11 @@ Each API area exports a router or a factory. The appointments, documents, and ad
 | Area | Modules |
 |---|---|
 | Appointments | `booking.js` for clinicians, slots, personal bookings and cancellation. `dailyQueue.js` for daily lists and queue status. `intake.js` for lookup, check-in, walk-ins and active tickets. `consultations.js` for status and finalization. `patientHistory.js` for history and patient search. |
-| Documents | `prescriptions.js` and `clearances.js` for issuance, history and lifecycle. `verification.js` for public and authorized QR reads. `attachments.js` for upload and token-based download. `pdfs.js` for protected prescription, clearance and incident report PDFs. |
+| Documents | `prescriptions/issuance.js`, `prescriptions/history.js`, and `prescriptions/cancellation.js` for issuing, reading, and cancelling prescriptions with stock restoration. `clearances.js` owns clearance issuance, history and lifecycle. `verification.js` serves public and authorized QR reads. `attachments.js` handles upload and token-based download. `pdfs.js` handles protected prescription, clearance and incident report PDFs. |
 | Admin | `userDirectory.js`, `userUpdates.js` and `accountCredentials.js` for account operations. `permissions.js` and `responders.js` for grants and responder eligibility. `audit.js` for access logs and telemetry. `databaseStudio.js` for database tools. `serverPolicy.js` for Super Admin policy read, preview and versioned save. |
+| Emergency | `sos.js` for SOS creation, rate limiting and dispatch notifications. `alerts.js` for live responder access, active alerts and status changes. `incidentReports/workflow.js` handles pending reports and filing. `incidentReports/archive.js` handles archived reports and PDF download. |
+| Analytics | `dashboard.js` for summary and department metrics. `exports.js` for CSV, Excel, and PDF downloads. The entry point applies the shared analytics access gate. |
+| Inventory | `overview.js` for catalog, stock views and logs. `receiving.js` for deliveries. `formulary.js` for catalog writes. `stock.js` for deductions and adjustments. |
 
 Use `rg -n '<route path>' server/src/routes/<area>` to locate a handler. Feature registrars attach to the same router in the order set by `index.js`. Admin applies authentication and the ADMIN role gate before registering its routes. The server-policy router applies its own Super Admin gate.
 
@@ -49,4 +52,5 @@ The admin directory lists archived accounts with `GET /users?archived=true`. Its
 
 - Finalization and offline replay share encounter text validation. Complaint and diagnosis require entered text. Optional fields accept blanks. The check-in note contains only readings recorded for that visit.
 - Prescription issuance validates medication directions and quantities before starting a transaction. Optional instructions and notes stay blank when omitted. Clearance issuance requires a purpose, clinical statement and expiry.
+- `services/prescriptions/issuePrescription.js` owns the transaction and post-commit PDF orchestration. Its `stock.js` helper locks FEFO lots, applies deductions, and links them to prescription items using the same connection. The route validates HTTP input and maps the workflow result to the existing response.
 - Issuer history reads saved prescription items and clearance remarks independently of PDF availability. Prescription items are loaded in one batch for the signed-in clinician's records.

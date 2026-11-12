@@ -8,11 +8,12 @@
 
 ## Utils — src/utils/*.js
 
-`secrets.js` env validation (boot-fatal when crypto keys missing) · `cryptoVault.js` AES field encryption · `redisClient.js` (`initRedis`, `isRedisActive()`) · `s3Vault.js` MinIO/S3 · `phiLogger.js` + `auditLogger.js` structured logging (no PHI) · `documentService.js` / `signatory.js` / `signatureVault.js` / `pdfVault.js` document chain · `mailer.js` nodemailer SMTP · `interactionChecker.js` drug interactions · `reminderWorker.js` scheduler: reminders + auto no-show after `NOSHOW_GRACE_MINUTES`, emits `appointment:status_changed`, `prescription:status_changed`, `queue:updated` · `fcmNotifier.js` Firebase push · `passwordPolicy.js` · `dentalValidator.js` · `analyticsStats.js` · `dbStudioGuard.js`.
+`secrets.js` env validation (boot-fatal when crypto keys missing) · `cryptoVault.js` AES field encryption · `redisClient.js` (`initRedis`, `isRedisActive()`) · `s3Vault.js` MinIO/S3 · `phiLogger.js` + `auditLogger.js` structured logging (no PHI) · `src/documents/documentService.js` and `src/documents/pdf/` document rendering and storage · `mailer.js` nodemailer SMTP · `interactionChecker.js` drug interactions · `reminderWorker.js` scheduler: reminders + auto no-show after `NOSHOW_GRACE_MINUTES`, emits `appointment:status_changed`, `prescription:status_changed`, `queue:updated` · `fcmNotifier.js` Firebase push · `passwordPolicy.js` · `dentalValidator.js` · `analyticsStats.js` · `dbStudioGuard.js`.
 
-## Database — src/db.js + schema.sql
+## Database — src/db/ + schema.sql
 
-- mysql2 pool; `runAutoMigrations()` runs at boot and is additive — never destructive.
+- Import the mysql2 pool from `src/db/pool.js`. `src/db/migrate.js` applies versioned upgrades before the listener starts.
+- The [migration rollout guide](../MIGRATION-PLAN.md) covers the migration command, disposable rehearsals and deployment recovery.
 - `schema.sql` is the source of truth: 32 tables, UPPERCASE names. Groups: identity (`USERS`, `ROLES`, `USER_ROLES`, `ADMIN_PERMISSIONS`, `USER_ADMIN_PERMISSIONS`), profiles (`STUDENT_`, `FACULTY_`, `NON_TEACHING_`, `STAFF_PROFILES`, `HEALTH_PROFILES`, `DEVICE_TOKENS`), consent (`CONSENT_RECORDS`), care flow (`APPOINTMENTS`, `QUEUE`, `QUEUE_TICKET_COUNTERS`, `EMR_RECORDS`, `EMR_ATTACHMENTS`, `DENTAL_CHARTS`, `VITAL_SIGNS`, `MEDICAL_CLEARANCES`), pharmacy (`MEDICINES`, `MEDICINE_BATCHES`, `DRUG_INTERACTIONS`, `INVENTORY_LOGS`, `PRESCRIPTIONS`, `PRESCRIPTION_ITEMS`), safety (`EMERGENCY_ALERTS`, `INCIDENT_REPORTS` — one report per alert, `UNIQUE(alert_id)`), audit (`AUDIT_LOGS`, `PHI_ACCESS_LOGS`, `LOCAL_SYNC_LOGS`), and operational policy (`SERVER_POLICY`).
 - Role seed rows (ids 1–8) live at the bottom of `schema.sql`.
 
@@ -21,6 +22,8 @@
 Crypto: `ENCRYPTION_KEY`, `JWT_SECRET`, `ENCRYPTION_SALT` (required) · DB: host 127.0.0.1, port **3307** (host-mapped) · Redis (password required with the repo compose) · MinIO/S3 endpoint 127.0.0.1:9000 · SMTP · `PUBLIC_API_BASE_URL` (baked into PDFs/QR) · rate limits `LOGIN_/SOS_/BOOKING_/VERIFY_RATE_LIMIT_{MAX,WINDOW}` · `NOSHOW_GRACE_MINUTES` · `CORS_ALLOWED_ORIGINS` (comma-separated additions to the built-in desktop-origin allow-list).
 
 ## Tests & scripts
+
+Run the full suite with `node --test` from `server/`. `tests/appRoutes.test.js` assembles the actual API with a fake realtime dependency and uses an ephemeral loopback port. It stubs database queries and needs no running MySQL, Redis, MinIO, or Firebase service.
 
 `node --test tests/<file>.test.js` from `server/` — available: `cryptoVault` (12), `analyticsStats` (4), `dbStudioGuard` (35), `bmi` (2), `signatory` (2). The cryptoVault suite spawns isolated child processes so a real `.env` is never loaded; the other suites inject a throwaway ENCRYPTION_KEY + ENCRYPTION_SALT before importing (analyticsStats also sets a dummy DB_PASSWORD — mysql2 pools connect lazily, so no MySQL is touched). `reencrypt.test.js` was removed with its module (the v1→v2 migration is complete; the vault is v2-only). `scripts/encrypt-plaintext-health-profiles.js` is a one-off tool for encrypting legacy plaintext rows.
 

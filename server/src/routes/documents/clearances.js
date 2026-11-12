@@ -1,10 +1,10 @@
 import crypto from 'crypto';
-import { pool } from '../../db.js';
+import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth.js';
 import { requireRoles } from '../../middleware/rbac.js';
 import { logAudit } from '../../utils/auditLogger.js';
 import { requirePrivacyConsent } from '../../middleware/consent.js';
-import { generateAndStoreClearancePDF } from '../../utils/documentService.js';
+import { generateAndStoreClearancePDF } from '../../documents/documentService.js';
 import { logPhiAccess } from '../../utils/phiLogger.js';
 import { isCalendarDate } from '../../config/appointmentRules.js';
 import {

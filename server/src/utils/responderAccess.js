@@ -1,5 +1,5 @@
 // server/src/utils/responderAccess.js
-import { pool } from '../db.js';
+import { pool } from '../db/pool.js';
 
 /* ═════════════════════════════════════════════════════════════════════════
    QUALIFIED RESPONDER — role-independent SOS access

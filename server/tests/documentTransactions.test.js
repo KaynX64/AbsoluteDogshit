@@ -6,8 +6,10 @@ process.env.JWT_SECRET = 'fixture-jwt-secret'.repeat(3);
 process.env.ENCRYPTION_KEY = 'fixture-encryption-key'.repeat(3);
 process.env.ENCRYPTION_SALT = 'fixture-encryption-salt';
 
-const { pool } = await import('../src/db.js');
+const { pool } = await import('../src/db/pool.js');
 const { default: documentRoutes } = await import('../src/routes/documents/index.js');
+const { issuePrescription } = await import('../src/services/prescriptions/issuePrescription.js');
+const { planStock, applyStockDeductions } = await import('../src/services/prescriptions/stock.js');
 const { encrypt } = await import('../src/utils/cryptoVault.js');
 const { readEncounterText } = await import('../src/utils/encounterText.js');
 const expires_at = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
@@ -30,8 +32,8 @@ const cases = [
   },
 ];
 
-for (const { path, body, idField, pdfTable } of cases) {
-  test(`${path} releases the issuance connection before querying for the PDF`, async (t) => {
+for (const { path, body, idField, pdfTable, service } of [...cases, { ...cases[0], service: true }]) {
+  test(`${service ? 'prescription service' : path} releases the issuance connection before querying for the PDF`, async (t) => {
     const actions = [];
     const connection = {
       async beginTransaction() {},
@@ -61,23 +63,33 @@ for (const { path, body, idField, pdfTable } of cases) {
       return [[]];
     });
 
-    const router = documentRoutes();
-    const { route } = router.stack.find(({ route }) => route?.path === path && route.methods.post);
-    const handler = route.stack.at(-1).handle;
-    const res = {
-      status(code) { this.statusCode = code; return this; },
-      json(result) { this.body = result; return this; },
-    };
-    await handler({
-      body: { ...body, appointment_id: 8 },
-      user: { user_id: 21 },
-      ip: '127.0.0.1',
-    }, res);
-
-    assert.equal(res.statusCode, 201, JSON.stringify(res.body));
-    assert.equal(res.body[idField], 53);
-    assert.equal(res.body.pdfAvailable, false);
-    assert.deepEqual(actions, ['commit', 'release', 'PDF query']);
+    let result;
+    if (service) {
+      const { issued, failure } = await issuePrescription({
+        doctorUserId: 21, appointment_id: 8, emr_id: body.emr_id, patient_user_id: body.patient_user_id,
+        expires_at, notes: '', formularyItems: [], outsideItems: [{ ...body.items[0], instructions: '' }],
+        itemCount: 1, ipAddress: '127.0.0.1', onInventoryUpdated: () => actions.push('inventory update'),
+      });
+      assert.ifError(failure);
+      result = issued;
+    } else {
+      const router = documentRoutes();
+      const { route } = router.stack.find(({ route }) => route?.path === path && route.methods.post);
+      const res = {
+        status(code) { this.statusCode = code; return this; },
+        json(data) { this.body = data; return this; },
+      };
+      await route.stack.at(-1).handle({
+        body: { ...body, appointment_id: 8 },
+        user: { user_id: 21 },
+        ip: '127.0.0.1',
+      }, res);
+      assert.equal(res.statusCode, 201, JSON.stringify(res.body));
+      result = res.body;
+    }
+    assert.equal(result[idField], 53);
+    assert.equal(result.pdfAvailable, false);
+    assert.deepEqual(actions, service ? ['commit', 'release', 'inventory update', 'PDF query'] : ['commit', 'release', 'PDF query']);
     assert.equal(pdfQuery.mock.callCount(), 1);
     assert.ok(pdfQuery.mock.calls[0].arguments[0].includes(`FROM ${pdfTable}`));
   });
@@ -131,4 +143,33 @@ test('encounter text preserves blank optional fields and requires actual complai
   });
   assert.throws(() => readEncounterText({ chief_complaint: ' ', diagnosis: 'Fixture diagnosis' }), /required/);
   assert.throws(() => readEncounterText({ chief_complaint: 'Complaint', diagnosis: 1 }), /must be text/);
+});
+
+test('the stock workflow locks FEFO lots and links each deduction to its prescription item', async () => {
+  const changes = [];
+  const links = [];
+  const connection = {
+    async query(sql, params) {
+      if (sql.includes('FROM MEDICINES')) return [[{ name: 'Fixture', generic_name: 'Fixture', is_active: 1 }]];
+      if (sql.includes('FROM MEDICINE_BATCHES')) {
+        assert.match(sql, /ORDER BY expiry_date ASC, batch_id ASC\s+FOR UPDATE/);
+        return [[
+          { batch_id: 11, batch_no: 'A', quantity_on_hand: 3 },
+          { batch_id: 12, batch_no: 'B', quantity_on_hand: 5 },
+        ]];
+      }
+      if (sql.startsWith('UPDATE MEDICINE_BATCHES')) changes.push(params);
+      else if (sql.startsWith('INSERT INTO INVENTORY_LOGS')) links.push(params.slice(0, 3));
+      else if (!sql.includes('AUDIT_LOGS')) assert.fail('Unexpected stock query');
+      return [[]];
+    },
+  };
+  const plannedDeductions = await planStock(connection, { 1: 4 });
+  const formularyDispenseLines = [
+    { medicine_id: 1, prescription_item_id: 21, quantity_to_link: 2 },
+    { medicine_id: 1, prescription_item_id: 22, quantity_to_link: 2 },
+  ];
+  await applyStockDeductions(connection, { plannedDeductions, formularyDispenseLines, prescriptionId: 7, doctorUserId: 2 });
+  assert.deepEqual(changes, [[0, 11], [4, 12]]);
+  assert.deepEqual(links, [[11, 21, -2], [11, 22, -1], [12, 22, -1]]);
 });

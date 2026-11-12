@@ -5,7 +5,10 @@
 
 ## Boot pipeline (src/index.js)
 
-CORS allow-list → security headers (HSTS, nosniff, X-Frame-Options DENY, XSS, Referrer-Policy) → `express.json()` → routes → `https.createServer` from `../certs/{cert,key}.pem` (**process exits if certs are missing**, unless `ALLOW_INSECURE_HTTP=true`) → Socket.IO `io` (exported) → load the persisted [server policy](../src/config/SERVER-POLICY.md) → ensure `QUEUE_TICKET_COUNTERS` → `listen(PORT=5000)` → async boot: `initRedis` → `ensureBucketExists` (MinIO bucket `valetudo-attachments`) → `runAutoMigrations` → `logActiveLimits` → `startReminderScheduler(io)`.
+- `src/app.js` builds Express middleware in order: CORS allow-list, JSON parsing, security headers. Its `mountApiRoutes(app, io)` function attaches the API.
+- `src/server.js` attaches Express to the HTTP(S) transport. TLS uses `server/certs/{cert,key}.pem` and exits on missing certs unless `ALLOW_INSECURE_HTTP=true`.
+- `src/realtime/socket.js` attaches Socket.IO to the same server. HTTP and realtime share the origin check. `index.js` exports `io` and mounts API routes before listening.
+- `src/bootstrap/startup.js` runs [versioned migrations](../MIGRATION-PLAN.md), then loads the persisted [server policy](../src/config/SERVER-POLICY.md) before listening. After listening it initializes Redis and MinIO, logs limits, and starts the reminder scheduler.
 
 ## Route map — src/routes/ (all mounted under /api in index.js)
 
@@ -15,11 +18,11 @@ CORS allow-list → security headers (HSTS, nosniff, X-Frame-Options DENY, XSS, 
 | `profile.js` | `/api/profile` | user & health profiles |
 | `healthPass.js` | `/api/health-pass` | medical clearances & QR health passes |
 | `appointments/index.js` | `/api/appointments` | booking, queue, intake, consultations and patient history. Emits `appointment:*` and `queue:updated`. |
-| `emergency.js` | `/api/emergency` | SOS lifecycle; audience = Qualified Responder flag OR legacy role (`EMERGENCY_RESPONDER`/`NURSE`/`DOCTOR`/`ADMIN`), resolved live per user. Emits `emergency:*` tiered per recipient to `user:<id>` rooms; community responders get a reduced payload (no medical details) but ALL tiers may acknowledge/dispatch/resolve/false-alarm (closing is an atomic conditional UPDATE — second closer gets 409 `ALERT_ALREADY_CLOSED`, so exactly one `status_change` event). The incident-documentation popup is triggered only for the specific desktop window that resolved an alert via `emergency:incident_report_required`; `POST` emits `emergency:incident_reported` so other consoles dismiss; automatically generates and stores official incident report PDFs in MinIO S3 (`/incident-reports/incident-<id>-<hex>.pdf`); serves archived incident records via `GET /incident-reports` and `GET /incident-reports/:id/pdf` |
-| `inventory.js` | `/api/inventory` | medicines, batches, inventory logs |
+| `emergency/index.js` | `/api/emergency` | SOS lifecycle; audience = Qualified Responder flag OR legacy role (`EMERGENCY_RESPONDER`/`NURSE`/`DOCTOR`/`ADMIN`), resolved live per user. Emits `emergency:*` tiered per recipient to `user:<id>` rooms; community responders get a reduced payload (no medical details) but ALL tiers may acknowledge/dispatch/resolve/false-alarm (closing is an atomic conditional UPDATE — second closer gets 409 `ALERT_ALREADY_CLOSED`, so exactly one `status_change` event). The incident-documentation popup is triggered only for the specific desktop window that resolved an alert via `emergency:incident_report_required`; `POST` emits `emergency:incident_reported` so other consoles dismiss; automatically generates and stores official incident report PDFs in MinIO S3 (`/incident-reports/incident-<id>-<hex>.pdf`); serves archived incident records via `GET /incident-reports` and `GET /incident-reports/:id/pdf` |
+| `inventory/index.js` | `/api/inventory` | medicines, batches, inventory logs |
 | `documents/index.js` | `/api/documents` | EMR docs, PDFs, attachments, signed one-time download tokens and public `GET /verify/:qrToken`. |
 | `admin/index.js` | `/api/admin` | accounts and health profiles, audited soft archive, granular permissions, qualified responder management, audit, telemetry, database studio and server policy. |
-| `analytics.js` | `/api/analytics` | dashboard aggregates |
+| `analytics/index.js` | `/api/analytics` | dashboard aggregates |
 | `sync.js` | `/api/sync` | offline-client sync ingestion |
 | `interactions.js` | `/api/interactions` | drug-interaction warnings |
 | `signature.js` | `/api/signature` | signature enrollment / verification |
@@ -28,7 +31,7 @@ Not in `routes/`: auth endpoints are wired directly in `index.js` — `POST /api
 
 Routers that emit realtime events receive `io` as a factory argument: `appointmentRoutes(io)` pattern — keep it.
 
-The [feature route map](../src/routes/AGENTS.md) lists the files registered by the three folder entry points.
+The [feature route map](../src/routes/AGENTS.md) lists the feature modules and their entry points.
 
 `appointment:booked` is an authenticated global refresh signal with an empty object payload. Clients retrieve appointment details through authorized REST endpoints.
 

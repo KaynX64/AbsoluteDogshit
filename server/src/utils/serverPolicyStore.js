@@ -1,4 +1,4 @@
-import { pool } from '../db.js';
+import { pool } from '../db/pool.js';
 import { activateServerPolicy, makeServerPolicy, validatePolicyOverrides } from '../config/serverPolicy.js';
 import { logAudit } from './auditLogger.js';
 
@@ -13,22 +13,7 @@ export async function readServerPolicy(connection, lock = '', allowMissing = fal
 }
 
 export async function loadServerPolicy() {
-  let saved;
-  try {
-    saved = await readServerPolicy(pool, '', true);
-  } catch (error) {
-    if (error.code !== 'ER_NO_SUCH_TABLE') throw error;
-    await pool.query(`CREATE TABLE IF NOT EXISTS SERVER_POLICY (
-      policy_id TINYINT UNSIGNED NOT NULL PRIMARY KEY CHECK (policy_id = 1),
-      revision INT UNSIGNED NOT NULL DEFAULT 0,
-      overrides JSON NOT NULL
-    ) ENGINE=InnoDB`);
-  }
-  if (!saved) {
-    await pool.query('INSERT IGNORE INTO SERVER_POLICY (policy_id, overrides) VALUES (1, JSON_OBJECT())');
-    saved = await readServerPolicy(pool);
-  }
-  activateServerPolicy(saved);
+  activateServerPolicy(await readServerPolicy(pool));
 }
 
 export async function saveServerPolicy(version, overrides, userId, ipAddress) {
