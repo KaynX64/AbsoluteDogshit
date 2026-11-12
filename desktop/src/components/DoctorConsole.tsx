@@ -273,7 +273,7 @@ export default function DoctorConsole({
 
   /* ── Issuance tab state ────────────────────────────────────── */
   const [docType, setDocType] = useState<'rx' | 'clearance'>('rx');
-  const [workspacePanel, setWorkspacePanel] = useState<'encounter' | 'documents' | 'dental'>('encounter');
+  const [workspacePanel, setWorkspacePanel] = useState<'encounter' | 'documents' | 'dental'>('documents');
   const [queueExpanded, setQueueExpanded] = useState(false);
   const queueToggle = useRef<HTMLButtonElement>(null);
   const patientHeading = useRef<HTMLHeadingElement>(null);
@@ -467,7 +467,7 @@ export default function DoctorConsole({
 
   const selectPatient = (app: AppointmentItem) => {
     selectedAppointmentId.current = app.appointment_id;
-    setWorkspacePanel('encounter');
+    setWorkspacePanel('documents');
     setSelectedApp(app);
     setClearanceConfirmation(false);
     setClearancePurpose('');
@@ -1922,8 +1922,8 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
               <div ref={workspaceStart} aria-hidden="true" />
               <div className="doctor-workspace-switch" role="group" aria-label="Patient workspace">
                 {([
-                  ['encounter', 'medical_services', 'Encounter'],
                   ['documents', 'description', 'Documents'],
+                  ['encounter', 'medical_services', 'Encounter'],
                   ['dental', 'dentistry', 'Dental chart'],
                 ] as const).filter(([panel]) => panel !== 'dental' || canViewDentalChart).map(([panel, icon, label]) => (
                   <button key={panel} type="button" aria-pressed={activeWorkspacePanel === panel}

@@ -188,6 +188,19 @@
   min-width: 68px;
 }
 
+.inventory-table .inventory-low-stock-table {
+  table-layout: fixed;
+}
+
+.inventory-table .inventory-low-stock-table :is(th, td) {
+  padding: 8px;
+}
+
+.inventory-table .inventory-low-stock-table th {
+  min-width: 0;
+  white-space: normal;
+}
+
 .inventory-formulary-table {
   width: 100%;
   min-width: 680px;

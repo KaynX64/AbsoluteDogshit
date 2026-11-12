@@ -19,13 +19,13 @@ Desktop component slice map · [index](../../CODESLICE.md) · base commit `93b41
 | 5 | 172-193 | UPPER_TEETH | UPPER_TEETH/LOWER_TEETH arrays; recognition of legacy sample text; stripLegacyOdontogram helpers |
 | 6 | 195-220 | export default function DoctorConsole | component entry; showSignature/signatureStatus state; isDentist via prop or JWT roles fallback |
 | 7 | 221-272 | dentalChartData | state: appointments, selectedApp; encounter form; attachments; dentalChartData; vitals fields |
-| 8 | 273-327 | checkSignatureStatus | workspace state, manual selection focus and useEffect GET /api/signature/me/status sets signatureStatus enrolled/missing/error |
+| 8 | 273-327 | checkSignatureStatus | workspace state defaults to Documents, manual selection focus and useEffect GET /api/signature/me/status sets signatureStatus enrolled/missing/error |
 | 9 | 328-367 | showHistoryModal | modal state: EMR, Rx and clearance history, archive directory search, immunization records |
 | 10 | 368-408 | fetchAppointments | fetchAppointments GET /api/appointments/today?filter=active,scheduled,history; dedupe; selectPatient |
 | 11 | 410-435 | appointment:booked | shared desktop socket subscription; on appointment:booked, appointment:status_changed, queue:updated, cancelled |
 | 12 | 437-453 | offline-sync-conflict | useEffect listens for offline-sync-conflict window event; sets error feedbackMsg |
 | 13 | 455-466 | resetForm | resetForm clears encounter fields, dental chart, attachments, feedback |
-| 14 | 468-530 | selectPatient | selectPatient hydrates the encounter and reads nurse vitals from the first triage note line |
+| 14 | 468-530 | selectPatient | selectPatient opens Documents and hydrates encounter fields plus nurse vitals from the first triage note line |
 | 15 | 532-553 | fetchActivePatientAttachments | fetchActivePatientAttachments requests the attachment-only view and guards patient changes |
 | 16 | 555-596 | handleOpenAttachment | handleOpenAttachment GET /api/documents/attachments/:id/download; blob preview modal; close revokes URL |
 | 17 | 598-612 | handleToothConditionChange | handleToothConditionChange sets condition on selectedTooth in dentalChartData |

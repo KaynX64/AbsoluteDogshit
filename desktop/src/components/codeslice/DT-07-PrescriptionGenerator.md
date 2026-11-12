@@ -30,7 +30,7 @@ Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172`
 | 17 | 497-541 | Verified Patient Demographic | patient safety bar: name, student_no, DOB/age, sex, red allergy warning from verifiedPatient |
 | 18 | 543-606 | Infirmary formulary | mode pills (Infirmary formulary / Outside pharmacy); FormularySelect field or outside-name input + hint |
 | 19 | 609-667 | doctor-formulary-details | read-only dosage strength, dosage type and generic active ingredient, editable outside dosage, and quantity with live stock feedback |
-| 20 | 669-708 | Prescription validity | frequency, duration, prescription-validity select grid |
+| 20 | 669-708 | Prescription validity | frequency, intake method, duration, prescription-validity select grid |
 | 21 | 710-729 | Instructions (sig) | instructions (sig) textarea; physician dietary/clinical notes input |
 | 22 | 731-752 | Checking for drug interactions | interaction feedback: checking spinner; InteractionWarning banner with onDismiss (formulary only) |
 | 23 | 754-796 | Issue, deduct inventory | submit button: disabled when saving/archived/blocked/out-of-stock/over-stock; dynamic label variants |

@@ -3,7 +3,7 @@
 Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172` · check from repo root: `python3 scripts/verify_codeslice.py desktop/src/components/codeslice .`
 
 ## DT-10 · desktop/src/components/CreateUserModal.tsx
-**LOC:** 726 · **Anchor commit:** 4a14140 · **Role:** Admin create-user modal: role-specific fields, super/limited admin archetypes, permission codes, qualified-responder flag
+**LOC:** 731 · **Anchor commit:** 4a14140 · **Role:** Admin create-user modal: role-specific fields, super/limited admin archetypes, permission codes, qualified-responder flag
 **Mounted by:** AdminConsole (users tab)
 **API surface:** GET /api/admin/permissions (L126), POST /api/admin/users (L194), PUT /api/admin/users/:id/qualified-responder (L230)
 **Socket events:** none
@@ -23,12 +23,12 @@ Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172`
 | 10 | 261-272 | sectionLabel | style helpers fieldLabel/sectionLabel; showStaffFields role list |
 | 11 | 274-298 | modal-backdrop | modal shell: header Create user account, close button, form open |
 | 12 | 299-325 | Identity & contact | identity grid: first/last name, institutional email, phone |
-| 13 | 327-366 | showPassword | temp password field: show/hide toggle, regenerate button, secure-channel hint |
-| 14 | 368-405 | Assigned RBAC role | role select (ADMIN option disabled for non-super), account status Active/Suspended |
-| 15 | 407-428 | Role-specific details | STUDENT block: student number, course, year level |
-| 16 | 430-468 | Faculty number | FACULTY + NON_TEACHING blocks: id numbers, department, position |
-| 17 | 470-508 | showStaffFields | clinical staff fields (PRC ID, specialty, dept) + ADMIN fields (adminNo, scope, dept) |
-| 18 | 510-556 | Emergency response | Qualified Responder card: checkbox + note (150 chars), shown when callerCanQr |
-| 19 | 558-689 | Admin archetype | super/limited archetype buttons; select-all; perm checkboxes locked beyond caller codes |
-| 20 | 691-701 | feedback.text | success/error feedback banner |
-| 21 | 703-726 | Create account | footer: Cancel / Create account submit (disabled while isSaving) |
+| 13 | 327-371 | showPassword | temp password field: inline SVG eye/eye-off toggle, regenerate button, secure-channel hint |
+| 14 | 373-410 | Assigned RBAC role | role select (ADMIN option disabled for non-super), account status Active/Suspended |
+| 15 | 412-433 | Role-specific details | STUDENT block: student number, course, year level |
+| 16 | 435-473 | Faculty number | FACULTY + NON_TEACHING blocks: id numbers, department, position |
+| 17 | 475-513 | showStaffFields | clinical staff fields (PRC ID, specialty, dept) + ADMIN fields (adminNo, scope, dept) |
+| 18 | 515-561 | Emergency response | Qualified Responder card: checkbox + note (150 chars), shown when callerCanQr |
+| 19 | 563-694 | Admin archetype | super/limited archetype buttons; select-all; perm checkboxes locked beyond caller codes |
+| 20 | 696-706 | feedback.text | success/error feedback banner |
+| 21 | 708-731 | Create account | footer: Cancel / Create account submit (disabled while isSaving) |

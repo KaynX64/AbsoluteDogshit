@@ -413,7 +413,7 @@ export default function PrescriptionGenerator({
       { label: 'Generic active ingredient', value: genericIngredient },
     ] : []),
     { label: 'Frequency', value: item.frequency, input: 'rx-frequency', error: item.frequency ? undefined : 'Enter a frequency.' },
-    { label: 'Route', value: item.route, input: 'rx-route', error: item.route ? undefined : 'Enter an administration route.' },
+    { label: 'Intake Method', value: item.route, input: 'rx-route', error: item.route ? undefined : 'Enter an intake method.' },
     { label: 'Duration (days)', value: rxDurationDays, input: 'rx-duration', error: wholeNumber(rxDurationDays, 2147483647) ? undefined : 'Enter a positive whole number.' },
     { label: 'Quantity', value: rxQuantity, input: 'rx-quantity', error: wholeNumber(rxQuantity, 2147483647) ? undefined : 'Enter a positive whole number.' },
     { label: 'Expiry date', value: expiresAt, input: 'rx-validity', error: validExpiry ? undefined : 'Enter a validity period from 1 to 180 days.' },
@@ -496,7 +496,7 @@ export default function PrescriptionGenerator({
   const isBlocked = rxMode === 'formulary' && (interactionResult?.blocking ?? false);
   const isOutsideNameMissing = rxMode === 'outside' && !outsideName.trim();
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div className="doctor-prescription-generator" style={{ display: 'flex', flexDirection: 'column' }}>
       {/* ── Verified Patient Demographic / Clinical Safety Bar ── */}
       {verifiedPatient && (
         <div
@@ -676,7 +676,7 @@ export default function PrescriptionGenerator({
             onChange={(e) => setRxFrequency(e.target.value)}
           />
         </Field>
-        <Field label="Route" inputId="rx-route">
+        <Field label="Intake Method" inputId="rx-route">
           <input id="rx-route" maxLength={50} style={inputStyle} disabled={isArchived}
             value={rxRoute} onChange={(event) => setRxRoute(event.target.value)} />
         </Field>

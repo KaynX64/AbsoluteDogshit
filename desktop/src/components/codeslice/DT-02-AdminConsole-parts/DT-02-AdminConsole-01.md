@@ -20,7 +20,7 @@ db studio: dbTablesList, selectedDbTable, tableSchema, tableRows, tablePage/Tota
 | 1 | 1-12 | — | imports: React, createPortal, AnalyticsDashboard, IncidentRecords, CreateUserModal, theme, api config, Icon |
 | 2 | 13-28 | inline, no dependency | inline SVG icon set I (Users, Shield, Activity, Database, Search, Refresh, Pencil, Trash, Lock, Check) |
 | 3 | 30-52 | modeBtnStyle | advanced-editor styles: advLabel, advTextarea, modeBtnStyle segmented Basic/Advanced toggle |
-| 4 | 54-84 | NoPermissionPanel | NoPermissionPanel: notice for LIMITED admins missing a permission code (super never sees it) |
+| 4 | 54-87 | NoPermissionPanel | NoPermissionPanel: shared restricted-archetype banner for missing permissions, with optional section-specific description |
 | 5 | 86-106 | AdminTab | AdminTab type includes serverPolicy. Controlled and internal tab state plus change callback. |
 | 6 | 107-171 | showCreateUserModal | state: active and archived users, logs, editingUser; myPerms+permCatalog; editMode/editHealth/editQrOriginal; DB studio state |
 | 7 | 172-186 | userRoleFilter | state: retentionInfo, sweeping, telemetry; user/phi/mutation filter and sort variables |

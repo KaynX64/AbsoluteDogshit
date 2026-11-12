@@ -4,7 +4,7 @@
 | 24 | 781-830 | fetchDbTables | fetchDbTables GET db/tables; fetchTableData GET db/tables/:table (page,limit,search); 300ms debounce effect |
 | 25 | 831-871 | handleSaveDbRow | handleSaveDbRow: POST (insert) / PUT (update) db/tables/:table/rows with primaryKey + updates |
 | 26 | 872-898 | handleDeleteDbRow | handleDeleteDbRow: DELETE db/tables/:table/rows with confirm; refetch current page |
-| 27 | 899-1034 | activeUsersCount | Page header, ServerPolicyPanel mount, and Active/Archived account tabs. |
+| 27 | 899-1040 | activeUsersCount | Page header, Super Admin-gated ServerPolicyPanel mount, and Active/Archived account tabs. |
 | 28 | 1035-1116 | Add account | USERS tab gate USERS_MANAGE; search input, account counters, Add account button (opens CreateUserModal) |
 | 29 | 1117-1155 | userSortKey | role filter chips, status chips, Qualified responders QR-only chip, userSortKey select |
 | 30 | 1156-1403 | processedUsers.map | Active users table: QR + SUPER/LIMITED pills, status, Edit/View and permission-gated Archive actions; archived-account table with loading/error/empty states |
