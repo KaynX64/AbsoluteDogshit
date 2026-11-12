@@ -7,7 +7,7 @@ process.env.ENCRYPTION_KEY = 'fixture-encryption-key'.repeat(3);
 process.env.ENCRYPTION_SALT = 'fixture-encryption-salt';
 
 const { pool } = await import('../src/db.js');
-const { default: documentRoutes } = await import('../src/routes/documents.js');
+const { default: documentRoutes } = await import('../src/routes/documents/index.js');
 const { encrypt } = await import('../src/utils/cryptoVault.js');
 const { readEncounterText } = await import('../src/utils/encounterText.js');
 const expires_at = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);

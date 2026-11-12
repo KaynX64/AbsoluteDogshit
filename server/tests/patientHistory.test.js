@@ -15,7 +15,7 @@ const { encrypt } = await import('../src/utils/cryptoVault.js');
 const serviceAccount = fileURLToPath(new URL('../serviceAccountKey.json', import.meta.url));
 const existsSync = fs.existsSync;
 const fsMock = mock.method(fs, 'existsSync', (path) => path !== serviceAccount && existsSync(path));
-const { default: appointmentRoutes } = await import('../src/routes/appointments.js');
+const { default: appointmentRoutes } = await import('../src/routes/appointments/index.js');
 fsMock.mock.restore();
 const { route } = appointmentRoutes().stack.find(({ route }) => route?.path === '/patient/:patientId/history');
 const handler = route.stack.at(-1).handle;

@@ -35,7 +35,7 @@ function loginRateLimitKey(ip) {
 // ── SEC-05 Remediation: in-memory fallback counter ──────────────────────
 // Redis is the primary (distributed) counter. When the cache layer is
 // unavailable or fails mid-request, this process-local Map takes over —
-// mirroring the verifyRateLimit pattern in routes/documents.js — so the
+// mirroring the verifyRateLimit pattern in routes/documents/verification.js — so the
 // login guard NEVER fails open. (Previously `if (!isRedisActive()) return
 // next();` allowed unlimited credential stuffing during Redis outages.)
 const loginMemoryHits = new Map();

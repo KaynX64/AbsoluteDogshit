@@ -1,12 +1,11 @@
 # server/src/routes/
-One file per `/api/<name>` area. Exports: `appointments emergency inventory documents` → factory `(io)`; rest → `Router`.
+Each API area exports a router or a factory. The appointments, documents, and admin folders compose their feature modules in `index.js`. These three areas, emergency, and inventory use factories that receive `io`.
 
 | File | Area | Size |
 |---|---|---|
-| documents.js | EMR docs, attachments, PDFs, QR verify, S3 | ~1.8k lines |
-| appointments.js | booking, queue, no-show, rules | ~1.6k |
-| admin.js | users, roles, admin permissions | ~1.3k |
-| serverPolicy.js | Super Admin policy read, impact preview and versioned save under `/api/admin/server-policy` | |
+| documents/index.js | EMR documents, attachments, PDFs, QR verification | |
+| appointments/index.js | booking, queue, intake, consultations and patient history | |
+| admin/index.js | users, roles, admin permissions, audit, database studio and server policy | |
 | inventory.js | medicines, batches, logs | |
 | emergency.js | SOS alerts, responders (Socket.IO + FCM); incident reports (~700 lines — status PATCH L314, pending L444, report GET/POST L492/L575) | |
 | analytics.js | stats/export (uses `utils/analyticsStats.js`) | |
@@ -17,9 +16,17 @@ One file per `/api/<name>` area. Exports: `appointments emergency inventory docu
 | interactions.js | drug-interaction check | |
 | signature.js | e-signature enroll/use | |
 
-## Workflow
-- Locate: `grep -n "router\.\(get\|post\|put\|patch\|delete\)" routes/<file>.js` → read only that handler.
-- Don't open `documents.js` / `appointments.js` / `admin.js` whole.
+## Feature modules
+
+| Area | Modules |
+|---|---|
+| Appointments | `booking.js` for clinicians, slots, personal bookings and cancellation. `dailyQueue.js` for daily lists and queue status. `intake.js` for lookup, check-in, walk-ins and active tickets. `consultations.js` for status and finalization. `patientHistory.js` for history and patient search. |
+| Documents | `prescriptions.js` and `clearances.js` for issuance, history and lifecycle. `verification.js` for public and authorized QR reads. `attachments.js` for upload and token-based download. `pdfs.js` for protected prescription, clearance and incident report PDFs. |
+| Admin | `userDirectory.js`, `userUpdates.js` and `accountCredentials.js` for account operations. `permissions.js` and `responders.js` for grants and responder eligibility. `audit.js` for access logs and telemetry. `databaseStudio.js` for database tools. `serverPolicy.js` for Super Admin policy read, preview and versioned save. |
+
+Use `rg -n '<route path>' server/src/routes/<area>` to locate a handler. Feature registrars attach to the same router in the order set by `index.js`. Admin applies authentication and the ADMIN role gate before registering its routes. The server-policy router applies its own Super Admin gate.
+
+The admin directory lists archived accounts with `GET /users?archived=true`. Its audited soft archive retains clinical and audit history and blocks self-archive and archiving the last active Super Admin. The advanced health-profile editor reads `GET /users/:id/health-profile` and saves through `PUT /users/:id`. The qualified responder endpoint requires `RESPONDERS_MANAGE`, requires a Super Admin for ADMIN targets, and emits `responder:status_changed`.
 
 ## Handler checklist
 1. Auth (`authenticateToken` — check file top for `router.use` vs per-route) + `requireRoles(...)`.

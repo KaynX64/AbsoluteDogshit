@@ -30,4 +30,4 @@ CORS allow-list only · TLS mandatory · timing-equalized login · jti denylist 
 
 ## Efficiency
 
-Never read `package-lock.json`. `routes/documents.js` (~64 KB), `appointments.js` (~60 KB) and `admin.js` (~67 KB) are large — `rg` the endpoint, then read a narrow window.
+Never read `package-lock.json`. Use the [feature route map](../src/routes/AGENTS.md) for appointments, documents, and admin. Search the relevant folder with `rg`, then read the endpoint's handler.

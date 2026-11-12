@@ -65,7 +65,7 @@ test('booking releases before confirmation lookup and broadcasts only an empty r
   const serviceAccount = fileURLToPath(new URL('../serviceAccountKey.json', import.meta.url));
   const existsSync = fs.existsSync;
   t.mock.method(fs, 'existsSync', (path) => path !== serviceAccount && existsSync(path));
-  const { default: appointmentRoutes } = await import('../src/routes/appointments.js');
+  const { default: appointmentRoutes } = await import('../src/routes/appointments/index.js');
 
   const actions = [];
   const connection = {
