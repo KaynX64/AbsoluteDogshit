@@ -1205,7 +1205,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
         </header>
       )}
 
-      {(signatureStatus === 'missing' || signatureStatus === 'error') && (
+      {viewMode !== 'analytics' && (signatureStatus === 'missing' || signatureStatus === 'error') && (
         <div
           role="alert"
           style={{

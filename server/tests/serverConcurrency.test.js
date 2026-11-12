@@ -371,6 +371,38 @@ test('paged offline bootstrap drains both streams and defers changes at the wate
   assert.equal(Object.hasOwn(legacy, 'nextCursor'), false);
 });
 
+test('analytics timelines share the database calendar and empty summaries report real values', { skip }, async t => {
+  const db = await fixture(t, 1);
+  const [[clock]] = await db.query("SELECT UNIX_TIMESTAMP('2026-11-13 00:00:01') AS epoch");
+  await db.query('SET timestamp = ?', [clock.epoch]);
+  const { request } = await mountedApi(t);
+  const empty = await (await request('/analytics/summary')).json();
+  assert.deepEqual(empty.deptBreakdown, []);
+  assert.deepEqual(empty.topDiagnoses, []);
+  assert.equal(empty.emergencyMetrics.timedClosures, 0);
+  await db.query(`INSERT INTO EMR_RECORDS
+    (patient_user_id, doctor_user_id, chief_complaint, diagnosis, encounter_date, deleted_at)
+    VALUES (5, 2, '', '', '2026-11-12 23:59:59', NULL),
+           (5, 2, '', '', '2026-11-13 00:00:00', NULL),
+           (5, 2, '', '', '2026-11-13 00:00:01', NOW()),
+           (5, 2, '', '', '2026-11-14 00:00:00', NULL)`);
+  await db.query(`INSERT INTO EMERGENCY_ALERTS (user_id, location, created_at, status)
+    VALUES (5, ST_GeomFromText('POINT(0 0)', 4326), '2026-11-13 00:00:00', 'triggered')`);
+  const result = await request('/analytics/summary');
+  assert.equal(result.status, 200);
+  const data = await result.json();
+  assert.equal(data.emergencyMetrics.timedClosures, 0);
+  assert.equal(data.timeSeries.length, 14);
+  assert.deepEqual(data.timeSeries.map(day => day.date), data.emergencyTimeSeries.map(day => day.date));
+  assert.deepEqual(data.timeSeries.slice(-2).map(({ date, count, partial }) => [date, count, partial]),
+    [['2026-11-12', 1, false], ['2026-11-13', 1, true]]);
+  assert.deepEqual(data.emergencyTimeSeries.slice(-2).map(day => day.count), [0, 1]);
+  await db.query("UPDATE EMERGENCY_ALERTS SET status = 'resolved', response_time_seconds = 0");
+  const updated = await (await request('/analytics/summary')).json();
+  assert.equal(updated.emergencyMetrics.timedClosures, 1);
+  assert.equal(Number(updated.emergencyMetrics.avgResponseSeconds), 0);
+});
+
 test('analytics exports and dashboard use the shared department totals', { skip }, async t => {
   const db = await fixture(t);
   await db.query(`INSERT INTO APPOINTMENTS (patient_user_id, doctor_user_id, date_time, appointment_type, status)

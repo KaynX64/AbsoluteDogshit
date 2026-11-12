@@ -29,6 +29,8 @@ Each API area exports a router or a factory. Feature folders compose their route
 | Analytics | `dashboard.js` and `exports.js` share `src/analytics/reportQueries.js`. The dashboard reads formulary activity and reorder priorities from `src/inventory/pharmacyAnalytics.js`. CSV, Excel, and PDF rendering lives in `src/analytics/reports/`. The entry point applies the shared analytics access gate. |
 | Inventory | `overview.js` for catalog, stock views and logs. Reorder suggestions sort by usable stock, lowest first, and use recent net dispensing and prescribing to break stock ties. `receiving.js` handles deliveries, `formulary.js` catalog writes, and `stock.js` deductions and adjustments. |
 
+Analytics summary reports fourteen MySQL calendar days for both encounter and SOS timelines. The current day is partial. `emergencyMetrics.timedClosures` distinguishes a measured zero-second closure from an empty sample. Empty diagnosis and department datasets are returned as empty arrays.
+
 Use `rg -n '<route path>' server/src/routes/<area>` to locate a handler. Feature registrars attach to the same router in the order set by `index.js`. Admin applies authentication and the ADMIN role gate before registering its routes. The server-policy router applies its own Super Admin gate.
 
 The admin directory lists archived accounts with `GET /users?archived=true`. Its audited soft archive retains clinical and audit history and blocks self-archive and archiving the last active Super Admin. The advanced health-profile editor reads `GET /users/:id/health-profile` and saves through `PUT /users/:id`. The qualified responder endpoint requires `RESPONDERS_MANAGE`, requires a Super Admin for ADMIN targets, and emits `responder:status_changed`.

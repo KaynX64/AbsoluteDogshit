@@ -931,7 +931,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
   return (
     <div style={{ width: '100%' }}>
       {/* ── Header ────────────────────────────────────────────── */}
-      <div className="vd-page-head">
+      {(activeTab !== 'analytics' || !can('ANALYTICS_VIEW')) && <div className="vd-page-head">
         <div className="vd-page-head-eyebrow">Administration</div>
         <h1 className="vd-page-head-title">
           {activeTab === 'users' && 'Users & roles'}
@@ -953,7 +953,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           {activeTab === 'db' && 'Inspect and maintain system records · valetudo_healthlink'}
           {activeTab === 'serverPolicy' && 'Review and update rate limits, no-show grace, and appointment rules.'}
         </p>
-      </div>
+      </div>}
 
       {activeTab === 'serverPolicy' && (
         myPerms.is_super

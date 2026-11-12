@@ -5,10 +5,10 @@
 - Props: `patientUserId`, `appointmentId?`, `verifiedPatient {first_name,last_name,student_no,course,allergies,date_of_birth?,age?,sex?}`, `initialNotes?`, `isArchived?`, `onPrescriptionIssued?`, `onPrescriptionError?`.
 - The selected catalog entry supplies the read-only Dosage, Dosage Type, and Generic active ingredient from `strength`, `form`, and `generic_name`. Outside pharmacy prescriptions retain manual dosage. `handleSaveAndPrintPrescription` reviews the draft and posts to `/api/documents/prescriptions` after stock and interaction checks.
 
-### AnalyticsDashboard.tsx — 1,350 lines / 43 KB. Read-only dashboards + exports
-- **Slice map:** `codeslice/DT-06-AnalyticsDashboard.md` (30 slices, verified @ 93b4172).
-- `GET /api/analytics/summary` L594 (`fetchAnalytics` L590); exports: xlsx L610, PDF L630, excel L650, server-rendered PDF L670.
-- `SvgVerticalBarChart` L267 (`niceAxisStep` L258): adaptive top-diagnoses chart — renders EVERY distinct diagnosis the server returns (the dashboard endpoint no longer slices to a top-5). Slot-width tiers (92/28/22/16 px per bar), label tiers (horizontal → -45° → -90° with every-kth thinning above 90 bars), value pills only when bars ≥ 24 px, `<title>` tooltips always, nice integer y-axis (≤ 6 gridlines), and the card scrolls sideways once the canvas exceeds 900 px.
+### AnalyticsDashboard.tsx — read-only dashboard and exports
+- **Slice map:** `codeslice/DT-06-AnalyticsDashboard.md`.
+- Overview, Clinical Activity, Campus Health, and Pharmacy share one summary response. The dashboard preserves the last successful response during transient refresh failures. The diagnosis chart shows ten categories, with searchable and paginated access to all returned categories.
+- Excel and PDF use the server export endpoints. Print dashboard renders all sections from the current snapshot. Shared chart and table components, sections, and scoped styles live in `analytics/`.
 ### CreateUserModal.tsx — 726 lines. Create account (+ optional Qualified Responder label)
 - **Slice map:** `codeslice/DT-10-CreateUserModal.md` (21 slices, verified @ 93b4172).
 - Permission catalog L118, submit L164 → `POST /api/admin/users` L186 (returns `userId`). `togglePerm` L150.

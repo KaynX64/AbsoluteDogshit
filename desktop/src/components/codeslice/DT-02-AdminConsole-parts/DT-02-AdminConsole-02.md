@@ -4,7 +4,7 @@
 | 24 | 808-857 | fetchDbTables | fetchDbTables GET db/tables; fetchTableData GET db/tables/:table (page,limit,search); 300ms debounce effect |
 | 25 | 858-898 | handleSaveDbRow | handleSaveDbRow: POST (insert) / PUT (update) db/tables/:table/rows with primaryKey + updates |
 | 26 | 899-925 | handleDeleteDbRow | handleDeleteDbRow: DELETE db/tables/:table/rows with confirm; refetch current page |
-| 27 | 926-1067 | activeUsersCount | Page header, Super Admin-gated ServerPolicyPanel mount, and Active/Archived account tabs. |
+| 27 | 926-1067 | activeUsersCount | Page header, Super Admin-gated ServerPolicyPanel mount, and Active/Archived account tabs. The permitted Analytics view supplies its own heading. |
 | 28 | 1068-1143 | Add account | USERS tab gate USERS_MANAGE; search input, account counters, Add account button (opens CreateUserModal) |
 | 29 | 1144-1182 | userSortKey | role filter chips, status chips, Qualified responders QR-only chip, userSortKey select |
 | 30 | 1183-1430 | processedUsers.map | Active users table: QR + SUPER/LIMITED pills, status, Edit/View and permission-gated Archive actions; archived-account table with loading/error/empty states |

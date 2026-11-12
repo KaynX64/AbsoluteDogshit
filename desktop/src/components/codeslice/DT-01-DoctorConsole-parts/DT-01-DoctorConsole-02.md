@@ -6,7 +6,7 @@
 | 28 | 1082-1146 | handlePrintClearance | handlePrintClearance POST /api/documents/clearances; SIGNATURE_NOT_ENROLLED opens enrollment |
 | 29 | 1148-1179 | isArchivedMode | derived read-only flags, dental view eligibility and headings per view mode |
 | 30 | 1181-1206 | vd-page-head | responsive page header: title and signature button (setShowSignature) |
-| 31 | 1207-1241 | Save signature | signature warning banner when signatureStatus missing or error |
+| 31 | 1207-1241 | Save signature | signature warning banner on clinical views when signatureStatus is missing or error |
 | 32 | 1242-1248 | EmergencyAlertBanner | mounts EmergencyAlertBanner (SOS alerts; self-hides via 403 for non-responders) |
 | 33 | 1250-1270 | AnalyticsDashboard | analytics view mounts AnalyticsDashboard; archive tab patient search form |
 | 34 | 1271-1343 | Matched patients | responsive archive results panel with selected patient state and empty search feedback |
