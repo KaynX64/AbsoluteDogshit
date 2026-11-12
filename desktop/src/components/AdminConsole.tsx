@@ -54,7 +54,7 @@ const modeBtnStyle = (active: boolean): React.CSSProperties => ({
 
 /* ── No-permission notice — rendered only for LIMITED admin archetypes.
       Full/super admins never see this panel (unchanged legacy behaviour). ── */
-function NoPermissionPanel({ required }: { required: string }) {
+function NoPermissionPanel({ required, description }: { required?: string; description?: string }) {
   return (
     <div style={{
       background: T.surface,
@@ -76,9 +76,11 @@ function NoPermissionPanel({ required }: { required: string }) {
         fontSize: 13, color: T.textSub, margin: 0, lineHeight: 1.6,
         maxWidth: 460, marginInline: 'auto',
       }}>
-        This console section requires the <b>{required}</b> permission, which this
-        administrator account does not hold. Contact a Super Admin to adjust this
-        admin archetype's permissions.
+        {description ?? (
+          <>This console section requires the <b>{required}</b> permission, which this
+          administrator account does not hold.</>
+        )}{' '}
+        Contact a Super Admin to review this administrator account's access.
       </p>
     </div>
   );
@@ -926,7 +928,11 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
         </p>
       </div>
 
-      {activeTab === 'serverPolicy' && <ServerPolicyPanel />}
+      {activeTab === 'serverPolicy' && (
+        myPerms.is_super
+          ? <ServerPolicyPanel />
+          : <NoPermissionPanel description="Server Policy requires Super Admin access." />
+      )}
 
       {(activeTab === 'users' || activeTab === 'archived') && (
         <div

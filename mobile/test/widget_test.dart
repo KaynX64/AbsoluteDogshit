@@ -1,13 +1,14 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/main.dart';
 
 void main() {
   testWidgets('LeoVital app smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
     await tester.pumpWidget(const ValetudoMobileApp());
 
-    // Verify that the login UI renders
-    expect(find.text('LeoVital HealthLink'), findsOneWidget);
-    expect(find.text('Sign In'), findsOneWidget);
+    final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
+    expect(app.title, 'LeoVital HealthLink');
+    expect(find.text('valetudo.'), findsOneWidget);
+    expect(find.text('H E A L T H L I N K'), findsOneWidget);
   });
 }

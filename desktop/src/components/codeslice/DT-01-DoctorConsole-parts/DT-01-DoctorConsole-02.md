@@ -18,7 +18,7 @@
 | 40 | 1761-1795 | Nurse-recorded vitals | read-only vitals in the patient context and begin-consultation action |
 | 41 | 1796-1856 | doctor-roster | compact queue, narrow-window disclosure and focus on the selected patient |
 | 42 | 1865-1921 | Encounter and issuance feedback | shared status messages and PDF download action |
-| 43 | 1922-1947 | doctor-workspace-switch | workspace navigation keeps encounter, prescription and dental drafts across view changes |
+| 43 | 1922-1947 | doctor-workspace-switch | Documents-first workspace navigation; Encounter and Dental chart remain available and drafts persist across view changes |
 | 44 | 1948-2030 | Adult Dental Chart | separate dental chart view with adult chart heading and reset control |
 | 45 | 2031-2084 | Maxillary Arch | scrollable upper arch with teeth 1–16 and accessible selection |
 | 46 | 2085-2151 | Mandibular Arch | lower teeth 32-17 grid buttons; condition letter codes |

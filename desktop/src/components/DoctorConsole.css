@@ -768,6 +768,10 @@
   gap: 12px;
 }
 
+.doctor-console .doctor-prescription-generator {
+  gap: 14px;
+}
+
 .doctor-console .doctor-prescription-fields > * {
   min-width: 0;
 }
@@ -844,4 +848,50 @@
   margin-bottom: 16px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border-soft);
+}
+
+@media (max-height: 800px) {
+  .app-content:has(.doctor-clinic-layout) {
+    padding-block: 8px;
+  }
+
+  .doctor-console[data-clinic-workspace='true'] .doctor-header {
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+  }
+
+  .doctor-console .doctor-workspace-switch {
+    margin-bottom: 8px;
+  }
+
+  .doctor-console .doctor-document-panel {
+    padding: 14px;
+  }
+
+  .doctor-console .doctor-document-panel .doctor-panel-header {
+    gap: 8px;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+  }
+
+  .doctor-console .doctor-prescription-generator {
+    gap: 8px;
+  }
+
+  .doctor-console .doctor-prescription-generator :is(input, select, textarea, #rx-formulary) {
+    min-height: 36px;
+    padding-block: 8px !important;
+  }
+
+  .doctor-console .doctor-prescription-generator .doctor-prescription-fields {
+    gap: 8px;
+  }
+
+  .doctor-console .doctor-formulary-details > div {
+    padding: 6px 8px;
+  }
+
+  .doctor-console .doctor-prescription-generator > button {
+    padding-block: 8px !important;
+  }
 }
