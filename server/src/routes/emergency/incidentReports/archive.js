@@ -1,6 +1,6 @@
 import { pool } from '../../../db/pool.js';
 import { authenticateToken } from '../../../auth/middleware.js';
-import { requireRoles } from '../../../middleware/rbac.js';
+import { requireIncidentRecordsView } from '../../../emergency/incidentRecordAccess.js';
 import { logPhiAccess } from '../../../utils/phiLogger.js';
 import { generateAndStoreIncidentReportPDF } from '../../../documents/documentService.js';
 import { getBufferFromS3 } from '../../../utils/s3Vault.js';
@@ -9,9 +9,9 @@ import { roleLabelFor } from '../../../emergency/responderAccess.js';
 export function registerIncidentArchiveRoutes(router) {
   // ===========================================================================
   // 3d. GET /api/emergency/incident-reports
-  // Returns documented incident reports for resolved emergencies (ADMIN only).
+  // Returns documented incident reports for administrators with archive access.
   // ===========================================================================
-  router.get('/incident-reports', authenticateToken, requireRoles('ADMIN'), async (req, res) => {
+  router.get('/incident-reports', authenticateToken, requireIncidentRecordsView, async (req, res) => {
     try {
       const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
 
@@ -106,9 +106,9 @@ export function registerIncidentArchiveRoutes(router) {
 
   // ===========================================================================
   // 3e. GET /api/emergency/incident-reports/:reportId/pdf
-  // Serves the official incident report PDF from MinIO (ADMIN only). Generates on-demand if null.
+  // Serves the official incident report PDF to administrators with archive access.
   // ===========================================================================
-  router.get('/incident-reports/:reportId/pdf', authenticateToken, requireRoles('ADMIN'), async (req, res) => {
+  router.get('/incident-reports/:reportId/pdf', authenticateToken, requireIncidentRecordsView, async (req, res) => {
     const reportId = Number(req.params.reportId);
     if (!reportId) return res.status(400).json({ error: 'Invalid report id.' });
 

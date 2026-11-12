@@ -153,9 +153,10 @@ interface SidebarProps {
   activeItem?: string;
   onItemClick?: (key: string) => void;
   badgeCounts?: Record<string, number>;
+  showIncidentRecords: boolean;
 }
 
-function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, badgeCounts }: SidebarProps) {
+function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, badgeCounts, showIncidentRecords }: SidebarProps) {
   // Each item now uses Material Symbols ligatures for clean, consistent icons.
   const navByRole: Record<string, { key: string; label: string; icon: string }[]> = {
     ADMIN: [
@@ -191,7 +192,7 @@ function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, b
     ],
   };
 
-  const navItems = navByRole[role] ?? navByRole.ADMIN;
+  const navItems = (navByRole[role] ?? navByRole.ADMIN).filter(item => item.key !== 'incidents' || showIncidentRecords);
 
   return (
     <aside className="sb">
@@ -665,6 +666,7 @@ function AppShell() {
 
   /* ── Workspace state (driven by sidebar) ─────────────────────── */
   const [adminTab, setAdminTab] = useState<AdminTab>('users');
+  const [showIncidentRecords, setShowIncidentRecords] = useState(false);
   const [doctorViewMode, setDoctorViewMode] = useState<
     'active' | 'scheduled' | 'history' | 'archive' | 'analytics'
   >('active');
@@ -695,6 +697,8 @@ function AppShell() {
     setEmail('');
     setActiveRoleView('');
     setUser(null);
+    setAdminTab('users');
+    setShowIncidentRecords(false);
     if (token) {
       try {
         await fetch(`${API_BASE_URL}/api/auth/logout`, {
@@ -874,6 +878,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
     <div className="app-shell" data-theme-mode={mode} data-theme-preset={preset}>
       <Sidebar
         role={activeRoleView}
+        showIncidentRecords={showIncidentRecords}
         badgeCounts={badgeKey ? { [badgeKey]: bookingBadge } : undefined}
         onSignOut={handleSignOut}
         onChangePassword={() => { setShowPasswordModal(true); setPasswordMsg(null); }}
@@ -966,7 +971,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
             />
           )}
           {activeRoleView === 'ADMIN' && (
-            <AdminConsole activeTab={adminTab} onTabChange={setAdminTab} />
+            <AdminConsole activeTab={adminTab} onTabChange={setAdminTab} onIncidentAccessChange={setShowIncidentRecords} />
           )}
           {activeRoleView === 'EMERGENCY_RESPONDER' && <ResponderConsole />}
         </main>

@@ -93,11 +93,13 @@ interface AdminConsoleProps {
   activeTab?: AdminTab;
   /** Called whenever the user clicks an inner pill or the sidebar item. */
   onTabChange?: (tab: AdminTab) => void;
+  onIncidentAccessChange?: (allowed: boolean) => void;
 }
 
 export default function AdminConsole({
   activeTab: controlledTab,
   onTabChange,
+  onIncidentAccessChange,
 }: AdminConsoleProps = {}) {
   /* Controlled or uncontrolled: fall back to internal state when no parent props are passed. */
   const [internalTab, setInternalTab] = useState<AdminTab>('users');
@@ -128,6 +130,7 @@ export default function AdminConsole({
     userId: null, archetype: 'super', is_super: true, permissions: ['SUPER_ADMIN'],
   });
   const [permCatalog, setPermCatalog] = useState<any[]>([]);
+  const [canViewIncidentRecords, setCanViewIncidentRecords] = useState(false);
   const [editAdminArchetype, setEditAdminArchetype] = useState<'super' | 'limited'>('super');
   const [editAdminPerms, setEditAdminPerms] = useState<string[]>([]);
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
@@ -219,14 +222,19 @@ export default function AdminConsole({
   };
 
   /* Caller's effective admin permission state (super admins keep full access). */
-  const fetchMyPermissions = async () => {
+  const fetchMyPermissions = async (signal: AbortSignal) => {
     const token = localStorage.getItem('valetudo_token');
+    let incidentAccess = false;
     try {
       const res = await fetch(`${API_BASE_URL}/api/admin/my-permissions`, {
         headers: { Authorization: `Bearer ${token}` },
+        signal,
       });
       if (res.ok) {
         const data = await res.json();
+        if (signal.aborted) return;
+        incidentAccess = data.is_super === true ||
+          (Array.isArray(data.permissions) && data.permissions.includes('INCIDENT_RECORDS_VIEW'));
         setMyPerms({
           userId: data.user_id ?? null,
           archetype: data.archetype || 'super',
@@ -235,6 +243,10 @@ export default function AdminConsole({
         });
       }
     } catch (_) {}
+    if (!signal.aborted) {
+      setCanViewIncidentRecords(incidentAccess);
+      onIncidentAccessChange?.(incidentAccess);
+    }
   };
 
   /* Live permission catalog for the archetype editors. */
@@ -349,9 +361,24 @@ export default function AdminConsole({
     fetchPhiLogs();
     fetchRetention();
     fetchTelemetry();
-    fetchMyPermissions();
     fetchPermissionCatalog();
   }, []);
+
+  useEffect(() => {
+    let pending: AbortController | undefined;
+    const refresh = () => {
+      pending?.abort();
+      pending = new AbortController();
+      void fetchMyPermissions(pending.signal);
+    };
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => {
+      pending?.abort();
+      window.removeEventListener('focus', refresh);
+      onIncidentAccessChange?.(false);
+    };
+  }, [onIncidentAccessChange]);
 
   // Refetch contextual data whenever the parent (sidebar) switches the active tab
   useEffect(() => {
@@ -1921,7 +1948,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: INCIDENT RECORDS                                       */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      {activeTab === 'incidents' && <IncidentRecords />}
+      {activeTab === 'incidents' && (canViewIncidentRecords ? <IncidentRecords /> : <NoPermissionPanel required="INCIDENT_RECORDS_VIEW" />)}
 
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: DATABASE STUDIO                                      */}

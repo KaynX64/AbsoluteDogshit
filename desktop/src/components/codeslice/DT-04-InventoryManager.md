@@ -45,7 +45,7 @@ The client and server preserve their existing expiry cutoffs. The formulary's av
 | 27 | 879-959 | ADJUST & DISPOSE | Centered removal form with all four existing reasons for adjustment |
 | 28 | 960-1046 | ALERTS & REORDER | Alerts page header and top-left low stock lots |
 | 29 | 1047-1101 | > Expiry alerts | Expired and expiring lots with text labels in the top-right panel |
-| 30 | 1102-1144 | Automated reorder suggestions | Read-only suggestions ordered by usable stock, lowest first. Prescription demand breaks stock ties. |
+| 30 | 1102-1144 | Automated reorder suggestions | Read-only suggestions ordered by usable stock, lowest first. Recent dispensing and prescribing break stock ties. Out-of-stock items with a zero buffer show “Set a buffer.” |
 | 31 | 1145-1172 | LOGS | Consumption log header, counts and refresh |
 | 32 | 1173-1209 | All actions ( | Action filters, including grouped removals, and text search |
 | 33 | 1210-1291 | {loadingLogs ? ( | Log loading/empty states and transaction table with non-wrapping action labels |

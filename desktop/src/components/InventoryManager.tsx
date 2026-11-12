@@ -1132,7 +1132,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                         textAlign: 'right', fontWeight: 700,
                         color: s.suggested_reorder_qty > 0 ? T.warning : T.textMuted,
                       }}>
-                        {s.suggested_reorder_qty > 0 ? `+${s.suggested_reorder_qty} ${s.unit}` : 'Adequate'}
+                        {s.suggested_reorder_qty > 0 ? `+${s.suggested_reorder_qty} ${s.unit}` : s.stock_status === 'OUT_OF_STOCK' ? 'Set a buffer' : 'Adequate'}
                       </td>
                     </tr>
                   ))}

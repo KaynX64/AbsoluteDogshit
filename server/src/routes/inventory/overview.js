@@ -1,4 +1,5 @@
 import { pool } from '../../db/pool.js';
+import { listReorderSuggestions } from '../../inventory/pharmacyAnalytics.js';
 import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';
 
@@ -75,44 +76,7 @@ export function registerInventoryOverview(router) {
   // GET /api/inventory/reorder-suggestions
   router.get('/reorder-suggestions', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
     try {
-      const [rows] = await pool.query(
-        `SELECT m.medicine_id, m.name, m.generic_name, m.form, m.strength, m.unit, m.reorder_level,
-                COALESCE(SUM(b.quantity_on_hand), 0) AS total_stock_on_hand,
-                CASE 
-                  WHEN COALESCE(SUM(b.quantity_on_hand), 0) <= m.reorder_level 
-                  THEN GREATEST((m.reorder_level * 2) - COALESCE(SUM(b.quantity_on_hand), 0), m.reorder_level)
-                  ELSE 0 
-                END AS suggested_reorder_qty,
-                CASE 
-                  WHEN COALESCE(SUM(b.quantity_on_hand), 0) = 0 THEN 'OUT_OF_STOCK'
-                  WHEN COALESCE(SUM(b.quantity_on_hand), 0) <= m.reorder_level THEN 'CRITICAL_BUFFER'
-                  ELSE 'ADEQUATE'
-                END AS stock_status
-         FROM MEDICINES m
-         LEFT JOIN MEDICINE_BATCHES b ON m.medicine_id = b.medicine_id 
-              AND b.deleted_at IS NULL 
-              AND b.expiry_date > CURDATE()
-         LEFT JOIN (
-           SELECT pi.medicine_id,
-                  SUM(pi.quantity_prescribed) AS quantity_prescribed,
-                  COUNT(DISTINCT pi.prescription_id) AS prescription_count
-           FROM PRESCRIPTION_ITEMS pi
-           JOIN PRESCRIPTIONS p ON p.prescription_id = pi.prescription_id
-           WHERE pi.medicine_id IS NOT NULL
-             AND pi.deleted_at IS NULL
-             AND p.deleted_at IS NULL
-             AND p.status <> 'cancelled'
-           GROUP BY pi.medicine_id
-         ) AS demand ON demand.medicine_id = m.medicine_id
-         WHERE m.is_active = TRUE AND m.deleted_at IS NULL
-         GROUP BY m.medicine_id, m.name, m.generic_name, m.form, m.strength, m.unit, m.reorder_level
-         ORDER BY total_stock_on_hand ASC,
-                  MAX(demand.quantity_prescribed) DESC,
-                  MAX(demand.prescription_count) DESC,
-                  m.name ASC,
-                  m.medicine_id ASC`
-      );
-      res.json(rows);
+      res.json(await listReorderSuggestions());
     } catch (error) {
       console.error('Error computing reorder suggestions:', error);
       res.status(500).json({ error: 'Failed to calculate reorder suggestions.' });

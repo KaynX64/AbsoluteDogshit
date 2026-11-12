@@ -48,7 +48,7 @@ async function foundationSchema(pool) {
 test('fresh schema is adopted once even when two migration runners start together', { skip }, async t => {
   const pool = await fixture(t);
   const applied = await Promise.all([runMigrations(pool), runMigrations(pool)]);
-  assert.deepEqual(applied.sort(), [0, 4]);
+  assert.deepEqual(applied.sort(), [0, 6]);
   assert.equal(await responderFlag(pool), 1);
   const readOnlyPool = {
     async getConnection() {
@@ -70,13 +70,16 @@ test('an existing schema keeps revoked responders, admin grants and saved policy
   const pool = await fixture(t);
   await pool.query('UPDATE USERS SET is_qualified_responder = 0, qualified_responder_since = NULL WHERE user_id = 4');
   await pool.query("INSERT INTO USER_ADMIN_PERMISSIONS (user_id, permission_id) SELECT 1, permission_id FROM ADMIN_PERMISSIONS WHERE code = 'USERS_MANAGE'");
+  await pool.query("DELETE FROM ADMIN_PERMISSIONS WHERE code = 'INCIDENT_RECORDS_VIEW'");
   await pool.query('UPDATE SERVER_POLICY SET revision = 4 WHERE policy_id = 1');
-  assert.equal(await runMigrations(pool), 4);
+  assert.equal(await runMigrations(pool), 6);
   assert.equal(await responderFlag(pool), 0);
   const [[{ revision }]] = await pool.query('SELECT revision FROM SERVER_POLICY WHERE policy_id = 1');
   const [[{ grants }]] = await pool.query('SELECT COUNT(*) AS grants FROM USER_ADMIN_PERMISSIONS WHERE user_id = 1');
   assert.equal(revision, 4);
   assert.equal(grants, 1);
+  const [[permission]] = await pool.query("SELECT name FROM ADMIN_PERMISSIONS WHERE code = 'INCIDENT_RECORDS_VIEW'");
+  assert.equal(permission.name, 'View incident records');
 });
 
 test('legacy tables and columns are rebuilt additively and the responder backfill runs once', { skip }, async t => {
@@ -84,6 +87,8 @@ test('legacy tables and columns are rebuilt additively and the responder backfil
   const freshFoundation = await foundationSchema(pool);
   for (const sql of [
     'ALTER TABLE APPOINTMENTS DROP INDEX idx_app_status_datetime',
+    'ALTER TABLE INVENTORY_LOGS DROP INDEX idx_inv_activity_date',
+    'ALTER TABLE PRESCRIPTIONS DROP INDEX idx_rx_issued_at',
     'DROP TABLE INCIDENT_REPORTS',
     'DROP TABLE USER_ADMIN_PERMISSIONS',
     'DROP TABLE ADMIN_PERMISSIONS',
@@ -100,9 +105,13 @@ test('legacy tables and columns are rebuilt additively and the responder backfil
   await pool.query(`INSERT INTO PRESCRIPTION_ITEMS
     (prescription_id, outside_name, dosage, frequency, duration_days, quantity_dispensed)
     VALUES (1, 'fixture', 'fixture', 'fixture', 1, 4)`);
-  assert.equal(await runMigrations(pool), 4);
+  assert.equal(await runMigrations(pool), 6);
   const [dayIndex] = await pool.query("SHOW INDEX FROM APPOINTMENTS WHERE Key_name = 'idx_app_status_datetime'");
   assert.deepEqual(dayIndex.map(row => row.Column_name), ['status', 'date_time', 'deleted_at']);
+  const [activityIndex] = await pool.query("SHOW INDEX FROM INVENTORY_LOGS WHERE Key_name = 'idx_inv_activity_date'");
+  assert.deepEqual(activityIndex.map(row => row.Column_name), ['transaction_type', 'created_at']);
+  const [issuedIndex] = await pool.query("SHOW INDEX FROM PRESCRIPTIONS WHERE Key_name = 'idx_rx_issued_at'");
+  assert.deepEqual(issuedIndex.map(row => row.Column_name), ['issued_at']);
   assert.deepEqual(await foundationSchema(pool), freshFoundation);
   assert.equal(await responderFlag(pool), 1);
   const [[{ quantity_prescribed }]] = await pool.query('SELECT quantity_prescribed FROM PRESCRIPTION_ITEMS');
@@ -134,7 +143,7 @@ test('an interrupted responder schema change resumes with its original backfill 
   assert.equal(await responderFlag(pool), 0);
   const [[{ applied_at }]] = await pool.query('SELECT applied_at FROM SCHEMA_MIGRATIONS WHERE version = 3');
   assert.equal(applied_at, null);
-  assert.equal(await runMigrations(pool), 2);
+  assert.equal(await runMigrations(pool), 4);
   assert.equal(await responderFlag(pool), 1);
 });
 

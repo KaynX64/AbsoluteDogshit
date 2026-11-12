@@ -2,8 +2,8 @@ import {
   listActiveRoles,
   listConsultationsByDepartment,
   listInventoryAlerts,
-  listTopPrescribedMedicines,
 } from '../../analytics/reportQueries.js';
+import { getPharmacyAnalytics } from '../../inventory/pharmacyAnalytics.js';
 import { pool } from '../../db/pool.js';
 import { decrypt } from '../../utils/cryptoVault.js';
 import { getDiagnosisCounts, getRiskCounts } from '../../analytics/analyticsStats.js';
@@ -141,8 +141,10 @@ export function registerAnalyticsDashboard(router) {
 
     
       // 11. Low Stock & Near Expiry Pharmacy Batches
-      const lowStockMeds = await listInventoryAlerts(6);
-      const topPrescribedMedicines = await listTopPrescribedMedicines(6);
+      const [lowStockMeds, { pharmacy, topPrescribedMedicines }] = await Promise.all([
+        listInventoryAlerts(6),
+        getPharmacyAnalytics(),
+      ]);
 
       res.json({
         totalConsultations: consultations[0]?.total || 0,
@@ -162,6 +164,7 @@ export function registerAnalyticsDashboard(router) {
           total_students_monitored: riskProfileTotal,
         },
         lowStockMeds,
+        pharmacy,
         topPrescribedMedicines,
       });
     } catch (error) {

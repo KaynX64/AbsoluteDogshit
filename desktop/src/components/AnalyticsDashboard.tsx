@@ -20,15 +20,17 @@ interface DeptItem {
   consultations_count: number;
 }
 
-interface TopPrescribedMedicine {
+interface PharmacyMedicine {
   medicine_id: number;
   name: string;
   generic_name: string;
   form: string;
   strength: string;
   unit: string;
-  prescription_count: number;
   quantity_prescribed: number;
+  quantity_dispensed: number;
+  quantity_returned: number;
+  net_dispensed: number;
   total_stock_on_hand: number;
   reorder_level: number;
   suggested_reorder_qty: number;
@@ -68,7 +70,11 @@ interface AnalyticsData {
     expiry_date: string;
     days_until_expiry: number;
   }[];
-  topPrescribedMedicines: TopPrescribedMedicine[];
+  pharmacy?: {
+    windowDays: number;
+    dispensing: PharmacyMedicine[];
+    reorderPriorities: PharmacyMedicine[];
+  };
 }
 
 /* ================================================================= */
@@ -1184,89 +1190,88 @@ export default function AnalyticsDashboard() {
         <SvgHorizontalBarChart data={data.deptBreakdown || []} />
       </div>
 
-      {/* ── 6. Watchlist & critical inventory ────────── */}
+      {/* ── 6. Formulary dispensing and reorder priorities ────────── */}
       <div className="my-card" style={{ marginBottom: 22 }}>
-        <div style={{ marginBottom: 14 }}>
-          <h4 className="my-card-title">Top prescribed medicines</h4>
-          <p className="my-card-sub">
-            Formulary demand ranked by prescribed quantity, with reorder guidance from current stock buffers
-          </p>
-        </div>
-        {!data.topPrescribedMedicines || data.topPrescribedMedicines.length === 0 ? (
-          <div
-            style={{
-              padding: '32px 20px',
-              textAlign: 'center',
-              color: T.textMuted,
-              fontSize: 13,
-              background: T.surface2,
-              borderRadius: 20,
-            }}
-          >
-            No formulary medicines have been prescribed yet.
+        <h4 className="my-card-title">Pharmacy activity</h4>
+        {data.pharmacy ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 390px), 1fr))', gap: 22 }}>
+            <section style={{ minWidth: 0 }}>
+              <h5 style={{ margin: '0 0 4px', fontSize: 14, color: T.text }}>Formulary dispensing</h5>
+              <p className="my-card-sub">Last {data.pharmacy.windowDays} days · Net = dispensed − returned</p>
+              {data.pharmacy.dispensing.length === 0 ? (
+                <p style={{ fontSize: 13, color: T.textMuted }}>No active formulary medicines.</p>
+              ) : (
+                <div tabIndex={0} role="region" aria-label="Formulary dispensing" style={{ overflowX: 'auto' }}>
+                  <table className="tbl" style={{ fontSize: 12, width: '100%' }}>
+                    <thead>
+                      <tr>
+                        <th scope="col">Medicine</th>
+                        <th scope="col" style={{ textAlign: 'right' }}>Prescribed</th>
+                        <th scope="col" style={{ textAlign: 'right' }}>Dispensed</th>
+                        <th scope="col" style={{ textAlign: 'right' }}>Returned</th>
+                        <th scope="col" style={{ textAlign: 'right' }}>Net</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.pharmacy.dispensing.map(medicine => (
+                        <tr key={medicine.medicine_id}>
+                          <th scope="row" style={{ textAlign: 'left' }}>
+                            {medicine.name}
+                            <div style={{ fontSize: 11, color: T.textMuted, fontWeight: 400 }}>
+                              {medicine.strength} {medicine.form} · {medicine.unit}
+                            </div>
+                          </th>
+                          <td style={{ textAlign: 'right' }}>{medicine.quantity_prescribed}</td>
+                          <td style={{ textAlign: 'right' }}>{medicine.quantity_dispensed}</td>
+                          <td style={{ textAlign: 'right' }}>{medicine.quantity_returned}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 800 }}>{medicine.net_dispensed}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+            <section style={{ minWidth: 0 }}>
+              <h5 style={{ margin: '0 0 4px', fontSize: 14, color: T.text }}>Reorder priorities</h5>
+              <p className="my-card-sub">Current stock, lowest first</p>
+              {data.pharmacy.reorderPriorities.length === 0 ? (
+                <p style={{ fontSize: 13, color: T.textMuted }}>
+                  {data.pharmacy.dispensing.length === 0 ? 'No active formulary medicines.' : 'All medicines are above their reorder buffers.'}
+                </p>
+              ) : (
+                <div tabIndex={0} role="region" aria-label="Reorder priorities" style={{ overflowX: 'auto' }}>
+                  <table className="tbl" style={{ fontSize: 12, width: '100%' }}>
+                    <thead>
+                      <tr>
+                        <th scope="col">Medicine</th>
+                        <th scope="col" style={{ textAlign: 'right' }}>On hand</th>
+                        <th scope="col" style={{ textAlign: 'right' }}>Suggested order</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.pharmacy.reorderPriorities.map(medicine => (
+                        <tr key={medicine.medicine_id}>
+                          <th scope="row" style={{ textAlign: 'left' }}>
+                            {medicine.name}
+                            <div style={{ fontSize: 11, color: T.textMuted, fontWeight: 400 }}>
+                              {medicine.strength} {medicine.form} · {medicine.stock_status === 'OUT_OF_STOCK' ? 'Out of stock' : 'At or below buffer'}
+                            </div>
+                          </th>
+                          <td style={{ textAlign: 'right', color: T.danger }}>{medicine.total_stock_on_hand} {medicine.unit}</td>
+                          <td style={{ textAlign: 'right' }}>
+                            {medicine.suggested_reorder_qty > 0 ? '+' + medicine.suggested_reorder_qty + ' ' + medicine.unit : 'Set a buffer'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
           </div>
         ) : (
-          <div style={{ display: 'grid', gap: 10 }}>
-            {data.topPrescribedMedicines.map((medicine, index) => {
-              const needsReorder = medicine.suggested_reorder_qty > 0;
-              return (
-                <div
-                  key={medicine.medicine_id}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '32px minmax(180px, 1.5fr) repeat(3, minmax(90px, 0.7fr))',
-                    gap: 12,
-                    alignItems: 'center',
-                    padding: '12px 14px',
-                    borderRadius: 16,
-                    background: T.surface2,
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 28,
-                      height: 28,
-                      display: 'grid',
-                      placeItems: 'center',
-                      borderRadius: '50%',
-                      background: T.primary50,
-                      color: T.primary,
-                      fontSize: 12,
-                      fontWeight: 800,
-                    }}
-                  >
-                    {index + 1}
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: T.text }}>
-                      {medicine.name}
-                    </div>
-                    <div style={{ marginTop: 2, fontSize: 11, color: T.textMuted }}>
-                      {medicine.generic_name} · {medicine.strength} {medicine.form}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: T.text }}>
-                      {medicine.quantity_prescribed} {medicine.unit}
-                    </div>
-                    <div style={{ fontSize: 10.5, color: T.textMuted }}>prescribed</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: T.text }}>
-                      {medicine.total_stock_on_hand} {medicine.unit}
-                    </div>
-                    <div style={{ fontSize: 10.5, color: T.textMuted }}>on hand</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: needsReorder ? T.warning : T.success }}>
-                      {needsReorder ? `+${medicine.suggested_reorder_qty} ${medicine.unit}` : 'Adequate'}
-                    </div>
-                    <div style={{ fontSize: 10.5, color: T.textMuted }}>order suggestion</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <p className="my-card-sub">Pharmacy activity requires an updated server.</p>
         )}
       </div>
 
