@@ -1,17 +1,70 @@
 // server/src/routes/healthPass.js
 import express from 'express';
 import crypto from 'crypto';
-import { pool } from '../db.js';
-import { authenticateToken } from '../auth.js';
+import { pool } from '../db/pool.js';
+import { authenticateToken } from '../auth/middleware.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
+import { getBmiCategory } from '../utils/bmi.js';
 import { decrypt } from '../utils/cryptoVault.js';
 import { requirePrivacyConsent } from '../middleware/consent.js';
 import { JWT_SECRET } from '../utils/secrets.js';
+import { redis, isRedisActive } from '../utils/redisClient.js';
 
 
 const router = express.Router();
-const HMAC_SECRET = JWT_SECRET;
+
+// ── SEC-08 Remediation (1/2): dedicated QR signing key ──────────────
+// The QR HMAC previously reused JWT_SECRET verbatim, violating
+// cryptographic key separation: one leaked or abused key would have
+// compromised BOTH session tokens and physical health-pass QR codes.
+//   • HEALTH_PASS_HMAC_SECRET (recommended, >= 32 chars) is the
+//     dedicated key, configured in .env.
+//   • If it is not set, a domain-separated key is derived from
+//     JWT_SECRET so existing deployments get distinct key material for
+//     the two purposes (QR signing key != JWT signing key) without any
+//     configuration change.
+const CONFIGURED_QR_SECRET = process.env.HEALTH_PASS_HMAC_SECRET;
+if (CONFIGURED_QR_SECRET && CONFIGURED_QR_SECRET.length < 32) {
+  throw new Error(
+    '[HealthPass] HEALTH_PASS_HMAC_SECRET is set but shorter than 32 chars. ' +
+    'Generate a dedicated key with: openssl rand -hex 32'
+  );
+}
+const HMAC_SECRET = CONFIGURED_QR_SECRET
+  || crypto.createHmac('sha256', JWT_SECRET).update('valetudo:health-pass:hmac:v1').digest('hex');
+
+// ── SEC-08 Remediation (2/2): single-use nonce store ────────────────
+// A QR pass is valid for 15 minutes, but the nonce it carries was never
+// recorded — a photographed screen could be verified repeatedly inside
+// that window. Successful verifications now claim the nonce atomically
+// (Redis SET NX EX, key qr:nonce:<nonce>, 15-minute TTL); a repeat
+// presentation of the same nonce is rejected. The Map below is the
+// in-process fallback when the cache layer is unavailable, bounded so
+// it cannot grow without limit.
+const QR_VALIDITY_MS = 15 * 60 * 1000;
+const NONCE_TTL_SECONDS = 15 * 60;
+const NONCE_MEMORY_LIMIT = 10000;
+const usedNonces = new Map(); // nonce -> expiresAtMs
+
+function claimNonceInProcess(nonce) {
+  const now = Date.now();
+  if (usedNonces.size >= NONCE_MEMORY_LIMIT) {
+    // Opportunistic pruning of expired entries keeps the map bounded.
+    for (const [storedNonce, expiresAt] of usedNonces) {
+      if (expiresAt <= now) usedNonces.delete(storedNonce);
+    }
+    // Still at capacity (pathological flood of valid QRs): evict the
+    // oldest entry rather than grow without limit.
+    while (usedNonces.size >= NONCE_MEMORY_LIMIT) {
+      const oldest = usedNonces.keys().next().value;
+      usedNonces.delete(oldest);
+    }
+  }
+  if (usedNonces.has(nonce)) return false;
+  usedNonces.set(nonce, now + QR_VALIDITY_MS);
+  return true;
+}
 
 // GET /api/health-pass/token
 router.get('/token', authenticateToken, requirePrivacyConsent, (req, res) => {
@@ -63,7 +116,35 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
     return res.status(401).json({ error: 'QR pass expired. Ask student to refresh pass.' });
   }
 
-  // 3. Acquire DB connection and execute queries safely inside try/finally
+  // 3. Single-use nonce claim (SEC-08 replay protection).
+  // SET NX EX is an atomic check-and-set: the first presentation of the
+  // nonce wins; concurrent or later presentations receive null and are
+  // rejected before any database work is done. A failed claim records
+  // nothing, and a cache outage degrades to the in-process guard below.
+  let nonceClaimed = false;
+  let nonceReplayed = false;
+  if (isRedisActive()) {
+    try {
+      const claimResult = await redis.set(`qr:nonce:${nonce}`, '1', 'EX', NONCE_TTL_SECONDS, 'NX');
+      nonceClaimed = claimResult === 'OK';
+      nonceReplayed = !nonceClaimed;
+    } catch (redisErr) {
+      console.warn(
+        `[HealthPass] Nonce cache unavailable (${redisErr.message}); using in-process replay guard.`
+      );
+    }
+  }
+  if (!nonceClaimed && !nonceReplayed) {
+    nonceReplayed = !claimNonceInProcess(nonce);
+  }
+  if (nonceReplayed) {
+    console.warn(
+      `[HealthPass] Replay rejected: QR nonce already consumed (scanner user_id=${req.user.user_id}).`
+    );
+    return res.status(401).json({ error: 'QR pass already used. Ask student to refresh pass.' });
+  }
+
+  // 4. Acquire DB connection and execute queries safely inside try/finally
   const connection = await pool.getConnection();
 
   try {
@@ -90,7 +171,7 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
       `SELECT u.user_id, u.first_name, u.last_name, u.email,
               sp.student_no, sp.course, sp.year_level,
               hp.blood_type, hp.allergies, hp.chronic_conditions,
-              hp.height, hp.weight, hp.updated_at AS health_profile_updated_at
+              hp.sex, hp.height, hp.weight, hp.bmi, hp.updated_at AS health_profile_updated_at
        FROM USERS u
        LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
        LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
@@ -103,15 +184,25 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
       return res.status(404).json({ error: 'Patient not found or deactivated.' });
     }
 
-//logphiaccess
-const parsedPatientId = Number(patientUserId);
-if (!isNaN(parsedPatientId) && parsedPatientId > 0) {
-  logPhiAccess({
-    viewerUserId: req.user.user_id,
-    patientUserId: parsedPatientId,
-    // ...
-  });
-}
+    // ── SEC-03 Remediation: record the complete statutory PHI audit entry ──
+    // PHI_ACCESS_LOGS.table_affected and record_id are NOT NULL. The previous
+    // call omitted table/recordId/purpose/ipAddress, so every QR scan's INSERT
+    // failed with ER_BAD_NULL_ERROR (silently caught inside phiLogger) and no
+    // audit entry was ever recorded — a violation of R.A. 10173 Sections 12/13
+    // accountability mandates. All mandatory fields are now passed, and the
+    // call is awaited so the entry is durably written before patient data is
+    // returned to the scanner.
+    const parsedPatientId = Number(patientUserId);
+    if (!isNaN(parsedPatientId) && parsedPatientId > 0) {
+      await logPhiAccess({
+        viewerUserId: req.user.user_id,
+        patientUserId: parsedPatientId,
+        table: 'HEALTH_PROFILES',
+        recordId: parsedPatientId,
+        purpose: 'QR Health Pass Verification & Intake',
+        ipAddress: req.ip,
+      });
+    }
 
     await connection.commit();
 
@@ -119,6 +210,7 @@ if (!isNaN(parsedPatientId) && parsedPatientId > 0) {
       ...patient[0],
       allergies: decrypt(patient[0].allergies),
       chronic_conditions: decrypt(patient[0].chronic_conditions),
+      bmi_category: getBmiCategory(patient[0].bmi),
     };
 
     res.json({

@@ -10,8 +10,8 @@
 //   Returns all active interaction rules (for admin management)
 
 import express from 'express';
-import { pool } from '../db.js';
-import { authenticateToken } from '../auth.js';
+import { pool } from '../db/pool.js';
+import { authenticateToken } from '../auth/middleware.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { checkInteractionsStandalone } from '../utils/interactionChecker.js';
 

@@ -7,8 +7,10 @@ import assert from 'node:assert/strict';
 
 // cryptoVault throws at import time without a key, so set it BEFORE importing.
 process.env.ENCRYPTION_KEY ||= 'x'.repeat(40);
+// ... and it is v2-only, so a salt is equally mandatory at import time.
+process.env.ENCRYPTION_SALT ||= 'dbstudio-test-salt-0123456789';
 
-const guard = await import('../src/utils/dbStudioGuard.js');
+const guard = await import('../src/routes/admin/databaseStudio/tablePolicy.js');
 const vault = await import('../src/utils/cryptoVault.js');
 
 const {
@@ -34,11 +36,19 @@ const { encrypt, decrypt } = vault;
 const BCRYPT = '$2b$10$' + 'a'.repeat(53);
 
 describe('read-only ledger tables', () => {
-  test('statutory ledgers are read-only', () => {
+  test('statutory and operational ledgers are read-only', () => {
     for (const t of ['AUDIT_LOGS', 'PHI_ACCESS_LOGS', 'INVENTORY_LOGS']) {
       assert.equal(isReadOnlyTable(t), true, t);
     }
-    assert.deepEqual([...READ_ONLY_TABLES].sort(), ['AUDIT_LOGS', 'INVENTORY_LOGS', 'PHI_ACCESS_LOGS']);
+    assert.deepEqual([...READ_ONLY_TABLES].sort(), [
+      'AUDIT_LOGS', 'INVENTORY_LOGS', 'PHI_ACCESS_LOGS', 'QUEUE_TICKET_COUNTERS', 'SCHEMA_MIGRATIONS', 'SERVER_POLICY',
+    ]);
+    assert.equal(isReadOnlyTable('schema_migrations'), true);
+  });
+
+  test('server policy writes must use its dedicated editor', () => {
+    assert.equal(isReadOnlyTable('SERVER_POLICY'), true);
+    assert.equal(isReadOnlyTable('server_policy'), true);
   });
 
   test('ordinary tables are editable', () => {

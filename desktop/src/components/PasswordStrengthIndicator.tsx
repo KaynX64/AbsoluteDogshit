@@ -87,7 +87,7 @@ export default function PasswordStrengthIndicator({ password, showChecklist = tr
   return (
     <div style={{ marginTop: 8, marginBottom: 4 }}>
       {/* Segmented strength bar */}
-      <div style={{ display: 'flex', gap: 4, height: 4, marginBottom: 6 }}>
+      <div style={{ display: 'flex', gap: 4, height: 4, marginBottom: 8 }}>
         {[1, 2, 3, 4].map((step) => (
           <div
             key={step}
@@ -95,8 +95,8 @@ export default function PasswordStrengthIndicator({ password, showChecklist = tr
               flex: 1,
               height: '100%',
               borderRadius: 2,
-              background: step <= score ? color : '#E2EBE1',
-              transition: 'background 180ms ease',
+              background: step <= score ? color : T.sage200,
+              transition: `background ${T.durBase} ${T.ease}`,
             }}
           />
         ))}
@@ -124,7 +124,7 @@ export default function PasswordStrengthIndicator({ password, showChecklist = tr
             letterSpacing: 0.2,
           }}
         >
-          {isAcceptable ? '✓ Meets requirements' : '✕ Must be Medium or better'}
+          {isAcceptable ? 'Meets requirements' : 'Must be Medium or better'}
         </span>
       </div>
 
@@ -134,8 +134,8 @@ export default function PasswordStrengthIndicator({ password, showChecklist = tr
           style={{
             display: 'grid',
             gridTemplateColumns: '1fr 1fr',
-            gap: '6px 14px',
-            padding: '10px 12px',
+            gap: '8px 16px',
+            padding: '12px 14px',
             background: T.sage50,
             borderRadius: T.radius.md,
             border: `1px solid ${T.borderSoft}`,
@@ -147,29 +147,29 @@ export default function PasswordStrengthIndicator({ password, showChecklist = tr
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 6,
+                gap: 8,
                 fontSize: 11.5,
                 fontWeight: 600,
                 color: r.met ? T.success : T.textMuted,
-                transition: 'color 120ms ease',
+                transition: `color ${T.durBase} ${T.ease}`,
               }}
             >
               <span
                 style={{
-                  width: 14,
-                  height: 14,
+                  width: 16,
+                  height: 16,
                   borderRadius: '50%',
                   display: 'grid',
                   placeItems: 'center',
                   background: r.met ? T.successSoft : T.sage100,
                   color: r.met ? T.success : T.textMuted,
-                  fontSize: 9,
+                  fontSize: 9.5,
                   fontWeight: 900,
                   border: `1px solid ${r.met ? T.successBorder : T.border}`,
                   flexShrink: 0,
                 }}
               >
-                {r.met ? '✓' : ''}
+                {r.met ? '' : ''}
               </span>
               {r.label}
             </div>

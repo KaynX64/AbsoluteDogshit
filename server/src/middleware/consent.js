@@ -1,5 +1,5 @@
 // server/src/middleware/consent.js
-import { pool } from '../db.js';
+import { pool } from '../db/pool.js';
 
 /**
  * R.A. 10173 Mandatory Statutory Consent Gatekeeper

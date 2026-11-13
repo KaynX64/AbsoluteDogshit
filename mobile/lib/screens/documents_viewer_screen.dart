@@ -277,7 +277,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                 SizedBox(height: rs.h(10)),
 
                 Text(
-                  'PRESCRIBED FORMULARY MEDICATION:',
+                  items.any((it) => it['is_outside'] == true)
+                      ? 'PRESCRIBED MEDICATION (INCLUDES OUTSIDE-PHARMACY ITEMS):'
+                      : 'PRESCRIBED FORMULARY MEDICATION:',
                   style: TextStyle(
                     fontSize: rs.sp(11),
                     fontWeight: FontWeight.w800,
@@ -313,7 +315,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                             children: [
                               Expanded(
                                 child: Text(
-                                  "${it['medicine_name']} (${it['generic_name']})",
+                                  it['is_outside'] == true
+                                      ? "${it['medicine_name'] ?? 'Prescribed medication'}"
+                                      : "${it['medicine_name']} (${it['generic_name']})",
                                   style: TextStyle(
                                     fontWeight: FontWeight.w800,
                                     fontSize: rs.sp(14),
@@ -338,9 +342,21 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                             style: TextStyle(fontSize: rs.sp(12), color: textSub),
                           ),
                           Text(
-                            "Duration: ${it['duration_days'] ?? 3} days (Qty: ${it['quantity_dispensed'] ?? 10} pcs)",
+                            "Duration: ${it['duration_days'] ?? 3} days (Qty: ${it['quantity_prescribed'] ?? it['quantity_dispensed'] ?? 10} pcs)",
                             style: TextStyle(fontSize: rs.sp(11.5), color: textSub),
                           ),
+                          if (it['is_outside'] == true)
+                            Padding(
+                              padding: EdgeInsets.only(top: rs.h(4)),
+                              child: Text(
+                                '🛒 Outside pharmacy purchase — not dispensed by the infirmary',
+                                style: TextStyle(
+                                  fontSize: rs.sp(11),
+                                  fontWeight: FontWeight.w700,
+                                  color: const Color(0xFF8C6826),
+                                ),
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -416,6 +432,15 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                               "Issued: ${_formatDate(rx['issued_at'])}",
                               style: TextStyle(fontSize: rs.sp(11), color: textSub),
                             ),
+                            if (rx['expires_at'] != null)
+                              Text(
+                                "Valid until: ${_formatDate(rx['expires_at'])}",
+                                style: TextStyle(
+                                  fontSize: rs.sp(11),
+                                  fontWeight: FontWeight.w600,
+                                  color: textSub,
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -938,9 +963,12 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
             final status = (rx['status'] ?? 'active').toString().toLowerCase();
 
             final firstMed = items.isNotEmpty ? items[0] : null;
+            final isFirstOutside = firstMed?['is_outside'] == true;
             final medName = firstMed?['medicine_name'] ?? 'Prescribed medication';
             final medStrength = firstMed != null
-                ? "${firstMed['generic_name']} · ${firstMed['dosage'] ?? '500 mg'}"
+                ? (isFirstOutside
+                    ? "OUTSIDE Rx · ${firstMed['dosage'] ?? '—'} · buy at an external pharmacy"
+                    : "${firstMed['generic_name']} · ${firstMed['dosage'] ?? '500 mg'}")
                 : '';
 
             return Container(
@@ -1035,7 +1063,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                       SizedBox(width: rs.w(6)),
                       Expanded(
                         child: Text(
-                          "Issued ${_formatDate(rx['issued_at'])}",
+                          rx['expires_at'] != null
+                              ? "Issued ${_formatDate(rx['issued_at'])} · Valid until ${_formatDate(rx['expires_at'])}"
+                              : "Issued ${_formatDate(rx['issued_at'])}",
                           style: TextStyle(fontSize: rs.sp(12), color: textSub),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -1429,12 +1459,62 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                       ),
                       onPressed: () async {
                         final token = await _storage.read(key: 'jwt_token');
-                        final authenticatedUrl = '$downloadUrl?token=$token';
+                        // SEC-06: fetch a single-use, 60-second download token
+                        // instead of appending the long-lived JWT to the URL
+                        // (query-string tokens leak into browser history,
+                        // proxy logs, and Referer headers).
+                        try {
+                          final res = await ApiConfig.client.post(
+                            Uri.parse('$downloadUrl-token'),
+                            headers: {
+                              'Content-Type': 'application/json',
+                              'Authorization': 'Bearer $token',
+                            },
+                          );
 
-                        launchUrl(
-                          Uri.parse(authenticatedUrl),
-                          mode: LaunchMode.externalApplication,
-                        );
+                          if (res.statusCode != 200) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                      'Could not open file. Please try again.'),
+                                  backgroundColor: Color(0xFF7A2E26),
+                                ),
+                              );
+                            }
+                            return;
+                          }
+
+                          final data =
+                              jsonDecode(res.body) as Map<String, dynamic>;
+                          final dlToken = data['downloadToken'] as String?;
+                          if (dlToken == null || dlToken.isEmpty) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                      'Could not open file. Please try again.'),
+                                  backgroundColor: Color(0xFF7A2E26),
+                                ),
+                              );
+                            }
+                            return;
+                          }
+
+                          await launchUrl(
+                            Uri.parse('$downloadUrl?dlToken=$dlToken'),
+                            mode: LaunchMode.externalApplication,
+                          );
+                        } catch (e) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Network error: $e'),
+                                backgroundColor: const Color(0xFF7A2E26),
+                              ),
+                            );
+                          }
+                        }
                       },
                       icon: const Icon(Icons.open_in_new, size: 14),
                       label: Text(

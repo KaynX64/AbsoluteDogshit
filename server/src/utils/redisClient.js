@@ -80,10 +80,28 @@ export async function invalidateCache(patternOrKey) {
   if (!isRedisActive()) return;
   try {
     if (patternOrKey.includes('*')) {
-      const keys = await redis.keys(patternOrKey);
-      if (keys.length > 0) {
-        await redis.del(...keys);
-      }
+      // ── SEC-09 Remediation: non-blocking keyspace sweep ────────────
+      // redis.keys() issues the O(N) KEYS command, which walks the ENTIRE
+      // keyspace in one synchronous, server-blocking call — stalling every
+      // other cache lookup, rate limiter and session check behind it.
+      // SCAN iterates the same keyspace in small batches (COUNT 100) and
+      // yields between batches, so both the Node event loop and the Redis
+      // server stay responsive. The stream is paused while each batch is
+      // deleted so the deletion queue stays bounded; a failed batch does
+      // not abort the sweep.
+      await new Promise((resolve, reject) => {
+        const stream = redis.scanStream({ match: patternOrKey, count: 100 });
+        stream.on('data', (batchKeys) => {
+          if (batchKeys.length === 0) return;
+          stream.pause();
+          redis
+            .del(...batchKeys)
+            .catch(() => {})
+            .then(() => stream.resume());
+        });
+        stream.on('error', reject);
+        stream.on('end', resolve);
+      });
     } else {
       await redis.del(patternOrKey);
     }

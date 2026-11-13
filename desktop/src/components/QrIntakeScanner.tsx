@@ -1,7 +1,11 @@
 // desktop/src/components/QrIntakeScanner.tsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useId, useRef } from 'react';
 import jsQR from 'jsqr';
 import { API_BASE_URL } from '../config/api';
+import { T } from '../theme';
+import Icon from './Icon';
+import { triageDraftError, validateTriageVitals, VITAL_RULES } from '../../../server/src/appointments/vitals.js';
+import type { TriageVitalField } from '../../../server/src/appointments/vitals.js';
 
 interface QrIntakeScannerProps {
   onPatientVerified: (patient: any, token: string) => void;
@@ -20,7 +24,7 @@ interface ActiveTicket {
 
 export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerProps) {
   const [scanMode, setScanMode] = useState<'camera' | 'search' | 'manual'>('camera');
-  const [searchQuery, setSearchQuery] = useState('22-LN-0123');
+  const [searchQuery, setSearchQuery] = useState('');
   const [verifiedPatient, setVerifiedPatient] = useState<any>(null);
   const [scanStatus, setScanStatus] = useState('');
 
@@ -35,12 +39,52 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
   const [walkInSuccess, setWalkInSuccess] = useState<string | null>(null);
   const [isRegisteringWalkIn, setIsRegisteringWalkIn] = useState(false);
 
-  const [bp, setBp] = useState('120/80');
-  const [temp, setTemp] = useState('36.6');
-  const [pulse, setPulse] = useState('78');
+  const [bp, setBp] = useState('');
+  const [temp, setTemp] = useState('');
+  const [pulse, setPulse] = useState('');
+  const [spo2, setSpo2] = useState('');
+  const [respRate, setRespRate] = useState('');
+  const [sex, setSex] = useState('');
   const [height, setHeight] = useState('');
   const [weight, setWeight] = useState('');
   const [lastVerifiedAt, setLastVerifiedAt] = useState<string>('');
+  const vitalId = useId();
+  const [touchedVitals, setTouchedVitals] = useState<Partial<Record<TriageVitalField, boolean>>>({});
+  const [rejectedVitals, setRejectedVitals] = useState<Partial<Record<TriageVitalField, string>>>({});
+  const [isCheckingIn, setIsCheckingIn] = useState(false);
+  const submittingIntake = useRef(false);
+  const vitalFields = {
+    blood_pressure: { label: 'Blood pressure (mmHg)', value: bp, set: setBp },
+    temperature: { label: 'Temp (°C)', value: temp, set: setTemp },
+    pulse: { label: 'Pulse (bpm)', value: pulse, set: setPulse },
+    spo2: { label: 'SpO₂ (%)', value: spo2, set: setSpo2 },
+    resp_rate: { label: 'Resp (breaths/min)', value: respRate, set: setRespRate },
+    height: { label: 'Height (cm)', value: height, set: setHeight },
+    weight: { label: 'Weight (kg)', value: weight, set: setWeight },
+  };
+  const triageVitals = validateTriageVitals({ blood_pressure: bp, temperature: temp, pulse, spo2, resp_rate: respRate, height, weight });
+  const vitalErrors = { ...triageVitals.errors, ...rejectedVitals };
+  const invalidFields = Object.keys(vitalErrors) as TriageVitalField[];
+  const intakeBlocked = invalidFields.length > 0;
+  const { systolic_bp, diastolic_bp, ...measurements } = triageVitals.values;
+  const bloodPressure = systolic_bp === undefined || diastolic_bp === undefined ? undefined : `${systolic_bp}/${diastolic_bp}`;
+  const heightMeters = (measurements.height ?? 0) / 100;
+  const weightKg = measurements.weight;
+  const invalidBodyMetrics = Boolean(vitalErrors.height || vitalErrors.weight);
+  const bmi = !invalidBodyMetrics && heightMeters && weightKg ? weightKg / (heightMeters * heightMeters) : null;
+  const bmiPrompt = invalidBodyMetrics ? 'Correct height or weight to calculate BMI'
+    : !height.trim() && !weight.trim() ? 'Enter height and weight'
+    : !height.trim() ? 'Enter height' : 'Enter weight';
+  const bmiCategory =
+    bmi === null
+      ? null
+      : bmi < 18.5
+        ? 'Underweight'
+        : bmi < 25
+          ? 'Normal'
+          : bmi < 30
+            ? 'Overweight'
+            : 'Obese';
 
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState('');
@@ -48,31 +92,33 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationFrameId = useRef<number | null>(null);
 
-  /* ── Palette (self-contained hex) ─────────────────────────── */
+  /* ── Resolve the current palette at render time so intake follows theme changes. ── */
   const C = {
-    primary:     '#1F4A34',
-    primaryDark: '#153627',
-    primaryTint: '#E2EBE1',
-    surface:     '#FFFFFF',
-    sage50:      '#F7F9F6',
-    sage100:     '#EEF3EC',
-    sage200:     '#E2EBE1',
-    sage300:     '#C9D9C7',
-    sage400:     '#A3B3A1',
-    border:      '#DCE4DA',
-    borderSoft:  '#E8EDE6',
-    text:        '#191C1A',
-    textSub:     '#5A635B',
-    textMuted:   '#94A396',
-    danger:      '#7A2E26',
-    dangerSoft:  '#FDE8E8',
-    dangerBorder:'#F8B4B4',
-    warning:     '#8C6826',
-    warningSoft: '#FEF3C7',
-    warningBorder:'#FDE68A',
-    success:     '#15803D',
-    successSoft: '#DCFCE7',
-    successBorder:'#BBF7D0',
+    primary: T.primary,
+    primaryDark: T.primaryDark,
+    primaryTint: T.primaryTint,
+    surface: T.surface,
+    sage50: T.sage50,
+    sage100: T.sage100,
+    sage200: T.sage200,
+    sage300: T.sage300,
+    sage400: T.sage400,
+    border: T.border,
+    borderSoft: T.borderSoft,
+    text: T.text,
+    textSub: T.textSub,
+    textMuted: T.textMuted,
+    danger: T.danger,
+    dangerSoft: T.dangerSoft,
+    dangerBorder: T.dangerBorder,
+    warning: T.warning,
+    warningSoft: T.warningSoft,
+    warningBorder: T.warningBorder,
+    success: T.success,
+    successSoft: T.successSoft,
+    successBorder: T.successBorder,
+    textOnPrimary: T.textOnPrimary,
+    textOnDanger: T.textOnDanger,
   };
 
   /* ── Active-ticket pre-check ─────────────────────────────── */
@@ -96,16 +142,30 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
     }
   };
 
-  /* ── Verify QR token ─────────────────────────────────────── */
-  const verifyToken = async (tokenToVerify: string) => {
-    if (!tokenToVerify || tokenToVerify.trim().length === 0) return;
-    setScanStatus('🔍 Verifying cryptographic QR pass signature...');
+  const resetIntake = () => {
     setVerifiedPatient(null);
     setPendingAppointment(null);
     setCheckInSuccess(null);
     setWalkInSuccess(null);
     setActiveTicket(null);
+    setBp('');
+    setTemp('');
+    setPulse('');
+    setSpo2('');
+    setRespRate('');
+    setSex('');
+    setHeight('');
+    setWeight('');
+    setLastVerifiedAt('');
+    setTouchedVitals({});
+    setRejectedVitals({});
+  };
 
+  /* ── Verify QR token ─────────────────────────────────────── */
+  const verifyToken = async (tokenToVerify: string) => {
+    if (submittingIntake.current || !tokenToVerify?.trim()) return;
+    resetIntake();
+    setScanStatus('Verifying cryptographic QR pass signature...');
     const jwt = localStorage.getItem('valetudo_token');
     try {
       const res = await fetch(`${API_BASE_URL}/api/health-pass/verify`, {
@@ -116,10 +176,9 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
       const data = await res.json();
       if (res.ok && data.verified) {
         setVerifiedPatient(data.patient);
+        setSex(data.patient?.sex || '');
         onPatientVerified(data.patient, tokenToVerify.trim());
-        setScanStatus('✅ Patient identity verified.');
-        setHeight(data.patient?.height ? String(data.patient.height) : '');
-        setWeight(data.patient?.weight ? String(data.patient.weight) : '');
+        setScanStatus('Patient identity verified.');
         setLastVerifiedAt(data.patient?.health_profile_updated_at || '');
         stopCamera();
         // Fetch active ticket + pending appointment in parallel
@@ -128,23 +187,21 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
           checkPatientAppointments(data.patient.user_id),
         ]);
       } else {
-        setScanStatus('❌ Verification failed: ' + (data.error || 'Invalid or expired QR pass'));
+        setScanStatus('Verification failed: ' + (data.error || 'Invalid or expired QR pass'));
       }
     } catch (err: any) {
-      setScanStatus('❌ Connection error: ' + err.message);
+      setScanStatus('Connection error: ' + err.message);
     }
   };
 
   const handleManualSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!searchQuery.trim()) return;
-    setScanStatus('🔍 Searching student records...');
-    setCheckInSuccess(null);
-    setWalkInSuccess(null);
-    setActiveTicket(null);
+    if (submittingIntake.current || !searchQuery.trim()) return;
+    resetIntake();
+    setScanStatus('Searching student records...');
 
     const jwt = localStorage.getItem('valetudo_token');
-try {
+    try {
       const res = await fetch(`${API_BASE_URL}/api/appointments/lookup?query=${encodeURIComponent(searchQuery.trim())}`, {
         headers: { Authorization: `Bearer ${jwt}` },
       });
@@ -162,15 +219,15 @@ try {
           chronic_conditions: app.chronic_conditions,
           height: app.height,
           weight: app.weight,
+          sex: app.sex,
         });
         setPendingAppointment(app);
-        setScanStatus(`✅ Patient record located: ${app.first_name} ${app.last_name}`);
-        setHeight(app.height ? String(app.height) : '');
-        setWeight(app.weight ? String(app.weight) : '');
+        setScanStatus(`Patient record located: ${app.first_name} ${app.last_name}`);
+        setSex(app.sex || '');
         setLastVerifiedAt(app.health_profile_updated_at || '');
         await checkActiveTicket(app.user_id);
       } else {
-        setScanStatus('❌ No scheduled appointments found matching that query.');
+        setScanStatus('No scheduled appointments found matching that query.');
       }
     } catch (err: any) {
       // Feature 6: Offline SQLite Fallback for Intake Station
@@ -190,16 +247,17 @@ try {
               chronic_conditions: p.chronic_conditions,
               height: null,
               weight: null,
+              sex: null,
             });
             setPendingAppointment(null); // Offline walk-in mode
-            setScanStatus(`🌐 [Offline Cache] Patient located: ${p.first_name} ${p.last_name} (${p.student_no})`);
+            setScanStatus(`[Offline Cache] Patient located: ${p.first_name} ${p.last_name} (${p.student_no})`);
             return;
           }
         } catch (sqliteErr) {
           console.error('[SQLite Intake Search Error]:', sqliteErr);
         }
       }
-      setScanStatus('❌ Search error: ' + err.message);
+      setScanStatus('Search error: ' + err.message);
     }
   };
 
@@ -213,27 +271,33 @@ try {
       if (Array.isArray(data) && data.length > 0) {
         setPendingAppointment(data[0]);
         if (data[0]?.health_profile_updated_at) setLastVerifiedAt(data[0].health_profile_updated_at);
-        if (data[0]?.height && !height) setHeight(String(data[0].height));
-        if (data[0]?.weight && !weight) setWeight(String(data[0].weight));
+        if (data[0]?.sex) setSex(data[0].sex);
       } else {
         setPendingAppointment(null);
       }
     } catch (_) {}
   };
 
+  const checkVitalInputs = () => {
+    if (!intakeBlocked) return true;
+    setTouchedVitals(Object.fromEntries(invalidFields.map((field) => [field, true])));
+    document.getElementById(`${vitalId}-${invalidFields[0]}`)?.focus();
+    return false;
+  };
+
   const handleConfirmArrival = async () => {
-    if (!pendingAppointment) return;
+    if (!pendingAppointment || submittingIntake.current || !checkVitalInputs()) return;
+    submittingIntake.current = true;
+    setIsCheckingIn(true);
     const jwt = localStorage.getItem('valetudo_token');
     try {
       const res = await fetch(`${API_BASE_URL}/api/appointments/${pendingAppointment.appointment_id}/checkin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
         body: JSON.stringify({
-          blood_pressure: bp,
-          temperature: temp,
-          pulse: pulse,
-          height: height || null,
-          weight: weight || null,
+          ...measurements,
+          blood_pressure: bloodPressure,
+          sex: sex || null,
         }),
       });
 
@@ -241,24 +305,28 @@ try {
 
       // Race-condition path: server rejected because patient is already in queue
       if (res.status === 409) {
-        setScanStatus('⚠️ ' + data.error);
+        setScanStatus('' + data.error);
         if (verifiedPatient) await checkActiveTicket(verifiedPatient.user_id);
         return;
       }
 
       if (!res.ok) throw new Error(data.error || 'Failed to check in patient.');
 
-      setCheckInSuccess(`✅ Arrival confirmed! Ticket ${data.queueTicket} assigned at ${data.arrivalTime}.`);
+      setCheckInSuccess(`Arrival confirmed! Ticket ${data.queueTicket} assigned at ${data.arrivalTime}.`);
       setPendingAppointment({ ...pendingAppointment, status: 'checked_in' });
       if (verifiedPatient) await checkActiveTicket(verifiedPatient.user_id);
     } catch (err: any) {
-      setScanStatus('❌ ' + err.message);
+      setScanStatus('' + err.message);
+    } finally {
+      submittingIntake.current = false;
+      setIsCheckingIn(false);
     }
   };
 
   /* ── Register as walk-in ─────────────────────────────────── */
   const handleRegisterWalkIn = async () => {
-    if (!verifiedPatient) return;
+    if (!verifiedPatient || submittingIntake.current || !checkVitalInputs()) return;
+    submittingIntake.current = true;
     setIsRegisteringWalkIn(true);
     setWalkInSuccess(null);
     const jwt = localStorage.getItem('valetudo_token');
@@ -270,29 +338,27 @@ try {
         body: JSON.stringify({
           patient_user_id: verifiedPatient.user_id,
           visit_type: 'Walk-in Consultation',
-          notes: `Walk-in triage vitals · BP ${bp}, Temp ${temp}°C, Pulse ${pulse} bpm`,
-          vitals: {
-            height: height || null,
-            weight: weight || null,
-          },
+          sex: sex || null,
+          vitals: triageVitals.values,
         }),
       });
       const data = await res.json();
 
       // Race-condition path: server rejected because patient is already in queue
       if (res.status === 409) {
-        setScanStatus('⚠️ ' + data.error);
+        setScanStatus('' + data.error);
         await checkActiveTicket(verifiedPatient.user_id);
         return;
       }
 
       if (!res.ok) throw new Error(data.error || 'Failed to register walk-in patient.');
 
-      setWalkInSuccess(`✅ Walk-in registered! Ticket ${data.queueTicket} at ${data.arrivalTime}.`);
+      setWalkInSuccess(`Walk-in registered! Ticket ${data.queueTicket} at ${data.arrivalTime}.`);
       await checkActiveTicket(verifiedPatient.user_id);
     } catch (err: any) {
-      setScanStatus('❌ ' + err.message);
+      setScanStatus('' + err.message);
     } finally {
+      submittingIntake.current = false;
       setIsRegisteringWalkIn(false);
     }
   };
@@ -300,7 +366,7 @@ try {
   const startCamera = async () => {
     setCameraError('');
     setIsCameraActive(true);
-    setScanStatus('📷 Webcam active. Center the student QR code.');
+    setScanStatus('Webcam active. Center the student QR code.');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
@@ -366,7 +432,7 @@ try {
       const imageData = ctx.getImageData(0, 0, img.width, img.height);
       const code = jsQR(imageData.data, imageData.width, imageData.height);
       if (code && code.data) verifyToken(code.data);
-      else setScanStatus('❌ No QR code found in the uploaded image.');
+      else setScanStatus('No QR code found in the uploaded image.');
     };
     img.src = URL.createObjectURL(file);
   };
@@ -388,9 +454,135 @@ try {
   };
 
   /* ── Derived status ──────────────────────────────────────── */
-  const statusIsOk = scanStatus.includes('✅');
-  const statusIsErr = scanStatus.includes('❌');
-  const statusIsWarn = scanStatus.includes('⚠️');
+  const statusIsOk = scanStatus.includes('');
+  const statusIsErr = scanStatus.includes('');
+  const statusIsWarn = scanStatus.includes('');
+
+  const updateVital = (field: TriageVitalField, draft: string) => {
+    const error = triageDraftError(field, draft);
+    setRejectedVitals((previous) => {
+      const next = { ...previous };
+      if (error) next[field] = error;
+      else delete next[field];
+      return next;
+    });
+    if (!error) vitalFields[field].set(draft);
+  };
+
+  const intakeError = intakeBlocked && (
+    <p id={`${vitalId}-intake-error`} role="status" style={{ color: C.danger, fontSize: 12 }}>
+      Correct or clear the following readings before continuing: {invalidFields.map((field) => vitalFields[field].label).join(', ')}.
+    </p>
+  );
+
+  const triageFields = (
+    <>
+      <div
+        style={{
+          fontSize: 10.5,
+          fontWeight: 800,
+          letterSpacing: 1.2,
+          color: C.textMuted,
+          textTransform: 'uppercase',
+          marginBottom: 8,
+        }}
+      >
+        Triage vitals
+      </div>
+      <p style={{ margin: '0 0 10px', fontSize: 12, color: C.textSub }}>Leave any unmeasured readings blank.</p>
+      {(verifiedPatient?.height || verifiedPatient?.weight) && (
+        <p style={{ margin: '0 0 10px', fontSize: 12, color: C.textSub }}>
+          Saved profile measurements{verifiedPatient.height ? ' · Height ' + verifiedPatient.height + ' cm' : ''}
+          {verifiedPatient.weight ? ' · Weight ' + verifiedPatient.weight + ' kg' : ''}
+        </p>
+      )}
+      <label style={{ display: 'block', marginBottom: 10, fontSize: 10.5, color: C.textSub, fontWeight: 600 }}>
+        Patient sex
+        <select
+          value={sex}
+          onChange={(e) => setSex(e.target.value)}
+          style={{
+            display: 'block',
+            width: '100%',
+            boxSizing: 'border-box',
+            marginTop: 4,
+            padding: '8px 10px',
+            color: C.text,
+            background: C.surface,
+            border: `1px solid ${C.border}`,
+            borderRadius: 8,
+            fontFamily: 'inherit',
+          }}
+        >
+          <option value="">Not recorded</option>
+          <option value="MALE">MALE</option>
+          <option value="FEMALE">FEMALE</option>
+        </select>
+      </label>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))',
+          gap: 8,
+          marginBottom: 14,
+        }}
+      >
+        {(Object.keys(vitalFields) as TriageVitalField[]).map((field) => {
+          const { label, value } = vitalFields[field];
+          const id = vitalId + '-' + field;
+          const error = rejectedVitals[field] || (touchedVitals[field] ? vitalErrors[field] : undefined);
+          const rejectedBlank = rejectedVitals[field] && !value.trim();
+          return (
+            <div key={field} style={{ minWidth: 0 }}>
+              <label htmlFor={id} style={{ fontSize: 10.5, color: C.textSub, fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                {label}
+              </label>
+              <input
+                id={id}
+                form={`${vitalId}-intake`}
+                type="text"
+                inputMode={field === 'blood_pressure' ? 'text' : VITAL_RULES[field].integer ? 'numeric' : 'decimal'}
+                autoComplete="off" disabled={isCheckingIn || isRegisteringWalkIn}
+                aria-invalid={Boolean(error)}
+                aria-describedby={error ? id + '-error' : undefined}
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  padding: '8px 10px',
+                  fontSize: 12,
+                  color: C.text,
+                  background: C.surface,
+                  border: '1px solid ' + (error ? C.danger : C.border),
+                  borderRadius: 8,
+                  fontFamily: 'inherit',
+                }}
+                value={value}
+                onChange={(event) => updateVital(field, event.target.value)}
+                onBlur={() => setTouchedVitals((touched) => ({ ...touched, [field]: true }))}
+                onKeyDown={(event) => {
+                  if (rejectedBlank && (event.key === 'Backspace' || event.key === 'Delete')) {
+                    event.preventDefault();
+                    updateVital(field, '');
+                  }
+                }}
+              />
+              {error && (
+                <div id={id + '-error'} role="alert" style={{ marginTop: 4, color: C.danger, fontSize: 11 }}>
+                  {error}
+                  {rejectedBlank && ' Press Backspace or Delete to leave it blank.'}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ marginTop: 10, fontSize: 12, color: C.textSub }}>
+        Calculated BMI: <strong style={{ color: C.text }}>
+          {bmi === null ? bmiPrompt : `${bmi.toFixed(1)} (${bmiCategory})`}
+        </strong>
+      </div>
+    </>
+  );
 
   /* ── Render ──────────────────────────────────────────────── */
   return (
@@ -616,7 +808,7 @@ try {
               padding: '10px 20px',
               borderRadius: 999,
               background: C.primary,
-              color: '#FFFFFF',
+              color: C.textOnPrimary,
               border: 'none',
               fontSize: 13,
               fontWeight: 700,
@@ -652,7 +844,7 @@ try {
               padding: '11px 22px',
               borderRadius: 999,
               background: C.primary,
-              color: '#FFFFFF',
+              color: C.textOnPrimary,
               border: 'none',
               fontSize: 13,
               fontWeight: 700,
@@ -686,7 +878,7 @@ try {
               padding: '11px 22px',
               borderRadius: 999,
               background: C.danger,
-              color: '#FFFFFF',
+              color: C.textOnDanger,
               border: 'none',
               fontSize: 13,
               fontWeight: 700,
@@ -843,7 +1035,7 @@ try {
             {[
               {
                 label: 'Blood type',
-                value: verifiedPatient.blood_type || 'O+',
+                value: verifiedPatient.blood_type || 'Not recorded',
                 color: C.text,
               },
               {
@@ -862,6 +1054,16 @@ try {
               {
                 label: 'Weight',
                 value: verifiedPatient.weight ? `${verifiedPatient.weight} kg` : '—',
+                color: C.text,
+              },
+              {
+                label: 'Sex',
+                value: sex || 'Not recorded',
+                color: C.text,
+              },
+              {
+                label: 'BMI',
+                value: bmi === null ? '—' : `${bmi.toFixed(1)} · ${bmiCategory}`,
                 color: C.text,
               },
             ].map((item) => (
@@ -939,7 +1141,7 @@ try {
                 }}
               >
                 <b style={{ fontSize: 13, color: C.warning, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 16 }}>⚠️</span>
+                  <span style={{ fontSize: 16 }}><Icon name="warning" size={14} /></span>
                   Patient already in today's queue
                 </b>
                 <span
@@ -948,7 +1150,7 @@ try {
                     padding: '3px 10px',
                     borderRadius: 999,
                     background: C.warning,
-                    color: '#FFFFFF',
+                    color: C.textOnPrimary,
                     fontWeight: 800,
                     textTransform: 'uppercase',
                     letterSpacing: 0.3,
@@ -1078,66 +1280,7 @@ try {
 
               {pendingAppointment.status !== 'checked_in' && (
                 <>
-                  <div
-                    style={{
-                      fontSize: 10.5,
-                      fontWeight: 800,
-                      letterSpacing: 1.2,
-                      color: C.textMuted,
-                      textTransform: 'uppercase',
-                      marginBottom: 8,
-                    }}
-                  >
-                    Triage vitals
-                  </div>
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(5, 1fr)',
-                      gap: 8,
-                      marginBottom: 14,
-                    }}
-                  >
-                    {[
-                      { label: 'Blood pressure', value: bp, set: setBp, placeholder: '120/80' },
-                      { label: 'Temp (°C)', value: temp, set: setTemp, placeholder: '36.6' },
-                      { label: 'Pulse (bpm)', value: pulse, set: setPulse, placeholder: '78' },
-                      { label: 'Height (cm)', value: height, set: setHeight, placeholder: '162.5' },
-                      { label: 'Weight (kg)', value: weight, set: setWeight, placeholder: '54.0' },
-                    ].map((f) => (
-                      <div key={f.label}>
-                        <label
-                          style={{
-                            fontSize: 10.5,
-                            color: C.textSub,
-                            fontWeight: 600,
-                            display: 'block',
-                            marginBottom: 4,
-                          }}
-                        >
-                          {f.label}
-                        </label>
-                        <input
-                          type="text"
-                          placeholder={f.placeholder}
-                          style={{
-                            width: '100%',
-                            boxSizing: 'border-box',
-                            padding: '8px 10px',
-                            fontSize: 12,
-                            color: C.text,
-                            background: C.surface,
-                            border: `1px solid ${C.border}`,
-                            borderRadius: 8,
-                            outline: 'none',
-                            fontFamily: 'inherit',
-                          }}
-                          value={f.value}
-                          onChange={(e) => f.set(e.target.value)}
-                        />
-                      </div>
-                    ))}
-                  </div>
+                  {triageFields}
                 </>
               )}
 
@@ -1157,24 +1300,28 @@ try {
                   {checkInSuccess || 'Patient is checked in and waiting in queue.'}
                 </div>
               ) : (
+                <form id={`${vitalId}-intake`} onSubmit={(event) => { event.preventDefault(); void handleConfirmArrival(); }}>
+                {intakeError}
                 <button
-                  type="button"
-                  onClick={handleConfirmArrival}
+                  type="submit"
+                  disabled={intakeBlocked || isCheckingIn}
+                  aria-describedby={intakeBlocked ? `${vitalId}-intake-error` : undefined}
                   style={{
                     width: '100%',
                     padding: 12,
                     borderRadius: 999,
-                    background: C.primary,
-                    color: '#FFFFFF',
+                    background: intakeBlocked || isCheckingIn ? C.sage400 : C.primary,
+                    color: C.textOnPrimary,
                     border: 'none',
                     fontSize: 13,
                     fontWeight: 700,
-                    cursor: 'pointer',
+                    cursor: intakeBlocked || isCheckingIn ? 'not-allowed' : 'pointer',
                     fontFamily: 'inherit',
                   }}
                 >
-                  Confirm arrival & check-in patient
+                  {isCheckingIn ? 'Confirming arrival…' : 'Confirm arrival & check-in patient'}
                 </button>
+                </form>
               )}
             </div>
           ) : (
@@ -1233,82 +1380,24 @@ try {
                   {walkInSuccess}
                 </div>
               ) : (
-                <>
-                  <div
-                    style={{
-                      fontSize: 10.5,
-                      fontWeight: 800,
-                      letterSpacing: 1.2,
-                      color: C.textMuted,
-                      textTransform: 'uppercase',
-                      marginBottom: 8,
-                    }}
-                  >
-                    Triage vitals
-                  </div>
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(5, 1fr)',
-                      gap: 8,
-                      marginBottom: 14,
-                    }}
-                  >
-                    {[
-                      { label: 'Blood pressure', value: bp, set: setBp, placeholder: '120/80' },
-                      { label: 'Temp (°C)', value: temp, set: setTemp, placeholder: '36.6' },
-                      { label: 'Pulse (bpm)', value: pulse, set: setPulse, placeholder: '78' },
-                      { label: 'Height (cm)', value: height, set: setHeight, placeholder: '162.5' },
-                      { label: 'Weight (kg)', value: weight, set: setWeight, placeholder: '54.0' },
-                    ].map((f) => (
-                      <div key={f.label}>
-                        <label
-                          style={{
-                            fontSize: 10.5,
-                            color: C.textSub,
-                            fontWeight: 600,
-                            display: 'block',
-                            marginBottom: 4,
-                          }}
-                        >
-                          {f.label}
-                        </label>
-                        <input
-                          type="text"
-                          placeholder={f.placeholder}
-                          style={{
-                            width: '100%',
-                            boxSizing: 'border-box',
-                            padding: '8px 10px',
-                            fontSize: 12,
-                            color: C.text,
-                            background: C.surface,
-                            border: `1px solid ${C.border}`,
-                            borderRadius: 8,
-                            outline: 'none',
-                            fontFamily: 'inherit',
-                          }}
-                          value={f.value}
-                          onChange={(e) => f.set(e.target.value)}
-                        />
-                      </div>
-                    ))}
-                  </div>
+                <form id={`${vitalId}-intake`} onSubmit={(event) => { event.preventDefault(); void handleRegisterWalkIn(); }}>
+                  {triageFields}
+                  {intakeError}
 
                   <button
-                    type="button"
-                    onClick={handleRegisterWalkIn}
-                    disabled={isRegisteringWalkIn}
+                    type="submit"
+                    disabled={intakeBlocked || isRegisteringWalkIn}
+                    aria-describedby={intakeBlocked ? `${vitalId}-intake-error` : undefined}
                     style={{
                       width: '100%',
                       padding: 12,
                       borderRadius: 999,
-                      background: isRegisteringWalkIn ? C.sage400 : C.primary,
-                      color: '#FFFFFF',
+                      background: intakeBlocked || isRegisteringWalkIn ? C.sage400 : C.primary,
+                      color: C.textOnPrimary,
                       border: 'none',
                       fontSize: 13,
                       fontWeight: 700,
-                      cursor: isRegisteringWalkIn ? 'not-allowed' : 'pointer',
+                      cursor: intakeBlocked || isRegisteringWalkIn ? 'not-allowed' : 'pointer',
                       fontFamily: 'inherit',
                       boxShadow: '0 4px 12px rgba(31,74,52,0.16)',
                       transition: 'background 120ms ease',
@@ -1316,9 +1405,9 @@ try {
                   >
                     {isRegisteringWalkIn
                       ? 'Registering walk-in…'
-                      : '✓ Register as walk-in patient'}
+                      : 'Register as walk-in patient'}
                   </button>
-                </>
+                </form>
               )}
             </div>
           )}

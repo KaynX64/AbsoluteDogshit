@@ -13,7 +13,7 @@ class ApiConfig {
         // If testing on an Android Emulator:
         // return 'https://10.0.2.2:5000';
 
-        return 'https://10.0.22.7:5000'; // e.g. https://192.168.1.15:5000
+        return 'https://192.168.18.116:5000'; // e.g. https://192.168.1.15:5000
       }
     } catch (_) {}
     return 'https://localhost:5000';

@@ -9,6 +9,7 @@
 // The localStorage store is always kept as a mirror so the sidebar
 // badge can read the count synchronously without async churn.
 import { API_BASE_URL } from '../config/api';
+import { saveBootstrapPages } from './offlineBootstrap';
 
 export interface OfflineMutation {
   client_mutation_id: string;
@@ -24,7 +25,9 @@ export interface OfflineMutation {
 
 const STORAGE_KEY = 'valetudo_offline_mutations_queue';
 const SYNC_TIME_KEY = 'valetudo_last_sync_time';
+const PAGED_SYNC_TIME_KEY = 'valetudo_last_sync_time_v2';
 const DEVICE_ID = 'CLINIC-DESKTOP-ELECTRON';
+let cacheBootstrap: { token: string; promise: Promise<void> } | undefined;
 
 function hasBridge(): boolean {
   return (
@@ -216,38 +219,51 @@ export async function replayOfflineQueue(): Promise<{
 }
 
 /* ── Bootstrap: preload patient + EMR cache after login ────────── */
-export async function bootstrapOfflineCache(): Promise<void> {
+export function bootstrapOfflineCache(): Promise<void> {
   const token = localStorage.getItem('valetudo_token');
-  if (!token || !hasBridge()) return; // web preview: nothing to seed
+  if (!token || !window.electronAPI?.offlineCacheBootstrap) return Promise.resolve();
+  if (cacheBootstrap?.token === token) return cacheBootstrap.promise;
 
-  // Delta Sync: Retrieve the last known server time to only fetch changes
-  const lastSync = localStorage.getItem(SYNC_TIME_KEY);
-  const queryParams = lastSync ? `?lastSyncedAt=${encodeURIComponent(lastSync)}` : '';
+  const promise = writeOfflineCache(token).finally(() => {
+    if (cacheBootstrap?.promise === promise) cacheBootstrap = undefined;
+  });
+  cacheBootstrap = { token, promise };
+  return promise;
+}
 
+async function writeOfflineCache(token: string): Promise<void> {
   try {
-    const res = await fetch(`${API_BASE_URL}/api/sync/bootstrap${queryParams}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    
-    if (!res.ok) return;
-    
-    const data = await res.json();
-    
-    await (window as any).electronAPI.offlineCacheBootstrap({
-      patients: data.patients || [],
-      emrRecords: data.emrRecords || [],
-    });
+    const checkpoint = localStorage.getItem(PAGED_SYNC_TIME_KEY);
+    const legacyCheckpoint = localStorage.getItem(SYNC_TIME_KEY);
+    const isCurrentSession = () => localStorage.getItem('valetudo_token') === token;
 
-    // Save the server time for the next delta sync
-    if (data.serverTime) {
-      localStorage.setItem(SYNC_TIME_KEY, data.serverTime);
-    }
-
-    console.log(
-      `📦 [Offline] Delta synced ${data.patients?.length || 0} patients, ${
-        data.emrRecords?.length || 0
-      } EMR records into SQLite`
+    const result = await saveBootstrapPages(
+      cursor => {
+        const params = new URLSearchParams({ paging: '1' });
+        if (cursor) params.set('cursor', cursor);
+        else {
+          if (checkpoint && Number.isFinite(Date.parse(checkpoint))) params.set('checkpoint', checkpoint);
+          if (legacyCheckpoint) params.set('lastSyncedAt', legacyCheckpoint);
+        }
+        return fetch(`${API_BASE_URL}/api/sync/bootstrap?${params}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      },
+      async page => {
+        if (!isCurrentSession()) return false;
+        const saved = await window.electronAPI?.offlineCacheBootstrap(page);
+        if (saved?.success !== true) console.warn('[Offline] SQLite cache write failed. The previous sync checkpoint was kept.');
+        return saved?.success === true && isCurrentSession();
+      },
     );
+    if (!result || !isCurrentSession()) return;
+
+    localStorage.setItem(result.paged ? PAGED_SYNC_TIME_KEY : SYNC_TIME_KEY, result.checkpoint);
+
+    if (import.meta.env.DEV) {
+      console.debug(`[Offline] Patient roster refreshed: ${result.patientCount} records.`);
+      console.debug(`[Offline] EMR updates saved: ${result.encounterCount} records.`);
+    }
   } catch (err) {
     console.warn('[Offline] Bootstrap failed (non-fatal):', err);
   }

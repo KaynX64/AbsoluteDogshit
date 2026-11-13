@@ -149,6 +149,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Widget build(BuildContext context) {
     final rs = Rs.of(context);
     final maxContentWidth = rs.isTablet ? 560.0 : double.infinity;
+    final healthProfile = widget.healthProfile ?? {};
+    final rawSex = healthProfile['sex'];
+    final sex = rawSex?.toString().toUpperCase();
+    final rawDob = healthProfile['date_of_birth'];
+    final dob = rawDob == null ? null : rawDob.toString().split('T')[0];
+    final age = healthProfile['age'];
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7F9F6),
@@ -192,7 +198,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   ),
                   SizedBox(height: rs.h(6)),
                   Text(
-                    'Edit contact details.',
+                    'Edit your profile details.',
                     style: TextStyle(
                       fontSize: rs.sp(30),
                       fontWeight: FontWeight.w800,
@@ -206,6 +212,58 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     style: TextStyle(fontSize: rs.sp(14), color: textSub),
                   ),
                   SizedBox(height: rs.h(24)),
+
+                  Text(
+                    'Sex (read-only)',
+                    style: TextStyle(
+                      fontSize: rs.sp(13),
+                      fontWeight: FontWeight.w700,
+                      color: textMain,
+                    ),
+                  ),
+                  SizedBox(height: rs.h(8)),
+                  InputDecorator(
+                    decoration: _pillInputDecoration(
+                      rs: rs,
+                      hint: 'Not recorded in clinic database',
+                      icon: Icons.person_outline,
+                    ),
+                    child: Text(
+                      sex ?? 'Not recorded in clinic database',
+                      style: TextStyle(
+                        fontSize: rs.sp(14),
+                        color: sex != null ? textMain : textSub,
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: rs.h(20)),
+
+                  Text(
+                    'Date of Birth (read-only)',
+                    style: TextStyle(
+                      fontSize: rs.sp(13),
+                      fontWeight: FontWeight.w700,
+                      color: textMain,
+                    ),
+                  ),
+                  SizedBox(height: rs.h(8)),
+                  InputDecorator(
+                    decoration: _pillInputDecoration(
+                      rs: rs,
+                      hint: 'Not recorded in clinic database',
+                      icon: Icons.cake_outlined,
+                    ),
+                    child: Text(
+                      dob == null
+                          ? 'Not recorded in clinic database'
+                          : '$dob${age == null ? '' : ' ($age yrs)'}',
+                      style: TextStyle(
+                        fontSize: rs.sp(14),
+                        color: dob != null ? textMain : textSub,
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: rs.h(20)),
 
                   // Infirmary Note
                   Container(
@@ -321,7 +379,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                               ),
                             )
                           : Text(
-                              'Save contact changes',
+                              'Save profile changes',
                               style: TextStyle(
                                 fontSize: rs.sp(15),
                                 fontWeight: FontWeight.w700,

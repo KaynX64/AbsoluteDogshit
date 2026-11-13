@@ -1,10 +1,11 @@
 # Dependencies
 node_modules/
+server/node_modules/
 .pub-cache/
 .pub/
 
 # Environments (Never commit secrets or personal network configs)
-.env
+.env    
 .env.*
 !.env.example
 
@@ -34,3 +35,7 @@ mobile/android/app/google-services.json
 #googleFirebaseCredentials.json
 server/serviceAccountKey.json
 mobile/android/app/google-services.json
+
+#audit_files/Misc Files
+audit.md
+draft_prompts.txt

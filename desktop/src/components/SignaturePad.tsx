@@ -99,9 +99,18 @@ const SignaturePad = forwardRef<SignaturePadHandle, { height?: number; onChange?
         style={{
           position: 'relative',
           border: `1.5px dashed ${T.sage400}`,
-          borderRadius: T.radius.md,
+          borderRadius: T.radius.lg,
           background: T.surfaceMuted,
           height,
+          transition: `border-color ${T.durBase} ${T.ease}, background ${T.durBase} ${T.ease}`,
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.borderColor = T.primarySoft;
+          e.currentTarget.style.background = T.surface;
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.borderColor = T.sage400;
+          e.currentTarget.style.background = T.surfaceMuted;
         }}
       >
         <canvas
@@ -110,17 +119,20 @@ const SignaturePad = forwardRef<SignaturePadHandle, { height?: number; onChange?
         />
         <div
           style={{
-            position: 'absolute', left: 24, right: 24, bottom: 36,
+            position: 'absolute', left: 28, right: 28, bottom: 38,
             borderBottom: `1px solid ${T.sage300}`, pointerEvents: 'none',
           }}
         />
         <span
           style={{
-            position: 'absolute', left: 24, bottom: 14, fontSize: 11,
-            color: T.textMuted, pointerEvents: 'none', letterSpacing: 1,
+            position: 'absolute', left: 28, bottom: 16, fontSize: 10.5,
+            color: T.textMuted, pointerEvents: 'none',
+            letterSpacing: T.ls.wider,
+            fontWeight: T.fw.bold,
+            textTransform: 'uppercase',
           }}
         >
-          SIGN ABOVE THE LINE
+          Sign above the line
         </span>
       </div>
     );

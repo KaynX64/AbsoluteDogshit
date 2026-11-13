@@ -3,8 +3,10 @@ import React, { useEffect, useState } from 'react';
 import NurseConsole from './components/NurseConsole';
 import DoctorConsole from './components/DoctorConsole';
 import AdminConsole from './components/AdminConsole';
+import type { AdminTab } from './components/AdminConsole';
 import ResponderConsole from './components/ResponderConsole';
 import { useBookingBadge } from './hooks/useBookingBadge';
+import { DesktopSocketContext, useDesktopSocketSession } from './services/desktopRealtime';
 import {
   getOfflineQueue,
   replayOfflineQueue,
@@ -13,7 +15,12 @@ import {
 } from './services/offlineSync';
 import { API_BASE_URL } from './config/api';
 import PasswordStrengthIndicator, { evaluatePassword } from './components/PasswordStrengthIndicator';
-import valetudoLogo from './assets/valetudo_logo.png';
+import { T, btnPrimary, btnSubtle } from './theme';
+import { ThemeProvider, applyThemeFromAccount, resetThemeAfterLogout, useTheme } from './theme/ThemeProvider';
+import Icon from './components/Icon';
+import IncidentReportModal from './components/IncidentReportModal';
+import SettingsMenu from './components/SettingsMenu';
+import ThemedLogo from './components/ThemedLogo';
 
 
 /* ── Inline SVG icons ──────────────────────────────────────────── */
@@ -122,7 +129,7 @@ export function useSessionTimeout(isActive: boolean, timeoutMinutes = 480) {
       timeoutId = setTimeout(() => {
         localStorage.removeItem('valetudo_token');
         localStorage.removeItem('token');
-        alert('🔒 Session expired due to 8 hours of inactivity (R.A. 10173 Compliance). Please log in again.');
+        alert('Session expired due to 8 hours of inactivity (R.A. 10173 Compliance). Please log in again.');
         window.location.reload();
       }, timeoutMinutes * 60 * 1000);
     };
@@ -146,95 +153,77 @@ interface SidebarProps {
   activeItem?: string;
   onItemClick?: (key: string) => void;
   badgeCounts?: Record<string, number>;
+  showIncidentRecords: boolean;
 }
 
-function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, badgeCounts }: SidebarProps) {
-  const navByRole: Record<string, { key: string; label: string; icon: React.ReactNode }[]> = {
+function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, badgeCounts, showIncidentRecords }: SidebarProps) {
+  // Each item now uses Material Symbols ligatures for clean, consistent icons.
+  const navByRole: Record<string, { key: string; label: string; icon: string }[]> = {
     ADMIN: [
-      { key: 'users',     label: 'Users',      icon: <I.Users /> },
-      { key: 'audit',     label: 'Audit',      icon: <I.Shield /> },
-      { key: 'telemetry', label: 'Health',     icon: <I.Activity /> },
-      { key: 'analytics', label: 'Analytics',  icon: <I.Chart /> },
-      { key: 'db',        label: 'Database',   icon: <I.Database /> },
+      { key: 'users',     label: 'Users & roles',    icon: 'manage_accounts' },
+      { key: 'audit',     label: 'Privacy & audit',  icon: 'shield_lock' },
+      { key: 'telemetry', label: 'System health',    icon: 'dns' },
+      { key: 'serverPolicy', label: 'Server Policy', icon: 'tune' },
+      { key: 'analytics', label: 'Health analytics', icon: 'monitoring' },
+      { key: 'incidents', label: 'Incident Records', icon: 'assignment' },
+      { key: 'db',        label: 'Database Studio',  icon: 'database' },
     ],
     NURSE: [
-      {
-        key: 'triage',
-        label: 'Triage',
-        icon: (
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-          </svg>
-        )
-      },
-      {
-        key: 'expected',
-        label: 'Expected',
-        icon: (
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="4" width="18" height="18" rx="2" />
-            <path d="M16 2v4M8 2v4M3 10h18" />
-            <path d="M9 15l2 2 4-4" />
-          </svg>
-        )
-      },
-      {
-        key: 'inventory',
-        label: 'Inventory',
-        icon: (
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M10.5 20.5a7 7 0 0 1-9.9-9.9l6.4-6.4a7 7 0 0 1 9.9 9.9z" />
-            <path d="M8.5 8.5l7 7" />
-          </svg>
-        )
-      },
+      { key: 'triage',    label: 'Triage',           icon: 'local_hospital' },
+      { key: 'expected',  label: 'Expected',         icon: 'monitor_heart' },
+      { key: 'inventory', label: 'Inventory',        icon: 'medication' },
     ],
     DOCTOR: [
-      { key: 'active',    label: 'Queue',     icon: <I.Stethoscope /> },
-      { key: 'scheduled', label: 'Bookings',  icon: <I.Calendar /> },
-      { key: 'history',   label: 'History',   icon: <I.History /> },
-      { key: 'archive',   label: 'EMR',       icon: <I.Folder /> },
-      { key: 'analytics', label: 'Analytics', icon: <I.Chart /> },
+      { key: 'active',    label: 'Queue',            icon: 'stethoscope' },
+      { key: 'scheduled', label: 'Bookings',         icon: 'event' },
+      { key: 'history',   label: 'History',          icon: 'history' },
+      { key: 'archive',   label: 'EMR',              icon: 'folder_shared' },
+      { key: 'analytics', label: 'Analytics',        icon: 'monitoring' },
     ],
     DENTIST: [
-      { key: 'active',    label: 'Queue',     icon: <I.Stethoscope /> },
-      { key: 'scheduled', label: 'Bookings',  icon: <I.Calendar /> },
-      { key: 'history',   label: 'History',   icon: <I.History /> },
-      { key: 'archive',   label: 'EMR',       icon: <I.Folder /> },
-      { key: 'analytics', label: 'Analytics', icon: <I.Chart /> },
+      { key: 'active',    label: 'Queue',            icon: 'stethoscope' },
+      { key: 'scheduled', label: 'Bookings',         icon: 'event' },
+      { key: 'history',   label: 'History',          icon: 'history' },
+      { key: 'archive',   label: 'EMR',              icon: 'folder_shared' },
+      { key: 'analytics', label: 'Analytics',        icon: 'monitoring' },
     ],
     EMERGENCY_RESPONDER: [
-      { key: 'dispatch', label: 'Dispatch', icon: <I.Alert /> },
+      { key: 'dispatch',  label: 'Dispatch',         icon: 'emergency' },
     ],
   };
 
-  const navItems = navByRole[role] ?? navByRole.ADMIN;
+  const navItems = (navByRole[role] ?? navByRole.ADMIN).filter(item => item.key !== 'incidents' || showIncidentRecords);
 
   return (
     <aside className="sb">
       <div className="sb-logo-block">
         <div className="sb-logo-lg">
-          <img src={valetudoLogo} alt="Valetudo HealthLink" />
+          <ThemedLogo alt="LeoVital HealthLink" />
+        </div>
+        <div className="sb-brand-text">
+          <span className="sb-brand-name">LeoVital</span>
+          <span className="sb-brand-sub">HealthLink</span>
         </div>
       </div>
       <nav className="sb-nav">
         {navItems.map((item) => {
           const isActive = activeItem === item.key;
+          const badge = badgeCounts?.[item.key] ?? 0;
           return (
             <button
               key={item.key}
               type="button"
               className={`sb-item${isActive ? ' is-active' : ''}`}
               onClick={() => onItemClick?.(item.key)}
-              style={{ cursor: onItemClick ? 'pointer' : 'default' }}
+              style={{ cursor: onItemClick ? 'pointer' : 'default', position: 'relative' }}
             >
-              {item.icon}
-              {(badgeCounts?.[item.key] ?? 0) > 0 && (
-                <span key={badgeCounts![item.key]} className="sb-badge">
-                  {badgeCounts![item.key] > 99 ? '99+' : badgeCounts![item.key]}
+              <Icon name={item.icon} size={20} />
+              <span>{item.label}</span>
+              {badge > 0 && (
+                <span className="sb-badge">
+                  {badge > 99 ? '99+' : badge}
                 </span>
               )}
-              <span>{item.label}</span>
             </button>
           );
         })}
@@ -243,21 +232,17 @@ function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, b
       <div className="sb-spacer" />
 
       <div className="sb-links">
-        <button
-          type="button"
-          className="sb-link"
-          onClick={onChangePassword}
-          title="Change password"
-        >
-          <I.Key />
-        </button>
+        {/* Dedicated settings menu (bottom-left) — theme mode & presets,
+            reset password, and per-account persistence state. */}
+        <SettingsMenu onResetPassword={onChangePassword} />
         <button
           type="button"
           className="sb-link"
           onClick={onSignOut}
           title="Sign out"
         >
-          <I.Logout />
+          <Icon name="logout" size={20} />
+          <span>Sign out</span>
         </button>
       </div>
     </aside>
@@ -293,10 +278,17 @@ function TopBar({
     : hour >= 12 && hour < 18 ? 'Good afternoon'
     : 'Good evening';
 
+  // Format current time in PHT for the sync-status pill
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString('en-PH', {
+    hour: '2-digit', minute: '2-digit', hour12: true,
+    timeZone: 'Asia/Shanghai',
+  });
+
   return (
     <header className="tb">
       <div className="tb-left">
-        <div className="tb-eyebrow">Valetudo HealthLink Console</div>
+        <div className="tb-eyebrow">LeoVital HealthLink Console</div>
         <h1 className="tb-greeting">{greeting}, {user.first_name}</h1>
       </div>
 
@@ -315,7 +307,7 @@ function TopBar({
 
         <span className={`tb-online ${isOnline ? 'is-on' : 'is-off'}`}>
           <span style={{ fontSize: 8 }}>●</span>
-          {isOnline ? 'Online' : 'Offline'}
+          {isOnline ? `Connected · ${timeStr}` : 'Offline'}
         </span>
 
         {offlineQueueCount > 0 && (
@@ -325,7 +317,7 @@ function TopBar({
             onClick={onManualReplay}
             disabled={isReplaying}
           >
-            {isReplaying ? '⏳ Syncing…' : `⏳ ${offlineQueueCount} queued`}
+            {isReplaying ? 'Syncing…' : `${offlineQueueCount} queued`}
           </button>
         )}
 
@@ -344,7 +336,7 @@ function TopBar({
 }
 
 /* ================================================================= */
-/* LOGIN SCREEN — two-panel split                                     */
+/* LOGIN SCREEN — clinic terminal                                     */
 /* ================================================================= */
 interface LoginScreenProps {
   email: string;
@@ -352,135 +344,301 @@ interface LoginScreenProps {
   password: string;
   setPassword: (v: string) => void;
   error: string;
-  onSubmit: (e: React.FormEvent) => void;
+  onSubmit: (e: React.FormEvent) => void | Promise<void>;
 }
 
+const DEV_ACCOUNTS = [
+  { email: 'nurse@psu.edu.ph',     label: 'Clinic nurse',   icon: 'medical_information' },
+  { email: 'doctor@psu.edu.ph',    label: 'Campus doctor',  icon: 'medical_services' },
+  { email: 'admin@psu.edu.ph',     label: 'System admin',   icon: 'admin_panel_settings' },
+  { email: 'responder@psu.edu.ph', label: 'SOS responder',  icon: 'emergency' },
+];
+
 function LoginScreen({ email, setEmail, password, setPassword, error, onSubmit }: LoginScreenProps) {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [revealPassword, setRevealPassword] = useState(false);
+  const [capsLock, setCapsLock] = useState(false);
+
+  const errorId = 'login-error';
+  const emailId = 'login-email';
+  const passwordId = 'login-password';
+
+  const handleLoginCardPointerMove = (e: React.PointerEvent<HTMLElement>) => {
+    if (e.pointerType !== 'mouse') return;
+    const bounds = e.currentTarget.getBoundingClientRect();
+    e.currentTarget.style.setProperty('--login-pointer-x', `${e.clientX - bounds.left}px`);
+    e.currentTarget.style.setProperty('--login-pointer-y', `${e.clientY - bounds.top}px`);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await onSubmit(e);
+    } finally {
+      // The screen unmounts on success; this only matters for failed attempts.
+      setIsSubmitting(false);
+    }
+  };
+
   return (
-    <div className="login-split">
-      {/* LEFT — sage hero panel */}
-      <div className="login-left">
-        <div className="login-left-brand">
-          <div className="login-left-logo">
-            <img src={valetudoLogo} alt="Valetudo HealthLink" />
-          </div>
-          <div className="login-left-brand-text">
-            <div className="login-left-brand-name">Valetudo</div>
-            <div className="login-left-brand-sub">HealthLink</div>
-          </div>
+    <div className="login-shell">
+      {/* LEFT — context rail (brand, what the workspace covers, campus identity) */}
+      <aside className="login-aside">
+        <div className="login-aside-atmosphere" aria-hidden="true">
+          <svg
+            className="login-aside-art"
+            viewBox="0 0 460 620"
+            preserveAspectRatio="xMidYMax slice"
+            focusable="false"
+          >
+            <defs>
+              <linearGradient id="login-wave-a" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" style={{ stopColor: 'var(--primary-tint)' }} stopOpacity="0.2" />
+                <stop offset="100%" style={{ stopColor: 'var(--primary-tint)' }} stopOpacity="0" />
+              </linearGradient>
+              <linearGradient id="login-wave-b" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" style={{ stopColor: 'var(--primary-tint)' }} stopOpacity="0.14" />
+                <stop offset="100%" style={{ stopColor: 'var(--primary-tint)' }} stopOpacity="0" />
+              </linearGradient>
+              <radialGradient id="login-halo" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" style={{ stopColor: 'var(--primary-tint)' }} stopOpacity="0.3" />
+                <stop offset="70%" style={{ stopColor: 'var(--primary-tint)' }} stopOpacity="0.08" />
+                <stop offset="100%" style={{ stopColor: 'var(--primary-tint)' }} stopOpacity="0" />
+              </radialGradient>
+            </defs>
+            <circle cx="96" cy="470" r="190" fill="url(#login-halo)" />
+            <circle cx="96" cy="470" r="118" fill="none" style={{ stroke: 'var(--primary-tint)' }} strokeOpacity="0.24" />
+            <circle cx="96" cy="470" r="166" fill="none" style={{ stroke: 'var(--primary-tint)' }} strokeOpacity="0.15" />
+            <circle cx="96" cy="470" r="214" fill="none" style={{ stroke: 'var(--primary-tint)' }} strokeOpacity="0.09" />
+            <circle cx="402" cy="120" r="96" fill="url(#login-halo)" />
+            <path
+              d="M0 470 C 70 436 132 502 208 476 C 292 448 356 494 460 452 L460 620 L0 620 Z"
+              fill="url(#login-wave-a)"
+            />
+            <path
+              d="M0 520 C 86 492 150 556 236 528 C 320 500 384 546 460 512 L460 620 L0 620 Z"
+              fill="url(#login-wave-b)"
+            />
+          </svg>
         </div>
 
-        <div className="login-left-hero">
-          <div className="login-left-eyebrow">PSU · Lingayen Campus</div>
-          <h1 className="login-left-headline">
-            Better care.<br />
-            Thoughtful<br />
-            administration.
-          </h1>
-          <p className="login-left-sub">
-            A considered workspace for the people who keep our campus clinic running.
-          </p>
-          <div className="login-left-tag">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-              <path d="M9 12l2 2 4-4" />
-            </svg>
-            <span>Secure access · Responsible health data stewardship</span>
-          </div>
+        <div className="login-aside-brand">
+          <span className="login-aside-mark">
+            <ThemedLogo />
+          </span>
+          <span className="login-aside-wordmark">
+            <span className="login-aside-name">LeoVital</span>
+            <span className="login-aside-sub">HealthLink</span>
+          </span>
         </div>
 
-        <div className="login-left-footer">
-          <div className="login-left-footer-logo">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ width: 26, height: 26 }}>
-              <path d="M3 21h18" />
-              <path d="M5 21V10l7-5 7 5v11" />
-              <path d="M9 21v-6h6v6" />
-            </svg>
-          </div>
-          <div>
-            <div className="login-left-footer-name">Pangasinan State University</div>
-            <div className="login-left-footer-sub">Lingayen Campus · University Infirmary</div>
-          </div>
-        </div>
-      </div>
-
-      {/* RIGHT — cream sign-in panel */}
-      <div className="login-right">
-        <div className="login-right-topbar">
-          <span className="login-sample-pill">Sample design · Admin access</span>
-        </div>
-
-        <div className="login-right-body">
-          <div className="login-right-eyebrow">Admin workspace</div>
-          <h2 className="login-right-title">Valetudo Clinic Portal</h2>
-          <p className="login-right-sub">
-            Sign in with your institutional account to manage clinic systems and governance.
+        <div className="login-aside-copy">
+          <p className="login-aside-eyebrow">University Infirmary · Lingayen</p>
+          <p className="login-aside-title">One calm place for campus care.</p>
+          <p className="login-aside-text">
+            Triage, records and emergency response — for the people who keep the clinic running.
           </p>
 
-          <form onSubmit={onSubmit}>
-            <label className="field-label">Staff PSU email</label>
-            <input
-              type="email"
-              className="field-input"
-              placeholder="Enter your @psu.edu.ph email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              style={{ marginBottom: 18 }}
+          <ul className="login-aside-list">
+            <li>
+              <Icon name="event_available" size={18} tone="inherit" />
+              <span>
+                <strong>Appointments &amp; queue</strong>
+                Daily triage, bookings and patient flow
+              </span>
+            </li>
+            <li>
+              <Icon name="folder_shared" size={18} tone="inherit" />
+              <span>
+                <strong>Electronic medical records</strong>
+                Consults, prescriptions and dental charts
+              </span>
+            </li>
+            <li>
+              <Icon name="emergency" size={18} tone="inherit" />
+              <span>
+                <strong>Emergency response</strong>
+                Campus SOS alerts with responder dispatch
+              </span>
+            </li>
+          </ul>
+        </div>
+
+        <div className="login-aside-foot">
+          <Icon name="apartment" size={20} tone="inherit" />
+          <span>
+            <strong>Pangasinan State University</strong>
+            <span>Lingayen Campus · University Infirmary</span>
+          </span>
+        </div>
+      </aside>
+
+      {/* RIGHT — sign-in card */}
+      <main className="login-main">
+        {/* Ambient art so the canvas around the card never reads as empty space. */}
+        <div className="login-main-art" aria-hidden="true">
+          <svg
+            className="login-main-art-svg"
+            viewBox="0 0 900 900"
+            preserveAspectRatio="xMidYMid slice"
+            focusable="false"
+          >
+            <circle cx="812" cy="790" r="330" fill="none" style={{ stroke: 'var(--primary)' }} strokeOpacity="0.09" />
+            <circle cx="812" cy="790" r="252" fill="none" style={{ stroke: 'var(--primary)' }} strokeOpacity="0.08" />
+            <circle cx="812" cy="790" r="174" fill="none" style={{ stroke: 'var(--primary)' }} strokeOpacity="0.075" />
+            <circle cx="812" cy="790" r="96" style={{ fill: 'var(--primary)' }} fillOpacity="0.05" />
+            <circle cx="96" cy="110" r="210" fill="none" style={{ stroke: 'var(--primary)' }} strokeOpacity="0.075" />
+            <circle cx="96" cy="110" r="140" fill="none" style={{ stroke: 'var(--primary)' }} strokeOpacity="0.06" />
+            <path
+              className="login-main-wave login-main-wave--one"
+              d="M-40 700 C 130 640 250 760 400 720 C 560 676 690 780 940 716 L940 940 L-40 940 Z"
+              style={{ fill: 'var(--primary)' }}
+              fillOpacity="0.058"
             />
-
-            <label className="field-label">Password</label>
-            <input
-              type="password"
-              className="field-input"
-              placeholder="Enter your password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
+            <path
+              className="login-main-wave login-main-wave--two"
+              d="M-40 790 C 140 742 270 848 430 806 C 590 764 720 856 940 800 L940 940 L-40 940 Z"
+              style={{ fill: 'var(--primary)' }}
+              fillOpacity="0.05"
             />
+          </svg>
+          <ThemedLogo className="login-main-watermark" />
+        </div>
 
-            {error && <div className="login-error">{error}</div>}
+        <div className="login-main-top">
+          <span className="login-status">
+            <span className="login-status-dot" aria-hidden="true" />
+            Encrypted session · TLS
+          </span>
+        </div>
 
-            <button type="submit" className="login-submit">
-              Sign in to clinic terminal
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 16, height: 16 }}>
-                <path d="M5 12h14" />
-                <path d="M13 6l6 6-6 6" />
-              </svg>
-            </button>
-
-            <p className="login-note">
-              Authorized personnel only. Your role determines access.
-              Sessions expire after 8 hours of inactivity to protect clinic information.
+        <div className="login-main-body">
+          <section
+            className="login-card"
+            aria-labelledby="login-title"
+            onPointerMove={handleLoginCardPointerMove}
+          >
+            <div className="login-card-smoke" aria-hidden="true" />
+            <p className="login-eyebrow">Staff sign-in</p>
+            <h1 id="login-title" className="login-title">Clinic workspace</h1>
+            <p className="login-sub">
+              Sign in with your institutional account. Your role decides which workspace opens.
             </p>
 
-            {import.meta.env.DEV && (
-              <div className="dev-chips">
-                <p className="dev-chips-label">Quick select test role (dev only)</p>
-                <div className="dev-chip-grid">
-                  <button type="button" className="dev-chip" onClick={() => { setEmail('nurse@psu.edu.ph'); setPassword('Password123!'); }}>
-                    👩‍⚕️ Clinic Nurse
-                  </button>
-                  <button type="button" className="dev-chip" onClick={() => { setEmail('doctor@psu.edu.ph'); setPassword('Password123!'); }}>
-                    🩺 Campus Doctor
-                  </button>
-                  <button type="button" className="dev-chip" onClick={() => { setEmail('admin@psu.edu.ph'); setPassword('Password123!'); }}>
-                    ⚙️ System Admin
-                  </button>
-                  <button type="button" className="dev-chip" onClick={() => { setEmail('responder@psu.edu.ph'); setPassword('Password123!'); }}>
-                    🚨 SOS Responder
+            <form onSubmit={handleSubmit} noValidate>
+              <div className="login-field">
+                <label className="login-label" htmlFor={emailId}>Institutional email</label>
+                <input
+                  id={emailId}
+                  type="email"
+                  className="login-input"
+                  placeholder="you@psu.edu.ph"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  autoFocus
+                  required
+                  aria-describedby={error ? errorId : undefined}
+                />
+              </div>
+
+              <div className="login-field">
+                <div className="login-label-row">
+                  <label className="login-label" htmlFor={passwordId}>Password</label>
+                  <span className="login-hint">Forgot? Ask your administrator</span>
+                </div>
+                <div className="login-input-wrap">
+                  <input
+                    id={passwordId}
+                    type={revealPassword ? 'text' : 'password'}
+                    className="login-input login-input--password"
+                    placeholder="Enter your password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    onKeyUp={(e) => setCapsLock(e.getModifierState?.('CapsLock') ?? false)}
+                    onBlur={() => setCapsLock(false)}
+                    autoComplete="current-password"
+                    required
+                    aria-describedby={error ? errorId : undefined}
+                  />
+                  <button
+                    type="button"
+                    className="login-reveal"
+                    onClick={() => setRevealPassword((v) => !v)}
+                    aria-pressed={revealPassword}
+                  >
+                    {revealPassword ? 'Hide' : 'Show'}
                   </button>
                 </div>
+                {capsLock && (
+                  <p className="login-caps">
+                    <Icon name="keyboard_capslock" size={14} tone="warning" />
+                    Caps Lock is on
+                  </p>
+                )}
               </div>
-            )}
-          </form>
+
+              {error && (
+                <p className="login-error" id={errorId} role="alert">
+                  <Icon name="error" size={16} tone="inherit" />
+                  <span>{error}</span>
+                </p>
+              )}
+
+              <button type="submit" className="login-submit" disabled={isSubmitting}>
+                {isSubmitting ? (
+                  <>
+                    <span className="login-spinner" aria-hidden="true" />
+                    Verifying…
+                  </>
+                ) : (
+                  <>
+                    Sign in to clinic terminal
+                    <Icon name="arrow_right_alt" size={18} tone="inherit" />
+                  </>
+                )}
+              </button>
+
+              <p className="login-privacy">
+                <Icon name="lock" size={15} tone="inherit" />
+                <span>
+                  Clinic staff only. Sessions end after 8 hours of inactivity, and patient
+                  data is handled under R.A. 10173.
+                </span>
+              </p>
+            </form>
+          </section>
+
+          {import.meta.env.DEV && (
+            <div className="login-dev">
+              <p className="login-dev-label">Dev quick sign-in</p>
+              <div className="login-dev-grid">
+                {DEV_ACCOUNTS.map((account) => (
+                  <button
+                    key={account.email}
+                    type="button"
+                    className="login-dev-chip"
+                    onClick={() => { setEmail(account.email); setPassword('Password123!'); }}
+                  >
+                    <Icon name={account.icon} size={15} tone="inherit" />
+                    {account.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className="login-right-footer">
-          <strong>Need account assistance?</strong> Contact your campus administrator.<br />
-          Valetudo HealthLink · R.A. 10173 Data Privacy Act
+        <div className="login-main-foot">
+          <p><strong>Need account help?</strong> Contact your campus administrator.</p>
+          <p>LeoVital HealthLink · R.A. 10173 Data Privacy Act</p>
         </div>
-      </div>
+      </main>
     </div>
   );
 }
@@ -488,7 +646,15 @@ function LoginScreen({ email, setEmail, password, setPassword, error, onSubmit }
 /* ================================================================= */
 /* APP ROOT                                                           */
 /* ================================================================= */
-export default function App() {
+
+/**
+ * Shell — everything below ThemeProvider. Consuming useTheme() here
+ * re-renders the whole tree on theme changes, which re-resolves every
+ * live `T.*` token used by the consoles. (Non-consuming subtrees would
+ * otherwise bail out of re-render and keep stale inline colors.)
+ */
+function AppShell() {
+  const { mode, preset } = useTheme();
   const [updateStatus, setUpdateStatus] = useState<{ state: string; version?: string; percent?: number } | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
 
@@ -499,7 +665,8 @@ export default function App() {
   const [activeRoleView, setActiveRoleView] = useState<string>('');
 
   /* ── Workspace state (driven by sidebar) ─────────────────────── */
-  const [adminTab, setAdminTab] = useState<'users' | 'audit' | 'telemetry' | 'analytics' | 'db'>('users');
+  const [adminTab, setAdminTab] = useState<AdminTab>('users');
+  const [showIncidentRecords, setShowIncidentRecords] = useState(false);
   const [doctorViewMode, setDoctorViewMode] = useState<
     'active' | 'scheduled' | 'history' | 'archive' | 'analytics'
   >('active');
@@ -521,6 +688,17 @@ export default function App() {
   // ── Session Logout & Token Invalidation ───────────────────────
   const handleSignOut = async () => {
     const token = localStorage.getItem('valetudo_token');
+    localStorage.removeItem('valetudo_token');
+    localStorage.removeItem('token');
+    resetThemeAfterLogout();
+
+    // Purge cached credentials and role state from React memory
+    setPassword('');
+    setEmail('');
+    setActiveRoleView('');
+    setUser(null);
+    setAdminTab('users');
+    setShowIncidentRecords(false);
     if (token) {
       try {
         await fetch(`${API_BASE_URL}/api/auth/logout`, {
@@ -529,14 +707,6 @@ export default function App() {
         });
       } catch (_) {}
     }
-    localStorage.removeItem('valetudo_token');
-    localStorage.removeItem('token');
-
-    // Purge cached credentials and role state from React memory
-    setPassword('');
-    setEmail('');
-    setActiveRoleView('');
-    setUser(null);
   };
 
   const isResponder =
@@ -544,7 +714,8 @@ export default function App() {
     (user?.roles?.length === 1 && user.roles[0] === 'EMERGENCY_RESPONDER');
   useSessionTimeout(Boolean(user) && !isResponder, 480);
 
-  const bookingBadge = useBookingBadge(activeRoleView, Boolean(user));
+  const desktopSocket = useDesktopSocketSession(user ? localStorage.getItem('valetudo_token') : null);
+  const bookingBadge = useBookingBadge(activeRoleView, Boolean(user), desktopSocket);
   const badgeKey =
     activeRoleView === 'NURSE' ? 'expected'
     : (activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST') ? 'scheduled'
@@ -594,6 +765,10 @@ export default function App() {
 
         localStorage.setItem('valetudo_token', data.token);
 
+        // Per-account theme: apply the preference stored on the account
+        // (validated inside) so the workspace opens in the user's theme.
+        applyThemeFromAccount(data.user);
+
         // Pull the offline SQLite bootstrap cache (patients + recent EMR)
         // in the background. Non-blocking; fails silently outside Electron.
         bootstrapOfflineCache().catch(() => {});
@@ -614,9 +789,9 @@ export default function App() {
     setIsReplaying(true);
     try {
       const result = await replayOfflineQueue();
-      alert(`✅ Replay complete. Synced ${result.synced} offline mutations.`);
+      alert(`Replay complete. Synced ${result.synced} offline mutations.`);
     } catch (err: any) {
-      alert(`⚠️ Replay failed: ${err.message}`);
+      alert(`Replay failed: ${err.message}`);
     } finally {
       setIsReplaying(false);
     }
@@ -656,7 +831,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
 
     const data = await res.json();
     if (res.ok) {
-      setPasswordMsg({ text: '✅ ' + data.message, isError: false });
+      setPasswordMsg({ text: data.message, isError: false });
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
@@ -670,10 +845,10 @@ const handleChangePassword = async (e: React.FormEvent) => {
         Array.isArray(data.issues) && data.issues.length > 0
           ? data.issues.join(' ')
           : data.error || 'Failed to update password.';
-      setPasswordMsg({ text: '❌ ' + detailed, isError: true });
+      setPasswordMsg({ text: detailed, isError: true });
     }
   } catch (err: any) {
-    setPasswordMsg({ text: '❌ Network error: ' + err.message, isError: true });
+    setPasswordMsg({ text: 'Network error: ' + err.message, isError: true });
   } finally {
     setIsSubmittingPassword(false);
   }
@@ -699,14 +874,16 @@ const handleChangePassword = async (e: React.FormEvent) => {
   }
 
   return (
-    <div className="app-shell">
+    <DesktopSocketContext.Provider value={desktopSocket}>
+    <div className="app-shell" data-theme-mode={mode} data-theme-preset={preset}>
       <Sidebar
         role={activeRoleView}
+        showIncidentRecords={showIncidentRecords}
         badgeCounts={badgeKey ? { [badgeKey]: bookingBadge } : undefined}
         onSignOut={handleSignOut}
         onChangePassword={() => { setShowPasswordModal(true); setPasswordMsg(null); }}
         activeItem={
-          activeRoleView === 'ADMIN' ? adminTab
+          activeRoleView === 'ADMIN' ? (adminTab === 'archived' ? 'users' : adminTab)
           : (activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST') ? doctorViewMode
           : activeRoleView === 'NURSE' ? nurseViewMode
           : undefined
@@ -717,7 +894,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
             : (activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST')
             ? (key) => setDoctorViewMode(key as typeof doctorViewMode)
             : activeRoleView === 'NURSE'
-            ? (key) => setNurseViewMode(key as 'triage' | 'expected' | 'inventory')
+            ? (key) => setNurseViewMode(key as typeof nurseViewMode)
             : undefined
         }
       />
@@ -737,36 +914,35 @@ const handleChangePassword = async (e: React.FormEvent) => {
 
         {updateStatus && !updateDismissed &&
   (updateStatus.state === 'downloading' || updateStatus.state === 'downloaded') && (
-  <div
-    style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-      padding: '10px 20px', background: 'var(--sage-100)', color: 'var(--text)',
-      fontSize: 13, fontWeight: 600, fontFamily: 'var(--font)',
-    }}
-  >
-    <span>
+  <div className="update-banner">
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      <Icon
+        name={updateStatus.state === 'downloading' ? 'download' : 'cloud_done'}
+        size={18}
+        tone={updateStatus.state === 'downloading' ? 'info' : 'success'}
+      />
       {updateStatus.state === 'downloading'
-        ? `⬇️ Downloading update… ${updateStatus.percent ?? 0}%`
-        : `✅ Update ${updateStatus.version ?? ''} is ready to install.`}
+        ? `Downloading update… ${updateStatus.percent ?? 0}%`
+        : `Update ${updateStatus.version ?? ''} is ready to install.`}
     </span>
 
     {updateStatus.state === 'downloaded' && (
       <span style={{ display: 'flex', gap: 8 }}>
         <button
           type="button"
+          className="update-btn update-btn-later"
           onClick={() => setUpdateDismissed(true)}
-          style={{ padding: '6px 14px', borderRadius: 'var(--r-pill)', border: 'none', cursor: 'pointer', fontWeight: 700, fontFamily: 'var(--font)', background: '#fff', color: 'var(--text)' }}
         >
           Later
         </button>
         <button
           type="button"
+          className="update-btn update-btn-install"
           onClick={() => {
             if (offlineQueueCount > 0 &&
                 !window.confirm(`${offlineQueueCount} offline changes are still queued. Restart anyway? They stay saved locally and sync after restart.`)) return;
             window.electronAPI?.installUpdate();
           }}
-          style={{ padding: '6px 14px', borderRadius: 'var(--r-pill)', border: 'none', cursor: 'pointer', fontWeight: 700, fontFamily: 'var(--font)', background: 'var(--primary)', color: '#fff' }}
         >
           Restart now
         </button>
@@ -775,7 +951,12 @@ const handleChangePassword = async (e: React.FormEvent) => {
   </div>
 )}
 
-        <main className="app-content">
+        <main
+          className="app-content"
+          style={activeRoleView === 'NURSE' && nurseViewMode === 'inventory'
+            ? { padding: 0, display: 'flex', minHeight: 0, overflow: 'hidden' }
+            : undefined}
+        >
           {activeRoleView === 'NURSE' && (
             <NurseConsole
               viewMode={nurseViewMode}
@@ -790,24 +971,45 @@ const handleChangePassword = async (e: React.FormEvent) => {
             />
           )}
           {activeRoleView === 'ADMIN' && (
-            <AdminConsole activeTab={adminTab} onTabChange={setAdminTab} />
+            <AdminConsole activeTab={adminTab} onTabChange={setAdminTab} onIncidentAccessChange={setShowIncidentRecords} />
           )}
           {activeRoleView === 'EMERGENCY_RESPONDER' && <ResponderConsole />}
         </main>
       </div>
 
+      {/* Post-resolution incident documentation popup. Server-driven: it
+          only appears for accounts in the live responder audience, on any
+          console view, whenever ANY responder closes an SOS as resolved. */}
+      <IncidentReportModal />
+
       {showPasswordModal && (
         <div className="modal-backdrop" onClick={() => setShowPasswordModal(false)}>
           <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-              <h3 style={{ margin: 0, color: 'var(--primary)', fontSize: 17, fontWeight: 800 }}>
-                🔑 Update account password
+              <h3 style={{ margin: 0, color: T.primary, fontSize: 17, fontWeight: 800, letterSpacing: -0.3, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <Icon name="key" size={20} tone="primary" />
+                Update account password
               </h3>
               <button
                 type="button"
                 onClick={() => setShowPasswordModal(false)}
-                style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-sub)' }}
-              >✕</button>
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: T.textSub,
+                  width: 32,
+                  height: 32,
+                  borderRadius: T.radius.sm,
+                  transition: `background ${T.durBase} ${T.ease}`,
+                  display: 'grid',
+                  placeItems: 'center',
+                  padding: 0,
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = T.sage100)}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
+                aria-label="Close"
+              ><Icon name="close" size={20} /></button>
             </div>
 
             <form onSubmit={handleChangePassword}>
@@ -847,12 +1049,12 @@ const handleChangePassword = async (e: React.FormEvent) => {
                   style={{
                     marginTop: 14,
                     padding: '10px 14px',
-                    borderRadius: 'var(--r-md)',
+                    borderRadius: T.radius.md,
                     fontSize: 12.5,
                     fontWeight: 600,
-                    background: passwordMsg.isError ? 'var(--danger-soft)' : 'var(--success-soft)',
-                    color: passwordMsg.isError ? 'var(--danger)' : 'var(--success)',
-                    border: `1px solid ${passwordMsg.isError ? 'var(--danger-border)' : 'var(--success-border)'}`,
+                    background: passwordMsg.isError ? T.dangerSoft : T.successSoft,
+                    color: passwordMsg.isError ? T.danger : T.success,
+                    border: `1px solid ${passwordMsg.isError ? T.dangerBorder : T.successBorder}`,
                   }}
                 >
                   {passwordMsg.text}
@@ -863,17 +1065,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
                 <button
                   type="button"
                   onClick={() => setShowPasswordModal(false)}
-                  style={{
-                    flex: 1,
-                    padding: 12,
-                    borderRadius: 'var(--r-pill)',
-                    background: 'var(--sage-100)',
-                    border: 'none',
-                    cursor: 'pointer',
-                    fontWeight: 700,
-                    color: 'var(--text)',
-                    fontFamily: 'var(--font)',
-                  }}
+                  style={{ ...btnSubtle, flex: 1, padding: 12 }}
                 >
                   Cancel
                 </button>
@@ -881,21 +1073,15 @@ const handleChangePassword = async (e: React.FormEvent) => {
                 type="submit"
                 disabled={isSubmittingPassword || !evaluatePassword(newPassword).isAcceptable}
                 style={{
+                  ...btnPrimary,
                   flex: 1,
                   padding: 12,
-                  borderRadius: 'var(--r-pill)',
-                  background: 'var(--primary)',
-                  color: '#fff',
-                  border: 'none',
                   cursor:
                     isSubmittingPassword || !evaluatePassword(newPassword).isAcceptable
                       ? 'not-allowed'
                       : 'pointer',
-                  fontWeight: 700,
-                  fontFamily: 'var(--font)',
                   opacity:
                     isSubmittingPassword || !evaluatePassword(newPassword).isAcceptable ? 0.55 : 1,
-                  transition: 'opacity 120ms ease',
                 }}
               >
                 {isSubmittingPassword ? 'Updating…' : 'Save password'}
@@ -906,5 +1092,19 @@ const handleChangePassword = async (e: React.FormEvent) => {
         </div>
       )}
     </div>
+    </DesktopSocketContext.Provider>
+  );
+}
+
+/**
+ * App — mounts the theme provider above the shell so both the login
+ * screen and the authenticated workspace live-theme, and so the
+ * account's stored preference can be applied the moment login succeeds.
+ */
+export default function App() {
+  return (
+    <ThemeProvider>
+      <AppShell />
+    </ThemeProvider>
   );
 }

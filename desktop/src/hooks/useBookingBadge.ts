@@ -1,7 +1,8 @@
 // desktop/src/hooks/useBookingBadge.ts
 import { useEffect, useState } from 'react';
-import { io } from 'socket.io-client';
-import { API_BASE_URL, SOCKET_URL } from '../config/api';
+import type { Socket } from 'socket.io-client';
+import { API_BASE_URL } from '../config/api';
+import { subscribeToDesktopEvents } from '../services/desktopRealtime';
 
 /**
  * Returns how many bookings are still pending for the current role:
@@ -10,7 +11,7 @@ import { API_BASE_URL, SOCKET_URL } from '../config/api';
  *                        the server already limits it to that practitioner)
  * Refreshes automatically on socket events, so it behaves like a live notification.
  */
-export function useBookingBadge(role: string, enabled: boolean): number {
+export function useBookingBadge(role: string, enabled: boolean, socket: Socket | null): number {
   const [count, setCount] = useState(0);
 
   useEffect(() => {
@@ -45,23 +46,17 @@ export function useBookingBadge(role: string, enabled: boolean): number {
 
     refresh();
 
-    const socket = io(SOCKET_URL, {
-      auth: { token: localStorage.getItem('valetudo_token') },
-      transports: ['websocket', 'polling'],
+    const unsubscribe = subscribeToDesktopEvents(socket, (on) => {
+      for (const event of ['appointment:booked', 'appointment:cancelled', 'appointment:status_changed', 'queue:updated', 'reconnect']) {
+        on(event, refresh);
+      }
     });
-
-    [
-      'appointment:booked',
-      'appointment:cancelled',
-      'appointment:status_changed',
-      'queue:updated',
-    ].forEach((evt) => socket.on(evt, refresh));
 
     return () => {
       cancelled = true;
-      socket.disconnect();
+      unsubscribe();
     };
-  }, [role, enabled]);
+  }, [role, enabled, socket]);
 
   return count;
 }

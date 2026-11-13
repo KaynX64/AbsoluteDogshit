@@ -190,7 +190,10 @@ ipcMain.handle('offline-mark-failed', async (event, { client_mutation_id, sync_s
 
 ipcMain.handle('offline-cache-bootstrap', async (event, { patients, emrRecords }) => {
   if (!sqliteDb) return { success: false };
+  let transactionOpen = false;
   try {
+    sqliteDb.exec('BEGIN IMMEDIATE');
+    transactionOpen = true;
     if (Array.isArray(patients)) {
       const pStmt = sqliteDb.prepare(`
         INSERT OR REPLACE INTO CACHED_PATIENTS
@@ -228,8 +231,16 @@ ipcMain.handle('offline-cache-bootstrap', async (event, { patients, emrRecords }
       }
     }
 
+    sqliteDb.exec('COMMIT');
     return { success: true };
   } catch (err) {
+    if (transactionOpen) {
+      try {
+        sqliteDb.exec('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('[SQLite Bootstrap Rollback Error]:', rollbackError.code);
+      }
+    }
     console.error('[SQLite Bootstrap Error]:', err);
     return { success: false, error: err.message };
   }
@@ -302,7 +313,7 @@ function createWindow() {
   initLocalDatabase();
 
   const win = new BrowserWindow({
-    title: 'Valetudo HealthLink',
+    title: 'LeoVital HealthLink',
     width: 1300,
     height: 880,
     minWidth: 1024,
@@ -337,7 +348,7 @@ function createWindow() {
   }
 
   win.once('ready-to-show', () => {
-    win.setTitle('Valetudo HealthLink - PSU Lingayen Infirmary');
+    win.setTitle('LeoVital HealthLink - PSU Lingayen Infirmary');
     win.show();
     win.focus();
     setupAutoUpdater(win);
@@ -405,8 +416,8 @@ ipcMain.handle('print-document', async (event, { htmlContent }) => {
 ipcMain.handle('show-notification', (event, { title, body }) => {
   if (Notification.isSupported()) {
     new Notification({
-      title: title || 'Valetudo Alert',
-      body: body || 'Notification from Valetudo HealthLink',
+      title: title || 'LeoVital Alert',
+      body: body || 'Notification from LeoVital HealthLink',
       urgency: 'critical',
     }).show();
     return { success: true };
@@ -414,23 +425,75 @@ ipcMain.handle('show-notification', (event, { title, body }) => {
   return { success: false, error: 'Notifications not supported' };
 });
 
-// 3. ALLOW SELF-SIGNED CERTS (RESTRICTED TO LOCAL DEVELOPMENT ONLY)
-app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
-  // Security Enforcement: Enforce strict TLS validation in packaged production builds
-  if (!app.isPackaged) {
-    if (
-      url.startsWith(API_BASE_URL) ||
-      url.startsWith(API_WS_URL) ||
-      url.startsWith(VITE_URL) ||
-      url.startsWith(VITE_WS_URL) ||
-      url.startsWith('https://localhost:5173') ||
-      url.startsWith('https://127.0.0.1:5173')
-    ) {
-      event.preventDefault();
-      callback(true);
-      return;
-    }
+// ── Local API / loopback detection for certificate handling ─────────
+// app-config.json points the desktop client at the API server. The repo's
+// Node server serves TLS with a self-signed certificate
+// (server/certs/cert.pem — not issued by any public CA), which Chromium
+// rejects under strict validation. Dev builds already bypass certificate
+// errors for the dev server and the API; without the same allowance a
+// PACKAGED build (.exe / installer) can never reach a local server: every
+// renderer fetch() and socket.io connection dies as a TLS error and the
+// app reports the server as unreachable although it is running.
+//
+// The allowance is deliberately scoped: certificate errors are accepted
+// ONLY for the configured API origin (https + wss) and ONLY while that
+// API host is a loopback address — i.e. the client was deliberately
+// pointed at a local server for workstation testing. Any other origin —
+// and any non-loopback API configuration (a real deployment behind a
+// CA-signed certificate) — keeps full strict validation.
+const isLoopbackHostname = (hostname) =>
+  hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
+
+let API_IS_LOOPBACK = false;
+try {
+  API_IS_LOOPBACK = isLoopbackHostname(new URL(API_BASE_URL).hostname);
+} catch (_) {
+  /* malformed apiBaseUrl — stay strict */
+}
+
+// Exact-origin match (protocol + hostname + port). Safer than
+// url.startsWith(...), which a URL like 'https://localhost:5000@evil/'
+// (userinfo trick, host is actually evil) would fool. Accepts both the
+// http(s) and ws(s) form of the base origin so one check covers fetch()
+// and socket.io connections.
+const isSameOrigin = (url, base) => {
+  try {
+    const u = new URL(url);
+    const b = new URL(base);
+    const wsProto = b.protocol === 'https:' ? 'wss:' : b.protocol === 'http:' ? 'ws:' : b.protocol;
+    return (u.protocol === b.protocol || u.protocol === wsProto) && u.host === b.host;
+  } catch (_) {
+    return false;
   }
+};
+
+const isLocalApiUrl = (url) => isSameOrigin(url, API_BASE_URL);
+const isDevServerUrl = (url) =>
+  isSameOrigin(url, VITE_URL) ||
+  isSameOrigin(url, 'https://localhost:5173') ||
+  isSameOrigin(url, 'https://127.0.0.1:5173');
+
+// 3. TLS CERTIFICATE ERRORS (LOCAL DEV + LOOPBACK API TESTING ONLY)
+app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
+  // Dev builds: trust the Vite dev server and the local API — both run
+  // with the repo's self-signed development certificates.
+  if (!app.isPackaged && (isLocalApiUrl(url) || isDevServerUrl(url))) {
+    event.preventDefault();
+    callback(true);
+    return;
+  }
+
+  // Packaged builds: allow the self-signed certificate ONLY for the
+  // configured LOOPBACK API server (https + wss origins). This is what
+  // lets an installed .exe talk to the local Node server during
+  // workstation testing. Everything else stays strictly validated.
+  if (app.isPackaged && API_IS_LOOPBACK && isLocalApiUrl(url)) {
+    event.preventDefault();
+    callback(true);
+    return;
+  }
+
+  // Everything else: strict TLS (default Chromium behavior).
   callback(false);
 });
 

@@ -14,6 +14,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_background/flutter_background.dart';
 import '../config/api_config.dart';
 import '../main.dart';
+import '../widgets/sos_alert_actions.dart';
 
 // Top-level function executed on a background isolate to avoid UI thread jank
 Uint8List _generateWavBytesIsolate(int durationSeconds) {
@@ -77,6 +78,14 @@ class EmergencyAlertService {
 
   bool _isResponderActive = false;
   int? _lastAlertIdProcessed;
+
+  // Live SOS dialog bookkeeping — lets the socket listener close the exact
+  // dialog (and stop its alarm) when ANY responder closes the incident.
+  BuildContext? _sosDialogContext;
+  int? _sosDialogAlertId;
+
+  /// Read-only view for screens that drive the listener lifecycle.
+  bool get isResponderActive => _isResponderActive;
 
   // 1. Critical Channel for Responders
   static const AndroidNotificationChannel _responderCriticalChannel = AndroidNotificationChannel(
@@ -169,7 +178,7 @@ class EmergencyAlertService {
       if (kIsWeb) return; // Skip FCM token registration on Web
     try {
       final messaging = FirebaseMessaging.instance;
-      
+
       await messaging.requestPermission(
         alert: true,
         badge: true,
@@ -197,9 +206,8 @@ class EmergencyAlertService {
           final type = message.data['type'] ?? '';
 
           if (type == 'EMERGENCY_SOS') {
-            if (_isResponderActive) {
-              triggerEmergencyBroadcast(message.data);
-            }
+            if (!_isResponderActive) return;
+            _handleForegroundSosPush(message.data);
           } else if (type == 'QUEUE_TURN') {
             showQueueTurnNotification(
               ticketNo: message.data['ticketNo'] ?? message.data['ticket_no'] ?? 'Your Ticket',
@@ -216,6 +224,51 @@ class EmergencyAlertService {
     } catch (e) {
       debugPrint("❌ [FCM Mobile Token Error]: $e");
     }
+  }
+
+  /// Current FCM token, or null on web / failure. Used by the logout paths
+  /// so the server can release this device's push registration.
+  Future<String?> currentFcmToken() async {
+    if (kIsWeb) return null;
+    try {
+      return await FirebaseMessaging.instance.getToken();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// FCM foreground SOS pushes carry the alertId + coordinates only (no
+  /// PHI on the lock screen). Deduplicate against the socket path by
+  /// alertId, then fetch the full tiered payload from /active so the alarm
+  /// dialog has real details instead of "Unknown User at 0,0".
+  Future<void> _handleForegroundSosPush(Map<String, dynamic> data) async {
+    final alertId = int.tryParse('${data['alertId'] ?? ''}');
+    if (alertId == null) return;
+    if (_lastAlertIdProcessed == alertId && _isAlarmPlaying) return; // socket already alarmed
+    _lastAlertIdProcessed = alertId;
+
+    Map<String, dynamic> full = Map<String, dynamic>.from(data);
+    try {
+      final jwt = await _storage.read(key: 'jwt_token');
+      if (jwt != null) {
+        final res = await ApiConfig.client.get(
+          Uri.parse('${ApiConfig.baseUrl}/api/emergency/active'),
+          headers: {'Authorization': 'Bearer $jwt'},
+        );
+        if (res.statusCode == 200) {
+          final List<dynamic> active = jsonDecode(res.body);
+          final match = active.firstWhere(
+            (a) => a['alert_id'] == alertId,
+            orElse: () => null,
+          );
+          if (match != null) {
+            full = Map<String, dynamic>.from(match);
+          }
+        }
+      }
+    } catch (_) {/* fall back to the push payload */}
+
+    triggerEmergencyBroadcast(full);
   }
 
   Future<void> _postTokenToServer(String token) async {
@@ -319,6 +372,35 @@ class EmergencyAlertService {
 
         triggerEmergencyBroadcast(alertMap);
       });
+
+      // ANY responder (this device included) closed an incident → the alarm
+      // on this phone must stop and the SOS dialog for that alert must go.
+      // Without this, "False alarm" worked only on the device that pressed
+      // it while every other responder's phone kept ringing.
+      _socket!.on('emergency:status_change', (data) {
+        if (data is! Map) return;
+        final alertId = data['alertId'] ?? data['alert_id'];
+        final status = data['status'];
+        if (status != 'resolved' && status != 'false_alarm') return;
+
+        if (_sosDialogAlertId != null && '$_sosDialogAlertId' == '$alertId') {
+          stopAlarmSound();
+          _cancelEmergencyNotification();
+          _closeSosDialog();
+        } else if ('$_lastAlertIdProcessed' == '$alertId') {
+          stopAlarmSound();
+          _cancelEmergencyNotification();
+        }
+      });
+
+      // Qualified Responder flag toggled from the Admin Console mid-session:
+      // start or stop listening WITHOUT a re-login. The server emits this to
+      // the user's own room, so it only ever reaches the affected account.
+      _socket!.on('responder:status_changed', (data) {
+        final enabled = data is Map && data['isQualifiedResponder'] == true;
+        debugPrint('🛡️ [QR] responder:status_changed → $enabled');
+        _applyFlagChange(enabled);
+      });
     } catch (e) {
       debugPrint('[Socket.IO Mobile] Connection error: $e');
     }
@@ -331,6 +413,7 @@ class EmergencyAlertService {
     connectSocket(force: true);
     _enableBackgroundService();
     syncFcmTokenWithBackend();
+    _catchUpOnOpenAlerts();
   }
 
   void stopResponderListener() {
@@ -338,6 +421,117 @@ class EmergencyAlertService {
     _lastAlertIdProcessed = null;
     stopAlarmSound();
     _disableBackgroundService();
+  }
+
+  // ── QUALIFIED RESPONDER FLAG ─────────────────────────────────────────
+
+  /// True when the stored user is routed to ResponderScreen (the
+  /// EMERGENCY_RESPONDER role). For those accounts the SCREEN governs the
+  /// listener — flag changes must never stop it (the flag is additive and
+  /// the role keeps receiving SOS regardless).
+  Future<bool> _storedUserIsResponderRoute() async {
+    final userDataStr = await _storage.read(key: 'user_data');
+    if (userDataStr == null) return false;
+    try {
+      final user = jsonDecode(userDataStr);
+      final roles = (user['roles'] as List?) ?? [];
+      return roles.contains('EMERGENCY_RESPONDER');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Apply a live flag change to this device (responder:status_changed).
+  /// Ignored for EMERGENCY_RESPONDER-route accounts (see above).
+  Future<void> _applyFlagChange(bool enabled) async {
+    if (await _storedUserIsResponderRoute()) return;
+    if (enabled && !_isResponderActive) {
+      startResponderListener();
+    } else if (!enabled && _isResponderActive) {
+      stopResponderListener();
+    }
+  }
+
+  /// Re-check /api/profile/me and apply + persist the live flag.
+  /// Returns the live flag, or null when it could not be determined.
+  /// Called on app resume and usable for splash refresh.
+  Future<bool?> syncQualifiedResponderFlag() async {
+    try {
+      final jwt = await _storage.read(key: 'jwt_token');
+      if (jwt == null) return null;
+      final res = await ApiConfig.client.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/profile/me'),
+        headers: {'Authorization': 'Bearer $jwt'},
+      );
+      if (res.statusCode != 200) return null;
+      final data = jsonDecode(res.body);
+      final flag = data['user']?['is_qualified_responder'] == true;
+
+      // Persist so the next launch (splash) routes with the live value.
+      final userDataStr = await _storage.read(key: 'user_data');
+      if (userDataStr != null) {
+        try {
+          final user = jsonDecode(userDataStr);
+          if (user is Map<String, dynamic> && user['is_qualified_responder'] != flag) {
+            user['is_qualified_responder'] = flag;
+            await _storage.write(key: 'user_data', value: jsonEncode(user));
+          }
+        } catch (_) {}
+      }
+
+      await _applyFlagChange(flag);
+      return flag;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// A responder connecting mid-incident must see open alerts. Fetch
+  /// /active on listener start: alarm on the newest 'triggered' alert, or
+  /// surface already-acknowledged/dispatched incidents quietly.
+  Future<void> _catchUpOnOpenAlerts() async {
+    try {
+      final jwt = await _storage.read(key: 'jwt_token');
+      if (jwt == null) return;
+      final res = await ApiConfig.client.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/emergency/active'),
+        headers: {'Authorization': 'Bearer $jwt'},
+      );
+      if (res.statusCode != 200) return;
+      final List<dynamic> alerts = jsonDecode(res.body);
+      if (alerts.isEmpty) return;
+
+      final triggered = alerts.where((a) => a['status'] == 'triggered').toList();
+      if (triggered.isNotEmpty) {
+        final newest = triggered.first; // /active is ordered newest-first
+        final alertId = newest['alert_id'];
+        if (_lastAlertIdProcessed != alertId) {
+          _lastAlertIdProcessed = alertId;
+          triggerEmergencyBroadcast(Map<String, dynamic>.from(newest));
+        }
+      } else {
+        showResponderCatchUpNotification(alerts.length);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> showResponderCatchUpNotification(int openCount) async {
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'emergency_sos_channel_v4',
+      '🚨 Critical Emergency SOS',
+      channelDescription: 'High-priority campus emergency dispatch alerts',
+      importance: Importance.max,
+      priority: Priority.high,
+      ticker: 'Open incidents',
+    );
+    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
+
+    await _localNotifications.show(
+      104,
+      '🚨 $openCount open SOS incident${openCount == 1 ? '' : 's'}',
+      'Already acknowledged by others. Open the app if you can assist.',
+      platformDetails,
+    );
   }
 
   Future<void> showStudentSosSentNotification() async {
@@ -453,17 +647,48 @@ class EmergencyAlertService {
     } catch (_) {}
   }
 
-  Future<void> triggerEmergencyBroadcast(Map<String, dynamic> alertData) async {
+  /// Remove the persistent SOS notification (id 999) from the tray once the
+  /// incident it advertised is closed.
+  Future<void> _cancelEmergencyNotification() async {
+    try {
+      await _localNotifications.cancel(999);
+    } catch (_) {}
+  }
+
+  /// Close the live SOS dialog (if any) from outside the dialog itself —
+  /// used by the socket listener when another responder closes the incident.
+  void _closeSosDialog() {
+    final ctx = _sosDialogContext;
+    _sosDialogContext = null;
+    _sosDialogAlertId = null;
+    if (ctx != null && ctx.mounted) {
+      Navigator.of(ctx).pop();
+    }
+  }
+
+  Future<void> triggerEmergencyBroadcast(
+    Map<String, dynamic> alertData, {
+    void Function(String status)? onStatusChanged,
+  }) async {
     playAlarmSound();
 
     final patientName = alertData['patientName'] ??
         "${alertData['first_name'] ?? 'Unknown'} ${alertData['last_name'] ?? 'User'}";
     final studentNo = alertData['studentNo'] ?? alertData['identifier_no'] ?? 'Verified User';
-    final bloodType = alertData['bloodType'] ?? alertData['blood_type'] ?? 'Unknown';
-    final allergies = alertData['allergies'] ?? 'None recorded';
+    final roleLabel = alertData['roleLabel'] ?? alertData['role'] ?? 'Campus Member';
+
+    // Server tiering: community (non-clinical) responders receive a reduced
+    // payload — medical details are stripped before they ever reach us.
+    // Closing actions are NOT tiered: any responder may resolve / flag a
+    // false alarm, so those buttons stay for every tier.
+    final redacted = alertData['medicalDetailsRedacted'] == true;
+    final bloodType = alertData['bloodType'] ?? alertData['blood_type'];
+    final allergies = alertData['allergies'];
     final lat = double.tryParse(alertData['latitude'].toString()) ?? 0.0;
     final lng = double.tryParse(alertData['longitude'].toString()) ?? 0.0;
     final googleMapsUrl = alertData['googleMapsUrl'] ?? 'https://www.google.com/maps?q=$lat,$lng';
+    final rawAlertId = alertData['alertId'] ?? alertData['alert_id'];
+    final alertId = rawAlertId is int ? rawAlertId : int.tryParse('$rawAlertId') ?? 0;
 
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'emergency_sos_channel_v4',
@@ -481,10 +706,13 @@ class EmergencyAlertService {
 
     const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
 
+    // Lock-screen privacy for EVERY tier: the notification shows the patient
+    // name and location only. Blood type and allergies were previously leaked
+    // here — they stay inside the in-app dialog from now on.
     await _localNotifications.show(
       999,
       '🚨 EMERGENCY SOS: $patientName',
-      'Location: ${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)} | Blood: $bloodType | Allergies: $allergies',
+      'Location: ${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)} — open the app for details.',
       platformDetails,
     );
 
@@ -495,6 +723,11 @@ class EmergencyAlertService {
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
+        // Track the live dialog so the socket listener can close it when
+        // another responder resolves / false-alarms this alert.
+        _sosDialogContext = ctx;
+        _sosDialogAlertId = alertId;
+
         return AlertDialog(
           backgroundColor: const Color(0xFF7F1D1D),
           shape: RoundedRectangleBorder(
@@ -542,7 +775,10 @@ class EmergencyAlertService {
                   textAlign: TextAlign.center,
                   style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
                 ),
-                Text('ID: $studentNo', style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                Text(
+                  '$roleLabel · ID: $studentNo',
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                ),
                 const SizedBox(height: 14),
 
                 Container(
@@ -555,16 +791,39 @@ class EmergencyAlertService {
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('🩸 Blood Type: $bloodType',
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                      const SizedBox(height: 4),
-                      Text('⚠️ Allergies: $allergies',
-                          style: const TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 13)),
-                      const SizedBox(height: 4),
-                      Text('📍 Coordinates: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
-                          style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                    ],
+                    children: redacted
+                        ? [
+                            const Text(
+                              '🩸 Medical details not shared at your responder level',
+                              style: TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 13),
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Reduced payload for non-clinical responders (R.A. 10173).',
+                              style: TextStyle(color: Colors.white54, fontSize: 11),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '📍 Coordinates: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
+                              style: const TextStyle(color: Colors.white70, fontSize: 12),
+                            ),
+                          ]
+                        : [
+                            Text(
+                              '🩸 Blood Type: ${bloodType ?? 'Unknown'}',
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '⚠️ Allergies: ${allergies ?? 'None recorded'}',
+                              style: const TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 13),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '📍 Coordinates: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
+                              style: const TextStyle(color: Colors.white70, fontSize: 12),
+                            ),
+                          ],
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -576,6 +835,9 @@ class EmergencyAlertService {
                     minimumSize: const Size.fromHeight(42),
                   ),
                   onPressed: () async {
+                    // Navigating to the scene stops the siren — the incident
+                    // itself stays open and actionable from the alert list.
+                    stopAlarmSound();
                     final uri = Uri.parse(googleMapsUrl);
                     if (await canLaunchUrl(uri)) {
                       await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -583,6 +845,29 @@ class EmergencyAlertService {
                   },
                   icon: const Icon(Icons.navigation, size: 18),
                   label: const Text('Open in Google Maps', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+                const SizedBox(height: 12),
+
+                // Shared status actions (responder_screen / dialog parity).
+                // ANY responder tier may close the incident — the buttons
+                // are shown regardless of medical-detail redaction.
+                SosAlertActions(
+                  alertId: alertId,
+                  status: '${alertData['status'] ?? 'triggered'}',
+                  onChanged: (status) {
+                    stopAlarmSound();
+                    // Closing the incident dismisses the SOS dialog on this
+                    // device too — the alarm must not outlive the incident.
+                    if (status == 'resolved' || status == 'false_alarm') {
+                      _cancelEmergencyNotification();
+                      if (ctx.mounted) {
+                        Navigator.of(ctx).pop();
+                      }
+                      _sosDialogContext = null;
+                      _sosDialogAlertId = null;
+                    }
+                    onStatusChanged?.call(status);
+                  },
                 ),
                 const SizedBox(height: 10),
 
@@ -595,12 +880,14 @@ class EmergencyAlertService {
                   ),
                   onPressed: () {
                     stopAlarmSound();
+                    _sosDialogContext = null;
+                    _sosDialogAlertId = null;
                     if (ctx.mounted) {
                       Navigator.pop(ctx);
                     }
                   },
                   child: const Text(
-                    'SILENCE & ACKNOWLEDGE ALARM',
+                    'SILENCE ALARM',
                     style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
                   ),
                 ),

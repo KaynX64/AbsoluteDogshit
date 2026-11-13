@@ -71,7 +71,20 @@ class _SplashScreenState extends State<SplashScreen> {
         if (mounted) setState(() => _isChecking = false);
         return;
       }
-      // 200, 500, 404, anything else → trust the cached session.
+
+      // 200 → refresh the Qualified Responder flag (an admin may have
+      // toggled it since the last launch) and persist it for routing.
+      if (res.statusCode == 200) {
+        try {
+          final me = jsonDecode(res.body);
+          final liveFlag = me['user']?['is_qualified_responder'] == true;
+          if (cachedUser['is_qualified_responder'] != liveFlag) {
+            cachedUser['is_qualified_responder'] = liveFlag;
+            await _storage.write(key: 'user_data', value: jsonEncode(cachedUser));
+          }
+        } catch (_) {}
+      }
+      // 500, 404, anything else → trust the cached session.
     } catch (_) {
       // Network unreachable → trust the cached session (offline mode).
     }

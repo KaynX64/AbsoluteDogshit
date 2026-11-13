@@ -1,10 +1,15 @@
 // desktop/src/components/AdminConsole.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import AnalyticsDashboard from './AnalyticsDashboard';
+import IncidentRecords from './IncidentRecords';
 import CreateUserModal from './CreateUserModal';
-import { T, rolePill, inputStyle, btnPrimary, btnGhost } from '../theme';
+import { T, rolePill, inputStyle, btnPrimary, btnGhost, liveObject } from '../theme';
+import { getTextColorOn } from '../theme/presets';
 import { API_BASE_URL, SOCKET_URL } from '../config/api';
 import ServerPingMonitor from './ServerPingMonitor';
+import ServerPolicyPanel from './ServerPolicyPanel';
+import Icon from './Icon';
 
 /* ── Icons (inline, no dependency) ─────────────────────────────── */
 const I = {
@@ -23,25 +28,93 @@ const I = {
   Check: () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>),
 };
 
-export type AdminTab = 'users' | 'audit' | 'telemetry' | 'analytics' | 'db';
+/* ── Advanced profile editor (Basic / Advanced modes) ─────────────────────────
+   Shared styles + the segmented-toggle button style. Basic mode keeps
+   the everyday fields; Advanced exposes every editable schema column. */
+const advLabel: React.CSSProperties = liveObject(() => ({
+  fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6,
+}));
+const advTextarea: React.CSSProperties = liveObject(() => ({
+  ...inputStyle, minHeight: 64, resize: 'vertical', lineHeight: 1.5,
+}));
+const modeBtnStyle = (active: boolean): React.CSSProperties => ({
+  flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+  padding: '9px 12px',
+  border: `1px solid ${active ? T.primary : 'transparent'}`,
+  borderRadius: T.radius.pill,
+  background: active ? '#FFFFFF' : 'transparent',
+  color: active ? T.primary : T.textSub,
+  fontWeight: active ? 800 : 600,
+  fontSize: 12.5, fontFamily: T.font,
+  cursor: 'pointer',
+  boxShadow: active ? T.shadow.xs : 'none',
+  transition: 'all 120ms ease',
+  whiteSpace: 'nowrap',
+});
+
+/* ── No-permission notice — rendered only for LIMITED admin archetypes.
+      Full/super admins never see this panel (unchanged legacy behaviour). ── */
+function NoPermissionPanel({ required, description }: { required?: string; description?: string }) {
+  return (
+    <div style={{
+      background: T.surface,
+      border: `1px solid ${T.border}`,
+      borderRadius: T.radius.lg,
+      padding: '56px 32px',
+      textAlign: 'center',
+      boxShadow: T.shadow.xs,
+    }}>
+      <div style={{
+        width: 52, height: 52, margin: '0 auto 18px', borderRadius: T.radius.md,
+        background: '#EDE9FE', color: '#6D28D9',
+        display: 'grid', placeItems: 'center',
+      }}><Icon name="shield" size={26} tone="inherit" /></div>
+      <div style={{ fontSize: 17, fontWeight: 800, color: T.text, marginBottom: 8 }}>
+        Restricted admin archetype
+      </div>
+      <p style={{
+        fontSize: 13, color: T.textSub, margin: 0, lineHeight: 1.6,
+        maxWidth: 460, marginInline: 'auto',
+      }}>
+        {description ?? (
+          <>This console section requires the <b>{required}</b> permission, which this
+          administrator account does not hold.</>
+        )}{' '}
+        Contact a Super Admin to review this administrator account's access.
+      </p>
+    </div>
+  );
+}
+
+export type AdminTab = 'users' | 'archived' | 'audit' | 'telemetry' | 'analytics' | 'incidents' | 'db' | 'serverPolicy';
 
 interface AdminConsoleProps {
   /** Optional controlled active tab — if provided, the sidebar drives the tab. */
   activeTab?: AdminTab;
   /** Called whenever the user clicks an inner pill or the sidebar item. */
   onTabChange?: (tab: AdminTab) => void;
+  onIncidentAccessChange?: (allowed: boolean) => void;
 }
 
 export default function AdminConsole({
   activeTab: controlledTab,
+  onTabChange,
+  onIncidentAccessChange,
 }: AdminConsoleProps = {}) {
-  /* Controlled ⇄ uncontrolled: fall back to internal state when no parent props are passed. */
-  const [internalTab] = useState<AdminTab>('users');
+  /* Controlled or uncontrolled: fall back to internal state when no parent props are passed. */
+  const [internalTab, setInternalTab] = useState<AdminTab>('users');
   const activeTab = controlledTab ?? internalTab;
+  const changeTab = (tab: AdminTab) => {
+    setInternalTab(tab);
+    onTabChange?.(tab);
+  };
 
   const [auditSubTab, setAuditSubTab] = useState<'mutations' | 'phi'>('phi');
 
   const [usersList, setUsersList] = useState<any[]>([]);
+  const [archivedUsers, setArchivedUsers] = useState<any[]>([]);
+  const [loadingArchivedUsers, setLoadingArchivedUsers] = useState(false);
+  const [archivedUsersError, setArchivedUsersError] = useState('');
   const [mutationLogs, setMutationLogs] = useState<any[]>([]);
   const [phiLogs, setPhiLogs] = useState<any[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
@@ -49,11 +122,36 @@ export default function AdminConsole({
   const [editingUser, setEditingUser] = useState<any | null>(null);
   const [showCreateUserModal, setShowCreateUserModal] = useState(false);
   const [isSavingUser, setIsSavingUser] = useState(false);
+  const [archivingUserId, setArchivingUserId] = useState<number | null>(null);
+  const [userActionFeedback, setUserActionFeedback] = useState<{ text: string; isError: boolean } | null>(null);
+
+  /* ── Admin archetype permissions (additive — only gates LIMITED admins) ── */
+  const [myPerms, setMyPerms] = useState<{ userId: number | null; archetype: string; is_super: boolean; permissions: string[] }>({
+    userId: null, archetype: 'super', is_super: true, permissions: ['SUPER_ADMIN'],
+  });
+  const [permCatalog, setPermCatalog] = useState<any[]>([]);
+  const [canViewIncidentRecords, setCanViewIncidentRecords] = useState(false);
+  const [editAdminArchetype, setEditAdminArchetype] = useState<'super' | 'limited'>('super');
+  const [editAdminPerms, setEditAdminPerms] = useState<string[]>([]);
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
   const [modalFeedback, setModalFeedback] = useState<{ text: string; isError: boolean } | null>(null);
 // ── Admin Vaccination History State ──────────────────────────────────────────
   const [adminUserVaccines, setAdminUserVaccines] = useState<string[]>([]);
   const [adminNewVaccine, setAdminNewVaccine] = useState('');
+
+  /* ── Advanced profile editor state (Basic / Advanced modes) ──────────────────
+     editHealth holds the decrypted HEALTH_PROFILES form values; it is
+     lazily fetched the first time the operator switches to Advanced. */
+  const [editMode, setEditMode] = useState<'basic' | 'advanced'>('basic');
+  const [editHealth, setEditHealth] = useState<any | null>(null);
+  const [editHealthLoaded, setEditHealthLoaded] = useState(false);
+  const [editHealthLoading, setEditHealthLoading] = useState(false);
+  const [editHealthExists, setEditHealthExists] = useState(false);
+  const [editAccountMeta, setEditAccountMeta] = useState<any | null>(null);
+  /* Qualified Responder: snapshot of the flag/note as loaded from the
+     server — diffs against it decide whether the save flow must call the
+     dedicated label endpoint after the main profile PUT. */
+  const [editQrOriginal, setEditQrOriginal] = useState<{ flag: boolean; note: string } | null>(null);
   /* Database Studio state */
   const [dbTablesList, setDbTablesList] = useState<any[]>([]);
   const [selectedDbTable, setSelectedDbTable] = useState<string>('USERS');
@@ -63,6 +161,7 @@ export default function AdminConsole({
   const [tableTotalPages, setTableTotalPages] = useState<number>(1);
   const [tableTotalRows, setTableTotalRows] = useState<number>(0);
   const [isTableReadOnly, setIsTableReadOnly] = useState<boolean>(false);
+  const [tableReadOnlyReason, setTableReadOnlyReason] = useState<'audit' | 'security' | null>(null);
   const [loadingDbTable, setLoadingDbTable] = useState<boolean>(false);
   const [dbRowModal, setDbRowModal] = useState<{ isNew: boolean; rowData: any } | null>(null);
   const [dbSearchFilter, setDbSearchFilter] = useState('');
@@ -77,6 +176,7 @@ export default function AdminConsole({
   /* Filters & sorting */
   const [userRoleFilter, setUserRoleFilter] = useState<string>('ALL');
   const [userStatusFilter, setUserStatusFilter] = useState<'ALL' | 'Active' | 'Suspended'>('ALL');
+  const [userQrOnly, setUserQrOnly] = useState(false);
   const [userSortKey, setUserSortKey] = useState<'id_asc' | 'id_desc' | 'name_asc' | 'name_desc' | 'role'>('id_asc');
 
   const [phiSearchTerm, setPhiSearchTerm] = useState<string>('');
@@ -98,6 +198,99 @@ export default function AdminConsole({
       if (res.ok) setUsersList(await res.json());
     } catch (_) {}
   };
+
+  const fetchArchivedUsers = async () => {
+    setLoadingArchivedUsers(true);
+    setArchivedUsersError('');
+    try {
+      const token = localStorage.getItem('valetudo_token');
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
+      const response = await fetch(`${API_BASE_URL}/api/admin/users?archived=true`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || `Failed to load archived accounts (HTTP ${response.status}).`);
+      }
+      if (!Array.isArray(result)) throw new Error('The server returned an invalid archived account list.');
+      setArchivedUsers(result);
+    } catch (error) {
+      setArchivedUsersError(error instanceof Error ? error.message : 'Failed to load archived accounts.');
+    } finally {
+      setLoadingArchivedUsers(false);
+    }
+  };
+
+  /* Caller's effective admin permission state (super admins keep full access). */
+  const fetchMyPermissions = async (signal: AbortSignal) => {
+    const token = localStorage.getItem('valetudo_token');
+    let incidentAccess = false;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/my-permissions`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (signal.aborted) return;
+        incidentAccess = data.is_super === true ||
+          (Array.isArray(data.permissions) && data.permissions.includes('INCIDENT_RECORDS_VIEW'));
+        setMyPerms({
+          userId: data.user_id ?? null,
+          archetype: data.archetype || 'super',
+          is_super: data.is_super !== false,
+          permissions: Array.isArray(data.permissions) ? data.permissions : ['SUPER_ADMIN'],
+        });
+      }
+    } catch (_) {}
+    if (!signal.aborted) {
+      setCanViewIncidentRecords(incidentAccess);
+      onIncidentAccessChange?.(incidentAccess);
+    }
+  };
+
+  /* Live permission catalog for the archetype editors. */
+  const fetchPermissionCatalog = async () => {
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/permissions`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.permissions) && data.permissions.length > 0) {
+          setPermCatalog(data.permissions);
+        }
+      }
+    } catch (_) {}
+  };
+
+  /* Permission gate — super admins always pass (unchanged legacy behaviour). */
+  const can = (code: string) => myPerms.is_super || myPerms.permissions.includes(code);
+
+  /* ── Adjusted manage-user-account feature (non-super admins) ──────
+     Limited admins keep the full Users workflow for REGULAR accounts, but
+     administrator accounts are hands-off for them (server-enforced):
+       • other admins  <Icon name="arrow_forward" size={14} /> read-only “View” mode (403 on any write)
+       • own account   <Icon name="arrow_forward" size={14} /> profile fields editable; role & status locked;
+                         password override disabled (use Change password)
+     Super admins see the console exactly as before. */
+  const viewingAsLimited = !myPerms.is_super;
+  const editingSelf = Boolean(editingUser && Number(editingUser.id) === Number(myPerms.userId));
+  const editingAdminTarget = Boolean(editingUser && editingUser.role === 'ADMIN');
+  const editingProtectedAdmin = viewingAsLimited && editingAdminTarget && !editingSelf;
+  const editingSelfAdminLocked = viewingAsLimited && editingAdminTarget && editingSelf;
+
+  /* Advanced editor: live BMI preview (the server-side generated column
+     remains authoritative — this mirrors ROUND(weight / POW(height/100, 2), 2)). */
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const previewBmi = (() => {
+    if (!editHealth) return null;
+    const h = Number(editHealth.height);
+    const w = Number(editHealth.weight);
+    if (!Number.isFinite(h) || !Number.isFinite(w) || h <= 0 || w <= 0) return null;
+    return (w / Math.pow(h / 100, 2)).toFixed(2);
+  })();
 
   const fetchMutationLogs = async () => {
     setLoadingLogs(true);
@@ -168,10 +361,28 @@ export default function AdminConsole({
     fetchPhiLogs();
     fetchRetention();
     fetchTelemetry();
+    fetchPermissionCatalog();
   }, []);
+
+  useEffect(() => {
+    let pending: AbortController | undefined;
+    const refresh = () => {
+      pending?.abort();
+      pending = new AbortController();
+      void fetchMyPermissions(pending.signal);
+    };
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => {
+      pending?.abort();
+      window.removeEventListener('focus', refresh);
+      onIncidentAccessChange?.(false);
+    };
+  }, [onIncidentAccessChange]);
 
   // Refetch contextual data whenever the parent (sidebar) switches the active tab
   useEffect(() => {
+    if (activeTab === 'archived') fetchArchivedUsers();
     if (activeTab === 'audit') {
       fetchPhiLogs();
       fetchMutationLogs();
@@ -182,7 +393,9 @@ export default function AdminConsole({
     }
     if (activeTab === 'db') {
       fetchDbTables();
-      fetchTableData('USERS', 1);
+      setDbSearchFilter('');
+      prevDbSearchRef.current = '';
+      fetchTableData('USERS', 1, '');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
@@ -197,7 +410,8 @@ export default function AdminConsole({
         (u.license_no || '').toLowerCase().includes(searchTerm.toLowerCase());
       const matchesRole = userRoleFilter === 'ALL' || u.role === userRoleFilter;
       const matchesStatus = userStatusFilter === 'ALL' || u.status === userStatusFilter;
-      return matchesSearch && matchesRole && matchesStatus;
+      const matchesQr = !userQrOnly || u.is_qualified_responder === true || u.is_qualified_responder === 1;
+      return matchesSearch && matchesRole && matchesStatus && matchesQr;
     })
     .sort((a, b) => {
       switch (userSortKey) {
@@ -248,6 +462,43 @@ export default function AdminConsole({
     });
 
   /* ── Handlers (unchanged) ────────────────────────────────────── */
+  const handleArchiveUser = async (target: any) => {
+    const targetLabel = target.name || `account #${target.id}`;
+    if (!window.confirm(
+      `Archive ${targetLabel}? This disables sign-in and retains clinical and audit history.`
+    )) return;
+
+    const targetUserId = Number(target.id);
+    setArchivingUserId(targetUserId);
+    setUserActionFeedback(null);
+    try {
+      const token = localStorage.getItem('valetudo_token');
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
+
+      const response = await fetch(`${API_BASE_URL}/api/admin/users/${targetUserId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || `Account archive failed (HTTP ${response.status}).`);
+      }
+
+      setUsersList((current) => current.filter((user) => Number(user.id) !== targetUserId));
+      setUserActionFeedback({
+        text: result.message || 'Account archived. Clinical and audit history has been retained.',
+        isError: false,
+      });
+    } catch (error) {
+      setUserActionFeedback({
+        text: error instanceof Error ? error.message : 'Failed to archive account.',
+        isError: true,
+      });
+    } finally {
+      setArchivingUserId(null);
+    }
+  };
+
   const handleOpenEditModal = (u: any) => {
     setEditingUser({
       ...u,
@@ -262,10 +513,37 @@ export default function AdminConsole({
       department: u.department || '',
       position: u.position || '',
       is_active: u.status === 'Active' || u.is_active === 1 || u.is_active === true,
+      // Qualified Responder (account property, shown on the Basic tab).
+      is_qualified_responder: u.is_qualified_responder === true || u.is_qualified_responder === 1,
+      qualified_responder_since: u.qualified_responder_since || null,
+      qualified_responder_note: (u.qualified_responder_note || ''),
+      sos_via_role: u.sos_via_role === true || u.sos_via_role === 1,
+    });
+    setEditQrOriginal({
+      flag: u.is_qualified_responder === true || u.is_qualified_responder === 1,
+      note: (u.qualified_responder_note || '').trim(),
     });
     setAdminPasswordInput('');
     setModalFeedback(null);
+    /* Advanced editor: every open starts fresh in Basic mode. */
+    setEditMode('basic');
+    setEditHealth(null);
+    setEditHealthLoaded(false);
+    setEditHealthLoading(false);
+    setEditHealthExists(false);
+    setEditAccountMeta(null);
     fetchUserVaccinesForAdmin(u.id);
+
+    /* Seed the admin-archetype editor state from the target's current grants. */
+    const targetIsLimited = u.admin_archetype === 'limited';
+    setEditAdminArchetype(
+      targetIsLimited ? 'limited' : (myPerms.is_super ? 'super' : 'limited')
+    );
+    setEditAdminPerms(
+      targetIsLimited
+        ? (Array.isArray(u.admin_permissions) ? u.admin_permissions : [])
+        : (myPerms.is_super ? [] : myPerms.permissions.filter((c) => c !== 'SUPER_ADMIN'))
+    );
   };
 const fetchUserVaccinesForAdmin = async (userId: number) => {
     const token = localStorage.getItem('valetudo_token');
@@ -282,6 +560,65 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
     }
   };
 
+  /* ── Advanced editor: lazily load the decrypted health record + account
+     metadata the first time the operator switches to Advanced mode. */
+  const fetchEditHealthProfile = async (userId: number) => {
+    setEditHealthLoading(true);
+    const token = localStorage.getItem('valetudo_token');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/admin/users/${userId}/health-profile`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setEditHealthExists(Boolean(data.health_profile));
+        setEditHealth(
+          data.health_profile
+            ? {
+                blood_type: data.health_profile.blood_type || '',
+                allergies: data.health_profile.allergies || '',
+                chronic_conditions: data.health_profile.chronic_conditions || '',
+                emergency_contact_name: data.health_profile.emergency_contact_name || '',
+                emergency_contact_phone: data.health_profile.emergency_contact_phone || '',
+                sex: data.health_profile.sex || '',
+                date_of_birth: data.health_profile.date_of_birth || '',
+                height: data.health_profile.height ?? '',
+                weight: data.health_profile.weight ?? '',
+                bmi: data.health_profile.bmi ?? null,
+                hp_version: data.health_profile.hp_version ?? null,
+                hp_updated_at: data.health_profile.hp_updated_at || null,
+              }
+            : {
+                blood_type: '', allergies: '', chronic_conditions: '',
+                emergency_contact_name: '', emergency_contact_phone: '',
+                sex: '', date_of_birth: '', height: '', weight: '',
+                bmi: null, hp_version: null, hp_updated_at: null,
+              }
+        );
+        setEditAccountMeta({ account: data.account, staff_signature: data.staff_signature });
+        setEditHealthLoaded(true);
+      } else {
+        setModalFeedback({ text: data.error || 'Failed to load the health record.', isError: true });
+      }
+    } catch (err: any) {
+      setModalFeedback({ text: 'Network error while loading the health record: ' + err.message, isError: true });
+    } finally {
+      setEditHealthLoading(false);
+    }
+  };
+
+  const handleEditModeSwitch = (mode: 'basic' | 'advanced') => {
+    setEditMode(mode);
+    // Limited admins cannot read another administrator's health record
+    // (the server 403s) — keep the section as a read-only notice.
+    if (
+      mode === 'advanced' && editingUser && !editHealthLoaded && !editHealthLoading &&
+      !editingProtectedAdmin
+    ) {
+      fetchEditHealthProfile(Number(editingUser.id));
+    }
+  };
+
   const handleAdminAddVaccine = (vacName: string) => {
     const trimmed = vacName.trim();
     if (!trimmed || adminUserVaccines.includes(trimmed)) return;
@@ -295,8 +632,44 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
   const handleSaveUserProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
+    // Adjusted manage-user-account feature: protected administrator accounts
+    // are read-only for limited admins (the server 403s any write anyway).
+    if (editingProtectedAdmin) {
+      setModalFeedback({
+        text: 'Read-only: only a Super Admin can modify another administrator account.',
+        isError: true,
+      });
+      return;
+    }
+    // Guard: a Limited archetype with zero permissions would be stored as an
+    // empty grant set, which the server treats as a LEGACY FULL admin — the
+    // exact opposite of the operator's intent. Block it client-side (the
+    // server rejects the empty set too).
+    if (editingUser.role === 'ADMIN' && editAdminArchetype === 'limited' && editAdminPerms.length === 0) {
+      setModalFeedback({
+        text: 'Select at least one permission for the Limited Admin archetype (an empty set means full access).',
+        isError: true,
+      });
+      return;
+    }
     setIsSavingUser(true);
     setModalFeedback(null);
+    // Advanced editor: only send health_profile once the health section has
+    // been loaded (Basic mode / never-visited Advanced → the server leaves
+    // the health record completely untouched).
+    const healthPayload = editHealthLoaded && editHealth
+      ? {
+          blood_type: editHealth.blood_type || null,
+          allergies: (editHealth.allergies || '').trim() || null,
+          chronic_conditions: (editHealth.chronic_conditions || '').trim() || null,
+          emergency_contact_name: (editHealth.emergency_contact_name || '').trim() || null,
+          emergency_contact_phone: (editHealth.emergency_contact_phone || '').trim() || null,
+          sex: editHealth.sex || null,
+          date_of_birth: editHealth.date_of_birth || null,
+          height: editHealth.height ? Number(editHealth.height) : null,
+          weight: editHealth.weight ? Number(editHealth.weight) : null,
+        }
+      : null;
     const token = localStorage.getItem('valetudo_token');
     try {
           const res = await fetch(`${API_BASE_URL}/api/admin/users/${editingUser.id}`, {
@@ -319,24 +692,88 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           specialty: editingUser.specialty,
           department: editingUser.department,
           position: editingUser.position,
+          ...(healthPayload ? { health_profile: healthPayload } : {}),
         }),
       });
       const data = await res.json();
       if (res.ok) {
-        setModalFeedback({ text: '✅ ' + data.message, isError: false });
+        setModalFeedback({ text: '' + data.message, isError: false });
         // Save updated immunization history
      await fetch(`${API_BASE_URL}/api/profile/patient/${editingUser.id}/immunizations`, {
        method: 'PUT',
        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
        body: JSON.stringify({ immunizations: adminUserVaccines }),
      });
+
+        /* Sync the Qualified Responder label (dedicated endpoint guarded by
+           RESPONDERS_MANAGE). Reported separately — a failure here must never
+           roll back the profile save (partial success, like permissions). */
+        let qrWarning: string | null = null;
+        const qrNoteNow = (editingUser.qualified_responder_note || '').trim();
+        const qrFlagChanged = editQrOriginal ? editQrOriginal.flag !== Boolean(editingUser.is_qualified_responder) : false;
+        const qrNoteChanged = editQrOriginal ? editQrOriginal.note !== qrNoteNow : false;
+        if (editQrOriginal && (qrFlagChanged || qrNoteChanged)) {
+          try {
+            const qrRes = await fetch(`${API_BASE_URL}/api/admin/users/${editingUser.id}/qualified-responder`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: JSON.stringify({
+                is_qualified_responder: Boolean(editingUser.is_qualified_responder),
+                // Note is only meaningful while the flag is ON; sending it
+                // while ON keeps/edits it, and the server clears it on OFF.
+                note: editingUser.is_qualified_responder ? qrNoteNow : undefined,
+              }),
+            });
+            const qrData = await qrRes.json().catch(() => ({}));
+            if (!qrRes.ok) {
+              qrWarning = qrData.error || 'The Qualified Responder label was not changed.';
+              setModalFeedback({ text: 'Profile saved, but the Qualified Responder label failed: ' + qrWarning, isError: true });
+            } else {
+              setEditQrOriginal({ flag: Boolean(editingUser.is_qualified_responder), note: qrNoteNow });
+            }
+          } catch (qrErr: any) {
+            qrWarning = qrErr.message;
+            setModalFeedback({ text: 'Profile saved, but the Qualified Responder label sync failed: ' + qrErr.message, isError: true });
+          }
+        }
+        /* Sync admin archetype permissions (dedicated endpoint; the server
+           enforces self-edit and super-only guards). Only Super Admins may
+           modify administrator permission sets (adjusted feature). */
+        let permWarning: string | null = null;
+        if (editingUser.role === 'ADMIN' && myPerms.is_super) {
+          const originalPerms = editingUser.admin_archetype === 'limited'
+            ? (editingUser.admin_permissions || [])
+            : ['SUPER_ADMIN'];
+          const nextPerms = editAdminArchetype === 'super' ? ['SUPER_ADMIN'] : editAdminPerms;
+          const permsChanged =
+            JSON.stringify([...originalPerms].sort()) !== JSON.stringify([...nextPerms].sort());
+          if (permsChanged) {
+            try {
+              const permRes = await fetch(`${API_BASE_URL}/api/admin/users/${editingUser.id}/permissions`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ admin_permissions: nextPerms }),
+              });
+              const permData = await permRes.json();
+              if (!permRes.ok) {
+                permWarning = permData.error || 'Permissions were not changed.';
+                setModalFeedback({ text: 'Profile saved, but permissions were not changed: ' + permWarning, isError: true });
+              }
+            } catch (permErr: any) {
+              permWarning = permErr.message;
+              setModalFeedback({ text: 'Profile saved, but permission sync failed: ' + permErr.message, isError: true });
+            }
+          }
+        }
         fetchUsers();
-        setTimeout(() => setEditingUser(null), 1200);
+        // Refresh the Advanced editor (BMI / versions) if it was in use.
+        if (editHealthLoaded) fetchEditHealthProfile(Number(editingUser.id));
+        if (!permWarning && !qrWarning) setTimeout(() => setEditingUser(null), 1200);
       } else {
-        setModalFeedback({ text: '❌ ' + (data.error || 'Failed to update profile.'), isError: true });
+        setModalFeedback({ text: '' + (data.error || 'Failed to update profile.'), isError: true });
       }
     } catch (err: any) {
-      setModalFeedback({ text: '❌ Error: ' + err.message, isError: true });
+      setModalFeedback({ text: 'Error: ' + err.message, isError: true });
     } finally {
       setIsSavingUser(false);
     }
@@ -360,13 +797,13 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       });
       const data = await res.json();
       if (res.ok) {
-        setModalFeedback({ text: '🔑 ' + data.message, isError: false });
+        setModalFeedback({ text: '' + data.message, isError: false });
         setAdminPasswordInput('');
       } else {
-        setModalFeedback({ text: '❌ ' + (data.error || 'Password reset failed.'), isError: true });
+        setModalFeedback({ text: '' + (data.error || 'Password reset failed.'), isError: true });
       }
     } catch (err: any) {
-      setModalFeedback({ text: '❌ Network error: ' + err.message, isError: true });
+      setModalFeedback({ text: 'Network error: ' + err.message, isError: true });
     }
   };
 
@@ -382,11 +819,14 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
     }
   };
 
-  const fetchTableData = async (table = selectedDbTable, page = 1) => {
+  const prevDbSearchRef = useRef(dbSearchFilter);
+
+  const fetchTableData = async (table = selectedDbTable, page = 1, search = dbSearchFilter) => {
     setLoadingDbTable(true);
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/db/tables/${table}?page=${page}&limit=15`, {
+      const searchParam = search ? `&search=${encodeURIComponent(search.trim())}` : '';
+      const res = await fetch(`${API_BASE_URL}/api/admin/db/tables/${table}?page=${page}&limit=15${searchParam}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -398,6 +838,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
         setTableTotalPages(data.totalPages);
         setTableTotalRows(data.totalRows);
         setIsTableReadOnly(data.isReadOnly);
+        setTableReadOnlyReason(data.readOnlyReason ?? null);
       }
     } catch (err) {
       console.error('Failed to load table content:', err);
@@ -405,6 +846,16 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       setLoadingDbTable(false);
     }
   };
+
+  useEffect(() => {
+    if (activeTab !== 'db') return;
+    if (prevDbSearchRef.current === dbSearchFilter) return;
+    prevDbSearchRef.current = dbSearchFilter;
+    const timer = setTimeout(() => {
+      fetchTableData(selectedDbTable, 1, dbSearchFilter);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [dbSearchFilter, activeTab, selectedDbTable]);
 
   const handleSaveDbRow = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -439,11 +890,11 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       }
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || 'Database operation failed.');
-      alert('✅ ' + result.message);
+      alert('' + result.message);
       setDbRowModal(null);
       fetchTableData(selectedDbTable, tablePage);
     } catch (err: any) {
-      alert('❌ Error: ' + err.message);
+      alert('Error: ' + err.message);
     }
   };
 
@@ -463,10 +914,10 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to delete row.');
-      alert('✅ ' + data.message);
+      alert('' + data.message);
       fetchTableData(selectedDbTable, tablePage);
     } catch (err: any) {
-      alert('❌ Delete error: ' + err.message);
+      alert('Delete error: ' + err.message);
     }
   };
 
@@ -480,36 +931,91 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
   return (
     <div style={{ width: '100%' }}>
       {/* ── Header ────────────────────────────────────────────── */}
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: -0.6, color: T.text, margin: 0 }}>
+      {(activeTab !== 'analytics' || !can('ANALYTICS_VIEW')) && <div className="vd-page-head">
+        <div className="vd-page-head-eyebrow">Administration</div>
+        <h1 className="vd-page-head-title">
           {activeTab === 'users' && 'Users & roles'}
+          {activeTab === 'archived' && 'Archived accounts'}
           {activeTab === 'audit' && 'Privacy & audit'}
           {activeTab === 'telemetry' && 'System health & retention'}
-          {activeTab === 'analytics' && 'Epidemiological analytics'}
+          {activeTab === 'analytics' && 'Health analytics'}
+          {activeTab === 'incidents' && 'Incident records'}
           {activeTab === 'db' && 'Database Studio'}
+          {activeTab === 'serverPolicy' && 'Server Policy'}
         </h1>
-        <p style={{ fontSize: 13.5, color: T.textSub, margin: '6px 0 0' }}>
-          {activeTab === 'users' && 'Manage institutional accounts, access permissions and account status.'}
+        <p className="vd-page-head-sub">
+          {activeTab === 'users' && 'Manage institutional accounts, access permissions and account status. Seven RBAC roles govern access. Editing a user changes their assigned permissions; suspending an account disables access without deleting its profile.'}
+          {activeTab === 'archived' && 'Review accounts that have been archived. Sign-in is disabled; associated clinical and audit history is retained.'}
           {activeTab === 'audit' && 'Trace access and changes to clinic information with read-only audit records.'}
           {activeTab === 'telemetry' && 'Service telemetry and clinical data lifecycle governance, in one place.'}
           {activeTab === 'analytics' && 'Campus illness trajectories, seasonal spike monitoring & health reports.'}
+          {activeTab === 'incidents' && 'Official documentation and MinIO-archived PDF records of resolved emergency incidents.'}
           {activeTab === 'db' && 'Inspect and maintain system records · valetudo_healthlink'}
+          {activeTab === 'serverPolicy' && 'Review and update rate limits, no-show grace, and appointment rules.'}
         </p>
-      </div>
+      </div>}
+
+      {activeTab === 'serverPolicy' && (
+        myPerms.is_super
+          ? <ServerPolicyPanel />
+          : <NoPermissionPanel description="Server Policy requires Super Admin access." />
+      )}
+
+      {(activeTab === 'users' || activeTab === 'archived') && (
+        <div
+          role="group"
+          aria-label="Account views"
+          style={{
+            display: 'flex',
+            gap: 8,
+            marginBottom: 18,
+            borderBottom: `1px solid ${T.border}`,
+          }}
+        >
+          {([
+            { key: 'users', label: 'Active accounts' },
+            { key: 'archived', label: 'Archived accounts' },
+          ] as const).map(({ key, label }) => {
+            const isSelected = activeTab === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={isSelected}
+                onClick={() => changeTab(key)}
+                style={{
+                  padding: '10px 14px',
+                  border: 0,
+                  borderBottom: `2px solid ${isSelected ? T.primary : 'transparent'}`,
+                  background: 'transparent',
+                  color: isSelected ? T.primary : T.textSub,
+                  fontSize: 13,
+                  fontWeight: isSelected ? 700 : 600,
+                  fontFamily: T.font,
+                  cursor: 'pointer',
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: USERS                                                 */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      {activeTab === 'users' && (
+      {activeTab === 'users' && !can('USERS_MANAGE') && (<NoPermissionPanel required="USERS_MANAGE" />)}
+      {activeTab === 'users' && can('USERS_MANAGE') && (
         <div>
           {/* Search + count row */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, marginBottom: 14, flexWrap: 'wrap' }}>
             <div style={{ position: 'relative', flex: '1 1 320px', maxWidth: 520 }}>
               <span style={{
                 position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)',
-                color: T.textMuted, width: 16, height: 16, display: 'grid', placeItems: 'center',
+                color: T.textMuted, display: 'grid', placeItems: 'center',
               }}>
-                <I.Search />
+                <Icon name="search" size={16} />
               </span>
               <input
                 type="text"
@@ -546,7 +1052,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   padding: '8px 16px',
                   borderRadius: T.radius.pill,
                   background: T.primary,
-                  color: '#FFFFFF',
+                  color: T.textOnPrimary,
                   border: 'none',
                   fontSize: 12.5,
                   fontWeight: 700,
@@ -621,6 +1127,25 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
               );
             })}
 
+            {/* Qualified Responder filter chip (flag only — accounts that
+                receive SOS through their role get an in-modal hint instead). */}
+            <button
+              type="button"
+              onClick={() => setUserQrOnly((v) => !v)}
+              title="Show only accounts labelled Qualified Responder (role-independent SOS label)"
+              style={{
+                padding: '5px 12px', borderRadius: T.radius.pill,
+                fontSize: 11.5, fontWeight: 700,
+                border: `1px solid ${userQrOnly ? '#C2410C' : T.border}`,
+                background: userQrOnly ? '#FFF7ED' : T.surface,
+                color: userQrOnly ? '#C2410C' : T.textSub,
+                cursor: 'pointer', fontFamily: T.font,
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+              }}
+            >
+              <Icon name="emergency" size={14} /> Qualified responders
+            </button>
+
             <select
               value={userSortKey}
               onChange={(e) => setUserSortKey(e.target.value as any)}
@@ -632,10 +1157,10 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                 fontFamily: T.font, cursor: 'pointer',
               }}
             >
-              <option value="id_asc">Sort: ID ↑</option>
-              <option value="id_desc">Sort: ID ↓</option>
-              <option value="name_asc">Sort: Name A→Z</option>
-              <option value="name_desc">Sort: Name Z→A</option>
+              <option value="id_asc">Sort: ID <Icon name="north" size={14} /></option>
+              <option value="id_desc">Sort: ID <Icon name="south" size={14} /></option>
+              <option value="name_asc">Sort: Name A<Icon name="arrow_forward" size={14} />Z</option>
+              <option value="name_desc">Sort: Name Z<Icon name="arrow_forward" size={14} />A</option>
               <option value="role">Sort: Role</option>
             </select>
           </div>
@@ -648,7 +1173,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
             overflow: 'hidden',
             boxShadow: T.shadow.xs,
           }}>
-            <div style={{ overflowX: 'auto' }}>
+            <div className="vd-table-wrap" style={{ overflowX: "auto" }}>
               <table className="tbl" style={{ minWidth: 820 }}>
                 <thead>
                   <tr>
@@ -657,7 +1182,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     <th>Institutional email</th>
                     <th>Assigned RBAC role</th>
                     <th style={{ width: 110 }}>Status</th>
-                    <th style={{ width: 100, textAlign: 'right' }}>Action</th>
+                    <th style={{ width: 190, textAlign: 'right' }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -670,6 +1195,45 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       <td style={{ color: T.textSub }}>{u.email}</td>
                       <td>
                         <span style={rolePill(u.role)}>{u.role}</span>
+                        {(u.is_qualified_responder === true || u.is_qualified_responder === 1) && (
+                          <span
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 4,
+                              marginLeft: 8, padding: '2px 9px',
+                              borderRadius: T.radius.pill,
+                              fontSize: 9.5, fontWeight: 800, letterSpacing: 0.4,
+                              background: '#FFF7ED', color: '#C2410C',
+                              border: '1px solid #FED7AA',
+                            }}
+                            title={
+                              `Qualified Responder (independent SOS label)${
+                                u.qualified_responder_since ? ` · since ${u.qualified_responder_since}` : ''
+                              }${u.qualified_responder_note ? ` · ${u.qualified_responder_note}` : ''}`
+                            }
+                          >
+                            <Icon name="emergency" size={14} /> QUALIFIED RESPONDER
+                          </span>
+                        )}
+                        {u.role === 'ADMIN' && u.admin_archetype && (
+                          <span
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 4,
+                              marginLeft: 8, padding: '2px 9px',
+                              borderRadius: T.radius.pill,
+                              fontSize: 9.5, fontWeight: 800, letterSpacing: 0.4,
+                              background: u.admin_archetype === 'super' ? '#EDE9FE' : T.sage50,
+                              color: u.admin_archetype === 'super' ? '#6D28D9' : T.textMuted,
+                              border: `1px solid ${u.admin_archetype === 'super' ? '#DDD6FE' : T.borderSoft}`,
+                            }}
+                            title={
+                              u.admin_archetype === 'super'
+                                ? 'Super Admin — unrestricted access'
+                                : `Limited Admin — ${(u.admin_permissions || []).join(', ')}`
+                            }
+                          >
+                            {u.admin_archetype === 'super' ? 'SUPER' : `LIMITED · ${u.admin_permissions?.length ?? 0}`}
+                          </span>
+                        )}
                       </td>
                       <td>
                         <span style={{
@@ -677,32 +1241,98 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                           padding: '4px 12px', borderRadius: T.radius.pill,
                           fontSize: 11, fontWeight: 700,
                           background: u.status === 'Active' ? T.successSoft : '#F5EFE9',
-                          color: u.status === 'Active' ? T.success : '#8C6826',
+                          color: u.status === 'Active' ? T.success : T.warning,
                         }}>
                           <span style={{ fontSize: 7 }}>●</span>
                           {u.status}
                         </span>
                       </td>
-                      <td style={{ textAlign: 'right' }}>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEditModal(u)}
-                          style={{
-                            padding: '6px 14px', borderRadius: T.radius.pill,
-                            background: 'transparent', color: T.primary,
-                            border: `1px solid ${T.primaryTint}`,
-                            fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                            fontFamily: T.font,
-                          }}
-                        >
-                          Edit
-                        </button>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        {viewingAsLimited && u.role === 'ADMIN' && Number(u.id) !== Number(myPerms.userId) ? (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(u)}
+                            title="Administrator accounts are read-only for limited admins — only a Super Admin can modify them"
+                            style={{
+                              padding: '6px 14px', borderRadius: T.radius.pill,
+                              background: 'transparent', color: T.textSub,
+                              border: `1px solid ${T.border}`,
+                              fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                              fontFamily: T.font,
+                              display: 'inline-flex', alignItems: 'center', gap: 5,
+                            }}
+                          >
+                            <Icon name="lock" size={14} /> View
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(u)}
+                            style={{
+                              padding: '6px 14px', borderRadius: T.radius.pill,
+                              background: 'transparent', color: T.primary,
+                              border: `1px solid ${T.primaryTint}`,
+                              fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                              fontFamily: T.font,
+                            }}
+                          >
+                            Edit
+                          </button>
+                        )}
+                        {Number(u.id) !== Number(myPerms.userId)
+                          && (u.role !== 'ADMIN' || myPerms.is_super) && (
+                          <button
+                            type="button"
+                            onClick={() => handleArchiveUser(u)}
+                            disabled={archivingUserId === Number(u.id)}
+                            title="Archive account; clinical and audit history will be retained"
+                            style={{
+                              padding: '6px 12px',
+                              borderRadius: T.radius.pill,
+                              background: T.dangerSoft,
+                              color: T.danger,
+                              borderWidth: 1,
+                              borderStyle: 'solid',
+                              borderColor: T.dangerBorder,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              cursor: archivingUserId === Number(u.id) ? 'wait' : 'pointer',
+                              opacity: archivingUserId === Number(u.id) ? 0.65 : 1,
+                              fontFamily: T.font,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 5,
+                            }}
+                          >
+                            <Icon name="archive" size={14} />
+                            {archivingUserId === Number(u.id) ? 'Archiving...' : 'Archive'}
+                          </button>
+                        )}
+                        </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+
+            {userActionFeedback && (
+              <div
+                role={userActionFeedback.isError ? 'alert' : 'status'}
+                style={{
+                  margin: '12px 16px',
+                  padding: '10px 14px',
+                  borderRadius: T.radius.md,
+                  background: userActionFeedback.isError ? T.dangerSoft : T.successSoft,
+                  color: userActionFeedback.isError ? T.danger : T.success,
+                  fontSize: 13,
+                  fontWeight: 600,
+                }}
+              >
+                {userActionFeedback.text}
+              </div>
+            )}
 
             {processedUsers.length === 0 && (
               <div style={{ padding: 40, textAlign: 'center', color: T.textMuted, fontSize: 13 }}>
@@ -717,43 +1347,104 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           }}>
             Seven RBAC roles govern access. Editing a user changes their assigned permissions;
             suspending an account disables access without deleting its profile.
+            ADMIN accounts carry an archetype — <b>Super</b> (full access) or <b>Limited</b> (only
+            the capabilities granted at creation).
+            {viewingAsLimited && (
+              <> You are signed in as a <b>Limited Admin</b>: administrator accounts are
+              read-only, admin passwords cannot be overridden, and new administrator
+              accounts cannot be created — those actions require a Super Admin.</>
+            )}
           </p>
         </div>
       )}
-            {/* ═══════════════════════════════════════════════════════════ */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* TAB: ARCHIVED ACCOUNTS                                     */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {activeTab === 'archived' && !can('USERS_MANAGE') && (<NoPermissionPanel required="USERS_MANAGE" />)}
+      {activeTab === 'archived' && can('USERS_MANAGE') && (
+        <div style={{
+          background: T.surface,
+          border: `1px solid ${T.border}`,
+          borderRadius: T.radius.lg,
+          overflow: 'hidden',
+          boxShadow: T.shadow.xs,
+        }}>
+          {archivedUsersError && (
+            <div role="alert" style={{
+              margin: 16,
+              padding: '10px 14px',
+              borderRadius: T.radius.md,
+              background: T.dangerSoft,
+              color: T.danger,
+              fontSize: 13,
+              fontWeight: 600,
+            }}>
+              {archivedUsersError}
+            </div>
+          )}
+          {loadingArchivedUsers ? (
+            <div role="status" style={{ padding: 32, textAlign: 'center', color: T.textMuted }}>
+              Loading archived accounts...
+            </div>
+          ) : archivedUsers.length === 0 && !archivedUsersError ? (
+            <div style={{ padding: 40, textAlign: 'center', color: T.textMuted, fontSize: 13 }}>
+              No archived accounts.
+            </div>
+          ) : (
+            <div className="vd-table-wrap" style={{ overflowX: 'auto' }}>
+              <table className="tbl" style={{ minWidth: 760 }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: 90 }}>User ID</th>
+                    <th>Full name</th>
+                    <th>Institutional email</th>
+                    <th>Assigned RBAC role</th>
+                    <th style={{ width: 190 }}>Archived</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {archivedUsers.map((archivedUser) => (
+                    <tr key={archivedUser.id}>
+                      <td style={{ color: T.textSub, fontWeight: 600, fontFamily: T.mono, fontSize: 12 }}>
+                        {archivedUser.id}
+                      </td>
+                      <td style={{ fontWeight: 600, color: T.text }}>{archivedUser.name}</td>
+                      <td style={{ color: T.textSub }}>{archivedUser.email}</td>
+                      <td><span style={rolePill(archivedUser.role)}>{archivedUser.role}</span></td>
+                      <td style={{ color: T.textSub }}>
+                        {archivedUser.archived_at
+                          ? new Date(archivedUser.archived_at).toLocaleString()
+                          : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+      {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: AUDIT                                                */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      {activeTab === 'audit' && (
+      {activeTab === 'audit' && !can('AUDIT_VIEW') && (<NoPermissionPanel required="AUDIT_VIEW" />)}
+      {activeTab === 'audit' && can('AUDIT_VIEW') && (
         <div>
-          {/* Sub-tabs */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+          {/* Sub-tabs — clean pill toggle */}
+          <div className="vd-subtabs" style={{ marginBottom: 20 }}>
             <button
               type="button"
+              className={`vd-subtab${auditSubTab === 'phi' ? ' is-active' : ''}`}
               onClick={() => setAuditSubTab('phi')}
-              style={{
-                padding: '9px 18px', borderRadius: T.radius.pill,
-                border: `1px solid ${auditSubTab === 'phi' ? T.primary : T.border}`,
-                background: auditSubTab === 'phi' ? T.primary : T.surface,
-                color: auditSubTab === 'phi' ? '#fff' : T.textSub,
-                fontSize: 13, fontWeight: 700, cursor: 'pointer',
-                fontFamily: T.font,
-              }}
             >
-              👁️ PHI access
+              <Icon name="visibility" size={14} /> PHI access
             </button>
             <button
               type="button"
+              className={`vd-subtab${auditSubTab === 'mutations' ? ' is-active' : ''}`}
               onClick={() => setAuditSubTab('mutations')}
-              style={{
-                padding: '9px 18px', borderRadius: T.radius.pill,
-                border: `1px solid ${auditSubTab === 'mutations' ? T.primary : T.border}`,
-                background: auditSubTab === 'mutations' ? T.primary : T.surface,
-                color: auditSubTab === 'mutations' ? '#fff' : T.textSub,
-                fontSize: 13, fontWeight: 700, cursor: 'pointer',
-                fontFamily: T.font,
-              }}
             >
-              ✓ SHA-256 mutation ledger
+              <Icon name="check" size={14} /> SHA-256 mutation ledger
             </button>
           </div>
 
@@ -799,7 +1490,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                         style={{ ...inputStyle, width: 'auto', padding: '8px 16px', borderRadius: T.radius.pill, fontSize: 12, fontWeight: 700 }}>
                   <option value="desc">Newest first</option>
                   <option value="asc">Oldest first</option>
-                  <option value="patient_asc">Patient A→Z</option>
+                  <option value="patient_asc">Patient A<Icon name="arrow_forward" size={14} />Z</option>
                 </select>
 
                 <span style={{ alignSelf: 'center', fontSize: 12, color: T.textSub, fontWeight: 700 }}>
@@ -843,7 +1534,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     No PHI read access events matched your filter.
                   </div>
                 ) : (
-                  <div style={{ overflowX: 'auto' }}>
+                  <div className="vd-table-wrap" style={{ overflowX: "auto" }}>
                     <table className="tbl" style={{ minWidth: 900 }}>
                       <thead>
                         <tr>
@@ -971,7 +1662,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     No mutation audit logs matched your filter.
                   </div>
                 ) : (
-                  <div style={{ overflowX: 'auto' }}>
+                  <div className="vd-table-wrap" style={{ overflowX: "auto" }}>
                     <table className="tbl" style={{ minWidth: 820 }}>
                       <thead>
                         <tr>
@@ -1029,7 +1720,10 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: TELEMETRY / SYSTEM HEALTH                            */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      {activeTab === 'telemetry' && (
+      {activeTab === 'telemetry' && !can('TELEMETRY_VIEW') && !can('RETENTION_MANAGE') && (
+        <NoPermissionPanel required="TELEMETRY_VIEW" />
+      )}
+      {activeTab === 'telemetry' && (can('TELEMETRY_VIEW') || can('RETENTION_MANAGE')) && (
         <div>
           {/* KPI cards row */}
           <div style={{
@@ -1111,7 +1805,8 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           {/* Live server ping monitor */}
           <ServerPingMonitor />
 
-          {/* Retention governance panel */}
+          {/* Retention governance panel — RETENTION_MANAGE permission */}
+          {can('RETENTION_MANAGE') ? (
           <div style={{
             background: T.surface,
             border: `1px solid ${T.border}`,
@@ -1234,22 +1929,32 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   cursor: sweeping ? 'not-allowed' : 'pointer',
                 }}
               >
-                🧹 {sweeping ? 'Executing sweep…' : 'Enforce retention sweep'}
+                <Icon name="cleaning_services" size={14} /> {sweeping ? 'Executing sweep…' : 'Enforce retention sweep'}
               </button>
             </div>
           </div>
+          ) : (
+            <NoPermissionPanel required="RETENTION_MANAGE" />
+          )}
         </div>
       )}
 
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: ANALYTICS                                            */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      {activeTab === 'analytics' && <AnalyticsDashboard />}
+      {activeTab === 'analytics' && !can('ANALYTICS_VIEW') && (<NoPermissionPanel required="ANALYTICS_VIEW" />)}
+      {activeTab === 'analytics' && can('ANALYTICS_VIEW') && <AnalyticsDashboard />}
+
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* TAB: INCIDENT RECORDS                                       */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {activeTab === 'incidents' && (canViewIncidentRecords ? <IncidentRecords /> : <NoPermissionPanel required="INCIDENT_RECORDS_VIEW" />)}
 
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: DATABASE STUDIO                                      */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      {activeTab === 'db' && (
+      {activeTab === 'db' && !can('DATABASE_MANAGE') && (<NoPermissionPanel required="DATABASE_MANAGE" />)}
+      {activeTab === 'db' && can('DATABASE_MANAGE') && (
         <div>
           <div style={{
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -1259,7 +1964,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <span style={{
                 fontFamily: T.mono, fontSize: 12, fontWeight: 700,
-                background: T.primary, color: '#fff',
+                background: T.primary, color: T.textOnPrimary,
                 padding: '5px 12px', borderRadius: T.radius.xs,
               }}>
                 valetudo_healthlink
@@ -1275,7 +1980,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                 fontSize: 11.5, fontWeight: 700,
                 display: 'inline-flex', alignItems: 'center', gap: 6,
               }}>
-                <I.Lock /> Read-only audit table
+                <I.Lock /> {tableReadOnlyReason === 'security' ? 'Super-admin-only security table' : 'Read-only audit table'}
               </span>
             )}
           </div>
@@ -1309,8 +2014,9 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       type="button"
                       onClick={() => {
                         setSelectedDbTable(t.tableName);
-                        fetchTableData(t.tableName, 1);
                         setDbSearchFilter('');
+                        prevDbSearchRef.current = '';
+                        fetchTableData(t.tableName, 1, '');
                       }}
                       style={{
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -1330,7 +2036,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         display: 'inline-flex', alignItems: 'center', gap: 6,
                       }}>
-                        {isAudit ? '🔒' : '📋'} {t.tableName}
+                        {isAudit ? '' : ''} {t.tableName}
                       </span>
                     </button>
                   );
@@ -1358,21 +2064,53 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     background: T.sage100, color: T.primary,
                     fontSize: 11, fontWeight: 700,
                   }}>
-                    {tableTotalRows} records
+                    {tableTotalRows} {dbSearchFilter ? 'matching ' : ''}records
                   </span>
                 </div>
 
                 <div className="my-toolbar">
-                  <input
-                    type="text"
-                    placeholder="Search loaded records…"
-                    value={dbSearchFilter}
-                    onChange={(e) => setDbSearchFilter(e.target.value)}
-                    className="my-toolbar-search"
-                  />
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      placeholder="Search records across table…"
+                      value={dbSearchFilter}
+                      onChange={(e) => setDbSearchFilter(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          fetchTableData(selectedDbTable, 1, dbSearchFilter);
+                        }
+                      }}
+                      className="my-toolbar-search"
+                      style={{ paddingRight: dbSearchFilter ? 28 : undefined }}
+                    />
+                    {dbSearchFilter && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDbSearchFilter('');
+                          prevDbSearchRef.current = '';
+                          fetchTableData(selectedDbTable, 1, '');
+                        }}
+                        style={{
+                          position: 'absolute',
+                          right: 8,
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: T.textSub,
+                          fontSize: 13,
+                          lineHeight: 1,
+                          padding: '4px 6px',
+                        }}
+                        title="Clear search"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
                   <button
                     type="button"
-                    onClick={() => fetchTableData(selectedDbTable, tablePage)}
+                    onClick={() => fetchTableData(selectedDbTable, tablePage, dbSearchFilter)}
                     className="my-toolbar-icon-btn"
                     title="Refresh"
                   >
@@ -1398,7 +2136,9 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
               {loadingDbTable ? (
                 <div style={{ padding: 40, textAlign: 'center', color: T.textSub }}>Loading records…</div>
               ) : tableRows.length === 0 ? (
-                <div style={{ padding: 40, textAlign: 'center', color: T.textMuted }}>Table is empty.</div>
+                <div style={{ padding: 40, textAlign: 'center', color: T.textMuted }}>
+                  {dbSearchFilter.trim() ? `No records found matching "${dbSearchFilter}".` : 'Table is empty.'}
+                </div>
               ) : (
                 <div style={{
                   border: `1px solid ${T.borderSoft}`,
@@ -1426,7 +2166,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                             borderBottom: `1px solid ${T.border}`,
                             whiteSpace: 'nowrap',
                           }}>
-                            {col.columnKey === 'PRI' && <span style={{ color: T.warning, marginRight: 4 }}>🔑</span>}
+                            {col.columnKey === 'PRI' && <span style={{ color: T.warning, marginRight: 4 }}><Icon name="key" size={14} /></span>}
                             {col.columnName}
                             <div style={{ fontSize: 9.5, color: T.textMuted, fontWeight: 500, textTransform: 'none', letterSpacing: 0, marginTop: 2 }}>
                               {col.dataType}
@@ -1436,9 +2176,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       </tr>
                     </thead>
                     <tbody>
-                      {tableRows
-                        .filter((r) => !dbSearchFilter || JSON.stringify(r).toLowerCase().includes(dbSearchFilter.toLowerCase()))
-                        .map((row, idx) => (
+                      {tableRows.map((row, idx) => (
                           <tr key={idx} style={{ borderBottom: `1px solid ${T.borderSoft}` }}>
                             {!isTableReadOnly && (
                               <td style={{ padding: '8px 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
@@ -1480,7 +2218,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                                       background: T.primaryTint, padding: '2px 8px',
                                       borderRadius: T.radius.xs,
                                     }}>
-                                      🔒 AES-256
+                                      <Icon name="lock" size={14} /> AES-256
                                     </span>
                                   ) : val === null || val === undefined ? (
                                     <span style={{ color: T.textFaint, fontStyle: 'italic' }}>NULL</span>
@@ -1502,14 +2240,14 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
               {/* Pagination */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, fontSize: 12, color: T.textSub }}>
                 <span>
-                  Page <b style={{ color: T.text }}>{tablePage}</b> of <b style={{ color: T.text }}>{tableTotalPages}</b>
-                  {' · '}Showing {tableRows.length} records
+                  Page <b style={{ color: T.text }}>{tablePage}</b> of <b style={{ color: T.text }}>{Math.max(1, tableTotalPages)}</b>
+                  {' · '}Showing {tableRows.length} of {tableTotalRows} records{dbSearchFilter.trim() ? ' (matching search)' : ''}
                 </span>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button
                     type="button"
                     disabled={tablePage <= 1}
-                    onClick={() => fetchTableData(selectedDbTable, tablePage - 1)}
+                    onClick={() => fetchTableData(selectedDbTable, tablePage - 1, dbSearchFilter)}
                     style={{
                       ...btnGhost, padding: '6px 14px', fontSize: 12,
                       opacity: tablePage <= 1 ? 0.4 : 1,
@@ -1521,7 +2259,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   <button
                     type="button"
                     disabled={tablePage >= tableTotalPages}
-                    onClick={() => fetchTableData(selectedDbTable, tablePage + 1)}
+                    onClick={() => fetchTableData(selectedDbTable, tablePage + 1, dbSearchFilter)}
                     style={{
                       ...btnGhost, padding: '6px 14px', fontSize: 12,
                       opacity: tablePage >= tableTotalPages ? 0.4 : 1,
@@ -1567,7 +2305,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                 type="button"
                 onClick={() => setDbRowModal(null)}
                 style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: T.textSub }}
-              >✕</button>
+              ><Icon name="close" size={14} /></button>
             </div>
             <p style={{ fontSize: 12.5, color: T.textSub, margin: '0 0 18px' }}>
               valetudo_healthlink / {selectedDbTable} · {dbRowModal.isNew ? 'Insert new record' : 'Update existing record'}
@@ -1581,7 +2319,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
               fontSize: 12.5, color: T.warning, lineHeight: 1.5,
               marginBottom: 20,
             }}>
-              <strong>⚠️ Direct database change.</strong> Committing writes directly to this system record.
+              <strong><Icon name="warning" size={14} /> Direct database change.</strong> Committing writes directly to this system record.
               Check field types and values carefully. Credentials are not available in this editor.
             </div>
 
@@ -1600,7 +2338,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                         marginBottom: 6,
                       }}>
                         <span>
-                          {isPK && <span style={{ color: T.warning, marginRight: 4 }}>🔑</span>}
+                          {isPK && <span style={{ color: T.warning, marginRight: 4 }}><Icon name="key" size={14} /></span>}
                           {col.columnName}
                         </span>
                         <span style={{ fontSize: 10, color: T.textMuted, fontFamily: T.mono, fontWeight: 500 }}>
@@ -1638,7 +2376,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   Cancel
                 </button>
                 <button type="submit" style={btnPrimary}>
-                  💾 Commit to database
+                  <Icon name="save" size={14} /> Commit to database
                 </button>
               </div>
             </form>
@@ -1649,16 +2387,23 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* MODAL: USER PROFILE EDIT                                   */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      {editingUser && (
-        <div className="modal-backdrop" onClick={() => setEditingUser(null)}>
+      {editingUser && createPortal(
+        <div className="modal-backdrop admin-profile-editor-backdrop" onClick={() => setEditingUser(null)}>
           <div
-            className="modal-card"
-            style={{ maxWidth: 980, padding: 0, overflow: 'hidden' }}
+            className="modal-card admin-profile-editor"
+            style={{
+              width: 'min(1180px, calc(100vw - 40px))',
+              maxWidth: 1180,
+              height: 'min(90vh, 900px)',
+              maxHeight: 'min(90vh, 900px)',
+              padding: 0,
+              overflow: 'hidden',
+            }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ display: 'grid', gridTemplateColumns: '1.7fr 1fr' }}>
+            <div className="admin-profile-editor__layout" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.7fr) minmax(260px, 1fr)', height: '100%' }}>
               {/* LEFT: form */}
-              <div style={{ padding: '28px 32px', maxHeight: '90vh', overflowY: 'auto' }}>
+              <div className="admin-profile-editor__form-pane" style={{ padding: '28px 32px', minHeight: 0, overflowY: 'auto' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
                   <div>
                     <h2 style={{ fontSize: 24, fontWeight: 800, color: T.text, margin: 0, letterSpacing: -0.5 }}>
@@ -1670,13 +2415,55 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   </div>
                 </div>
 
+                {editingProtectedAdmin && (
+                  <div style={{
+                    marginTop: 16, padding: '12px 16px',
+                    borderRadius: T.radius.md,
+                    background: '#FFFBEB', border: '1px solid #FDE68A',
+                    fontSize: 12.5, color: T.warning, lineHeight: 1.55,
+                    display: 'flex', gap: 8, alignItems: 'flex-start',
+                  }}>
+                    <span style={{ fontSize: 15, lineHeight: 1.3 }}><Icon name="lock" size={14} /></span>
+                    <span>
+                      <b>Administrator account — read-only view.</b> Only a Super Admin can
+                      modify administrator accounts, change admin roles, edit admin
+                      permissions or override admin passwords.
+                    </span>
+                  </div>
+                )}
+
+                {/* ── Basic / Advanced editor switch ───────────────────────────────────────────────
+                    Basic keeps the everyday fields; Advanced exposes every
+                    editable column in the schema (sub-profiles + the
+                    encrypted HEALTH_PROFILES record). */}
+                <div className="admin-profile-editor__mode-toggle" style={{
+                  marginTop: 20, padding: 4,
+                  background: T.sage100, border: `1px solid ${T.border}`,
+                  borderRadius: T.radius.pill, display: 'flex', gap: 6, flexWrap: 'wrap',
+                }}>
+                  <button type="button" onClick={() => handleEditModeSwitch('basic')} style={modeBtnStyle(editMode === 'basic')}>
+                    <Icon name="edit" size={14} /> Basic
+                  </button>
+                  <button type="button" onClick={() => handleEditModeSwitch('advanced')} style={modeBtnStyle(editMode === 'advanced')}>
+                    <Icon name="settings" size={14} /> Advanced · full schema
+                  </button>
+                </div>
+                <p style={{ fontSize: 11.5, color: T.textMuted, margin: '8px 2px 0', lineHeight: 1.5 }}>
+                  {editMode === 'basic'
+                    ? 'Everyday account fields — identity, contact, role and professional details.'
+                    : 'Adds every HEALTH_PROFILES column (sex, date of birth, blood type, body metrics, encrypted allergies & conditions, emergency contacts) plus system metadata.'}
+                </p>
+
                 <form onSubmit={handleSaveUserProfile} style={{ marginTop: 22 }}>
+                  {/* Read-only shield for protected admin accounts: a disabled
+                      fieldset locks every input/select/button inside at once. */}
+                  <fieldset disabled={editingProtectedAdmin} style={{ border: 'none', padding: 0, margin: 0 }}>
                   {/* Identity & contact */}
                   <div style={{ marginBottom: 8, fontSize: 11, fontWeight: 800, letterSpacing: 1.4, color: T.textMuted, textTransform: 'uppercase' }}>
                     Identity & contact
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: 14, marginBottom: 14 }}>
                     <div>
                       <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
                         First name
@@ -1701,7 +2488,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     </div>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: 14, marginBottom: 20 }}>
                     <div>
                       <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
                         Institutional email
@@ -1735,7 +2522,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     Access & account status
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: 14, marginBottom: 20 }}>
                     <div>
                       <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
                         Assigned RBAC role
@@ -1743,6 +2530,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       <select
                         style={inputStyle}
                         value={editingUser.role}
+                        disabled={editingProtectedAdmin || editingSelfAdminLocked}
                         onChange={(e) => setEditingUser({ ...editingUser, role: e.target.value })}
                       >
                         <option value="STUDENT">STUDENT</option>
@@ -1752,8 +2540,18 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                         <option value="DENTIST">DENTIST</option>
                         <option value="NURSE">NURSE</option>
                         <option value="EMERGENCY_RESPONDER">EMERGENCY_RESPONDER</option>
-                        <option value="ADMIN">ADMIN</option>
+                        <option value="ADMIN" disabled={viewingAsLimited}>ADMIN</option>
                       </select>
+                      {viewingAsLimited && editingUser.role !== 'ADMIN' && (
+                        <div style={{ fontSize: 11, color: T.textMuted, marginTop: 5, fontStyle: 'italic' }}>
+                          <Icon name="lock" size={14} /> Only a Super Admin can assign the ADMIN role.
+                        </div>
+                      )}
+                      {editingSelfAdminLocked && (
+                        <div style={{ fontSize: 11, color: T.textMuted, marginTop: 5, fontStyle: 'italic' }}>
+                          <Icon name="lock" size={14} /> Administrator roles can only be changed by a Super Admin.
+                        </div>
+                      )}
                     </div>
                     <div>
                       <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
@@ -1762,11 +2560,17 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       <select
                         style={inputStyle}
                         value={editingUser.is_active ? '1' : '0'}
+                        disabled={editingProtectedAdmin || editingSelfAdminLocked}
                         onChange={(e) => setEditingUser({ ...editingUser, is_active: e.target.value === '1' })}
                       >
                         <option value="1">Active</option>
                         <option value="0">Suspended / deactivated</option>
                       </select>
+                      {editingSelfAdminLocked && (
+                        <div style={{ fontSize: 11, color: T.textMuted, marginTop: 5, fontStyle: 'italic' }}>
+                          <Icon name="lock" size={14} /> Your own admin account status is managed by a Super Admin.
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1776,7 +2580,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   </div>
 
                   {editingUser.role === 'STUDENT' && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 100px', gap: 14, marginBottom: 20 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 14, marginBottom: 20 }}>
                       <div>
                         <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
                           Student no.
@@ -1803,7 +2607,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
 
                   {/* Clinical staff — doctors, dentists, nurses, responders */}
                   {['DOCTOR', 'DENTIST', 'NURSE', 'EMERGENCY_RESPONDER'].includes(editingUser.role) && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 20 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: 14, marginBottom: 20 }}>
                       <div>
                         <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
                           PRC / staff ID
@@ -1830,7 +2634,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
 
                   {/* ADMIN — admin number replaces PRC license */}
                   {editingUser.role === 'ADMIN' && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 20 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: 14, marginBottom: 20 }}>
                       <div>
                         <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
                           Admin number
@@ -1860,8 +2664,131 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     </div>
                   )}
 
+                  {/* ADMIN ARCHETYPE — permission grants editor */}
+                  {editingUser.role === 'ADMIN' && (
+                    <div style={{
+                      marginBottom: 20, padding: 16,
+                      borderRadius: T.radius.md,
+                      background: '#F5F3FF', border: '1px solid #DDD6FE',
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 10, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 800, color: '#6D28D9' }}>
+                          <Icon name="shield" size={14} /> Admin archetype &amp; permissions
+                        </span>
+                        {editingUser.id === myPerms.userId && (
+                          <span style={{ fontSize: 10.5, color: '#5B21B6', fontStyle: 'italic' }}>
+                            This is your own account — permissions cannot be self-modified
+                          </span>
+                        )}
+                      </div>
+
+                      {myPerms.is_super ? (
+                        <>
+                          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                            <button
+                              type="button"
+                              onClick={() => setEditAdminArchetype('super')}
+                              disabled={!myPerms.is_super}
+                              style={{
+                                flex: 1, padding: '9px 12px',
+                                border: `1px solid ${editAdminArchetype === 'super' ? '#6D28D9' : 'transparent'}`,
+                                borderRadius: T.radius.pill,
+                                background: editAdminArchetype === 'super' ? '#FFFFFF' : 'transparent',
+                                color: editAdminArchetype === 'super' ? '#6D28D9' : T.textSub,
+                                fontWeight: editAdminArchetype === 'super' ? 800 : 600,
+                                fontSize: 12, fontFamily: T.font,
+                                cursor: !myPerms.is_super ? 'not-allowed' : 'pointer',
+                                opacity: !myPerms.is_super ? 0.55 : 1,
+                                boxShadow: editAdminArchetype === 'super' ? T.shadow.xs : 'none',
+                                transition: 'all 120ms ease',
+                                whiteSpace: 'nowrap',
+                              }}
+                              title={!myPerms.is_super ? 'Only a Super Admin can assign the SUPER_ADMIN archetype' : undefined}
+                            >
+                              <Icon name="shield" size={14} /> Super Admin · full access
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditAdminArchetype('limited')}
+                              style={{
+                                flex: 1, padding: '9px 12px',
+                                border: `1px solid ${editAdminArchetype === 'limited' ? '#6D28D9' : 'transparent'}`,
+                                borderRadius: T.radius.pill,
+                                background: editAdminArchetype === 'limited' ? '#FFFFFF' : 'transparent',
+                                color: editAdminArchetype === 'limited' ? '#6D28D9' : T.textSub,
+                                fontWeight: editAdminArchetype === 'limited' ? 800 : 600,
+                                fontSize: 12, fontFamily: T.font,
+                                cursor: 'pointer',
+                                boxShadow: editAdminArchetype === 'limited' ? T.shadow.xs : 'none',
+                                transition: 'all 120ms ease',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              <Icon name="settings" size={14} /> Limited Admin · choose permissions
+                            </button>
+                          </div>
+
+                          {editAdminArchetype === 'super' ? (
+                            <p style={{ fontSize: 12, color: '#5B21B6', margin: 0, lineHeight: 1.55 }}>
+                              Unrestricted access to every console capability — identical to the
+                              seeded administrator account.
+                            </p>
+                          ) : (
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 8 }}>
+                              {permCatalog.filter((p: any) => p.code !== 'SUPER_ADMIN').map((p: any) => {
+                                const checked = editAdminPerms.includes(p.code);
+                                const beyondCaller = !myPerms.is_super && !myPerms.permissions.includes(p.code);
+                                return (
+                                  <label
+                                    key={p.code}
+                                    style={{
+                                      display: 'flex', alignItems: 'flex-start', gap: 8,
+                                      padding: '9px 11px',
+                                      borderRadius: T.radius.sm,
+                                      background: checked ? '#EDE9FE' : '#FFFFFF',
+                                      border: `1px solid ${checked ? '#C4B5FD' : '#E9E5F8'}`,
+                                      cursor: beyondCaller ? 'not-allowed' : 'pointer',
+                                      opacity: beyondCaller ? 0.55 : 1,
+                                    }}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      disabled={beyondCaller}
+                                      onChange={() =>
+                                        setEditAdminPerms((prev) =>
+                                          prev.includes(p.code) ? prev.filter((c) => c !== p.code) : [...prev, p.code]
+                                        )
+                                      }
+                                      style={{ marginTop: 2, accentColor: '#6D28D9' }}
+                                    />
+                                    <span>
+                                      <span style={{ display: 'block', fontSize: 12, fontWeight: 700, color: T.text }}>
+                                        {p.name}
+                                      </span>
+                                      <span style={{ display: 'block', fontSize: 10.5, color: T.textSub, marginTop: 1, lineHeight: 1.4 }}>
+                                        {p.description}
+                                      </span>
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <p style={{ fontSize: 12, color: '#5B21B6', margin: 0, lineHeight: 1.55 }}>
+                          <Icon name="lock" size={14} /> Only a Super Admin can modify administrator permissions
+                          {editingUser.admin_archetype === 'super'
+                            ? ' — this is a full-access administrator.'
+                            : '.'}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   {editingUser.role === 'FACULTY' && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1fr', gap: 14, marginBottom: 20 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: 14, marginBottom: 20 }}>
                       <div>
                         <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
                           Faculty number
@@ -1891,7 +2818,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   )}
 
                   {editingUser.role === 'NON_TEACHING' && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1fr', gap: 14, marginBottom: 20 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: 14, marginBottom: 20 }}>
                       <div>
                         <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
                           Employee no. (optional)
@@ -1919,20 +2846,251 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     </div>
                   )}
 
-                  {/* Admin password override panel */}
-                  {/* 💉 SECTION: VACCINATION / IMMUNIZATION RECORDS */}
+                  {/* ── QUALIFIED RESPONDER — account property, every role ──
+                      Not a health field: it lives on the Basic tab for every
+                      role. The flag is ADDITIVE: accounts that already
+                      receive SOS through their role keep it when off. */}
                   <div style={{
-                    background: '#F0FDFA',
+                    marginTop: 24, marginBottom: 20, padding: 16,
+                    borderRadius: T.radius.md,
+                    background: '#FFF7ED', border: '1px solid #FED7AA',
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 800, color: '#C2410C' }}>
+                        <Icon name="emergency" size={14} /> Emergency response · Qualified Responder
+                      </span>
+                      <label
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 8,
+                          cursor: (can('RESPONDERS_MANAGE') && !(editingUser.role === 'ADMIN' && !myPerms.is_super))
+                            ? 'pointer' : 'not-allowed',
+                          opacity: (can('RESPONDERS_MANAGE') && !(editingUser.role === 'ADMIN' && !myPerms.is_super)) ? 1 : 0.6,
+                          fontWeight: 700, fontSize: 12.5, color: T.text,
+                        }}
+                        title={
+                          !can('RESPONDERS_MANAGE')
+                            ? 'Requires the RESPONDERS_MANAGE permission (ask a Super Admin).'
+                            : (editingUser.role === 'ADMIN' && !myPerms.is_super)
+                              ? 'Only a Super Admin may change this label on an administrator account.'
+                              : 'Label this account a Qualified Responder — it will receive Emergency SOS alarms on any role.'
+                        }
+                      >
+                        <input
+                          type="checkbox"
+                          checked={Boolean(editingUser.is_qualified_responder)}
+                          disabled={!can('RESPONDERS_MANAGE') || (editingUser.role === 'ADMIN' && !myPerms.is_super)}
+                          onChange={(e) => setEditingUser({ ...editingUser, is_qualified_responder: e.target.checked })}
+                          style={{ width: 16, height: 16, accentColor: '#C2410C' }}
+                        />
+                        Qualified Responder
+                      </label>
+                    </div>
+
+                    <p style={{ fontSize: 11.5, color: T.textSub, margin: '0 0 12px', lineHeight: 1.55 }}>
+                      Role-independent SOS label. A labelled account receives Emergency SOS
+                      alarms and can act on them — whatever its role is.{' '}
+                      {Boolean(editingUser.sos_via_role) && (
+                        <b style={{ color: '#9A3412' }}>
+                          This account also receives SOS through its {editingUser.role} role —
+                          turning the label off will NOT stop role-based alerts (change the role instead).
+                        </b>
+                      )}
+                    </p>
+
+                    {Boolean(editingUser.is_qualified_responder) && (
+                      <>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 14 }}>
+                          <div>
+                            <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
+                              Note (max 150 chars)
+                            </label>
+                            <input
+                              style={inputStyle}
+                              maxLength={150}
+                              placeholder="e.g. First-aid certified, campus volunteer responder"
+                              value={editingUser.qualified_responder_note || ''}
+                              disabled={!can('RESPONDERS_MANAGE') || (editingUser.role === 'ADMIN' && !myPerms.is_super)}
+                              onChange={(e) => setEditingUser({ ...editingUser, qualified_responder_note: e.target.value })}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
+                              Qualified since
+                            </label>
+                            <input
+                              style={{ ...inputStyle, background: '#FFFDF9' }}
+                              readOnly
+                              value={editingUser.qualified_responder_since || '—'}
+                              title="Read-only: set automatically when the label was granted"
+                            />
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* ── ADVANCED: Health record — every HEALTH_PROFILES column ── */}
+                  {editMode === 'advanced' && (
+                    <div style={{
+                      marginTop: 24, padding: 16,
+                      borderRadius: T.radius.md,
+                      background: '#F0F7F1', border: '1px solid #CDE4D2',
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, gap: 10, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 13, fontWeight: 800, color: T.primary }}>
+                          <Icon name="health_and_safety" size={14} /> Health record — HEALTH_PROFILES
+                        </span>
+                        <span style={{ fontSize: 11, color: T.textMuted, fontWeight: 600 }}>
+                          <Icon name="lock" size={14} /> AES-256-GCM encrypted at rest
+                        </span>
+                      </div>
+                      <p style={{ fontSize: 11.5, color: T.textSub, margin: '0 0 14px', lineHeight: 1.55 }}>
+                        {editingProtectedAdmin
+                          ? 'Read-only view: only a Super Admin can access another administrator’s health record.'
+                          : editHealthExists
+                            ? 'Full clinic-staff editing: sex and date of birth are editable here — patients cannot change these themselves on the mobile app.'
+                            : 'No health record on file yet — saving in Advanced mode creates the HEALTH_PROFILES row.'}
+                      </p>
+
+                      {editHealthLoading ? (
+                        <div style={{ fontSize: 12.5, color: T.textMuted, fontStyle: 'italic', padding: '14px 0' }}>
+                          Loading health record…
+                        </div>
+                      ) : editHealth && (
+                        <>
+                          {/* Demographics */}
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: 14, marginBottom: 14 }}>
+                            <div>
+                              <label style={advLabel}>Blood type</label>
+                              <select style={inputStyle} value={editHealth.blood_type || ''}
+                                      onChange={(e) => setEditHealth({ ...editHealth, blood_type: e.target.value })}>
+                                <option value="">— Not recorded —</option>
+                                {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((b) => (
+                                  <option key={b} value={b}>{b}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label style={advLabel}>Sex</label>
+                              <select style={inputStyle} value={editHealth.sex || ''}
+                                      onChange={(e) => setEditHealth({ ...editHealth, sex: e.target.value })}>
+                                <option value="">— Not recorded —</option>
+                                <option value="MALE">MALE</option>
+                                <option value="FEMALE">FEMALE</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label style={advLabel}>Date of birth</label>
+                              <input type="date" style={inputStyle} max={todayIso} value={editHealth.date_of_birth || ''}
+                                     onChange={(e) => setEditHealth({ ...editHealth, date_of_birth: e.target.value })} />
+                            </div>
+                          </div>
+
+                          {/* Body metrics (BMI is a generated column — read-only) */}
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: 14, marginBottom: 14 }}>
+                            <div>
+                              <label style={advLabel}>Height (cm)</label>
+                              <input type="number" style={inputStyle} min={30} max={300} step={0.1} placeholder="170"
+                                     value={editHealth.height ?? ''}
+                                     onChange={(e) => setEditHealth({ ...editHealth, height: e.target.value })} />
+                            </div>
+                            <div>
+                              <label style={advLabel}>Weight (kg)</label>
+                              <input type="number" style={inputStyle} min={1} max={500} step={0.1} placeholder="60"
+                                     value={editHealth.weight ?? ''}
+                                     onChange={(e) => setEditHealth({ ...editHealth, weight: e.target.value })} />
+                            </div>
+                            <div>
+                              <label style={advLabel}>BMI (auto-generated)</label>
+                              <input style={{ ...inputStyle, background: '#F5F8F3' }} readOnly value={previewBmi ?? '—'}
+                                     title="MySQL generated column: ROUND(weight / POW(height/100, 2), 2) — recomputed on save" />
+                              <div style={{ fontSize: 10.5, color: T.textMuted, marginTop: 5, fontStyle: 'italic' }}>
+                                Computed column — recalculated from height &amp; weight.
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Emergency contact */}
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: 14, marginBottom: 14 }}>
+                            <div>
+                              <label style={advLabel}>Emergency contact name</label>
+                              <input style={inputStyle} placeholder="Contact person" value={editHealth.emergency_contact_name || ''}
+                                     onChange={(e) => setEditHealth({ ...editHealth, emergency_contact_name: e.target.value })} />
+                            </div>
+                            <div>
+                              <label style={advLabel}>Emergency contact phone</label>
+                              <input style={inputStyle} placeholder="+63 900 000 0000" value={editHealth.emergency_contact_phone || ''}
+                                     onChange={(e) => setEditHealth({ ...editHealth, emergency_contact_phone: e.target.value })} />
+                            </div>
+                          </div>
+
+                          {/* Encrypted clinical free text */}
+                          <div style={{ marginBottom: 14 }}>
+                            <label style={advLabel}>Allergies</label>
+                            <textarea style={advTextarea} placeholder="None recorded" value={editHealth.allergies || ''}
+                                      onChange={(e) => setEditHealth({ ...editHealth, allergies: e.target.value })} />
+                          </div>
+                          <div>
+                            <label style={advLabel}>Chronic conditions</label>
+                            <textarea style={advTextarea} placeholder="None recorded" value={editHealth.chronic_conditions || ''}
+                                      onChange={(e) => setEditHealth({ ...editHealth, chronic_conditions: e.target.value })} />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ── ADVANCED: system & integrity metadata (read-only) ── */}
+                  {editMode === 'advanced' && (
+                    <div style={{
+                      marginTop: 16, padding: 16,
+                      borderRadius: T.radius.md,
+                      background: T.sage100, border: `1px solid ${T.sage300}`,
+                    }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: T.primary, marginBottom: 12 }}>
+                        <Icon name="badge" size={14} /> System &amp; integrity metadata
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: '8px 18px' }}>
+                        {[
+                          { label: 'User ID', value: `#${editingUser.id}` },
+                          { label: 'Account version', value: editAccountMeta?.account?.version != null ? `v${editAccountMeta.account.version}` : '—' },
+                          { label: 'Account created', value: editAccountMeta?.account?.created_at ? new Date(editAccountMeta.account.created_at).toLocaleString() : '—' },
+                          { label: 'Account last updated', value: editAccountMeta?.account?.updated_at ? new Date(editAccountMeta.account.updated_at).toLocaleString() : '—' },
+                          { label: 'Health record version', value: editHealth?.hp_version != null ? `v${editHealth.hp_version}` : '—' },
+                          { label: 'Health record updated', value: editHealth?.hp_updated_at || '—' },
+                          ...(editAccountMeta?.staff_signature ? [{
+                            label: 'Clinical signature',
+                            value: editAccountMeta.staff_signature.enrolled
+                              ? `Enrolled · ${editAccountMeta.staff_signature.updated_at || 'date unknown'}`
+                              : 'Not enrolled',
+                          }] : []),
+                        ].map((row) => (
+                          <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, borderBottom: `1px dashed ${T.sage300}`, paddingBottom: 6 }}>
+                            <span style={{ fontSize: 11.5, color: T.textMuted, fontWeight: 600 }}>{row.label}</span>
+                            <span style={{ fontSize: 11.5, color: T.textSub, fontWeight: 700, textAlign: 'right' }}>{row.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <p style={{ fontSize: 10.5, color: T.textMuted, margin: '10px 0 0', fontStyle: 'italic' }}>
+                        Read-only: signatures are enrolled cryptographically via the Signature Enrollment screen.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Admin password override panel */}
+                  {/* <Icon name="vaccines" size={14} /> SECTION: VACCINATION / IMMUNIZATION RECORDS */}
+                  <div style={{
+                    background: T.tonalTealBg,
                     padding: 16,
                     borderRadius: T.radius.md,
                     border: '1px solid #99F6E4',
                     marginBottom: 16,
                   }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                      <span style={{ fontSize: 13, fontWeight: 800, color: '#0F766E' }}>
-                        💉 Vaccination & Immunization History
+                      <span style={{ fontSize: 13, fontWeight: 800, color: T.tonalTealFg }}>
+                        <Icon name="vaccines" size={14} /> Vaccination & Immunization History
                       </span>
-                      <span style={{ fontSize: 11.5, color: '#475569', fontWeight: 600 }}>
+                      <span style={{ fontSize: 11.5, color: T.textSub, fontWeight: 600 }}>
                         {adminUserVaccines.length} vaccine(s) on file
                       </span>
                     </div>
@@ -1940,7 +3098,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     {/* Badges List */}
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
                       {adminUserVaccines.length === 0 ? (
-                        <span style={{ fontSize: 12, color: '#64748B', fontStyle: 'italic' }}>
+                        <span style={{ fontSize: 12, color: T.textMuted, fontStyle: 'italic' }}>
                           No immunization records on file. Type a vaccine below to add.
                         </span>
                       ) : (
@@ -1951,7 +3109,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                               padding: '4px 12px',
                               borderRadius: 20,
                               background: '#CCFBF1',
-                              color: '#0F766E',
+                              color: T.tonalTealFg,
                               fontSize: 11.5,
                               fontWeight: 700,
                               border: '1px solid #99F6E4',
@@ -1960,13 +3118,13 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                               gap: 6,
                             }}
                           >
-                            ✓ {v}
+                            <Icon name="check" size={14} /> {v}
                             <button
                               type="button"
                               onClick={() => handleAdminRemoveVaccine(v)}
-                              style={{ background: 'none', border: 'none', color: '#DC2626', cursor: 'pointer', fontWeight: 900, padding: 0, fontSize: 12 }}
+                              style={{ background: 'none', border: 'none', color: T.danger, cursor: 'pointer', fontWeight: 900, padding: 0, fontSize: 12 }}
                             >
-                              ✕
+                              <Icon name="close" size={14} />
                             </button>
                           </span>
                         ))
@@ -1974,7 +3132,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     </div>
 
                     {/* Add Input */}
-                    <div style={{ display: 'flex', gap: 8 }}>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       <input
                         type="text"
                         placeholder="Add vaccine (e.g. Hepatitis B, COVID-19 Booster, Anti-Rabies)..."
@@ -1991,12 +3149,37 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       <button
                         type="button"
                         onClick={() => handleAdminAddVaccine(adminNewVaccine)}
-                        style={{ ...btnGhost, padding: '7px 16px', fontSize: 12.5, fontWeight: 700, color: '#0F766E', borderColor: '#99F6E4' }}
+                        style={{ ...btnGhost, padding: '7px 16px', fontSize: 12.5, fontWeight: 700, color: T.tonalTealFg, borderColor: '#9FD9CB' }}
                       >
                         + Add Vaccine
                       </button>
                     </div>
                   </div>
+                  {/* Adjusted manage-user-account feature: administrator passwords
+                      (Super Admins included) can only be overridden by a Super
+                      Admin. Limited admins keep the override for regular users. */}
+                  {viewingAsLimited && editingUser.role === 'ADMIN' ? (
+                    <div style={{
+                      marginTop: 20,
+                      padding: '18px 20px',
+                      background: '#EDE9FE',
+                      borderRadius: T.radius.lg,
+                    }}>
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        fontSize: 13, fontWeight: 800, color: '#6D28D9',
+                        marginBottom: 6,
+                      }}>
+                        <Icon name="key" size={14} /> Password admin override
+                      </div>
+                      <p style={{ fontSize: 12, color: '#5B21B6', margin: 0, lineHeight: 1.55 }}>
+                        <Icon name="lock" size={14} /> Only a Super Admin can override an administrator password.
+                        {editingSelf
+                          ? ' To change your own password, use the Change password screen after closing this window.'
+                          : ' Ask a Super Admin if this administrator is locked out.'}
+                      </p>
+                    </div>
+                  ) : (
                   <div style={{
                     marginTop: 20,
                     padding: '18px 20px',
@@ -2008,7 +3191,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       fontSize: 13, fontWeight: 800, color: '#6D28D9',
                       marginBottom: 6,
                     }}>
-                      🔑 Password admin override
+                      <Icon name="key" size={14} /> Password admin override
                     </div>
                     <p style={{ fontSize: 12, color: '#5B21B6', margin: '0 0 12px', lineHeight: 1.5 }}>
                       Reset this user's credentials separately from their profile.
@@ -2035,7 +3218,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                         onClick={handleAdminResetPassword}
                         style={{
                           padding: '0 18px', borderRadius: T.radius.pill,
-                          background: '#7C3AED', color: '#fff',
+                          background: T.tonalLilacFg, color: getTextColorOn(T.tonalLilacFg),
                           border: 'none', fontWeight: 700, fontSize: 12.5,
                           cursor: 'pointer', fontFamily: T.font,
                         }}
@@ -2047,6 +3230,9 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       Only this action applies the password override.
                     </div>
                   </div>
+                  )}
+
+                  </fieldset>
 
                   {modalFeedback && (
                     <div style={{
@@ -2062,29 +3248,31 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
 
                   <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 22, paddingTop: 18, borderTop: `1px solid ${T.border}` }}>
                     <button type="button" onClick={() => setEditingUser(null)} style={btnGhost}>
-                      Cancel
+                      Close
                     </button>
-                    <button
-                      type="submit"
-                      disabled={isSavingUser}
-                      style={{
-                        ...btnPrimary,
-                        opacity: isSavingUser ? 0.6 : 1,
-                        cursor: isSavingUser ? 'not-allowed' : 'pointer',
-                      }}
-                    >
-                      {isSavingUser ? 'Saving…' : 'Save profile changes'}
-                    </button>
+                    {!editingProtectedAdmin && (
+                      <button
+                        type="submit"
+                        disabled={isSavingUser}
+                        style={{
+                          ...btnPrimary,
+                          opacity: isSavingUser ? 0.6 : 1,
+                          cursor: isSavingUser ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {isSavingUser ? 'Saving…' : 'Save profile changes'}
+                      </button>
+                    )}
                   </div>
                 </form>
               </div>
 
               {/* RIGHT: side info panel */}
-              <div style={{
+              <div className="admin-profile-editor__info-pane" style={{
                 background: T.sage100,
                 padding: '28px 24px',
                 display: 'flex', flexDirection: 'column', gap: 24,
-                maxHeight: '90vh', overflowY: 'auto',
+                minHeight: 0, overflowY: 'auto',
               }}>
                 <div>
                   <div style={{
@@ -2097,6 +3285,8 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   <p style={{ fontSize: 12, color: T.textSub, margin: 0, lineHeight: 1.55 }}>
                     The contextual section changes with the assigned role.
                     Staff fields are shown for this <b>{editingUser.role}</b> account.
+                    Switch to <b>Advanced</b> to edit every schema column,
+                    including the encrypted health record.
                   </p>
                 </div>
 
@@ -2122,7 +3312,8 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

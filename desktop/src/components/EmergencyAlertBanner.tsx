@@ -1,7 +1,10 @@
 // desktop/src/components/EmergencyAlertBanner.tsx
 import React, { useEffect, useState } from 'react';
-import { io, Socket } from 'socket.io-client';
-import { API_BASE_URL, SOCKET_URL } from '../config/api';
+import { subscribeToDesktopEvents, useDesktopSocket } from '../services/desktopRealtime';
+import { API_BASE_URL } from '../config/api';
+import { CLIENT_INSTANCE_ID } from '../services/clientInstance';
+import { T } from '../theme';
+import Icon from './Icon';
 
 interface EmergencyAlert {
   alertId: number;
@@ -12,19 +15,25 @@ interface EmergencyAlert {
   roleLabel?: string;
   studentNo: string;
   course: string;
-  bloodType: string;
-  allergies: string;
-  chronicConditions: string;
-  emergencyContact: string;
+  bloodType?: string;
+  allergies?: string;
+  chronicConditions?: string;
+  emergencyContact?: string;
   latitude: number;
   longitude: number;
+  formattedAddress?: string;
   googleMapsUrl: string;
   status: string;
   createdAt: string;
+  // Server tiering: true when the recipient's responder level is not allowed
+  // to see medical details (community / non-clinical responders).
+  medicalDetailsRedacted?: boolean;
 }
 
 export default function EmergencyAlertBanner() {
   const [alerts, setAlerts] = useState<EmergencyAlert[]>([]);
+  const [authorized, setAuthorized] = useState(false);
+  const socket = useDesktopSocket();
 
   // Synthesize an audible emergency alert chime using Web Audio API
   const playEmergencyAlarm = () => {
@@ -42,95 +51,126 @@ export default function EmergencyAlertBanner() {
   };
 
   useEffect(() => {
-    // 1. Fetch initial active alerts from DB
-    const fetchActiveAlerts = async () => {
-      const token = localStorage.getItem('valetudo_token');
-      if (!token) return;
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/emergency/active`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json();
-        if (Array.isArray(data)) {
-          const mapped: EmergencyAlert[] = data.map((a: any) => {
-            let roleLabel = 'Student';
-            if (a.primary_role === 'ADMIN') roleLabel = 'System Administrator';
-            else if (a.primary_role === 'DOCTOR') roleLabel = 'Campus Physician';
-            else if (a.primary_role === 'DENTIST') roleLabel = 'Campus Dentist';
-            else if (a.primary_role === 'NURSE') roleLabel = 'Clinic Nurse';
-            else if (a.primary_role === 'FACULTY') roleLabel = 'Faculty / Staff';
-            else if (a.primary_role === 'EMERGENCY_RESPONDER') roleLabel = 'Emergency Responder';
+    const token = localStorage.getItem('valetudo_token');
+    if (!token) return;
 
-            return {
+    let accessGranted = false;
+    let request: AbortController | undefined;
+    let alertVersion = 0;
+
+    const clearAccess = () => {
+      accessGranted = false;
+      setAuthorized(false);
+      setAlerts([]);
+    };
+
+    const fetchActiveAlerts = async () => {
+      request?.abort();
+      const controller = new AbortController();
+      request = controller;
+      const options = {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      };
+      try {
+        const access = await fetch(`${API_BASE_URL}/api/emergency/responder-access`, options);
+        if (controller.signal.aborted) return;
+        if (!access.ok) {
+          clearAccess();
+          return;
+        }
+        const capability = await access.json();
+        if (controller.signal.aborted) return;
+        if (capability?.authorized !== true) {
+          clearAccess();
+          return;
+        }
+
+        accessGranted = true;
+        setAuthorized(true);
+        const snapshotVersion = alertVersion;
+        const res = await fetch(`${API_BASE_URL}/api/emergency/active`, options);
+        if (controller.signal.aborted) return;
+        if (res.status === 401 || res.status === 403) {
+          clearAccess();
+          return;
+        }
+        if (!res.ok) return;
+        const data = await res.json();
+        if (controller.signal.aborted) return;
+        if (snapshotVersion !== alertVersion) {
+          void fetchActiveAlerts();
+          return;
+        }
+        if (Array.isArray(data)) {
+          setAlerts(
+            data.map((a: any) => ({
               alertId: a.alert_id,
               userId: a.user_id,
               patientName: `${a.first_name} ${a.last_name}`,
               phone: a.phone,
               role: a.primary_role,
-              roleLabel: roleLabel,
+              roleLabel: a.roleLabel || a.primary_role,
               studentNo: a.studentNo || a.identifier_no || 'Verified',
               course: a.course || a.affiliation || 'PSU Lingayen',
-              bloodType: a.blood_type || 'Unknown',
-              allergies: a.allergies || 'None',
-              chronicConditions: 'N/A',
-              emergencyContact: 'Check Profile',
+              bloodType: a.blood_type ?? undefined,
+              allergies: a.allergies ?? undefined,
+              chronicConditions: undefined,
+              emergencyContact: undefined,
               latitude: Number(a.latitude),
               longitude: Number(a.longitude),
               googleMapsUrl: `https://www.google.com/maps?q=${a.latitude},${a.longitude}`,
               status: a.status,
               createdAt: a.created_at,
-            };
-          });
-          setAlerts(mapped);
+              medicalDetailsRedacted: a.medicalDetailsRedacted === true,
+            }))
+          );
         }
       } catch (_) {}
     };
 
-    fetchActiveAlerts();
+    void fetchActiveAlerts();
+    const unsubscribe = subscribeToDesktopEvents(socket, (on) => {
+      on('reconnect', fetchActiveAlerts);
+      on('responder:status_changed', () => {
+        clearAccess();
+        void fetchActiveAlerts();
+      });
+      on('emergency:new_alert', (newAlert: EmergencyAlert) => {
+        if (!accessGranted) return;
+        alertVersion += 1;
+        playEmergencyAlarm();
 
-    // 2. Connect Socket.IO with token authentication
-    const token = localStorage.getItem('valetudo_token');
-    const socket: Socket = io(SOCKET_URL, {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-    });
+        // Trigger native OS system tray notification. Lock-screen privacy: the
+        // OS notification carries the location only — no medical details and no
+        // blood/allergy data for ANY recipient tier.
+        if ((window as any).electronAPI?.showNotification) {
+          (window as any).electronAPI.showNotification({
+            title: `SOS: ${newAlert.patientName} (${newAlert.roleLabel || 'PSU Member'})`,
+            body: `Location: ${newAlert.formattedAddress || `${Number(newAlert.latitude).toFixed(5)}, ${Number(newAlert.longitude).toFixed(5)}`}. Open the console for details.`,
+          });
+        }
 
-    socket.on('connect', () => {
-      console.log('✅ [EmergencyAlertBanner] Live Socket connected:', socket.id);
-    });
+        // Immediately display the red banner at the top of the UI
+        setAlerts((prev) => [newAlert, ...prev.filter((a) => a.alertId !== newAlert.alertId)]);
+      });
 
-    socket.on('connect_error', (err) => {
-      console.error('❌ [EmergencyAlertBanner] Socket error:', err.message);
-    });
-
-    socket.on('emergency:new_alert', (newAlert: EmergencyAlert) => {
-      console.log('🚨 [EmergencyAlertBanner] New SOS received in real-time:', newAlert);
-      playEmergencyAlarm();
-
-      // Trigger native OS system tray notification
-      if ((window as any).electronAPI?.showNotification) {
-        (window as any).electronAPI.showNotification({
-          title: `🚨 SOS: ${newAlert.patientName} (${newAlert.roleLabel || 'PSU Member'})`,
-          body: `Location: ${newAlert.latitude.toFixed(5)}, ${newAlert.longitude.toFixed(5)}. Blood: ${newAlert.bloodType}. Allergies: ${newAlert.allergies}`,
-        });
-      }
-
-      // Immediately display the red banner at the top of the UI
-      setAlerts((prev) => [newAlert, ...prev.filter((a) => a.alertId !== newAlert.alertId)]);
-    });
-
-    socket.on('emergency:status_change', ({ alertId, status }: { alertId: number; status: string }) => {
-      setAlerts((prev) =>
-        prev
-          .map((a) => (Number(a.alertId) === Number(alertId) ? { ...a, status } : a))
-          .filter((a) => (status !== 'resolved' && status !== 'false_alarm' ? true : Number(a.alertId) !== Number(alertId)))
-      );
+      on('emergency:status_change', ({ alertId, status }: { alertId: number; status: string }) => {
+        if (!accessGranted) return;
+        alertVersion += 1;
+        setAlerts((prev) =>
+          prev
+            .map((a) => (Number(a.alertId) === Number(alertId) ? { ...a, status } : a))
+            .filter((a) => (status !== 'resolved' && status !== 'false_alarm' ? true : Number(a.alertId) !== Number(alertId)))
+        );
+      });
     });
 
     return () => {
-      socket.disconnect();
+      request?.abort();
+      unsubscribe();
     };
-  }, []);
+  }, [socket]);
 
   const updateStatus = async (alertId: number, status: string) => {
     const token = localStorage.getItem('valetudo_token');
@@ -139,6 +179,7 @@ export default function EmergencyAlertBanner() {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
+          'X-Client-Instance-Id': CLIENT_INSTANCE_ID,
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ status }),
@@ -148,202 +189,114 @@ export default function EmergencyAlertBanner() {
     }
   };
 
-  // Test OS notification
-  const handleTestDirectNotification = () => {
-    playEmergencyAlarm();
-    if ((window as any).electronAPI?.showNotification) {
-      (window as any).electronAPI.showNotification({
-        title: '🚨 Valetudo HealthLink — SOS Alert Test',
-        body: 'Daniella Movida (BSIT) reported a medical emergency at PSU Lingayen Library. Allergies: Penicillin.',
-      });
-    } else {
-      alert('electronAPI.showNotification not detected. Ensure preload.cjs is configured.');
-    }
-  };
-
-  // Full stack SOS test
-  const handleTestFullStackSOS = async () => {
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/emergency/sos`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          latitude: 16.029851,
-          longitude: 120.228543,
-          notes: 'SIMULATED SOS: PSU Lingayen Administration Building',
-        }),
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        alert('Server SOS error: ' + (data.error || 'Check server connection'));
-      }
-    } catch (err: any) {
-      alert('Could not trigger backend test SOS: ' + err.message);
-    }
-  };
+  // Display alerts only after live responder access has been confirmed.
+  if (!authorized) return null;
 
   return (
     <div style={{ marginBottom: 20 }}>
-      {/* TEST TRIGGER TOOLBAR */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          gap: 8,
-          marginBottom: alerts.length > 0 ? 12 : 0,
-        }}
-      >
-        <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 'bold' }}>TEST HARNESS:</span>
-        <button
-          type="button"
-          onClick={handleTestDirectNotification}
-          style={{
-            padding: '4px 10px',
-            fontSize: 12,
-            borderRadius: 4,
-            border: '1px solid #cbd5e1',
-            background: '#f8fafc',
-            color: '#334155',
-            cursor: 'pointer',
-            fontWeight: 'bold',
-          }}
-          title="Directly test the OS banner without server"
-        >
-          🧪 Test OS Notification (Instant)
-        </button>
-
-        <button
-          type="button"
-          onClick={handleTestFullStackSOS}
-          style={{
-            padding: '4px 10px',
-            fontSize: 12,
-            borderRadius: 4,
-            border: '1px solid #fca5a5',
-            background: '#fef2f2',
-            color: '#dc2626',
-            cursor: 'pointer',
-            fontWeight: 'bold',
-          }}
-          title="Sends real SOS request to backend and broadcasts over Socket.IO"
-        >
-          🚨 Trigger Live SOS (Full System Test)
-        </button>
-      </div>
-
       {/* ACTIVE EMERGENCY ALERTS BANNER */}
-      {alerts.map((alert) => (
-        <div
-          key={alert.alertId}
-          style={{
-            background: '#fee2e2',
-            border: '2px solid #ef4444',
-            borderRadius: 8,
-            padding: 16,
-            marginBottom: 12,
-            boxShadow: '0 4px 6px -1px rgba(239, 68, 68, 0.2)',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 24 }}>🚨</span>
-              <h3 style={{ margin: 0, color: '#b91c1c' }}>
+      {alerts.map((alert) => {
+        const redacted = alert.medicalDetailsRedacted === true;
+        return (
+          <div key={alert.alertId} className="ea-alert">
+            <div className="ea-alert-head">
+              <h3 className="ea-alert-title">
+                <Icon name="emergency" size={22} fill tone="danger" />
                 ACTIVE SOS ALERT: {alert.patientName} ({alert.roleLabel || alert.studentNo || 'Campus Personnel'})
               </h3>
+              <span className="ea-status-pill">
+                Status: {alert.status}
+              </span>
             </div>
-            <span
-              style={{
-                background: '#ef4444',
-                color: '#fff',
-                padding: '4px 10px',
-                borderRadius: 4,
-                fontSize: 12,
-                fontWeight: 'bold',
-                textTransform: 'uppercase',
-              }}
-            >
-              Status: {alert.status}
-            </span>
-          </div>
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(4, 1fr)',
-              gap: 12,
-              marginTop: 12,
-              fontSize: 13,
-              background: '#fff',
-              padding: 12,
-              borderRadius: 6,
-            }}
-          >
-            <div>
-              <b>Contact:</b> {alert.phone || 'N/A'}<br />
-              <b>Blood Type:</b> {alert.bloodType}
-            </div>
-            <div>
-              <b>Allergies:</b> <span style={{ color: 'red' }}>{alert.allergies}</span><br />
-              <b>Role / Unit:</b> {alert.roleLabel || alert.course || 'PSU Personnel'}
-            </div>
-            <div>
-              <b>Emergency Contact:</b><br />
-              {alert.emergencyContact}
-            </div>
-            <div>
-              <b>GPS Coordinates:</b><br />
-              <code>{alert.latitude.toFixed(6)}, {alert.longitude.toFixed(6)}</code>
-              <div style={{ marginTop: 4 }}>
-                <a
-                  href={alert.googleMapsUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: '#2563eb', fontWeight: 'bold', textDecoration: 'underline' }}
-                >
-                  📍 Open in Google Maps
-                </a>
+            <div className="ea-grid">
+              <div>
+                <b>Contact:</b> {alert.phone || 'N/A'}<br />
+                <b>Role / Unit:</b> {alert.roleLabel || alert.course || 'PSU Personnel'}
+              </div>
+              <div>
+                {redacted ? (
+                  <>
+                    <b>Medical details:</b>{' '}
+                    <span style={{ color: T.warning, fontWeight: 700 }}>
+                      Not shared at your responder level
+                    </span>
+                    <br />
+                    <span style={{ fontSize: 11, color: T.textMuted }}>
+                      Reduced payload for non-clinical responders (R.A. 10173).
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <b>Blood Type:</b> {alert.bloodType || 'Unknown'}
+                    <br />
+                    <b>Allergies:</b>{' '}
+                    <span style={{ color: T.danger, fontWeight: 700 }}>
+                      {alert.allergies || 'None'}
+                    </span>
+                  </>
+                )}
+              </div>
+              <div>
+                <b>Emergency Contact:</b><br />
+                {redacted ? (
+                  <span style={{ color: T.textMuted }}>Not shared at your responder level</span>
+                ) : (
+                  (alert.emergencyContact || 'Check Profile')
+                )}
+              </div>
+              <div>
+                <b>GPS Coordinates:</b><br />
+                <code style={{ fontFamily: T.mono, fontSize: 12, color: T.textSub }}>
+                  {Number(alert.latitude).toFixed(6)}, {Number(alert.longitude).toFixed(6)}
+                </code>
+                <div style={{ marginTop: 4, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <a
+                    href={alert.googleMapsUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                  >
+                    <Icon name="location_on" size={14} /> Open in Google Maps
+                  </a>
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Action dispatch buttons */}
-          <div style={{ display: 'flex', gap: 10, marginTop: 12, justifyContent: 'flex-end' }}>
-            {alert.status === 'triggered' && (
+            {/* Action dispatch buttons */}
+            <div className="ea-actions">
+              {alert.status === 'triggered' && (
+                <button
+                  className="ea-action ea-action-ack"
+                  onClick={() => updateStatus(alert.alertId, 'acknowledged')}
+                >
+                  Acknowledge Alert
+                </button>
+              )}
+              {alert.status !== 'dispatched' && (
+                <button
+                  className="ea-action ea-action-dispatch"
+                  onClick={() => updateStatus(alert.alertId, 'dispatched')}
+                >
+                  Dispatch Response Team
+                </button>
+              )}
               <button
-                onClick={() => updateStatus(alert.alertId, 'acknowledged')}
-                style={{ background: '#f59e0b', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
+                className="ea-action ea-action-resolve"
+                onClick={() => updateStatus(alert.alertId, 'resolved')}
               >
-                Acknowledge Alert
+                Mark Resolved
               </button>
-            )}
-            {alert.status !== 'dispatched' && (
               <button
-                onClick={() => updateStatus(alert.alertId, 'dispatched')}
-                style={{ background: '#0284c7', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
+                className="ea-action ea-action-false"
+                onClick={() => updateStatus(alert.alertId, 'false_alarm')}
               >
-                Dispatch Response Team
+                False Alarm
               </button>
-            )}
-            <button
-              onClick={() => updateStatus(alert.alertId, 'resolved')}
-              style={{ background: '#10b981', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}
-            >
-              Mark Resolved
-            </button>
-            <button
-              onClick={() => updateStatus(alert.alertId, 'false_alarm')}
-              style={{ background: '#6b7280', color: '#fff', border: 'none', padding: '6px 10px', borderRadius: 4, cursor: 'pointer' }}
-            >
-              False Alarm
-            </button>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

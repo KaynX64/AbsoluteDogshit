@@ -3,6 +3,7 @@
 // Central place for tunable rate-limit and throttle constants.
 // These are NOT secrets — they are documented, reviewable defaults that
 // operations can override via environment variables when needed.
+import 'dotenv/config';
 
 /**
  * Read an integer from an environment variable with a safe fallback.
@@ -11,8 +12,8 @@
 function envInt(name, fallback) {
   const raw = process.env[name];
   if (raw === undefined || raw === null || raw === '') return fallback;
-  const n = parseInt(raw, 10);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
+  const n = /^\d+$/.test(raw.trim()) ? Number(raw) : NaN;
+  return Number.isSafeInteger(n) && n > 0 ? n : fallback;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -24,7 +25,7 @@ export const LOGIN_LIMIT = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────
-// SOS — panic-button throttle (wired in server/src/routes/emergency.js)
+// SOS — panic-button throttle (wired in server/src/routes/emergency/sos.js)
 // ─────────────────────────────────────────────────────────────────────────
 export const SOS_LIMIT = {
   maxAttempts:   envInt('SOS_RATE_LIMIT_MAX',    10),
@@ -51,7 +52,7 @@ export const VERIFY_LIMIT = {
 // NO-SHOW GRACE PERIOD — how long past the appointment time the auto worker
 // waits before flipping status from 'scheduled' to 'no_show'.
 //
-// Read by server/src/utils/reminderWorker.js. The worker runs every 60s, so
+// Read by server/src/workers/noShowWorker.js. The worker runs every 60s, so
 // a patient is marked no-show within ~1 minute of crossing this threshold.
 //
 // Default 20 minutes matches the original hardcoded value. Set it to 15 for
@@ -64,13 +65,14 @@ export const NOSHOW_LIMIT = {
 // ─────────────────────────────────────────────────────────────────────────
 // Startup log — confirms the active policy in the server console
 // ─────────────────────────────────────────────────────────────────────────
-export function logActiveLimits() {
+export function logActiveLimits({ login, sos, booking, verify, noShow }) {
   console.log(
-    `🛡️  [Rate Limits] Login: ${LOGIN_LIMIT.maxAttempts} / ${LOGIN_LIMIT.windowSeconds}s · ` +
-    `SOS: ${SOS_LIMIT.maxAttempts} / ${SOS_LIMIT.windowSeconds}s · ` +
-    `Booking: ${BOOKING_LIMIT.maxAttempts} / ${BOOKING_LIMIT.windowSeconds}s`
+    `🛡️  [Rate Limits] Login: ${login.maxAttempts} / ${login.windowSeconds}s · ` +
+    `SOS: ${sos.maxAttempts} / ${sos.windowSeconds}s · ` +
+    `Booking: ${booking.maxAttempts} / ${booking.windowSeconds}s · ` +
+    `Verify: ${verify.maxAttempts} / ${verify.windowSeconds}s`
   );
   console.log(
-    `⏰ [No-Show] Grace period: ${NOSHOW_LIMIT.graceMinutes} minute(s) past appointment time`
+    `⏰ [No-Show] Grace period: ${noShow.graceMinutes} minute(s) past appointment time`
   );
 }

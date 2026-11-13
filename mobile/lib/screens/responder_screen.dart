@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../config/api_config.dart';
 import '../utils/responsive.dart';
 import '../widgets/valetudo_logo.dart';
+import '../widgets/sos_alert_actions.dart';
 import '../services/emergency_alert_service.dart';
 import 'login_screen.dart';
 import 'change_password_screen.dart';
@@ -76,7 +77,19 @@ class _ResponderScreenState extends State<ResponderScreen> {
           if (triggeredAlert != null &&
               _lastAlertAlarmedId != triggeredAlert['alert_id']) {
             _lastAlertAlarmedId = triggeredAlert['alert_id'];
-            EmergencyAlertService().triggerEmergencyBroadcast(triggeredAlert);
+            // Status changes made inside the SOS dialog (acknowledge /
+            // dispatch / resolve / false alarm) refresh this list too.
+            EmergencyAlertService().triggerEmergencyBroadcast(
+              Map<String, dynamic>.from(triggeredAlert),
+              onStatusChanged: (status) {
+                if (status == 'resolved' || status == 'false_alarm') {
+                  setState(() =>
+                      _activeAlerts.removeWhere((a) => a['alert_id'] == triggeredAlert['alert_id']));
+                } else {
+                  _fetchActiveAlerts(silent: true);
+                }
+              },
+            );
           }
         }
       }
@@ -100,21 +113,20 @@ class _ResponderScreenState extends State<ResponderScreen> {
       }
     });
 
-    final token = await _storage.read(key: 'jwt_token');
-    try {
-      await ApiConfig.client.patch(
-        Uri.parse('${ApiConfig.baseUrl}/api/emergency/$alertId/status'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({'status': status}),
-      );
-    } catch (e) {
+    // Shared status-change path (mobile/lib/widgets/sos_alert_actions.dart)
+    // — the same helper the SOS alarm dialog uses.
+    final result = await updateSosAlertStatus(alertId, status);
+    if (result['ok'] != true) {
+      // Another responder closed this incident first — our local removal
+      // above already matches the server, nothing to report.
+      final current = result['currentStatus'];
+      if (current == 'resolved' || current == 'false_alarm') {
+        return;
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Update failed: $e'),
+            content: Text('${result['error'] ?? 'Update failed. Check your connection.'}'),
             backgroundColor: primaryCrimson,
           ),
         );
@@ -124,6 +136,10 @@ class _ResponderScreenState extends State<ResponderScreen> {
   }
 
   Future<void> _openGoogleMaps(double lat, double lng) async {
+    // Navigating to the scene stops the siren — the incident stays open and
+    // actionable in the list when the responder returns to the app.
+    EmergencyAlertService().stopAlarmSound();
+
     if (lat == 0.0 && lng == 0.0) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -231,9 +247,17 @@ class _ResponderScreenState extends State<ResponderScreen> {
                         final token = await _storage.read(key: 'jwt_token');
                         if (token != null) {
                           try {
+                            // Release this device's FCM token so the signed-out
+                            // phone stops receiving SOS pushes.
+                            final fcmToken =
+                                await EmergencyAlertService().currentFcmToken();
                             await ApiConfig.client.post(
                               Uri.parse('${ApiConfig.baseUrl}/api/auth/logout'),
-                              headers: {'Authorization': 'Bearer $token'},
+                              headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': 'Bearer $token',
+                              },
+                              body: jsonEncode({'fcm_token': fcmToken}),
                             );
                           } catch (_) {}
                         }

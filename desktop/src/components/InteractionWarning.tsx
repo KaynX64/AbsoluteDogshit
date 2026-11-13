@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { T } from '../theme';
+import Icon from './Icon';
 import { SEVERITY_CONFIG, type DrugInteraction } from '../services/interactionService';
 
 interface InteractionWarningProps {
@@ -35,30 +36,33 @@ export default function InteractionWarning({
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          padding: '10px 16px',
+          padding: '12px 18px',
           background: blocking ? T.danger : T.warning,
-          color: '#FFFFFF',
+          color: blocking ? T.textOnDanger : T.textOnWarning,
         }}
       >
-        <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.3 }}>
+        <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.3, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           {blocking
-            ? '🚫 CONTRAINDICATED — Cannot issue this prescription'
-            : `⚠️ ${interactions.length} Drug Interaction${interactions.length > 1 ? 's' : ''} Detected`}
+            ? (<><Icon name="block" size={18} fill /> CONTRAINDICATED — Cannot issue this prescription</>)
+            : (<><Icon name="warning" size={18} fill /> {interactions.length} Drug Interaction{interactions.length > 1 ? 's' : ''} Detected</>)}
         </span>
         {onDismiss && !blocking && (
           <button
             type="button"
             onClick={onDismiss}
             style={{
-              background: 'rgba(255,255,255,0.2)',
-              border: 'none',
-              color: '#fff',
-              borderRadius: 4,
-              padding: '2px 8px',
+              background: 'rgba(15,30,23,0.12)',
+              border: '1px solid rgba(15,30,23,0.24)',
+              color: 'inherit',
+              borderRadius: T.radius.pill,
+              padding: '4px 12px',
               fontSize: 11,
               cursor: 'pointer',
               fontWeight: 700,
+              transition: `background ${T.durBase} ${T.ease}`,
             }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(15,30,23,0.20)')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(15,30,23,0.12)')}
           >
             Dismiss
           </button>
@@ -68,8 +72,16 @@ export default function InteractionWarning({
       {/* Interaction cards */}
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {interactions.map((interaction) => {
-          const cfg =
-            SEVERITY_CONFIG[interaction.severity] || SEVERITY_CONFIG.mild;
+          const severity = interaction.severity;
+          const baseCfg = SEVERITY_CONFIG[severity] || SEVERITY_CONFIG.mild;
+          const cfg = {
+            ...baseCfg,
+            ...(severity === 'contraindicated' || severity === 'severe'
+              ? { bg: T.dangerSoft, color: T.danger, border: T.dangerBorder, onColor: T.textOnDanger }
+              : severity === 'moderate'
+              ? { bg: T.warningSoft, color: T.warning, border: T.warningBorder, onColor: T.textOnWarning }
+              : { bg: T.infoSoft, color: T.info, border: T.infoBorder, onColor: T.textOnInfo }),
+          };
           return (
             <div
               key={interaction.interaction_id}
@@ -95,7 +107,7 @@ export default function InteractionWarning({
                     color: cfg.color,
                   }}
                 >
-                  {cfg.icon} {interaction.medicine_a.name} ↔{' '}
+                  <Icon name={cfg.icon} size={16} fill /> {interaction.medicine_a.name} ↔{' '}
                   {interaction.medicine_b.name}
                 </span>
                 <span
@@ -106,7 +118,7 @@ export default function InteractionWarning({
                     padding: '2px 8px',
                     borderRadius: T.radius.pill,
                     background: cfg.color,
-                    color: '#fff',
+                    color: cfg.onColor,
                     textTransform: 'uppercase',
                   }}
                 >
