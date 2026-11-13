@@ -1,0 +1,74 @@
+/* ═══════════════════════════════════════════════════════════════════
+   MATERIAL YOU — Analytics (kept for backward compat)
+   ═══════════════════════════════════════════════════════════════════ */
+.my-card {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-xl);
+  padding: 24px;
+  transition: box-shadow var(--dur-base) var(--ease),
+              transform var(--dur-base) var(--ease);
+}
+.my-card:hover {
+  box-shadow: var(--shadow-card);
+  transform: translateY(-1px);
+}
+
+.my-card-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.2px;
+}
+.my-card-sub {
+  margin: 5px 0 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.my-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.my-tonal-green  { background: var(--tonal-green);  color: var(--tonal-green-fg); }
+.my-tonal-blue   { background: var(--tonal-blue);   color: var(--tonal-blue-fg);  }
+.my-tonal-cream  { background: var(--tonal-cream);  color: var(--tonal-cream-fg); }
+.my-tonal-lilac  { background: var(--tonal-lilac);  color: var(--tonal-lilac-fg); }
+.my-tonal-rose   { background: var(--tonal-rose);   color: var(--tonal-rose-fg);  }
+
+@keyframes my-draw {
+  from { stroke-dashoffset: var(--dash-len, 2000); }
+  to   { stroke-dashoffset: 0; }
+}
+@keyframes my-grow {
+  from { transform: scaleY(0); }
+  to   { transform: scaleY(1); }
+}
+@keyframes my-slide {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+.my-line-path {
+  stroke-dasharray: var(--dash-len, 2000);
+  animation: my-draw 1.2s var(--ease) forwards;
+}
+.my-bar-rect {
+  transform-origin: bottom;
+  transform-box: fill-box;
+  animation: my-grow 0.75s var(--ease) forwards;
+}
+.my-hbar-rect {
+  transform-origin: left;
+  transform-box: fill-box;
+  animation: my-slide 0.9s var(--ease) forwards;
+}
+

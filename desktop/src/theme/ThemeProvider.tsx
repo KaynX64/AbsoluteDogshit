@@ -174,7 +174,6 @@ export function useTheme(): ThemeContextValue {
 /* ── Module bridge — lets App.applyThemeFromAccount(user) reach the
    provider after login without prop-drilling through LoginScreen. ── */
 
-type RegisterFn = (apply: ((sel: ThemeSelection, fromServer: boolean) => void) | null) => void;
 let registeredApply: ((sel: ThemeSelection, fromServer: boolean) => void) | null = null;
 
 /**

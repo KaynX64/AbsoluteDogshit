@@ -1,0 +1,79 @@
+/* ═══════════════════════════════════════════════════════════════════
+   MODALS — calmer, no spring overshoot
+   ═══════════════════════════════════════════════════════════════════ */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 30, 23, 0.44);
+  backdrop-filter: blur(6px);
+  display: grid;
+  place-items: center;
+  z-index: var(--z-modal);
+  padding: 20px;
+  animation: backdrop-in var(--dur-base) var(--ease-out) both;
+}
+@keyframes backdrop-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.modal-card {
+  position: relative;
+  background: var(--surface);
+  border-radius: var(--r-xl);
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-modal);
+  width: 100%;
+  padding: 28px;
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: modal-in var(--dur-slow) var(--ease-out) both;
+  /* Safety: ensure the card never escapes the backdrop's centering grid */
+  margin: auto;
+}
+/* Brand hairline crowning the card — the login-card recipe. */
+.modal-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    rgba(var(--primary-rgb), 0) 0%,
+    rgba(var(--primary-rgb), 0.5) 30%,
+    rgba(var(--primary-soft-rgb), 0.3) 64%,
+    rgba(var(--primary-soft-rgb), 0) 100%
+  );
+  pointer-events: none;
+}
+@keyframes modal-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   SCROLLBARS — minimal
+   ═══════════════════════════════════════════════════════════════════ */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--sage-300);
+  border-radius: var(--r-pill);
+  border: 2px solid var(--surface);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--sage-400); }
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--sage-300) transparent;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   PRINT
+   ═══════════════════════════════════════════════════════════════════ */
+@media print {
+  .sb, .tb { display: none !important; }
+  .app-shell { display: block; grid-template-columns: none; }
+  .app-content { padding: 0 !important; }
+}
+
