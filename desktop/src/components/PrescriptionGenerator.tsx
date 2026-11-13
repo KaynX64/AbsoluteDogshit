@@ -114,6 +114,7 @@ function FormularySelect({
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const selected = medicines.find((m) => m.medicine_id === value);
+  const stockedMedicines = medicines.filter((medicine) => Number(medicine.available_stock) > 0);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -210,10 +211,13 @@ function FormularySelect({
             <div style={{ padding: '10px 12px', fontSize: 12.5, color: T.textMuted, fontStyle: 'italic' }}>
               Loading formulary…
             </div>
+          ) : stockedMedicines.length === 0 ? (
+            <div style={{ padding: '10px 12px', fontSize: 12.5, color: T.textMuted, fontStyle: 'italic' }}>
+              No medicines currently in stock.
+            </div>
           ) : (
-            medicines.map((m) => {
+            stockedMedicines.map((m) => {
               const isSelected = m.medicine_id === value;
-              const isOutOfStock = m.available_stock !== undefined && m.available_stock <= 0;
               return (
                 <button
                   key={m.medicine_id}
@@ -232,7 +236,7 @@ function FormularySelect({
                     borderRadius: T.radius.sm,
                     border: 'none',
                     background: isSelected ? T.primaryTint : 'transparent',
-                    color: isOutOfStock ? T.textMuted : isSelected ? T.primary : T.text,
+                    color: isSelected ? T.primary : T.text,
                     fontSize: 12.5,
                     fontWeight: isSelected ? 700 : 500,
                     cursor: 'pointer',
@@ -255,13 +259,13 @@ function FormularySelect({
                       fontWeight: 700,
                       padding: '2px 8px',
                       borderRadius: T.radius.pill,
-                      background: isOutOfStock ? T.dangerSoft : T.successSoft,
-                      color: isOutOfStock ? T.danger : T.success,
+                      background: T.successSoft,
+                      color: T.success,
                       flexShrink: 0,
                       marginLeft: 8,
                     }}
                   >
-                    {isOutOfStock ? '0 in stock' : `${m.available_stock ?? '—'} ${m.unit || 'pcs'}`}
+                    {m.available_stock} {m.unit || 'pcs'}
                   </span>
                 </button>
               );
@@ -521,11 +525,9 @@ export default function PrescriptionGenerator({
               <b style={{ color: T.textSub }}>ID:</b> {verifiedPatient.student_no}
             </span>
           )}
-          {(verifiedPatient.date_of_birth || verifiedPatient.age != null) && (
+          {verifiedPatient.age != null && (
             <span>
-              <b style={{ color: T.textSub }}>DOB / Age:</b>{' '}
-              {verifiedPatient.date_of_birth || ''}
-              {verifiedPatient.age != null ? ` (${verifiedPatient.age} yrs)` : ''}
+              <b style={{ color: T.textSub }}>Age:</b> {verifiedPatient.age} yrs
             </span>
           )}
           {verifiedPatient.sex && (
@@ -610,7 +612,7 @@ export default function PrescriptionGenerator({
         {outside ? (
           <Field label="Dosage" inputId="rx-dosage">
             <input
-              style={inputStyle}
+              style={{ ...inputStyle }}
               disabled={isArchived}
               id="rx-dosage" maxLength={100} value={outsideDosage}
               onChange={(e) => setOutsideDosage(e.target.value)}
@@ -669,7 +671,7 @@ export default function PrescriptionGenerator({
       <div className="doctor-prescription-fields">
         <Field label="Frequency" inputId="rx-frequency">
           <input
-            style={inputStyle}
+            style={{ ...inputStyle }}
             disabled={isArchived}
 
             id="rx-frequency" maxLength={100} value={rxFrequency}
@@ -677,14 +679,14 @@ export default function PrescriptionGenerator({
           />
         </Field>
         <Field label="Intake Method" inputId="rx-route">
-          <input id="rx-route" maxLength={50} style={inputStyle} disabled={isArchived}
+          <input id="rx-route" maxLength={50} style={{ ...inputStyle }} disabled={isArchived}
             value={rxRoute} onChange={(event) => setRxRoute(event.target.value)} />
         </Field>
         <Field label="Duration (days)" inputId="rx-duration">
           <input
             type="number"
             min="1"
-            style={inputStyle}
+            style={{ ...inputStyle }}
             disabled={isArchived}
             id="rx-duration" value={rxDurationDays}
             onChange={(e) => setRxDurationDays(e.target.value)}
@@ -720,7 +722,7 @@ export default function PrescriptionGenerator({
 
       <Field label="Physician dietary / clinical notes" inputId="rx-notes">
         <input
-          style={inputStyle}
+          style={{ ...inputStyle }}
           disabled={isArchived}
 
           id="rx-notes" value={doctorNotes}

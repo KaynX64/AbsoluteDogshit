@@ -10,6 +10,7 @@ import { API_BASE_URL, SOCKET_URL } from '../config/api';
 import ServerPingMonitor from './ServerPingMonitor';
 import ServerPolicyPanel from './ServerPolicyPanel';
 import Icon from './Icon';
+import './AdminConsole.css';
 
 /* ── Icons (inline, no dependency) ─────────────────────────────── */
 const I = {
@@ -119,6 +120,7 @@ export default function AdminConsole({
   const [phiLogs, setPhiLogs] = useState<any[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [archivedSearchTerm, setArchivedSearchTerm] = useState('');
   const [editingUser, setEditingUser] = useState<any | null>(null);
   const [showCreateUserModal, setShowCreateUserModal] = useState(false);
   const [isSavingUser, setIsSavingUser] = useState(false);
@@ -423,6 +425,13 @@ export default function AdminConsole({
         default: return Number(a.id) - Number(b.id);
       }
     });
+
+    const archivedQuery = archivedSearchTerm.trim().toLowerCase();
+    const filteredArchivedUsers = archivedUsers.filter((user) =>
+      [user.id, user.name, user.email, user.role].some((value) =>
+        String(value ?? '').toLowerCase().includes(archivedQuery),
+      ),
+    );
 
   const processedPhiLogs = phiLogs
     .filter((log) => {
@@ -1070,98 +1079,82 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
             </div>
           </div>
 
-          {/* Role filter chips */}
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
-            {[
-              { code: 'ALL', label: 'All roles' },
-              { code: 'DOCTOR', label: 'Doctor' },
-              { code: 'DENTIST', label: 'Dentist' },
-              { code: 'NURSE', label: 'Nurse' },
-              { code: 'STUDENT', label: 'Student' },
-              { code: 'FACULTY', label: 'Faculty' },
-              { code: 'NON_TEACHING', label: 'Non-Teaching' },
-              { code: 'EMERGENCY_RESPONDER', label: 'Responder' },
-              { code: 'ADMIN', label: 'Admin' },
-            ].map((r) => {
-              const isSelected = userRoleFilter === r.code;
-              return (
-                <button
-                  key={r.code}
-                  type="button"
-                  onClick={() => setUserRoleFilter(r.code)}
-                  style={{
-                    padding: '5px 12px', borderRadius: T.radius.pill,
-                    fontSize: 11.5, fontWeight: 700,
-                    border: `1px solid ${isSelected ? T.primary : T.border}`,
-                    background: isSelected ? T.primary : T.surface,
-                    color: isSelected ? '#fff' : T.textSub,
-                    cursor: 'pointer', fontFamily: T.font,
-                    transition: 'all 120ms',
-                  }}
-                >
-                  {r.label}
-                </button>
-              );
-            })}
+          <div className="admin-user-filterbar">
+            <div className="admin-user-filter-groups">
+              <div className="admin-filter-section">
+                <span className="admin-filter-section-label">Role</span>
+                <div className="admin-filter-control" role="group" aria-label="Filter accounts by role">
+                  {[
+                    { code: 'ALL', label: 'All roles', icon: 'groups' },
+                    { code: 'DOCTOR', label: 'Doctor', icon: 'stethoscope' },
+                    { code: 'DENTIST', label: 'Dentist', icon: 'dentistry' },
+                    { code: 'NURSE', label: 'Nurse', icon: 'medical_information' },
+                    { code: 'STUDENT', label: 'Student', icon: 'school' },
+                    { code: 'FACULTY', label: 'Faculty', icon: 'co_present' },
+                    { code: 'NON_TEACHING', label: 'Non-Teaching', icon: 'badge' },
+                    { code: 'EMERGENCY_RESPONDER', label: 'Responder', icon: 'emergency' },
+                    { code: 'ADMIN', label: 'Admin', icon: 'admin_panel_settings' },
+                  ].map((r) => {
+                    const isSelected = userRoleFilter === r.code;
+                    return (
+                      <button
+                        key={r.code}
+                        type="button"
+                        className={`admin-filter-button${isSelected ? ' is-selected' : ''}`}
+                        aria-pressed={isSelected}
+                        onClick={() => setUserRoleFilter(r.code)}
+                      >
+                        <Icon name={r.icon} size={14} /> {r.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
 
-            <span style={{ width: 1, background: T.border, margin: '0 6px' }} />
+              <div className="admin-filter-section">
+                <span className="admin-filter-section-label">Status</span>
+                <div className="admin-filter-control" role="group" aria-label="Filter accounts by status">
+                  {(['ALL', 'Active', 'Suspended'] as const).map((s) => {
+                    const isSelected = userStatusFilter === s;
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        className={`admin-filter-button${isSelected ? ' is-selected' : ''}`}
+                        aria-pressed={isSelected}
+                        onClick={() => setUserStatusFilter(s)}
+                      >
+                        {s !== 'ALL' && <span className={`admin-status-dot admin-status-dot-${s.toLowerCase()}`} aria-hidden="true" />}
+                        {s === 'ALL' ? 'All statuses' : s}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
 
-            {(['ALL', 'Active', 'Suspended'] as const).map((s) => {
-              const isSelected = userStatusFilter === s;
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setUserStatusFilter(s)}
-                  style={{
-                    padding: '5px 12px', borderRadius: T.radius.pill,
-                    fontSize: 11.5, fontWeight: 700,
-                    border: `1px solid ${isSelected ? T.primary : T.border}`,
-                    background: isSelected ? T.primary : T.surface,
-                    color: isSelected ? '#fff' : T.textSub,
-                    cursor: 'pointer', fontFamily: T.font,
-                  }}
-                >
-                  {s === 'ALL' ? 'All statuses' : s}
-                </button>
-              );
-            })}
-
-            {/* Qualified Responder filter chip (flag only — accounts that
-                receive SOS through their role get an in-modal hint instead). */}
-            <button
-              type="button"
-              onClick={() => setUserQrOnly((v) => !v)}
-              title="Show only accounts labelled Qualified Responder (role-independent SOS label)"
-              style={{
-                padding: '5px 12px', borderRadius: T.radius.pill,
-                fontSize: 11.5, fontWeight: 700,
-                border: `1px solid ${userQrOnly ? '#C2410C' : T.border}`,
-                background: userQrOnly ? '#FFF7ED' : T.surface,
-                color: userQrOnly ? '#C2410C' : T.textSub,
-                cursor: 'pointer', fontFamily: T.font,
-                display: 'inline-flex', alignItems: 'center', gap: 5,
-              }}
-            >
-              <Icon name="emergency" size={14} /> Qualified responders
-            </button>
+              <button
+                type="button"
+                className={`admin-qualified-filter${userQrOnly ? ' is-selected' : ''}`}
+                aria-pressed={userQrOnly}
+                onClick={() => setUserQrOnly((v) => !v)}
+                title="Show only accounts labelled Qualified Responder (role-independent SOS label)"
+              >
+                <Icon name="emergency" size={16} tone={userQrOnly ? 'warning' : 'sub'} />
+                <span>Qualified responders</span>
+                <span className="admin-qualified-switch" aria-hidden="true" />
+              </button>
+            </div>
 
             <select
-              value={userSortKey}
-              onChange={(e) => setUserSortKey(e.target.value as any)}
-              style={{
-                marginLeft: 'auto',
-                padding: '5px 14px', borderRadius: T.radius.pill,
-                border: `1px solid ${T.border}`, background: T.surface,
-                fontSize: 11.5, fontWeight: 700, color: T.textSub,
-                fontFamily: T.font, cursor: 'pointer',
-              }}
+              className="admin-filter-sort"
+              value={userSortKey} aria-label="Sort accounts"
+              onChange={(e) => setUserSortKey(e.target.value as typeof userSortKey)}
             >
-              <option value="id_asc">Sort: ID <Icon name="north" size={14} /></option>
-              <option value="id_desc">Sort: ID <Icon name="south" size={14} /></option>
-              <option value="name_asc">Sort: Name A<Icon name="arrow_forward" size={14} />Z</option>
-              <option value="name_desc">Sort: Name Z<Icon name="arrow_forward" size={14} />A</option>
-              <option value="role">Sort: Role</option>
+              <option value="id_asc">ID: Lowest first</option>
+              <option value="id_desc">ID: Highest first</option>
+              <option value="name_asc">Name: A to Z</option>
+              <option value="name_desc">Name: Z to A</option>
+              <option value="role">Role: A to Z</option>
             </select>
           </div>
 
@@ -1386,41 +1379,83 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
             <div role="status" style={{ padding: 32, textAlign: 'center', color: T.textMuted }}>
               Loading archived accounts...
             </div>
-          ) : archivedUsers.length === 0 && !archivedUsersError ? (
+          ) : archivedUsers.length === 0 && archivedUsersError ? null : archivedUsers.length === 0 ? (
             <div style={{ padding: 40, textAlign: 'center', color: T.textMuted, fontSize: 13 }}>
               No archived accounts.
             </div>
           ) : (
-            <div className="vd-table-wrap" style={{ overflowX: 'auto' }}>
-              <table className="tbl" style={{ minWidth: 760 }}>
-                <thead>
-                  <tr>
-                    <th style={{ width: 90 }}>User ID</th>
-                    <th>Full name</th>
-                    <th>Institutional email</th>
-                    <th>Assigned RBAC role</th>
-                    <th style={{ width: 190 }}>Archived</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {archivedUsers.map((archivedUser) => (
-                    <tr key={archivedUser.id}>
-                      <td style={{ color: T.textSub, fontWeight: 600, fontFamily: T.mono, fontSize: 12 }}>
-                        {archivedUser.id}
-                      </td>
-                      <td style={{ fontWeight: 600, color: T.text }}>{archivedUser.name}</td>
-                      <td style={{ color: T.textSub }}>{archivedUser.email}</td>
-                      <td><span style={rolePill(archivedUser.role)}>{archivedUser.role}</span></td>
-                      <td style={{ color: T.textSub }}>
-                        {archivedUser.archived_at
-                          ? new Date(archivedUser.archived_at).toLocaleString()
-                          : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                flexWrap: 'wrap',
+                padding: '14px 16px',
+                borderBottom: `1px solid ${T.border}`,
+              }}>
+                <div style={{ position: 'relative', flex: '1 1 320px', maxWidth: 520 }}>
+                  <span style={{
+                    position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)',
+                    color: T.textMuted, display: 'grid', placeItems: 'center',
+                  }}>
+                    <Icon name="search" size={16} />
+                  </span>
+                  <input
+                    type="text"
+                    aria-label="Search archived accounts"
+                    placeholder="Search by name, email, role or ID"
+                    value={archivedSearchTerm}
+                    onChange={(e) => setArchivedSearchTerm(e.target.value)}
+                    style={{
+                      ...inputStyle,
+                      paddingLeft: 40,
+                      borderRadius: T.radius.pill,
+                      background: T.surface,
+                    }}
+                  />
+                </div>
+                <span style={{ fontSize: 12.5, color: T.textSub }}>
+                  {filteredArchivedUsers.length} of {archivedUsers.length} accounts
+                </span>
+              </div>
+              {filteredArchivedUsers.length === 0 ? (
+                <div style={{ padding: 40, textAlign: 'center', color: T.textMuted, fontSize: 13 }}>
+                  No archived accounts match your search.
+                </div>
+              ) : (
+                <div className="vd-table-wrap" style={{ overflowX: 'auto' }}>
+                  <table className="tbl" style={{ minWidth: 760 }}>
+                    <thead>
+                      <tr>
+                        <th style={{ width: 90 }}>User ID</th>
+                        <th>Full name</th>
+                        <th>Institutional email</th>
+                        <th>Assigned RBAC role</th>
+                        <th style={{ width: 190 }}>Archived</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredArchivedUsers.map((archivedUser) => (
+                        <tr key={archivedUser.id}>
+                          <td style={{ color: T.textSub, fontWeight: 600, fontFamily: T.mono, fontSize: 12 }}>
+                            {archivedUser.id}
+                          </td>
+                          <td style={{ fontWeight: 600, color: T.text }}>{archivedUser.name}</td>
+                          <td style={{ color: T.textSub }}>{archivedUser.email}</td>
+                          <td><span style={rolePill(archivedUser.role)}>{archivedUser.role}</span></td>
+                          <td style={{ color: T.textSub }}>
+                            {archivedUser.archived_at
+                              ? new Date(archivedUser.archived_at).toLocaleString()
+                              : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -1486,11 +1521,11 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   <option value="EMR_ATTACHMENTS">EMR_ATTACHMENTS</option>
                 </select>
 
-                <select value={phiSortOrder} onChange={(e) => setPhiSortOrder(e.target.value as any)}
+                <select aria-label="Sort PHI access logs" value={phiSortOrder} onChange={(e) => setPhiSortOrder(e.target.value as typeof phiSortOrder)}
                         style={{ ...inputStyle, width: 'auto', padding: '8px 16px', borderRadius: T.radius.pill, fontSize: 12, fontWeight: 700 }}>
-                  <option value="desc">Newest first</option>
-                  <option value="asc">Oldest first</option>
-                  <option value="patient_asc">Patient A<Icon name="arrow_forward" size={14} />Z</option>
+                  <option value="desc">Access date: Newest first</option>
+                  <option value="asc">Access date: Oldest first</option>
+                  <option value="patient_asc">Patient name: A to Z</option>
                 </select>
 
                 <span style={{ alignSelf: 'center', fontSize: 12, color: T.textSub, fontWeight: 700 }}>
@@ -1498,27 +1533,31 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                 </span>
               </div>
 
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
-                {['ALL', 'DOCTOR', 'NURSE', 'DENTIST', 'ADMIN'].map((role) => {
-                  const isSelected = phiRoleFilter === role;
-                  return (
-                    <button
-                      key={role}
-                      type="button"
-                      onClick={() => setPhiRoleFilter(role)}
-                      style={{
-                        padding: '5px 12px', borderRadius: T.radius.pill,
-                        fontSize: 11.5, fontWeight: 700,
-                        border: `1px solid ${isSelected ? T.primary : T.border}`,
-                        background: isSelected ? T.primary : T.surface,
-                        color: isSelected ? '#fff' : T.textSub,
-                        cursor: 'pointer', fontFamily: T.font,
-                      }}
-                    >
-                      {role === 'ALL' ? 'All roles' : role}
-                    </button>
-                  );
-                })}
+              <div className="admin-phi-role-filters">
+                <span className="admin-filter-section-label">Role</span>
+                <div className="admin-filter-control" role="group" aria-label="Filter PHI access logs by role">
+                  {[
+                    { role: 'ALL', label: 'All roles', icon: 'groups' },
+                    { role: 'DOCTOR', label: 'Doctor', icon: 'stethoscope' },
+                    { role: 'NURSE', label: 'Nurse', icon: 'medical_information' },
+                    { role: 'DENTIST', label: 'Dentist', icon: 'dentistry' },
+                    { role: 'ADMIN', label: 'Admin', icon: 'admin_panel_settings' },
+                  ].map(({ role, label, icon }) => {
+                    const isSelected = phiRoleFilter === role;
+                    return (
+                      <button
+                        key={role}
+                        type="button"
+                        className={`admin-filter-button${isSelected ? ' is-selected' : ''}`}
+                        aria-pressed={isSelected}
+                        onClick={() => setPhiRoleFilter(role)}
+                      >
+                        <Icon name={icon} size={14} />
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               <div style={{
@@ -1619,10 +1658,10 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   />
                 </div>
 
-                <select value={mutationSortOrder} onChange={(e) => setMutationSortOrder(e.target.value as any)}
+                <select aria-label="Sort mutation logs" value={mutationSortOrder} onChange={(e) => setMutationSortOrder(e.target.value as typeof mutationSortOrder)}
                         style={{ ...inputStyle, width: 'auto', padding: '8px 16px', borderRadius: T.radius.pill, fontSize: 12, fontWeight: 700 }}>
-                  <option value="desc">Newest first</option>
-                  <option value="asc">Oldest first</option>
+                  <option value="desc">Created: Newest first</option>
+                  <option value="asc">Created: Oldest first</option>
                 </select>
 
                 <span style={{ alignSelf: 'center', fontSize: 12, color: T.textSub, fontWeight: 700 }}>

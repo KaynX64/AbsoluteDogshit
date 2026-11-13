@@ -350,6 +350,7 @@ interface LoginScreenProps {
 const DEV_ACCOUNTS = [
   { email: 'nurse@psu.edu.ph',     label: 'Clinic nurse',   icon: 'medical_information' },
   { email: 'doctor@psu.edu.ph',    label: 'Campus doctor',  icon: 'medical_services' },
+  { email: 'dentist@psu.edu.ph',   label: 'Campus dentist', icon: 'dentistry' },
   { email: 'admin@psu.edu.ph',     label: 'System admin',   icon: 'admin_panel_settings' },
   { email: 'responder@psu.edu.ph', label: 'SOS responder',  icon: 'emergency' },
 ];

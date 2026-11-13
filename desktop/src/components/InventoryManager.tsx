@@ -152,7 +152,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
       return isUnexpired && b.quantity_on_hand <= threshold;
     })
     .sort((a, b) => a.quantity_on_hand - b.quantity_on_hand);
-  const inventoryAlertCount = expiringLots.length + reorderSuggestions.filter(
+  const inventoryAlertCount = lowStockLots.length + expiringLots.length + reorderSuggestions.filter(
     (suggestion) => suggestion.stock_status === 'CRITICAL_BUFFER' || suggestion.stock_status === 'OUT_OF_STOCK'
   ).length;
   const hasInventoryAlerts = inventoryAlertCount > 0;
@@ -517,6 +517,8 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
     display: 'block', fontSize: 11.5, fontWeight: 700,
     color: T.textSub, marginBottom: 6,
   };
+  const formularyFieldLabel = { ...fieldLabel, marginBottom: 2 };
+  const formularyInputStyle = { ...inputStyle, padding: '6px 12px' };
 
   return (
     <section className="inventory-workspace" aria-labelledby="inventory-title">
@@ -961,10 +963,10 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
 
       {/* ── ALERTS & REORDER ────────────────────────────── */}
       {activeTab === 'alerts' && (
-        <div className="inventory-alerts-page" style={{ display: 'flex', flexDirection: 'column' }}>
+        <div className="inventory-alerts-view inventory-alerts-page" style={{ display: 'flex', flexDirection: 'column' }}>
           {/* Top row: 2 columns for Low stock lots & Expiry alerts */}
           <div className="inventory-split inventory-alerts">
-            <div>
+            <div className="inventory-alert-panel">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <h4 style={{
                   margin: 0, fontSize: 14, fontWeight: 800, color: T.warning,
@@ -979,7 +981,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                 )}
               </div>
 
-              <div className="inventory-table inventory-alert-table" style={{ overflowX: 'hidden' }} tabIndex={0} role="region" aria-label="Low stock lots">
+              <div className="inventory-table inventory-alert-table inventory-alert-table-low-stock" tabIndex={0} role="region" aria-label="Low stock lots">
                 {lowStockLots.length === 0 ? (
                   <div style={{
                     padding: 28, textAlign: 'center',
@@ -1040,7 +1042,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
               </div>
             </div>
 
-            <div>
+            <div className="inventory-alert-panel">
               <h4 style={{
                 margin: '0 0 12px', fontSize: 14, fontWeight: 800, color: T.danger,
                 display: 'flex', alignItems: 'center', gap: 8,
@@ -1102,7 +1104,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
             }}>
               <Icon name="trending_down" size={14} /> Automated reorder suggestions
             </h4>
-            <div className="inventory-table inventory-reorder-table" tabIndex={0} role="region" aria-label="Reorder suggestions">
+            <div className="inventory-table inventory-alert-table inventory-reorder-table" tabIndex={0} role="region" aria-label="Reorder suggestions">
               <table className="tbl" style={{ fontSize: 12 }}>
                 <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
                   <tr>
@@ -1163,36 +1165,26 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
             </button>
           </div>
 
-          <div style={{
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            gap: 12, marginBottom: 16, flexWrap: 'wrap',
-            background: T.sage50, padding: 12,
-            borderRadius: T.radius.md, border: `1px solid ${T.borderSoft}`,
-          }}>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <div className="inventory-log-toolbar">
+            <div className="inventory-log-filter-group" role="group" aria-label="Filter consumption logs by action">
               {([
-                { id: 'all',      label: `All actions (${inventoryLogs.length})` },
-                { id: 'dispense', label: `Dispensed (${inventoryLogs.filter((l) => l.transaction_type === 'dispense').length})` },
-                { id: 'receive',  label: `Received (${inventoryLogs.filter((l) => l.transaction_type === 'receive').length})` },
-                { id: 'dispose',  label: `Disposals (${inventoryLogs.filter((l) => ['dispose', 'adjust', 'recall', 'return'].includes(l.transaction_type)).length})` },
+                { id: 'all', label: 'All actions', count: inventoryLogs.length, icon: 'history', tone: 'primary' },
+                { id: 'dispense', label: 'Dispensed', count: inventoryLogs.filter((l) => l.transaction_type === 'dispense').length, icon: 'medication', tone: 'info' },
+                { id: 'receive', label: 'Received', count: inventoryLogs.filter((l) => l.transaction_type === 'receive').length, icon: 'download', tone: 'success' },
+                { id: 'dispose', label: 'Disposals', count: inventoryLogs.filter((l) => ['dispose', 'adjust', 'recall', 'return'].includes(l.transaction_type)).length, icon: 'delete', tone: 'danger' },
               ] as const).map((chip) => {
                 const isActive = logTypeFilter === chip.id;
                 return (
                   <button
                     key={chip.id}
                     type="button"
+                    className="inventory-log-filter"
                     aria-pressed={isActive}
                     onClick={() => setLogTypeFilter(chip.id)}
-                    style={{
-                      padding: '5px 12px', borderRadius: T.radius.pill,
-                      fontSize: 11.5, fontWeight: 700,
-                      border: `1px solid ${isActive ? T.primary : T.border}`,
-                      background: isActive ? T.primary : T.surface,
-                      color: isActive ? T.textOnPrimary : T.textSub,
-                      cursor: 'pointer', fontFamily: T.font,
-                    }}
                   >
-                    {chip.label}
+                    <Icon name={chip.icon} size={15} tone={isActive ? 'inherit' : chip.tone} />
+                    <span>{chip.label}</span>
+                    <span className="inventory-log-filter-count">{chip.count}</span>
                   </button>
                 );
               })}
@@ -1292,22 +1284,22 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
 
       {/* ── FORMULARY MASTER ────────────────────────────── */}
       {activeTab === 'addmed' && (
-        <div className="inventory-split inventory-formulary">
+        <div className="inventory-split inventory-formulary inventory-formulary-view">
           <div className="inventory-panel">
             <h4 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 800, color: T.primary }}>
               <Icon name="add" size={14} /> Register new drug
             </h4>
-            <p style={{ margin: '0 0 16px', fontSize: 12, color: T.textSub }}>
+            <p style={{ margin: '0 0 8px', fontSize: 12, color: T.textSub }}>
               Adds a new formulation definition to the master catalog.
             </p>
 
             <form onSubmit={handleCreateMedicine} className="inventory-form-stack">
               <div>
-                <label htmlFor="inventory-brand" style={fieldLabel}>Brand / trade name</label>
+                <label htmlFor="inventory-brand" style={formularyFieldLabel}>Brand / trade name</label>
                 <input
                   id="inventory-brand"
                   disabled={isSubmitting}
-                  style={inputStyle}
+                  style={formularyInputStyle}
                   placeholder="e.g. Alaxan FR"
                   value={newMedName}
                   onChange={(e) => setNewMedName(e.target.value)}
@@ -1315,11 +1307,11 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                 />
               </div>
               <div>
-                <label htmlFor="inventory-generic" style={fieldLabel}>Generic active ingredient</label>
+                <label htmlFor="inventory-generic" style={formularyFieldLabel}>Generic active ingredient</label>
                 <input
                   id="inventory-generic"
                   disabled={isSubmitting}
-                  style={inputStyle}
+                  style={formularyInputStyle}
                   placeholder="e.g. Ibuprofen + Paracetamol"
                   value={newMedGeneric}
                   onChange={(e) => setNewMedGeneric(e.target.value)}
@@ -1328,8 +1320,8 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
               </div>
               <div className="inventory-field-grid">
                 <div>
-                  <label htmlFor="inventory-dosage-form" style={fieldLabel}>Dosage form</label>
-                  <select id="inventory-dosage-form" disabled={isSubmitting} style={inputStyle} value={newMedForm} onChange={(e) => setNewMedForm(e.target.value)}>
+                  <label htmlFor="inventory-dosage-form" style={formularyFieldLabel}>Dosage form</label>
+                  <select id="inventory-dosage-form" disabled={isSubmitting} style={formularyInputStyle} value={newMedForm} onChange={(e) => setNewMedForm(e.target.value)}>
                     <option value="Tablet">Tablet</option>
                     <option value="Capsule">Capsule</option>
                     <option value="Syrup">Syrup</option>
@@ -1339,11 +1331,11 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                   </select>
                 </div>
                 <div>
-                  <label htmlFor="inventory-strength" style={fieldLabel}>Strength</label>
+                  <label htmlFor="inventory-strength" style={formularyFieldLabel}>Strength</label>
                   <input
                     id="inventory-strength"
                     disabled={isSubmitting}
-                    style={inputStyle}
+                    style={formularyInputStyle}
                     placeholder="e.g. 500mg"
                     value={newMedStrength}
                     onChange={(e) => setNewMedStrength(e.target.value)}
@@ -1353,11 +1345,11 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
               </div>
               <div className="inventory-field-grid">
                 <div>
-                  <label htmlFor="inventory-unit" style={fieldLabel}>Unit</label>
+                  <label htmlFor="inventory-unit" style={formularyFieldLabel}>Unit</label>
                   <input
                     id="inventory-unit"
                     disabled={isSubmitting}
-                    style={inputStyle}
+                    style={formularyInputStyle}
                     placeholder="pcs, bottle"
                     value={newMedUnit}
                     onChange={(e) => setNewMedUnit(e.target.value)}
@@ -1365,11 +1357,11 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                   />
                 </div>
                 <div>
-                  <label htmlFor="inventory-buffer" style={fieldLabel}>Buffer threshold</label>
+                  <label htmlFor="inventory-buffer" style={formularyFieldLabel}>Buffer threshold</label>
                   <input
                     id="inventory-buffer"
                     disabled={isSubmitting}
-                    style={inputStyle}
+                    style={formularyInputStyle}
                     type="number"
                     min="1"
                     value={newMedReorder}
@@ -1384,7 +1376,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
             </form>
           </div>
 
-          <div>
+          <div className="inventory-formulary-list-panel">
             <div className="inventory-table-toolbar">
               <div>
                 <h4 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: T.text }}>
@@ -1404,7 +1396,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
               />
             </div>
 
-            <div className="inventory-table" style={{ maxHeight: 460 }} tabIndex={0} role="region" aria-label="Registered formulary drugs">
+            <div className="inventory-table inventory-formulary-scroll" tabIndex={0} role="region" aria-label="Registered formulary drugs">
               <table className="tbl inventory-formulary-table" style={{ fontSize: 12 }}>
                 <colgroup>
                   <col className="inventory-formulary-name-col" />

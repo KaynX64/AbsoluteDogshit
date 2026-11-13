@@ -702,6 +702,10 @@ code, pre { font-family: var(--mono); font-variant-numeric: tabular-nums; }
               border-color var(--dur-base) var(--ease);
 }
 .tb-user-chip:hover { background: var(--surface); border-color: var(--border); }
+:root[data-theme-mode='dark'] .tb-user-chip {
+  background: var(--surface);
+  border-color: var(--border);
+}
 
 .tb-avatar {
   width: 32px;

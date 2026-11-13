@@ -15,6 +15,133 @@
   flex-direction: column;
 }
 
+.app-shell:has(.inventory-alerts-view, .inventory-formulary-view) {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.app-main:has(.inventory-alerts-view, .inventory-formulary-view) {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-content:has(.inventory-alerts-view, .inventory-formulary-view) {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.inventory-workspace:has(.inventory-alerts-view, .inventory-formulary-view) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.inventory-workspace:has(.inventory-formulary-view) .inventory-heading {
+  margin-bottom: var(--sp-3);
+}
+
+.inventory-workspace:has(.inventory-formulary-view) .inventory-nav {
+  margin-bottom: var(--sp-3);
+}
+
+.inventory-alerts-view {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.inventory-split.inventory-alerts {
+  align-items: stretch;
+  flex: 1 1 0;
+  gap: var(--sp-3);
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.inventory-alert-panel,
+.inventory-reorder-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.inventory-alert-panel > :first-child,
+.inventory-reorder-panel > h4 {
+  flex: 0 0 auto;
+}
+
+.inventory-alert-table {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: none;
+  overscroll-behavior: contain;
+}
+
+.inventory-alert-table-low-stock {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.inventory-reorder-panel {
+  flex: 1 1 0;
+  width: 100%;
+  max-width: 1100px;
+  margin-inline: auto;
+}
+
+.inventory-formulary-view {
+  flex: 1 1 0;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.inventory-split.inventory-formulary-view {
+  align-items: stretch;
+}
+
+.inventory-formulary-view > .inventory-panel {
+  padding: var(--sp-3);
+  min-height: 0;
+}
+
+.inventory-formulary-view .inventory-form-stack {
+  gap: var(--sp-1);
+}
+
+.inventory-formulary-view .inventory-field-grid {
+  column-gap: var(--sp-3);
+  row-gap: var(--sp-2);
+}
+
+.inventory-formulary-view .inventory-panel :is(input:not([type='radio']), select) {
+  min-height: 36px;
+}
+
+.inventory-formulary-list-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.inventory-formulary-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: none;
+  overscroll-behavior: contain;
+}
+
 .inventory-workspace .inventory-heading {
   margin-bottom: var(--sp-3);
 }
@@ -210,6 +337,78 @@
   margin-bottom: var(--sp-3);
 }
 
+.inventory-log-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+  padding: var(--sp-3);
+  background: var(--sage-50);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+}
+
+.inventory-log-filter-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 3px;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-lg);
+}
+
+.inventory-log-filter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  min-height: 36px;
+  padding: 6px 10px;
+  color: var(--text-sub);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  font: 700 var(--fs-meta) var(--font);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.inventory-log-filter:hover:not([aria-pressed='true']) {
+  color: var(--text);
+  background: var(--sage-50);
+}
+
+.inventory-log-filter[aria-pressed='true'] {
+  color: var(--text-on-primary);
+  background: var(--primary);
+  box-shadow: var(--shadow-primary);
+}
+
+.inventory-log-filter-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  padding: 2px 6px;
+  color: var(--text-sub);
+  background: var(--sage-100);
+  border-radius: var(--r-pill);
+  font-size: 10px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.inventory-log-filter[aria-pressed='true'] .inventory-log-filter-count {
+  color: var(--text-on-primary);
+  background: rgba(255, 255, 255, 0.16);
+}
+
 .inventory-table .tbl :is(th, td) {
   overflow-wrap: anywhere;
 }
@@ -311,8 +510,41 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .inventory-alerts {
+    display: grid;
+    flex: 2 1 0;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+  }
+
   .inventory-split {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .inventory-split.inventory-formulary-view {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .inventory-workspace:has(.inventory-formulary-view) .vd-page-head-eyebrow,
+  .inventory-workspace:has(.inventory-formulary-view) .vd-page-head-sub {
+    display: none;
+  }
+
+  .inventory-formulary-view > .inventory-panel {
+    padding: var(--sp-2);
+  }
+
+  .inventory-formulary-view > .inventory-panel > p {
+    display: none;
+  }
+
+  .inventory-formulary-view .inventory-panel :is(input:not([type='radio']), select) {
+    min-height: 34px;
+  }
+
+  .inventory-workspace:has(.inventory-formulary-view) .inventory-nav {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 }
 
@@ -324,5 +556,14 @@
   .inventory-field-grid,
   .inventory-lookup {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .inventory-workspace:has(.inventory-formulary-view) .inventory-nav {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .inventory-split.inventory-formulary-view {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: max-content minmax(0, 1fr);
   }
 }
