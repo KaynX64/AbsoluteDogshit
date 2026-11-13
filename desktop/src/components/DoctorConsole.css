@@ -22,7 +22,13 @@
 }
 
 .doctor-console .doctor-header h1 {
-  font-size: clamp(20px, 3cqi, 29px);
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: -.035em;
+}
+
+.doctor-console .an-dashboard h1 {
+  font-size: clamp(18px, 2.2cqi, 22px);
   font-weight: 750;
   letter-spacing: -.035em;
 }
@@ -71,7 +77,7 @@
   gap: clamp(14px, 1.8cqi, 24px);
 }
 
-.app-content:has(.doctor-console[data-clinic-workspace='true']) {
+.app-content:has(.doctor-console) {
   padding-block: 14px 12px;
 }
 
@@ -83,10 +89,6 @@
 
 .doctor-console[data-clinic-workspace='true'] .doctor-heading-icon {
   width: 36px;
-}
-
-.doctor-console[data-clinic-workspace='true'] .doctor-header h1 {
-  font-size: clamp(19px, 2.4cqi, 24px);
 }
 
 .doctor-console .doctor-context {
