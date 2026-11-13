@@ -2,12 +2,17 @@
   container-type: inline-size;
   flex: 1;
   min-width: 0;
-  margin: var(--sp-4);
-  padding: var(--sp-6);
+  min-height: 0;
+  height: 100%;
+  margin: 0;
+  padding: var(--sp-4) var(--sp-5);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--r-xl);
+  border-radius: 0;
   box-shadow: var(--shadow-card);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .app-shell:has(.inventory-alerts-view, .inventory-formulary-view) {
@@ -138,7 +143,7 @@
 }
 
 .inventory-workspace .inventory-heading {
-  margin-bottom: var(--sp-5);
+  margin-bottom: var(--sp-3);
 }
 
 .inventory-heading .vd-page-head-title {
@@ -151,7 +156,7 @@
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: var(--sp-1);
-  margin-bottom: var(--sp-6);
+  margin-bottom: var(--sp-3);
   padding: var(--sp-1);
   background: var(--sage-100);
   border: 1px solid var(--border-soft);
@@ -201,6 +206,31 @@
   gap: var(--sp-2);
   margin-bottom: var(--sp-4);
   overflow-wrap: anywhere;
+}
+
+.inventory-alerts {
+  flex: 0 1 auto;
+}
+
+.inventory-alert-table {
+  max-height: min(320px, 34vh);
+}
+
+.inventory-reorder-table {
+  max-height: min(320px, 34vh);
+}
+
+.inventory-reorder-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.inventory-alerts-page {
+  min-height: 0;
+  gap: var(--sp-3) !important;
 }
 
 .inventory-split,

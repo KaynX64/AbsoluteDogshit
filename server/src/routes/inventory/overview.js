@@ -1,4 +1,5 @@
 import { pool } from '../../db/pool.js';
+import { listReorderSuggestions } from '../../inventory/pharmacyAnalytics.js';
 import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';
 
@@ -75,28 +76,7 @@ export function registerInventoryOverview(router) {
   // GET /api/inventory/reorder-suggestions
   router.get('/reorder-suggestions', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
     try {
-      const [rows] = await pool.query(
-        `SELECT m.medicine_id, m.name, m.generic_name, m.form, m.strength, m.unit, m.reorder_level,
-                COALESCE(SUM(b.quantity_on_hand), 0) AS total_stock_on_hand,
-                CASE 
-                  WHEN COALESCE(SUM(b.quantity_on_hand), 0) <= m.reorder_level 
-                  THEN GREATEST((m.reorder_level * 2) - COALESCE(SUM(b.quantity_on_hand), 0), m.reorder_level)
-                  ELSE 0 
-                END AS suggested_reorder_qty,
-                CASE 
-                  WHEN COALESCE(SUM(b.quantity_on_hand), 0) = 0 THEN 'OUT_OF_STOCK'
-                  WHEN COALESCE(SUM(b.quantity_on_hand), 0) <= m.reorder_level THEN 'CRITICAL_BUFFER'
-                  ELSE 'ADEQUATE'
-                END AS stock_status
-         FROM MEDICINES m
-         LEFT JOIN MEDICINE_BATCHES b ON m.medicine_id = b.medicine_id 
-              AND b.deleted_at IS NULL 
-              AND b.expiry_date > CURDATE()
-         WHERE m.is_active = TRUE AND m.deleted_at IS NULL
-         GROUP BY m.medicine_id, m.name, m.generic_name, m.form, m.strength, m.unit, m.reorder_level
-         ORDER BY total_stock_on_hand ASC`
-      );
-      res.json(rows);
+      res.json(await listReorderSuggestions());
     } catch (error) {
       console.error('Error computing reorder suggestions:', error);
       res.status(500).json({ error: 'Failed to calculate reorder suggestions.' });

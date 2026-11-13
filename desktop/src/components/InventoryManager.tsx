@@ -963,7 +963,8 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
 
       {/* ── ALERTS & REORDER ────────────────────────────── */}
       {activeTab === 'alerts' && (
-        <div className="inventory-alerts-view">
+        <div className="inventory-alerts-view inventory-alerts-page" style={{ display: 'flex', flexDirection: 'column' }}>
+          {/* Top row: 2 columns for Low stock lots & Expiry alerts */}
           <div className="inventory-split inventory-alerts">
             <div className="inventory-alert-panel">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -1103,7 +1104,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
             }}>
               <Icon name="trending_down" size={14} /> Automated reorder suggestions
             </h4>
-            <div className="inventory-table inventory-alert-table" tabIndex={0} role="region" aria-label="Reorder suggestions">
+            <div className="inventory-table inventory-alert-table inventory-reorder-table" tabIndex={0} role="region" aria-label="Reorder suggestions">
               <table className="tbl" style={{ fontSize: 12 }}>
                 <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
                   <tr>
@@ -1133,7 +1134,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                         textAlign: 'right', fontWeight: 700,
                         color: s.suggested_reorder_qty > 0 ? T.warning : T.textMuted,
                       }}>
-                        {s.suggested_reorder_qty > 0 ? `+${s.suggested_reorder_qty} ${s.unit}` : 'Adequate'}
+                        {s.suggested_reorder_qty > 0 ? `+${s.suggested_reorder_qty} ${s.unit}` : s.stock_status === 'OUT_OF_STOCK' ? 'Set a buffer' : 'Adequate'}
                       </td>
                     </tr>
                   ))}

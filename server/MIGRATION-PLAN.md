@@ -10,6 +10,8 @@
 - Upgrade an existing database with the migration command. The runner checks the base tables, serializes migration sessions, and records each started and completed version in `SCHEMA_MIGRATIONS`. A failure reports the migration number and prevents the new process from listening.
 - The responder and prescription-quantity steps save their backfill decisions before altering the schema. A pre-existing responder flag column is treated as already adopted so a legacy upgrade cannot overwrite an administrator's revocation. Inspect ambiguous partially upgraded installations against a known-good backup before making manual eligibility corrections.
 - Migration 004 adds the appointment status and date index for queue reads. Rehearse its DDL on a staging copy with representative appointment volume.
+- Migration 005 adds indexes for prescription issue dates and inventory movement dates. The pharmacy dashboard uses them for the rolling activity window.
+- Migration 006 adds the View incident records permission to the catalog. Limited Admins receive archive access when a Super Admin grants it. Legacy full-access admins and explicit Super Admins continue to pass the archive gate.
 
 ## Rehearsal and recovery
 

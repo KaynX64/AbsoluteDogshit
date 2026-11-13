@@ -26,12 +26,16 @@ Each API area exports a router or a factory. Feature folders compose their route
 | Profile | `self.js` for personal profile reads and edits, `clinicalHealth.js` for clinical health-profile routes, and `preferences.js` for theme and device tokens. |
 | Sync | `bootstrap.js` loads legacy or paged workstation cache data via `src/sync/bootstrapReads.js`. `replay.js` calls the transaction service in `src/sync/`, and `status.js` returns sync telemetry. |
 | Emergency | `sos.js` for SOS creation, rate limiting and dispatch notifications. `alerts.js` for live responder access, active alerts and status changes. `incidentReports/workflow.js` maps pending-report and filing requests. `src/emergency/fileIncidentReport.js` owns the filing transaction. `incidentReports/archive.js` handles archived reports and PDF download. |
-| Analytics | `dashboard.js` and `exports.js` share `src/analytics/reportQueries.js`. CSV, Excel, and PDF rendering lives in `src/analytics/reports/`. The entry point applies the shared analytics access gate. |
-| Inventory | `overview.js` for catalog, stock views and logs. `receiving.js` for deliveries. `formulary.js` for catalog writes. `stock.js` for deductions and adjustments. |
+| Analytics | `dashboard.js` and `exports.js` share `src/analytics/reportQueries.js`. The dashboard reads formulary activity and reorder priorities from `src/inventory/pharmacyAnalytics.js`. CSV, Excel, and PDF rendering lives in `src/analytics/reports/`. The entry point applies the shared analytics access gate. |
+| Inventory | `overview.js` for catalog, stock views and logs. Reorder suggestions sort by usable stock, lowest first, and use recent net dispensing and prescribing to break stock ties. `receiving.js` handles deliveries, `formulary.js` catalog writes, and `stock.js` deductions and adjustments. |
+
+Analytics summary reports fourteen MySQL calendar days for both encounter and SOS timelines. The current day is partial. `emergencyMetrics.timedClosures` distinguishes a measured zero-second closure from an empty sample. Empty diagnosis and department datasets are returned as empty arrays.
 
 Use `rg -n '<route path>' server/src/routes/<area>` to locate a handler. Feature registrars attach to the same router in the order set by `index.js`. Admin applies authentication and the ADMIN role gate before registering its routes. The server-policy router applies its own Super Admin gate.
 
 The admin directory lists archived accounts with `GET /users?archived=true`. Its audited soft archive retains clinical and audit history and blocks self-archive and archiving the last active Super Admin. The advanced health-profile editor reads `GET /users/:id/health-profile` and saves through `PUT /users/:id`. The qualified responder endpoint requires `RESPONDERS_MANAGE`, requires a Super Admin for ADMIN targets, and emits `responder:status_changed`.
+
+Super Admins can grant `INCIDENT_RECORDS_VIEW` during Limited Admin creation or by editing grants. The incident archive and both PDF routes enforce the grant for administrators. The document PDF route also serves patients their own report. Responder prefill returns the filed report ID so the popup can close when someone has already filed it.
 
 ## Handler checklist
 1. Auth (`authenticateToken` — check file top for `router.use` vs per-route) + `requireRoles(...)`.

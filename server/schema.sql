@@ -421,6 +421,7 @@ CREATE TABLE `INVENTORY_LOGS` (
   `performed_by` BIGINT NOT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX `idx_inv_rx_item` (`prescription_item_id`),
+  INDEX `idx_inv_activity_date` (`transaction_type`, `created_at`),
   CONSTRAINT `fk_inv_batch` FOREIGN KEY (`batch_id`) REFERENCES `MEDICINE_BATCHES` (`batch_id`),
   CONSTRAINT `fk_inv_user` FOREIGN KEY (`performed_by`) REFERENCES `USERS` (`user_id`)
 ) ENGINE=InnoDB;
@@ -443,6 +444,7 @@ CREATE TABLE `PRESCRIPTIONS` (
   INDEX `idx_rx_patient` (`patient_user_id`, `issued_at`),
   INDEX `idx_rx_expires` (`expires_at`),
   INDEX `idx_rx_status` (`status`),
+  INDEX `idx_rx_issued_at` (`issued_at`),
   CONSTRAINT `fk_rx_emr` FOREIGN KEY (`emr_id`) REFERENCES `EMR_RECORDS` (`emr_id`),
   CONSTRAINT `fk_rx_patient` FOREIGN KEY (`patient_user_id`) REFERENCES `USERS` (`user_id`),
   CONSTRAINT `fk_rx_doctor` FOREIGN KEY (`doctor_user_id`) REFERENCES `USERS` (`user_id`)
@@ -633,6 +635,7 @@ INSERT INTO `ADMIN_PERMISSIONS` (`code`, `name`, `description`, `sort_order`) VA
 ('RETENTION_MANAGE',  'Data retention governance', 'Retention status and statutory R.A. 10173 sweeps',       40),
 ('RESPONDERS_MANAGE', 'Manage qualified responders', 'Label any account a Qualified Responder: SOS alarms on any role, tiered alert payloads (reduced medical detail for non-clinical responders). Grant together with USERS_MANAGE — the toggle lives in the Users tab.', 45),
 ('ANALYTICS_VIEW',    'View analytics',            'Epidemiological analytics and campus health reports',   50),
+('INCIDENT_RECORDS_VIEW', 'View incident records', 'Open the emergency incident archive and view its report PDFs.', 55),
 ('DATABASE_MANAGE',   'Database Studio',           'Inspect and maintain raw system records',               60);
 
 -- Default password for all seeded accounts: 'Password123!'

@@ -3,8 +3,10 @@ import foundation from './migrations/001-foundation.js';
 import clinicalDocuments from './migrations/002-clinical-documents.js';
 import responders from './migrations/003-qualified-responders.js';
 import appointmentDayIndex from './migrations/004-appointment-day-index.js';
+import pharmacyActivityIndexes from './migrations/005-pharmacy-activity-indexes.js';
+import incidentRecordsPermission from './migrations/006-incident-records-permission.js';
 
-const migrations = [foundation, clinicalDocuments, responders, appointmentDayIndex];
+const migrations = [foundation, clinicalDocuments, responders, appointmentDayIndex, pharmacyActivityIndexes, incidentRecordsPermission];
 const requiredTables = [
   'USERS', 'ROLES', 'USER_ROLES', 'STAFF_PROFILES', 'HEALTH_PROFILES', 'EMERGENCY_ALERTS',
   'PRESCRIPTIONS', 'PRESCRIPTION_ITEMS', 'INVENTORY_LOGS', 'MEDICAL_CLEARANCES', 'AUDIT_LOGS', 'APPOINTMENTS',

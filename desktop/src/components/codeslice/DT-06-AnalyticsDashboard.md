@@ -1,43 +1,20 @@
 # DT-06 · AnalyticsDashboard.tsx
 
-Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172` · check from repo root: `python3 scripts/verify_codeslice.py desktop/src/components/codeslice .`
+[Desktop slice index](../CODESLICE.md)
 
 ## DT-06 · desktop/src/components/AnalyticsDashboard.tsx
-**LOC:** 1352 · **Anchor commit:** working tree · **Role:** Analytics dashboard: hand-rolled SVG charts (no chart lib), KPI cards, flu spike banner, theme-aware XLSX/PDF export controls
-**Mounted by:** DoctorConsole.tsx L1423 (viewMode=analytics) · AdminConsole.tsx L1679 (analytics tab, gated by ANALYTICS_VIEW)
-**API surface:** GET /api/analytics/summary (L594); GET /api/analytics/export/xlsx (L610); GET /api/analytics/export/pdf (L630, L670); GET /api/analytics/export/excel (L650)
-**Socket events:** none
-**State / key fields:** data: AnalyticsData (totalConsultations, totalStudents, emergencyMetrics, roleDistribution, timeSeries, emergencyTimeSeries, topDiagnoses, deptBreakdown, fluStats, highRiskGroups, lowStockMeds) · loading · exports: handleDownloadExcelXLSX, handleDownloadPdfReport, handleDownloadExcelXlsx, handleDownloadServerPdf (blob + anchor download) · derived: isFluSpike, getRoleTone, totalRegistered · charts: SvgLineChart, SvgVerticalBarChart, SvgHorizontalBarChart + buildSmoothPath, niceAxisStep — hand-rolled SVG, no external chart library · chart palette/chrome resolves live `T.*` tokens (svg stopColor/stroke/fill included) so every preset × mode repaints; the print-only header stays on fixed dark ink
+**LOC:** 180 · **Role:** Desktop analytics dashboard, shared by Doctor, Dentist and authorized Admin consoles.
+**API surface:** GET /api/analytics/summary; GET /api/analytics/export/excel; GET /api/analytics/export/pdf.
+**Feature modules:** `analytics/Sections.tsx` owns the four section panels and diagnosis explorer. `analytics/Charts.tsx` owns shared charts and exact-value tables. `analytics/data.ts` owns the response types and formatting. `analytics/dashboard.css` scopes dashboard and print styles.
 
 | # | Lines | Anchor | Description |
-|---|-------|--------|-------------|
-| 1 | 1-56 | interface AnalyticsData | imports; interfaces TimePoint/DiagnosisItem/DeptItem/RoleItem; AnalyticsData payload (fluStats, lowStockMeds) |
-| 2 | 58-75 | buildSmoothPath | buildSmoothPath: cubic-bezier SVG path builder for smooth line charts |
-| 3 | 77-109 | No data recorded yet. | SvgLineChart props (themeColor, gradId, emptyMessage) + empty-state placeholder |
-| 4 | 111-129 | areaPath | line geometry: maxCount/maxVal scaling, points map, smoothPath + areaPath |
-| 5 | 131-189 | my-line-path | line chart svg: gradient defs, dashed guides w/ values, area fill, gradient stroke |
-| 6 | 191-249 | Data points | point markers (filled/hollow circles), count labels, alternating x labels; svg close |
-| 7 | 251-284 | niceAxisStep | banner + niceAxisStep (1/2/5 tick ladder); SvgVerticalBarChart empty-state placeholder |
-| 8 | 286-341 | Adaptive geometry | bar geometry: minSlot tiers, canvas widens + scrolls, y ticks, label angle tiers, truncate |
-| 9 | 343-446 | my-bar-rect | bar svg: gridlines + spine, gradient bars w/ title tooltips, value pills, rotated labels |
-| 10 | 447-468 | scroll sideways to see all bars | footer: N distinct diagnoses count + sideways-scroll hint |
-| 11 | 470-501 | SvgHorizontalBarChart | dept bar chart: empty-state placeholder + row geometry (padLeft 240, barThickness 26) |
-| 12 | 503-581 | barHorizGrad | dept svg: department labels, pill track + gradient fill, value pill (N visits) |
-| 13 | 583-605 | fetchAnalytics | AnalyticsDashboard: data/loading useState; fetchAnalytics GET /api/analytics/summary; mount useEffect |
-| 14 | 607-625 | handleDownloadExcelXLSX | handleDownloadExcelXLSX: GET /api/analytics/export/xlsx → blob download .xlsx |
-| 15 | 627-645 | handleDownloadPdfReport | handleDownloadPdfReport: GET /api/analytics/export/pdf → blob download .pdf |
-| 16 | 647-665 | handleDownloadExcelXlsx | handleDownloadExcelXlsx: GET /api/analytics/export/excel → blob download .xlsx |
-| 17 | 667-686 | handleDownloadServerPdf | handleDownloadServerPdf: GET /api/analytics/export/pdf (server-rendered) + revokeObjectURL |
-| 18 | 688-717 | Loading campus epidemiological analytics | guards: loading spinner; !data error card (server not running) |
-| 19 | 719-736 | getRoleTone | derived: isFluSpike; getRoleTone per-role color/icon map; totalRegistered sum |
-| 20 | 738-758 | analytics-report-area | render root #analytics-report-area; @media print stylesheet (print-only visibility) |
-| 21 | 760-780 | print-header | print-only header: PSU Lingayen campus title, RA 10173 line, generated timestamp (fixed dark ink — paper is always light) |
-| 22 | 782-834 | Epidemiological analytics | toolbar: page head; Refresh, Export Excel .xlsx (selected-theme primary tint), Official PDF Report, Print View buttons use live theme tokens and consistent longhand borders |
-| 23 | 836-947 | KPI cards | 4 KPI cards: enrolled students, total consultations, active emergencies, avg response time |
-| 24 | 949-1008 | EPIDEMIC SURVEILLANCE | flu surveillance banner: spike alert vs stable, past/prev 7-day counts; pill |
-| 25 | 1010-1088 | Campus population & headcount by role | card 1: roleDistribution grid (getRoleTone tiles) + Total registered pill |
-| 26 | 1090-1116 | 14-day consultation volume | card 2: consultation timeline; SvgLineChart on timeSeries (primary grad) |
-| 27 | 1118-1145 | 14-day campus emergency incidents | card 3: emergency SOS timeline; SvgLineChart on emergencyTimeSeries (danger grad) |
-| 28 | 1147-1167 | Top clinical diagnoses | cards 4-5: top diagnoses SvgVerticalBarChart; dept breakdown SvgHorizontalBarChart |
-| 29 | 1169-1252 | High-risk student surveillance watchlist | card 6a: high-risk watchlist tiles asthma, hypertension, severe allergies, diabetes |
-| 30 | 1254-1349 | Critical pharmacy inventory | card 6b: lowStockMeds table (name, batch, qty, expiry; critical flags) + closers |
+|---|---|---|---|
+| 1 | 1-18 | const tabs | Imports, tab definitions, auth headers and timestamp formatting |
+| 2 | 19-31 | function PrintReport | Print portal renders all four sections from the last successful response |
+| 3 | 32-45 | export default function AnalyticsDashboard | Tab, data, freshness, refresh, and export state |
+| 4 | 46-73 | const refresh | Summary request, transient failure recovery, and access-denied state |
+| 5 | 74-88 | jumpTarget | Request cleanup and focus after an Overview shortcut |
+| 6 | 89-99 | function switchTab | Keyboard navigation and automatic tab activation |
+| 7 | 100-132 | async function download | Excel and PDF downloads and status feedback |
+| 8 | 133-161 | an-header | Toolbar, freshness and error messages, and first-load skeleton |
+| 9 | 162-180 | Analytics sections | Accessible tablist and panels, Overview shortcuts, and print portal |

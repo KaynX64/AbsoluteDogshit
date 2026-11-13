@@ -90,27 +90,12 @@ export function registerIncidentWorkflowRoutes(router, io) {
         return res.status(404).json({ error: 'Alert not found.' });
       }
 
-      const [reportRows] = await pool.query(
-        `SELECT ir.report_id, ir.alert_id, ir.resolved_at, ir.incident_details,
-                ir.treatment_notes, ir.created_at,
-                CONCAT(du.first_name, ' ', du.last_name) AS documented_by_name
-         FROM INCIDENT_REPORTS ir
-         JOIN USERS du ON ir.documented_by = du.user_id
-         WHERE ir.alert_id = ?`,
+      const [[filedReport]] = await pool.query(
+        'SELECT report_id FROM INCIDENT_REPORTS WHERE alert_id = ?',
         [alertId]
       );
 
       const a = alertRows[0];
-      const report = reportRows.length > 0
-        ? {
-            reportId: Number(reportRows[0].report_id),
-            resolvedAt: new Date(reportRows[0].resolved_at).toISOString(),
-            incidentDetails: reportRows[0].incident_details,
-            treatmentNotes: reportRows[0].treatment_notes,
-            documentedByName: reportRows[0].documented_by_name,
-            createdAt: new Date(reportRows[0].created_at).toISOString(),
-          }
-        : null;
 
       res.json({
         patient: {
@@ -130,7 +115,7 @@ export function registerIncidentWorkflowRoutes(router, io) {
           latitude: a.latitude !== null ? Number(a.latitude) : null,
           longitude: a.longitude !== null ? Number(a.longitude) : null,
         },
-        report,
+        report: filedReport ? { reportId: Number(filedReport.report_id) } : null,
       });
     } catch (error) {
       console.error('[Incident Report Fetch Error]:', error);

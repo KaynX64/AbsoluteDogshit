@@ -40,11 +40,6 @@ interface AlertPrefill {
 
 interface ExistingReport {
   reportId: number;
-  resolvedAt: string;
-  incidentDetails: string;
-  treatmentNotes: string | null;
-  documentedByName: string;
-  createdAt: string;
 }
 
 interface PrefillData {

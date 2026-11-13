@@ -1,5 +1,6 @@
 import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth/middleware.js';
+import { requireIncidentRecordsViewForAdmin } from '../../emergency/incidentRecordAccess.js';
 import { getBufferFromS3 } from '../../utils/s3Vault.js';
 import {
   generateAndStorePrescriptionPDF,
@@ -130,7 +131,7 @@ export function registerPdfRoutes(router) {
   });
 
   // GET /api/documents/incident-reports/:id/pdf
-  router.get('/incident-reports/:id/pdf', authenticateToken, async (req, res) => {
+  router.get('/incident-reports/:id/pdf', authenticateToken, requireIncidentRecordsViewForAdmin, async (req, res) => {
     const reportId = Number(req.params.id);
     if (!reportId) return res.status(400).json({ error: 'Invalid incident report id.' });
 

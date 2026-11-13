@@ -1,13 +1,19 @@
-import { listActiveRoles, listConsultationsByDepartment, listInventoryAlerts } from '../../analytics/reportQueries.js';
+import {
+  listActiveRoles,
+  listConsultationsByDepartment,
+  listInventoryAlerts,
+} from '../../analytics/reportQueries.js';
+import { getPharmacyAnalytics } from '../../inventory/pharmacyAnalytics.js';
 import { pool } from '../../db/pool.js';
 import { decrypt } from '../../utils/cryptoVault.js';
+import { getDailyTimelines } from '../../analytics/dailyTimelines.js';
 import { getDiagnosisCounts, getRiskCounts } from '../../analytics/analyticsStats.js';
 
 export function registerAnalyticsDashboard(router) {
   // 1. GET /api/analytics/summary
   router.get('/summary', async (req, res) => {
     try {
-      // 1. Total Consultations
+      // 1. All-time appointment records (legacy totalConsultations field).
       const [consultations] = await pool.query(
         'SELECT COUNT(*) as total FROM APPOINTMENTS WHERE deleted_at IS NULL'
       );
@@ -23,71 +29,16 @@ export function registerAnalyticsDashboard(router) {
       // 3. Active Emergencies & Average Response Time
       const [emergencies] = await pool.query(
         `SELECT COUNT(CASE WHEN status IN ('triggered', 'acknowledged', 'dispatched') THEN 1 END) as active,
-              COALESCE(AVG(response_time_seconds), 0) as avgResponseSeconds 
+              COALESCE(AVG(response_time_seconds), 0) AS avgResponseSeconds,
+              COUNT(response_time_seconds) AS timedClosures
        FROM EMERGENCY_ALERTS`
       );
 
       // 4. Role Distribution (Headcount per role)
       const roleDistribution = (await listActiveRoles()).map(({ code, name, count }) => ({ role_code: code, role_name: name, count }));
 
-      // 5. 14-Day Consultation Timeline
-      const [dailyTimeline] = await pool.query(
-        `SELECT date_key, label, COUNT(*) as count
-       FROM (
-         SELECT DATE_FORMAT(encounter_date, '%Y-%m-%d') as date_key,
-                DATE_FORMAT(encounter_date, '%b %d') as label
-         FROM EMR_RECORDS
-         WHERE encounter_date >= DATE_SUB(CURDATE(), INTERVAL 14 DAY) AND deleted_at IS NULL
-       ) AS timeline_sub
-       GROUP BY date_key, label
-       ORDER BY date_key ASC`
-      );
+      const { timeSeries, emergencyTimeSeries } = await getDailyTimelines();
 
-      const timelineMap = new Map(dailyTimeline.map((item) => [item.date_key, item.count]));
-      const timeSeries = [];
-      for (let i = 13; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        const dateKey = d.toISOString().split('T')[0];
-        const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        timeSeries.push({
-          date: dateKey,
-          label,
-          count: timelineMap.get(dateKey) || 0,
-        });
-      }
-
-      // 6. 14-Day Emergency SOS Incidents Timeline
-      const [dailyEmergencyTimeline] = await pool.query(
-        `SELECT date_key, label, COUNT(*) as count
-       FROM (
-         SELECT DATE_FORMAT(created_at, '%Y-%m-%d') as date_key,
-                DATE_FORMAT(created_at, '%b %d') as label
-         FROM EMERGENCY_ALERTS
-         WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
-       ) AS em_sub
-       GROUP BY date_key, label
-       ORDER BY date_key ASC`
-      );
-
-      const emergencyTimelineMap = new Map(dailyEmergencyTimeline.map((item) => [item.date_key, item.count]));
-      const emergencyTimeSeries = [];
-      for (let i = 13; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        const dateKey = d.toISOString().split('T')[0];
-        const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        emergencyTimeSeries.push({
-          date: dateKey,
-          label,
-          count: emergencyTimelineMap.get(dateKey) || 0,
-        });
-      }
-
-      // 7. Top Diagnoses (In-Memory AES-256 Decrypted Aggregation)
-      // Full distinct list — the desktop bar chart renders every diagnosis in
-      // the database (countDiagnoses itself caps the output at MAX_DISTINCT=500
-      // and the result is cached). Exports keep their own tighter slices.
       const topDiagnoses = await getDiagnosisCounts();
 
       // 8. Consultation Volume per Department
@@ -97,7 +48,7 @@ export function registerAnalyticsDashboard(router) {
       // 9. Flu / Respiratory Surveillance
       const [fluEmrs] = await pool.query(
         `SELECT diagnosis, encounter_date FROM EMR_RECORDS 
-       WHERE encounter_date >= DATE_SUB(NOW(), INTERVAL 14 DAY) AND deleted_at IS NULL`
+       WHERE encounter_date >= DATE_SUB(NOW(), INTERVAL 14 DAY) AND encounter_date <= NOW() AND deleted_at IS NULL`
       );
 
       let cases_past_7_days = 0;
@@ -134,19 +85,22 @@ export function registerAnalyticsDashboard(router) {
         total: riskProfileTotal,
       } = await getRiskCounts();
 
-    
+
       // 11. Low Stock & Near Expiry Pharmacy Batches
-      const lowStockMeds = await listInventoryAlerts(6);
+      const [lowStockMeds, { pharmacy, topPrescribedMedicines }] = await Promise.all([
+        listInventoryAlerts(6),
+        getPharmacyAnalytics(),
+      ]);
 
       res.json({
         totalConsultations: consultations[0]?.total || 0,
         totalStudents: studentCount[0]?.total_students || 0,
-        emergencyMetrics: emergencies[0] || { active: 0, avgResponseSeconds: 0 },
+        emergencyMetrics: emergencies[0] || { active: 0, avgResponseSeconds: 0, timedClosures: 0 },
         roleDistribution,
         timeSeries,
         emergencyTimeSeries,
-        topDiagnoses: topDiagnoses.length > 0 ? topDiagnoses : [{ diagnosis: 'General Health Check', count: 1 }],
-        deptBreakdown: deptBreakdown.length > 0 ? deptBreakdown : [{ department: 'BS Information Technology', consultations_count: 1 }],
+        topDiagnoses,
+        deptBreakdown,
         fluStats: { cases_past_7_days, cases_prev_7_days },
         highRiskGroups: {
           hypertension_count,
@@ -156,6 +110,8 @@ export function registerAnalyticsDashboard(router) {
           total_students_monitored: riskProfileTotal,
         },
         lowStockMeds,
+        pharmacy,
+        topPrescribedMedicines,
       });
     } catch (error) {
       console.error('[Analytics] Error computing summary:', error);

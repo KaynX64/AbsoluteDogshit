@@ -371,6 +371,38 @@ test('paged offline bootstrap drains both streams and defers changes at the wate
   assert.equal(Object.hasOwn(legacy, 'nextCursor'), false);
 });
 
+test('analytics timelines share the database calendar and empty summaries report real values', { skip }, async t => {
+  const db = await fixture(t, 1);
+  const [[clock]] = await db.query("SELECT UNIX_TIMESTAMP('2026-11-13 00:00:01') AS epoch");
+  await db.query('SET timestamp = ?', [clock.epoch]);
+  const { request } = await mountedApi(t);
+  const empty = await (await request('/analytics/summary')).json();
+  assert.deepEqual(empty.deptBreakdown, []);
+  assert.deepEqual(empty.topDiagnoses, []);
+  assert.equal(empty.emergencyMetrics.timedClosures, 0);
+  await db.query(`INSERT INTO EMR_RECORDS
+    (patient_user_id, doctor_user_id, chief_complaint, diagnosis, encounter_date, deleted_at)
+    VALUES (5, 2, '', '', '2026-11-12 23:59:59', NULL),
+           (5, 2, '', '', '2026-11-13 00:00:00', NULL),
+           (5, 2, '', '', '2026-11-13 00:00:01', NOW()),
+           (5, 2, '', '', '2026-11-14 00:00:00', NULL)`);
+  await db.query(`INSERT INTO EMERGENCY_ALERTS (user_id, location, created_at, status)
+    VALUES (5, ST_GeomFromText('POINT(0 0)', 4326), '2026-11-13 00:00:00', 'triggered')`);
+  const result = await request('/analytics/summary');
+  assert.equal(result.status, 200);
+  const data = await result.json();
+  assert.equal(data.emergencyMetrics.timedClosures, 0);
+  assert.equal(data.timeSeries.length, 14);
+  assert.deepEqual(data.timeSeries.map(day => day.date), data.emergencyTimeSeries.map(day => day.date));
+  assert.deepEqual(data.timeSeries.slice(-2).map(({ date, count, partial }) => [date, count, partial]),
+    [['2026-11-12', 1, false], ['2026-11-13', 1, true]]);
+  assert.deepEqual(data.emergencyTimeSeries.slice(-2).map(day => day.count), [0, 1]);
+  await db.query("UPDATE EMERGENCY_ALERTS SET status = 'resolved', response_time_seconds = 0");
+  const updated = await (await request('/analytics/summary')).json();
+  assert.equal(updated.emergencyMetrics.timedClosures, 1);
+  assert.equal(Number(updated.emergencyMetrics.avgResponseSeconds), 0);
+});
+
 test('analytics exports and dashboard use the shared department totals', { skip }, async t => {
   const db = await fixture(t);
   await db.query(`INSERT INTO APPOINTMENTS (patient_user_id, doctor_user_id, date_time, appointment_type, status)
@@ -396,6 +428,169 @@ test('analytics exports and dashboard use the shared department totals', { skip 
   const pdf = await request('/analytics/export/pdf');
   assert.equal(pdf.status, 200);
   assert.equal(Buffer.from(await pdf.arrayBuffer()).subarray(0, 4).toString(), '%PDF');
+});
+
+test('reorder suggestions put the lowest usable stock ahead of prescription demand', { skip }, async t => {
+  const db = await fixture(t);
+  await db.query(`INSERT INTO MEDICINES (medicine_id, name, generic_name, form, strength, unit, is_active)
+    VALUES (1, 'Top demand', 'Fixture 1', 'Tablet', '10 mg', 'pcs', TRUE),
+           (2, 'Expired only', 'Fixture 2', 'Tablet', '10 mg', 'pcs', TRUE),
+           (3, 'Low stock', 'Fixture 3', 'Tablet', '10 mg', 'pcs', TRUE),
+           (4, 'Low stock with demand', 'Fixture 4', 'Tablet', '10 mg', 'pcs', TRUE),
+           (5, 'No batches', 'Fixture 5', 'Tablet', '10 mg', 'pcs', TRUE),
+           (6, 'Second highest demand', 'Fixture 6', 'Tablet', '10 mg', 'pcs', TRUE),
+           (7, 'Inactive', 'Fixture 7', 'Tablet', '10 mg', 'pcs', FALSE)`);
+  await db.query(`INSERT INTO MEDICINE_BATCHES (medicine_id, batch_no, manufacture_date, expiry_date, quantity_on_hand, deleted_at)
+    VALUES (1, 'a', CURDATE() - INTERVAL 1 YEAR, CURDATE() + INTERVAL 1 MONTH, 100, NULL),
+           (1, 'b', CURDATE() - INTERVAL 1 YEAR, CURDATE() + INTERVAL 1 MONTH, 20, NULL),
+           (2, 'c', CURDATE() - INTERVAL 1 YEAR, CURDATE() - INTERVAL 1 DAY, 200, NULL),
+           (3, 'd', CURDATE() - INTERVAL 1 YEAR, CURDATE() + INTERVAL 1 MONTH, 3, NULL),
+           (4, 'e', CURDATE() - INTERVAL 1 YEAR, CURDATE() + INTERVAL 1 MONTH, 3, NULL),
+           (4, 'f', CURDATE() - INTERVAL 1 YEAR, CURDATE() + INTERVAL 1 MONTH, 50, NOW()),
+           (6, 'g', CURDATE() - INTERVAL 1 YEAR, CURDATE() + INTERVAL 1 MONTH, 20, NULL)`);
+  await db.query(`INSERT INTO EMR_RECORDS (emr_id, patient_user_id, doctor_user_id, chief_complaint, diagnosis)
+    VALUES (1, 5, 2, 'fixture complaint', 'fixture diagnosis')`);
+  await db.query(`INSERT INTO PRESCRIPTIONS
+    (prescription_id, emr_id, patient_user_id, doctor_user_id, expires_at, qr_token, status)
+    VALUES (1, 1, 5, 2, CURDATE(), 'reorder-active', 'active'),
+           (2, 1, 5, 2, CURDATE(), 'reorder-cancelled', 'cancelled')`);
+  await db.query(`INSERT INTO PRESCRIPTION_ITEMS (prescription_id, medicine_id, dosage, frequency, duration_days, quantity_prescribed)
+    VALUES (1, 1, 'fixture', 'fixture', 1, 200), (1, 6, 'fixture', 'fixture', 1, 40),
+           (1, 4, 'fixture', 'fixture', 1, 5), (2, 3, 'fixture', 'fixture', 1, 500)`);
+
+  const { request } = await mountedApi(t);
+  const summary = await request('/analytics/summary');
+  assert.equal(summary.status, 200);
+  assert.deepEqual((await summary.json()).topPrescribedMedicines.map(row => row.medicine_id), [1, 6, 4]);
+
+  const response = await request('/inventory/reorder-suggestions', { userId: 3, roles: ['NURSE'] });
+  assert.equal(response.status, 200);
+  const suggestions = await response.json();
+  assert.deepEqual(suggestions.map(row => row.medicine_id), [2, 5, 4, 3, 6, 1]);
+  assert.deepEqual(suggestions.map(row => Number(row.total_stock_on_hand)), [0, 0, 3, 3, 20, 120]);
+  assert.equal(suggestions[0].stock_status, 'OUT_OF_STOCK');
+  assert.equal(Number(suggestions[2].suggested_reorder_qty), 27);
+});
+
+test('pharmacy analytics separates recent dispensing, returns, intent and reorder priorities', { skip }, async t => {
+  const db = await fixture(t);
+  const { request } = await mountedApi(t);
+  await db.query(`INSERT INTO MEDICINES (medicine_id, name, generic_name, form, strength, unit, is_active)
+    VALUES (1, 'Uncollected', 'Fixture 1', 'Tablet', '10 mg', 'pcs', TRUE),
+           (2, 'Recently dispensed', 'Fixture 2', 'Tablet', '10 mg', 'pcs', TRUE),
+           (3, 'Reversed', 'Fixture 3', 'Tablet', '10 mg', 'pcs', TRUE),
+           (4, 'Historical demand', 'Fixture 4', 'Tablet', '10 mg', 'pcs', TRUE),
+           (5, 'Never prescribed', 'Fixture 5', 'Tablet', '10 mg', 'pcs', TRUE),
+           (6, 'Returned this window', 'Fixture 6', 'Tablet', '10 mg', 'pcs', TRUE),
+           (7, 'Inactive', 'Fixture 7', 'Tablet', '10 mg', 'pcs', FALSE)`);
+  const initial = await request('/analytics/summary');
+  assert.equal(initial.status, 200);
+  const initialPharmacy = (await initial.json()).pharmacy;
+  assert.equal(initialPharmacy.dispensing.length, 6);
+  assert.ok(initialPharmacy.dispensing.every(row => Number(row.net_dispensed) === 0));
+  assert.equal(initialPharmacy.reorderPriorities.length, 6);
+
+  await db.query(`INSERT INTO MEDICINE_BATCHES (batch_id, medicine_id, batch_no, manufacture_date, expiry_date, quantity_on_hand)
+    VALUES (1, 1, 'a', CURDATE() - INTERVAL 1 YEAR, CURDATE() + INTERVAL 1 MONTH, 120),
+           (2, 2, 'b', CURDATE() - INTERVAL 1 YEAR, CURDATE() + INTERVAL 1 MONTH, 40),
+           (3, 2, 'c', CURDATE() - INTERVAL 1 YEAR, CURDATE() - INTERVAL 1 DAY, 50),
+           (4, 3, 'd', CURDATE() - INTERVAL 1 YEAR, CURDATE() + INTERVAL 1 MONTH, 12),
+           (5, 4, 'e', CURDATE() - INTERVAL 1 YEAR, CURDATE() + INTERVAL 1 MONTH, 100),
+           (6, 6, 'f', CURDATE() - INTERVAL 1 YEAR, CURDATE() + INTERVAL 1 MONTH, 25)`);
+  await db.query(`INSERT INTO EMR_RECORDS (emr_id, patient_user_id, doctor_user_id, chief_complaint, diagnosis)
+    VALUES (1, 5, 2, 'fixture complaint', 'fixture diagnosis')`);
+  await db.query(`INSERT INTO PRESCRIPTIONS
+    (prescription_id, emr_id, patient_user_id, doctor_user_id, issued_at, expires_at, qr_token, status)
+    VALUES (1, 1, 5, 2, NOW(), CURDATE(), 'pharmacy-active', 'active'),
+           (2, 1, 5, 2, NOW(), CURDATE(), 'pharmacy-cancelled', 'cancelled'),
+           (3, 1, 5, 2, NOW() - INTERVAL 15 DAY, CURDATE(), 'pharmacy-historical', 'expired')`);
+  await db.query(`INSERT INTO PRESCRIPTION_ITEMS
+    (item_id, prescription_id, medicine_id, dosage, frequency, duration_days, quantity_prescribed, quantity_dispensed)
+    VALUES (1, 1, 1, 'fixture', 'fixture', 1, 90, 0),
+           (2, 1, 2, 'fixture', 'fixture', 1, 30, 10),
+           (3, 2, 3, 'fixture', 'fixture', 1, 8, 8),
+           (4, 3, 4, 'fixture', 'fixture', 1, 700, 500),
+           (5, 3, 6, 'fixture', 'fixture', 1, 7, 7)`);
+  await db.query(`INSERT INTO INVENTORY_LOGS (batch_id, prescription_item_id, quantity_change, transaction_type, performed_by, created_at)
+    VALUES (2, 2, -6, 'dispense', 2, NOW()), (3, 2, -4, 'dispense', 2, NOW()),
+           (2, NULL, -2, 'dispense', 3, NOW()), (2, 2, 3, 'return', 2, NOW()),
+           (2, NULL, -12, 'return', 3, NOW()), (2, NULL, 100, 'receive', 3, NOW()),
+           (4, 3, -8, 'dispense', 2, NOW()), (4, 3, 8, 'return', 2, NOW()),
+           (5, 4, -500, 'dispense', 2, NOW() - INTERVAL 15 DAY),
+           (6, 5, -7, 'dispense', 2, NOW() - INTERVAL 15 DAY), (6, 5, 7, 'return', 2, NOW())`);
+
+  const response = await request('/analytics/summary');
+  assert.equal(response.status, 200);
+  const { pharmacy, topPrescribedMedicines } = await response.json();
+  assert.equal(pharmacy.windowDays, 14);
+  assert.deepEqual(topPrescribedMedicines.map(row => row.medicine_id), [1, 2]);
+  assert.deepEqual(pharmacy.dispensing.map(row => [
+    row.medicine_id, Number(row.quantity_prescribed), Number(row.quantity_dispensed),
+    Number(row.quantity_returned), Number(row.net_dispensed),
+  ]), [
+    [2, 30, 12, 3, 9], [3, 0, 8, 8, 0], [6, 0, 0, 7, -7],
+    [1, 90, 0, 0, 0], [4, 0, 0, 0, 0], [5, 0, 0, 0, 0],
+  ]);
+  const nurseResponse = await request('/inventory/reorder-suggestions', { userId: 3, roles: ['NURSE'] });
+  assert.equal(nurseResponse.status, 200);
+  const nursePriorities = (await nurseResponse.json()).filter(row => row.stock_status !== 'ADEQUATE');
+  assert.deepEqual(pharmacy.reorderPriorities.map(row => row.medicine_id), [5, 3]);
+  assert.deepEqual(
+    pharmacy.reorderPriorities.map(({ medicine_id, total_stock_on_hand, suggested_reorder_qty }) =>
+      [medicine_id, total_stock_on_hand, suggested_reorder_qty]),
+    nursePriorities.map(({ medicine_id, total_stock_on_hand, suggested_reorder_qty }) =>
+      [medicine_id, total_stock_on_hand, suggested_reorder_qty]),
+  );
+});
+
+test('a Super Admin can grant and revoke incident archive access while responder and patient access still works', { skip }, async t => {
+  const db = await fixture(t);
+  await db.query(`INSERT INTO EMERGENCY_ALERTS (alert_id, user_id, location, created_at, resolved_at, status)
+    VALUES (1, 5, ST_GeomFromText('POINT(0 0)', 4326), NOW() - INTERVAL 1 MINUTE, NOW(), 'resolved')`);
+  await db.query(`INSERT INTO INCIDENT_REPORTS (report_id, alert_id, patient_user_id, documented_by, resolved_at, incident_details, pdf_s3_key)
+    VALUES (1, 1, 5, 4, NOW(), 'Fixture archived narrative', 'incident-reports/fixture.pdf')`);
+  const { s3 } = await import('../src/utils/s3Vault.js');
+  t.mock.method(s3, 'send', async () => ({ Body: [Buffer.from('%PDF fixture')] }));
+  const { request } = await mountedApi(t);
+  const superAdmin = { userId: 1, roles: ['ADMIN'] };
+  const catalog = await request('/admin/permissions', superAdmin);
+  assert.ok((await catalog.json()).permissions.some(permission => permission.code === 'INCIDENT_RECORDS_VIEW'));
+
+  const create = await request('/admin/users', {
+    ...superAdmin, method: 'POST', json: {
+      first_name: 'Fixture', last_name: 'Reviewer', email: 'fixture-reviewer@example.test',
+      password: 'Z7!aQ3#rT9%w', role_code: 'ADMIN', admin_permissions: ['INCIDENT_RECORDS_VIEW'],
+    },
+  });
+  const created = await create.json();
+  assert.equal(create.status, 201, created.error);
+  const reviewer = { userId: created.userId, roles: ['ADMIN'] };
+  const paths = ['/emergency/incident-reports', '/emergency/incident-reports/1/pdf', '/documents/incident-reports/1/pdf'];
+  for (const path of paths) {
+    const response = await request(path, reviewer);
+    assert.equal(response.status, 200, path);
+    if (path.endsWith('/pdf')) assert.equal(await response.text(), '%PDF fixture');
+    else assert.equal((await response.json())[0].reportId, 1);
+  }
+
+  const revoke = await request(`/admin/users/${created.userId}/permissions`, {
+    ...superAdmin, method: 'PUT', json: { admin_permissions: ['USERS_MANAGE'] },
+  });
+  assert.equal(revoke.status, 200, await revoke.text());
+  for (const path of paths) {
+    const response = await request(path, reviewer);
+    assert.equal(response.status, 403, path);
+    assert.equal((await response.json()).requiredPermission, 'INCIDENT_RECORDS_VIEW');
+  }
+  const legacyAdmin = await request('/emergency/incident-reports', superAdmin);
+  assert.equal(legacyAdmin.status, 200);
+  await legacyAdmin.json();
+  const patientPdf = await request('/documents/incident-reports/1/pdf', { userId: 5, roles: ['STUDENT'] });
+  assert.equal(patientPdf.status, 200);
+  assert.equal(await patientPdf.text(), '%PDF fixture');
+  const prefill = await request('/emergency/1/incident-report', { userId: 4, roles: ['EMERGENCY_RESPONDER'] });
+  assert.equal(prefill.status, 200);
+  assert.deepEqual((await prefill.json()).report, { reportId: 1 });
 });
 
 test('concurrent incident filing publishes a single report after commit', { skip }, async t => {
