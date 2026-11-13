@@ -12,13 +12,9 @@ Sibling of this directory's `AGENTS.md`. Each desktop monolith has its own slice
 
 | ID | File | LOC | Commit | Map | Role |
 |---|------|-----|--------|-----|------|
-| DT-01 | `desktop/src/components/DoctorConsole.tsx` | 3918 | 6710f4f | `codeslice/DT-01-DoctorConsole-parts/` | Doctor/Dentist EMR console: consultation queue, encounters, e-Rx, clearances, dental chart, immunizations |
-<<<<<<< Updated upstream
-| DT-02 | `desktop/src/components/AdminConsole.tsx` | 3364 | working tree | `codeslice/DT-02-AdminConsole-parts/` | Admin console: account roles, staff analytics permissions, profile editor, audit, telemetry, analytics, DB Studio |
-| DT-03 | `desktop/src/components/NurseConsole.tsx` | 1941 | fb9688d | `codeslice/DT-03-NurseConsole.md` | Nurse console: live triage queue, expected-arrivals check-in, active SOS alert handling, inventory stat tiles |
-=======
-| DT-03 | `desktop/src/components/NurseConsole.tsx` | 1943 | working tree | `codeslice/DT-03-NurseConsole.md` | Nurse console: triage, arrivals, active SOS alerts, inventory, and scoped analytics |
->>>>>>> Stashed changes
+| DT-01 | `desktop/src/components/DoctorConsole.tsx` | 3953 | 6710f4f | `codeslice/DT-01-DoctorConsole-parts/` | Doctor/Dentist EMR console: consultation queue, encounters, e-Rx, clearances, dental chart, immunizations |
+| DT-02 | `desktop/src/components/AdminConsole.tsx` | 3374 | working tree | `codeslice/DT-02-AdminConsole-parts/` | Admin console: account roles, active/archived accounts, staff analytics permissions, profile editor, audit, telemetry, analytics, DB Studio |
+| DT-03 | `desktop/src/components/NurseConsole.tsx` | 1944 | working tree | `codeslice/DT-03-NurseConsole.md` | Nurse console: live triage queue, expected arrivals, active SOS alerts, station metrics, inventory, and scoped analytics |
 | DT-04 | `desktop/src/components/InventoryManager.tsx` | 1464 | ed2c817 | `codeslice/DT-04-InventoryManager.md` | Medicine inventory: FEFO catalog/dispense, stock-in, adjust-dispose, alerts, logs, formulary CRUD |
 | DT-05 | `desktop/src/components/QrIntakeScanner.tsx` | 1440 | ee8bbe5 | `codeslice/DT-05-QrIntakeScanner.md` | QR intake desk: webcam/file QR verification, ID search, triage vitals, appointment check-in, walk-in tickets; follows active theme |
 | DT-06 | `desktop/src/components/AnalyticsDashboard.tsx` | 225 | working tree | `codeslice/DT-06-AnalyticsDashboard.md` | Scoped analytics shell and report actions |

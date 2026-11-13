@@ -281,6 +281,7 @@ export default function DoctorConsole({
   const workspaceStart = useRef<HTMLDivElement>(null);
   const encounterFileInput = useRef<HTMLInputElement>(null);
   const [clearancePurpose, setClearancePurpose] = useState('');
+  const [clearancePurposeOther, setClearancePurposeOther] = useState('');
   const [clearanceRemarks, setClearanceRemarks] = useState('');
   const [isIssuingClearance, setIsIssuingClearance] = useState(false);
   const [clearanceExpiryDate, setClearanceExpiryDate] = useState('');
@@ -471,6 +472,7 @@ export default function DoctorConsole({
     setSelectedApp(app);
     setClearanceConfirmation(false);
     setClearancePurpose('');
+    setClearancePurposeOther('');
     setClearanceRemarks('');
     setClearanceExpiryDate('');
 
@@ -1093,8 +1095,10 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
     ...(isDentist ? [{ label: 'Dental chart', value: Object.values(dentalChartData)
       .filter(({ condition }) => condition !== 'sound').map(({ number, condition }) => 'Tooth ' + number + ' · ' + condition).join('\n') }] : []),
   ];
+  const finalClearancePurpose =
+    clearancePurpose === 'Other' ? clearancePurposeOther.trim() : clearancePurpose.trim();
   const clearanceFields: ReviewField[] = [
-    { label: 'Purpose', value: clearancePurpose.trim(), input: 'clearance-purpose', error: clearancePurpose.trim() ? undefined : 'Select a purpose.' },
+    { label: 'Purpose', value: finalClearancePurpose, input: 'clearance-purpose', error: finalClearancePurpose ? undefined : 'Enter a purpose.' },
     { label: 'Clinical fitness statement', value: clearanceRemarks.trim(), input: 'clearance-remarks', error: clearanceRemarks.trim() ? undefined : 'Enter a clinical fitness statement.' },
     { label: 'Expiry date', value: clearanceExpiryDate, input: 'clearance-expiry', error: clearanceExpiryDate ? undefined : 'Enter an expiry date.' },
   ];
@@ -1114,7 +1118,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
         body: JSON.stringify({
           user_id: selectedApp.patient_id,
           appointment_id: selectedApp.appointment_id,
-          purpose: clearancePurpose.trim(),
+          purpose: finalClearancePurpose,
           remarks: clearanceRemarks.trim(),
           expires_at: clearanceExpiryDate,
         }),
@@ -2328,6 +2332,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                   <div>
                     <label
+                      htmlFor="clearance-purpose"
                       style={{
                         display: 'block',
                         fontSize: 12,
@@ -2341,7 +2346,10 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                     <select
                       id="clearance-purpose" value={clearancePurpose}
                       disabled={isArchivedMode}
-                      onChange={(e) => setClearancePurpose(e.target.value)}
+                      onChange={(e) => {
+                        setClearancePurpose(e.target.value);
+                        if (e.target.value !== 'Other') setClearancePurposeOther('');
+                      }}
                       style={inputStyle}
                     >
                       <option value="">Select a purpose</option>
@@ -2357,8 +2365,35 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                       <option value="Annual Campus Physical Examination">
                         Annual Campus Physical Examination
                       </option>
+                      <option value="Other">Other</option>
                     </select>
                   </div>
+                  {clearancePurpose === 'Other' && (
+                    <div>
+                      <label
+                        htmlFor="clearance-purpose-other"
+                        style={{
+                          display: 'block',
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color: T.textSub,
+                          marginBottom: 6,
+                        }}
+                      >
+                        Specify purpose
+                      </label>
+                      <input
+                        id="clearance-purpose-other"
+                        type="text"
+                        value={clearancePurposeOther}
+                        onChange={(e) => setClearancePurposeOther(e.target.value)}
+                        maxLength={100}
+                        placeholder="Enter clearance purpose"
+                        disabled={isArchivedMode}
+                        style={inputStyle}
+                      />
+                    </div>
+                  )}
 
                   <div>
                     <div

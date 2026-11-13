@@ -642,6 +642,10 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
   const handleSaveUserProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
+    if (
+      adminPasswordInput.trim() &&
+      !window.confirm('The temporary password has not been applied. Save profile changes without changing the password?')
+    ) return;
     // Adjusted manage-user-account feature: protected administrator accounts
     // are read-only for limited admins (the server 403s any write anyway).
     if (editingProtectedAdmin) {
@@ -798,6 +802,12 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       alert('Password must be at least 8 characters long.');
       return;
     }
+    const accountLabel = editingUser.name
+      || [editingUser.first_name, editingUser.last_name].filter(Boolean).join(' ')
+      || `account #${editingUser.id}`;
+    if (!window.confirm(
+      `Reset the password for ${accountLabel} now? This immediately replaces the current password with the temporary password entered.`
+    )) return;
     const token = localStorage.getItem('valetudo_token');
     try {
       const res = await fetch(`${API_BASE_URL}/api/admin/users/${editingUser.id}/reset-password`, {
