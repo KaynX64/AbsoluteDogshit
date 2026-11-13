@@ -5,7 +5,7 @@
 ## DT-06 · desktop/src/components/AnalyticsDashboard.tsx
 **LOC:** 225 · **Role:** Scoped desktop analytics for Doctor, Dentist, Nurse, and authorized Admin consoles.
 **API surface:** GET /api/analytics/summary, /by-department, /report-access, /export/excel, and /export/pdf.
-**Feature modules:** `analytics/tabs/` owns the section panels and drill-downs. `analytics/Charts.tsx` owns shared charts and exact-value tables. `analytics/data.ts` owns snapshot types and formatting. `analytics/PrintReport.tsx` renders the authorized print snapshot.
+**Feature modules:** `analytics/tabs/` owns the section panels and drill-downs. `analytics/Charts.tsx` owns shared charts and exact-value tables. `analytics/data.ts` owns snapshot types and formatting. `analytics/PrintReport.tsx` renders the authorized print snapshot. `analytics/dashboard.css` owns the shared styles; its `--an-base` fluid root font (clamp on `vw`) plus em-relative sizes makes fonts, spacing and charts scale with the window/resolution.
 
 | # | Lines | Anchor | Description |
 |---|---|---|---|

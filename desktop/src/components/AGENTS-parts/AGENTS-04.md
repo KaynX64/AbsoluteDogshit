@@ -8,7 +8,7 @@
 ### AnalyticsDashboard.tsx — read-only dashboard and exports
 - **Slice map:** `codeslice/DT-06-AnalyticsDashboard.md`.
 - Overview, Clinical Activity, Campus Health, and Pharmacy share one scoped summary. Clinical separates diagnosis rankings from aggregate surveillance and risk counts. Pharmacy separates dispensing with availability from inventory details. Window focus refreshes the snapshot and its permissions, clears revoked subsections and their drill-downs, and restores tab focus when a focused control disappears. Transient failures keep the last successful response.
-- Excel and PDF use the server export endpoints. Print dashboard checks current report access before creating a print portal. Shared charts, tables, section panels, and styles live in `analytics/`.
+- Excel and PDF use the server export endpoints. Print dashboard checks current report access before creating a print portal. Shared charts, tables, section panels, and styles live in `analytics/`. `analytics/dashboard.css` sizes everything from a fluid `--an-base` (em-relative fonts, gaps and chart heights), so the dashboard grows on large/high-resolution windows and shrinks on compact ones; keep new sizes em-relative.
 ### CreateUserModal.tsx — 726 lines. Create account (+ optional Qualified Responder label)
 - **Slice map:** `codeslice/DT-10-CreateUserModal.md` (21 slices, verified @ 93b4172).
 - Permission catalog L118, submit L164 → `POST /api/admin/users` L186 (returns `userId`). `togglePerm` L150.
