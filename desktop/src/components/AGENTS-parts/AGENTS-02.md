@@ -14,7 +14,9 @@
 - BMI: consult form computes `bmi`/`bmiCategory` client-side from height/weight; header also shows appointment-supplied `bmi`/`bmi_category`.
 - Layout anchors: `doctor-context`, `doctor-roster`, `doctor-workspace-switch`, `doctor-encounter-panel`, `doctor-encounter-actions`, `doctor-document-panel` and `doctor-dental-panel`.
 
-### AdminConsole.tsx — 3,054 lines. Users, audit, telemetry, analytics, DB Studio
+### AdminConsole.tsx — Users, audit, telemetry, analytics, DB Studio
+
+- The Edit account modal mounts `StaffAnalyticsPermissions.tsx` for Super Admins editing a nurse, doctor or dentist. Its save action applies analytics permissions independently of profile changes. Select Use role defaults and save to remove an override.
 - **Slice map:** `codeslice/DT-02-AdminConsole-parts/` (59 slices, 2 parts, verified @ 93b4172).
 - Exports: `AdminTab` L83 (`'users'|'audit'|'telemetry'|'analytics'|'db'`), component L92. Props `activeTab`/`onTabChange` (App.tsx).
 - Permission gate: `fetchMyPermissions` uses `GET /api/admin/my-permissions` on mount and window focus. Restricted tabs render `NoPermissionPanel`. `INCIDENT_RECORDS_VIEW` controls the Incident Records view and its sidebar entry. Server Policy requires a Super Admin.

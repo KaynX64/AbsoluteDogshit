@@ -12,6 +12,9 @@
 - Migration 004 adds the appointment status and date index for queue reads. Rehearse its DDL on a staging copy with representative appointment volume.
 - Migration 005 adds indexes for prescription issue dates and inventory movement dates. The pharmacy dashboard uses them for the rolling activity window.
 - Migration 006 adds the View incident records permission to the catalog. Limited Admins receive archive access when a Super Admin grants it. Legacy full-access admins and explicit Super Admins continue to pass the archive gate.
+- Migration 007 adds Operations, Clinical, Pharmacy, Headcount, and Export analytics permissions. Existing Limited Admins with View analytics receive Headcount once. Super Admins can grant additional analytics access in account settings. Deploy the server and desktop together because the analytics summary now returns scoped blocks.
+- The clinical and pharmacy workflow refinement uses the existing grants. Surveillance and Dispensing are derived scopes. Deploy the server and desktop together for the nested summary changes. This refinement adds no migration.
+- Migration 008 creates the staff analytics settings table. It leaves the table empty so nurses, doctors and dentists inherit their existing defaults. Apply migration 008 before serving analytics with the updated server.
 
 ## Rehearsal and recovery
 

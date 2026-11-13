@@ -22,6 +22,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import QrIntakeScanner from './QrIntakeScanner';
 import InventoryManager from './InventoryManager';
+import AnalyticsDashboard from './AnalyticsDashboard';
 import { subscribeToDesktopEvents, useDesktopSocket } from '../services/desktopRealtime';
 import { API_BASE_URL } from '../config/api';
 import { CLIENT_INSTANCE_ID } from '../services/clientInstance';
@@ -93,7 +94,7 @@ interface ActiveTicket {
   doctor_name: string;
 }
 
-export type NurseViewMode = 'triage' | 'expected' | 'inventory';
+export type NurseViewMode = 'triage' | 'expected' | 'inventory' | 'analytics';
 
 interface NurseConsoleProps {
   viewMode?: NurseViewMode;
@@ -1191,7 +1192,7 @@ export default function NurseConsole({
      INVENTORY — same full-bleed manager, plus a safety strip so an
      incoming SOS is never invisible while stock work is open.
      ═══════════════════════════════════════════════════════════ */
-  if (viewMode === 'inventory') {
+  if (viewMode === 'inventory' || viewMode === 'analytics') {
     return (
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <style>{NURSE_CSS}</style>
@@ -1231,7 +1232,7 @@ export default function NurseConsole({
             )}
           </div>
         )}
-        <InventoryManager initialTab={selectedInvTab} />
+        {viewMode === 'analytics' ? <AnalyticsDashboard /> : <InventoryManager initialTab={selectedInvTab} />}
       </div>
     );
   }

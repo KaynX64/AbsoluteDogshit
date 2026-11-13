@@ -5,8 +5,10 @@ import responders from './migrations/003-qualified-responders.js';
 import appointmentDayIndex from './migrations/004-appointment-day-index.js';
 import pharmacyActivityIndexes from './migrations/005-pharmacy-activity-indexes.js';
 import incidentRecordsPermission from './migrations/006-incident-records-permission.js';
+import analyticsScopes from './migrations/007-analytics-scopes.js';
+import staffAnalyticsPermissions from './migrations/008-staff-analytics-permissions.js';
 
-const migrations = [foundation, clinicalDocuments, responders, appointmentDayIndex, pharmacyActivityIndexes, incidentRecordsPermission];
+const migrations = [foundation, clinicalDocuments, responders, appointmentDayIndex, pharmacyActivityIndexes, incidentRecordsPermission, analyticsScopes, staffAnalyticsPermissions];
 const requiredTables = [
   'USERS', 'ROLES', 'USER_ROLES', 'STAFF_PROFILES', 'HEALTH_PROFILES', 'EMERGENCY_ALERTS',
   'PRESCRIPTIONS', 'PRESCRIPTION_ITEMS', 'INVENTORY_LOGS', 'MEDICAL_CLEARANCES', 'AUDIT_LOGS', 'APPOINTMENTS',

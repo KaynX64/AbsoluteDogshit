@@ -48,7 +48,10 @@ export async function getAdminPermissionCodes(userId, connection = pool) {
  *   isSuper = false → limited to `codes` (never includes SUPER_ADMIN)
  */
 export async function resolveAdminPermissions(userId, connection = pool) {
-  const codes = await getAdminPermissionCodes(userId, connection);
+  return classifyAdminPermissions(await getAdminPermissionCodes(userId, connection));
+}
+
+export function classifyAdminPermissions(codes) {
   const isSuper = codes.length === 0 || codes.includes('SUPER_ADMIN');
   return { isSuper, codes: isSuper ? ['SUPER_ADMIN'] : codes.filter((c) => c !== 'SUPER_ADMIN') };
 }
