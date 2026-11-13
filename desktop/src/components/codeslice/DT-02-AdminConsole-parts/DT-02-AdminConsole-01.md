@@ -4,7 +4,7 @@
 Desktop component slice map · [index](../../CODESLICE.md) · base commit `93b4172` · check from repo root: `python3 scripts/verify_codeslice.py desktop/src/components/codeslice .`
 
 ## DT-02 · desktop/src/components/AdminConsole.tsx
-**LOC:** 3332 · **Anchor base:** 2727901 + current changes · **Role:** Admin console: roles management, active/archived account tabs and archive actions, qualified-responder flag, profile editor, audit, telemetry, analytics, Server Policy, and DB Studio
+**LOC:** 3369 · **Anchor base:** 2727901 + current changes · **Role:** Admin console: roles management, active/archived account tabs and archive actions, qualified-responder flag, profile editor, audit, telemetry, analytics, Server Policy, and DB Studio
 **Mounted by:** desktop/src/App.tsx (import L5; mounted L965 when activeRoleView === 'ADMIN', controlled via adminTab/onTabChange)
 **API surface:** GET /api/admin/users (L189) · GET /api/admin/users?archived=true (L202) · GET /api/admin/my-permissions (L222) · GET /api/admin/permissions (L241) · GET /api/admin/audit-logs (L284) · GET /api/admin/phi-access-logs (L296) · GET /api/privacy/retention/status (L307) · GET /api/admin/telemetry (L317) · POST /api/privacy/retention/sweep (L329) · GET+PUT /api/profile/patient/:id/immunizations (L521/L672) · GET /api/admin/users/:id/health-profile (L539) · DELETE /api/admin/users/:id archives account while retaining clinical/audit history (L448) · PUT /api/admin/users/:id (L645) · PUT /api/admin/users/:id/qualified-responder (L687) · PUT /api/admin/users/:id/permissions (L722) · POST /api/admin/users/:id/reset-password (L763) · GET /api/admin/db/tables (L783) · GET /api/admin/db/tables/:table (L799) · POST/PUT/DELETE /api/admin/db/tables/:table/rows (L847/L855/L880) · ServerPolicyPanel uses GET/PUT /api/admin/server-policy and POST /api/admin/server-policy/preview
 **Socket events:** none (SOCKET_URL imported L8 but never used; L1483 is only a static KPI label Socket.IO gateway)
@@ -35,6 +35,6 @@ db studio: dbTablesList, selectedDbTable, tableSchema, tableRows, tablePage/Tota
 | 16 | 443-512 | handleArchiveUser | handleArchiveUser: confirmed DELETE /api/admin/users/:id; keeps audit/clinical history and updates list feedback; handleOpenEditModal seeds profile editor |
 | 17 | 513-587 | fetchUserVaccinesForAdmin | fetchUserVaccinesForAdmin GET immunizations; fetchEditHealthProfile GET users/:id/health-profile |
 | 18 | 588-609 | handleEditModeSwitch | handleEditModeSwitch lazy-loads health record on Advanced; vaccine add/remove handlers |
-| 19 | 610-660 | handleSaveUserProfile | handleSaveUserProfile: guards (protected admin, empty limited perms); builds health_profile payload |
+| 19 | 641-648 | handleSaveUserProfile | profile-save guard confirms when a typed temporary password will not be applied |
 | 20 | 661-694 | role_code | PUT /api/admin/users/:id with role_code + sub-profile fields; then PUT immunizations |
 | 21 | 695-722 | qualified-responder | PUT users/:id/qualified-responder when flag/note changed; partial-success warning on failure |

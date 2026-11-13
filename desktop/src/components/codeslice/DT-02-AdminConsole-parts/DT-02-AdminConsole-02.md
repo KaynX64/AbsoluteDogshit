@@ -1,6 +1,6 @@
 <!-- split from desktop/src/components/codeslice/DT-02-AdminConsole.md — part 02 of 02 -->
 | 22 | 723-759 | admin_permissions | PUT users/:id/permissions (super-only, admin_permissions); refetch users + health; close modal |
-| 23 | 760-787 | handleAdminResetPassword | handleAdminResetPassword: POST users/:id/reset-password (newPassword, min 8 chars) |
+| 23 | 795-828 | handleAdminResetPassword | handleAdminResetPassword: validates and confirms before POST users/:id/reset-password (newPassword, min 8 chars) |
 | 24 | 788-837 | fetchDbTables | fetchDbTables GET db/tables; fetchTableData GET db/tables/:table (page,limit,search); 300ms debounce effect |
 | 25 | 838-878 | handleSaveDbRow | handleSaveDbRow: POST (insert) / PUT (update) db/tables/:table/rows with primaryKey + updates |
 | 26 | 879-905 | handleDeleteDbRow | handleDeleteDbRow: DELETE db/tables/:table/rows with confirm; refetch current page |
@@ -33,7 +33,7 @@
 | 53 | 2944-3053 | Health record | Advanced HEALTH_PROFILES editor: blood type, sex, DOB, height/weight, BMI preview, contacts, allergies |
 | 54 | 3054-3096 | integrity metadata | Advanced read-only metadata: account/health versions, timestamps, staff signature status |
 | 55 | 3097-3175 | adminUserVaccines | vaccination card: adminUserVaccines badge list with remove, add-vaccine input + button |
-| 56 | 3176-3265 | Password admin override | password override: limited-admin lockout notice vs Force reset form (handleAdminResetPassword) |
-| 57 | 3266-3285 | Save profile changes | fieldset close; modalFeedback banner; Close and Save profile changes buttons (isSavingUser) |
-| 58 | 3286-3318 | Role-specific fields | right info pane: per-role field descriptions (student, faculty, doctor, nurse, dentist, responder) |
-| 59 | 3319-3332 | document.body | modal + portal close (document.body); root div close; component end |
+| 56 | 3210-3283 | Password admin override | password override: limited-admin lockout notice vs Force reset form (handleAdminResetPassword); confirms before applying the new password |
+| 57 | 3284-3319 | Save profile changes | fieldset close; modalFeedback banner; Close and Save profile changes buttons (isSavingUser) |
+| 58 | 3320-3364 | Role-specific fields | right info pane: per-role field descriptions (student, faculty, doctor, nurse, dentist, responder) |
+| 59 | 3365-3369 | document.body | modal + portal close (document.body); root div close; component end |
