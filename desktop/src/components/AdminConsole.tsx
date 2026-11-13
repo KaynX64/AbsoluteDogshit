@@ -11,6 +11,7 @@ import ServerPingMonitor from './ServerPingMonitor';
 import ServerPolicyPanel from './ServerPolicyPanel';
 import Icon from './Icon';
 import './AdminConsole.css';
+import StaffAnalyticsPermissions from './StaffAnalyticsPermissions';
 
 /* ── Icons (inline, no dependency) ─────────────────────────────── */
 const I = {
@@ -2680,6 +2681,10 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       </div>
                     </div>
                   )}
+
+                  {myPerms.userId !== null && myPerms.is_super && ['DOCTOR', 'DENTIST', 'NURSE'].includes(editingUser.role) &&
+                    usersList.find(user => user.id === editingUser.id)?.role === editingUser.role &&
+                    <StaffAnalyticsPermissions key={editingUser.id} userId={editingUser.id} />}
 
                   {/* ADMIN — admin number replaces PRC license */}
                   {editingUser.role === 'ADMIN' && (

@@ -172,6 +172,7 @@ function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, b
       { key: 'triage',    label: 'Triage',           icon: 'local_hospital' },
       { key: 'expected',  label: 'Expected',         icon: 'monitor_heart' },
       { key: 'inventory', label: 'Inventory',        icon: 'medication' },
+      { key: 'analytics', label: 'Analytics',        icon: 'monitoring' },
     ],
     DOCTOR: [
       { key: 'active',    label: 'Queue',            icon: 'stethoscope' },
@@ -671,7 +672,7 @@ function AppShell() {
   const [doctorViewMode, setDoctorViewMode] = useState<
     'active' | 'scheduled' | 'history' | 'archive' | 'analytics'
   >('active');
-  const [nurseViewMode, setNurseViewMode] = useState<'triage' | 'expected' | 'inventory'>('triage');
+  const [nurseViewMode, setNurseViewMode] = useState<'triage' | 'expected' | 'inventory' | 'analytics'>('triage');
 
   /* ── Connectivity & offline queue ────────────────────────────── */
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);

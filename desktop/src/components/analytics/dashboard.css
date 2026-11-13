@@ -106,6 +106,7 @@
 .an-print { display: none; }
 
 @media print {
+  #root:has(.an-dashboard) { display: none !important; }
   html:has(.an-print), body:has(> .an-print) { height: auto !important; overflow: visible !important; background: white !important; }
   body:has(> .an-print) > :not(.an-print) { display: none !important; }
   body > .an-print { display: block; width: auto; padding: 0; --an-ink: #181e1b; --an-muted: #3f4942; --an-border: #c8d0ca; --an-paper: white; --an-soft: #f2f5f2; --an-accent: #1f4a34; }

@@ -48,7 +48,7 @@ async function foundationSchema(pool) {
 test('fresh schema is adopted once even when two migration runners start together', { skip }, async t => {
   const pool = await fixture(t);
   const applied = await Promise.all([runMigrations(pool), runMigrations(pool)]);
-  assert.deepEqual(applied.sort(), [0, 6]);
+  assert.deepEqual(applied.sort(), [0, 8]);
   assert.equal(await responderFlag(pool), 1);
   const readOnlyPool = {
     async getConnection() {
@@ -70,14 +70,27 @@ test('an existing schema keeps revoked responders, admin grants and saved policy
   const pool = await fixture(t);
   await pool.query('UPDATE USERS SET is_qualified_responder = 0, qualified_responder_since = NULL WHERE user_id = 4');
   await pool.query("INSERT INTO USER_ADMIN_PERMISSIONS (user_id, permission_id) SELECT 1, permission_id FROM ADMIN_PERMISSIONS WHERE code = 'USERS_MANAGE'");
+  await pool.query("INSERT INTO USER_ADMIN_PERMISSIONS (user_id, permission_id) SELECT 1, permission_id FROM ADMIN_PERMISSIONS WHERE code = 'ANALYTICS_VIEW'");
+  await pool.query("DELETE FROM ADMIN_PERMISSIONS WHERE code IN ('ANALYTICS_OPERATIONS', 'ANALYTICS_CLINICAL', 'ANALYTICS_PHARMACY', 'ANALYTICS_HEADCOUNT', 'ANALYTICS_EXPORT')");
   await pool.query("DELETE FROM ADMIN_PERMISSIONS WHERE code = 'INCIDENT_RECORDS_VIEW'");
   await pool.query('UPDATE SERVER_POLICY SET revision = 4 WHERE policy_id = 1');
-  assert.equal(await runMigrations(pool), 6);
+  await pool.query('DROP TABLE STAFF_ANALYTICS_PERMISSIONS');
+  assert.equal(await runMigrations(pool), 8);
+  const [[staffSettings]] = await pool.query('SELECT COUNT(*) AS total FROM STAFF_ANALYTICS_PERMISSIONS');
+  assert.equal(staffSettings.total, 0);
   assert.equal(await responderFlag(pool), 0);
   const [[{ revision }]] = await pool.query('SELECT revision FROM SERVER_POLICY WHERE policy_id = 1');
   const [[{ grants }]] = await pool.query('SELECT COUNT(*) AS grants FROM USER_ADMIN_PERMISSIONS WHERE user_id = 1');
   assert.equal(revision, 4);
-  assert.equal(grants, 1);
+  assert.equal(grants, 3);
+  const [codes] = await pool.query(`SELECT p.code FROM ADMIN_PERMISSIONS p
+    JOIN USER_ADMIN_PERMISSIONS g ON g.permission_id = p.permission_id WHERE g.user_id = 1 ORDER BY p.code`);
+  assert.deepEqual(codes.map(({ code }) => code), ['ANALYTICS_HEADCOUNT', 'ANALYTICS_VIEW', 'USERS_MANAGE']);
+  await pool.query(`DELETE g FROM USER_ADMIN_PERMISSIONS g JOIN ADMIN_PERMISSIONS p USING (permission_id)
+    WHERE g.user_id = 1 AND p.code = 'ANALYTICS_HEADCOUNT'`);
+  assert.equal(await runMigrations(pool), 0);
+  const [[remaining]] = await pool.query('SELECT COUNT(*) AS count FROM USER_ADMIN_PERMISSIONS WHERE user_id = 1');
+  assert.equal(remaining.count, 2);
   const [[permission]] = await pool.query("SELECT name FROM ADMIN_PERMISSIONS WHERE code = 'INCIDENT_RECORDS_VIEW'");
   assert.equal(permission.name, 'View incident records');
 });
@@ -105,7 +118,7 @@ test('legacy tables and columns are rebuilt additively and the responder backfil
   await pool.query(`INSERT INTO PRESCRIPTION_ITEMS
     (prescription_id, outside_name, dosage, frequency, duration_days, quantity_dispensed)
     VALUES (1, 'fixture', 'fixture', 'fixture', 1, 4)`);
-  assert.equal(await runMigrations(pool), 6);
+  assert.equal(await runMigrations(pool), 8);
   const [dayIndex] = await pool.query("SHOW INDEX FROM APPOINTMENTS WHERE Key_name = 'idx_app_status_datetime'");
   assert.deepEqual(dayIndex.map(row => row.Column_name), ['status', 'date_time', 'deleted_at']);
   const [activityIndex] = await pool.query("SHOW INDEX FROM INVENTORY_LOGS WHERE Key_name = 'idx_inv_activity_date'");
@@ -143,7 +156,7 @@ test('an interrupted responder schema change resumes with its original backfill 
   assert.equal(await responderFlag(pool), 0);
   const [[{ applied_at }]] = await pool.query('SELECT applied_at FROM SCHEMA_MIGRATIONS WHERE version = 3');
   assert.equal(applied_at, null);
-  assert.equal(await runMigrations(pool), 4);
+  assert.equal(await runMigrations(pool), 6);
   assert.equal(await responderFlag(pool), 1);
 });
 

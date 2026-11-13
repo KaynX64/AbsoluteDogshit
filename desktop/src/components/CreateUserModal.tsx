@@ -30,7 +30,12 @@ const ADMIN_PERMISSION_CATALOG: { code: string; name: string; description: strin
   { code: 'TELEMETRY_VIEW',    name: 'View system health',        description: 'Service telemetry, uptime and health metrics',            sort_order: 30 },
   { code: 'RETENTION_MANAGE',  name: 'Data retention governance', description: 'Retention status and statutory R.A. 10173 sweeps',         sort_order: 40 },
   { code: 'ANALYTICS_VIEW',    name: 'View analytics',            description: 'Epidemiological analytics and campus health reports',     sort_order: 50 },
+  { code: 'ANALYTICS_OPERATIONS', name: 'View clinic operations', description: 'Appointments, encounter volumes, department visits and SOS activity.', sort_order: 51 },
+  { code: 'ANALYTICS_CLINICAL', name: 'View clinical analytics', description: 'Diagnosis counts, respiratory surveillance and health-risk aggregates.', sort_order: 52 },
+  { code: 'ANALYTICS_PHARMACY', name: 'View pharmacy analytics', description: 'Dispensing, stock priorities and batch expiry.', sort_order: 53 },
+  { code: 'ANALYTICS_HEADCOUNT', name: 'View campus headcount', description: 'Active account counts by role.', sort_order: 54 },
   { code: 'INCIDENT_RECORDS_VIEW', name: 'View incident records',  description: 'Open the emergency incident archive and view its report PDFs.', sort_order: 55 },
+  { code: 'ANALYTICS_EXPORT', name: 'Export and print analytics', description: 'Download or print reports for granted analytics sections.', sort_order: 56 },
   { code: 'DATABASE_MANAGE',   name: 'Database Studio',           description: 'Inspect and maintain raw system records',                 sort_order: 60 },
 ];
 

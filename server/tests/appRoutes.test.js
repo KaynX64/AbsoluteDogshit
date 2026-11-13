@@ -5,6 +5,8 @@ import { once } from 'node:events';
 import { after, before, mock, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import jwt from 'jsonwebtoken';
+import { inflateSync } from 'node:zlib';
+import ExcelJS from 'exceljs';
 
 Object.assign(process.env, {
   DB_PASSWORD: 'fixture-password',
@@ -55,6 +57,158 @@ const request = (path, { roles, userId = 21, method = 'GET', headers = {}, json 
   if (body !== undefined) headers = { ...headers, 'content-type': 'application/json' };
   return fetch(baseUrl + path, { method, headers, body });
 };
+
+test('analytics headcount scope skips all other loaders and limits every report format', async t => {
+  let codes = ['ANALYTICS_VIEW', 'ANALYTICS_HEADCOUNT', 'ANALYTICS_EXPORT'];
+  const unexpected = [];
+  t.mock.method(pool, 'query', async sql => {
+    if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
+    if (sql.includes('AS permission_code')) return [codes.map(permission_code => ({ role_code: 'ADMIN', permission_code }))];
+    if (sql.includes('SELECT r.code, r.name')) return [[{ code: 'STUDENT', name: 'Fixture headcount', count: 12 }]];
+    unexpected.push(sql);
+    throw new Error('Unexpected analytics query');
+  });
+  const roles = ['ADMIN', 'DOCTOR'];
+  const analytics = (path) => request('/api/analytics/' + path, { roles });
+  const summary = await analytics('summary');
+  assert.equal(summary.status, 200);
+  assert.deepEqual(await summary.json(), {
+    scopes: ['ANALYTICS_HEADCOUNT', 'ANALYTICS_EXPORT'],
+    operations: null, clinical: null, pharmacy: null,
+    headcount: { roleDistribution: [{ role_code: 'STUDENT', role_name: 'Fixture headcount', count: 12 }] },
+  });
+  assert.equal((await analytics('by-department')).status, 403);
+  assert.deepEqual(await (await analytics('report-access')).json(), { scopes: ['ANALYTICS_HEADCOUNT', 'ANALYTICS_EXPORT'] });
+  const csv = await analytics('export/csv');
+  assert.equal(csv.status, 200);
+  const csvText = await csv.text();
+  assert.match(csvText, /SECTION 1: CAMPUS ROLES & USER HEADCOUNT[\s\S]*Fixture headcount/);
+  assert.doesNotMatch(csvText, /SECTION 2|DIAGNOSES|DEPARTMENT|PHARMACY/);
+  const excel = await analytics('export/excel');
+  assert.equal(excel.status, 200);
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(await excel.arrayBuffer());
+  assert.deepEqual(workbook.worksheets.map(sheet => sheet.name), ['Campus Headcount']);
+  const pdf = await analytics('export/pdf');
+  assert.equal(pdf.status, 200);
+  const pdfText = await readPdfText(pdf);
+  assert.match(pdfText, /CAMPUS ROLES & USER HEADCOUNT/);
+  assert.doesNotMatch(pdfText, /DIAGNOSES|DEPARTMENT|PHARMACY/);
+
+  codes = ['ANALYTICS_VIEW', 'ANALYTICS_HEADCOUNT'];
+  for (const path of ['report-access', 'export/csv', 'export/excel', 'export/pdf']) {
+    assert.equal((await analytics(path)).status, 403, path);
+  }
+  codes = ['ANALYTICS_VIEW', 'ANALYTICS_EXPORT'];
+  assert.equal((await analytics('report-access')).status, 403);
+  codes = ['USERS_MANAGE'];
+  assert.equal((await analytics('summary')).status, 403);
+  assert.deepEqual(unexpected, []);
+});
+
+async function readPdfText(response) {
+  const body = Buffer.from(await response.arrayBuffer()).toString('latin1');
+  const streams = [...body.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)];
+  return streams.flatMap(([, stream]) => {
+    try {
+      const operators = inflateSync(Buffer.from(stream, 'latin1')).toString();
+      return [...operators.matchAll(/<([a-f0-9]+)>/gi)].map(([, hex]) => Buffer.from(hex, 'hex').toString('latin1'));
+    } catch { return []; }
+  }).join('');
+}
+
+test('analytics report permissions map staff and Super Admin roles independently of the dashboard', async t => {
+  let codes = [];
+  let liveRoles = [];
+  t.mock.method(pool, 'query', async sql => {
+    if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
+    assert.match(sql, /AS permission_code/);
+    return [liveRoles.flatMap(role_code => role_code === 'ADMIN' && codes.length
+      ? codes.map(permission_code => ({ role_code, permission_code })) : [{ role_code }])];
+  });
+  const common = ['ANALYTICS_OPERATIONS', 'ANALYTICS_EXPORT', 'ANALYTICS_SURVEILLANCE', 'ANALYTICS_DISPENSING'];
+  const clinical = [...common, 'ANALYTICS_CLINICAL'];
+  const all = [...clinical, 'ANALYTICS_PHARMACY', 'ANALYTICS_HEADCOUNT'];
+  const token = jwt.sign({ user_id: 21, roles: ['ADMIN'] }, process.env.JWT_SECRET, { expiresIn: '5m' });
+  const session = { headers: { authorization: 'Bearer ' + token } };
+  for (const [roles, expected] of [
+    [['DOCTOR'], clinical],
+    [['DENTIST'], clinical],
+    [['NURSE'], [...common, 'ANALYTICS_PHARMACY']],
+    [['NURSE', 'DENTIST'], [...clinical, 'ANALYTICS_PHARMACY']],
+    [['ADMIN'], all],
+  ]) {
+    liveRoles = roles;
+    const response = await request('/api/analytics/report-access', session);
+    assert.equal(response.status, 200);
+    assert.deepEqual(new Set((await response.json()).scopes), new Set(expected));
+  }
+  codes = ['SUPER_ADMIN'];
+  assert.equal((await request('/api/analytics/report-access', session)).status, 200);
+  liveRoles = ['STUDENT'];
+  assert.equal((await request('/api/analytics/summary', session)).status, 403);
+});
+
+test('analytics outputs contain only the live clinical and pharmacy subsections', async t => {
+  let role = 'NURSE';
+  const unexpected = [];
+  const reject = sql => { unexpected.push(sql); throw new Error('Unexpected analytics query'); };
+  t.mock.method(pool, 'query', async sql => {
+    if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
+    if (sql.includes('AS permission_code')) return [[{ role_code: role }]];
+    if (sql.includes('WITH RECURSIVE calendar') || sql.includes('SELECT department, COUNT')) return [[]];
+    if (sql.includes('as total FROM APPOINTMENTS')) return [[{ total: 0 }]];
+    if (sql.includes('as total_students')) return [[{ total_students: 0 }]];
+    if (sql.includes('as active,')) return [[{ active: 0, timedClosures: 0, avgResponseSeconds: 0 }]];
+    if (sql.includes('SELECT diagnosis, encounter_date')) return [[{ diagnosis: 'Fixture cough', encounter_date: new Date() }]];
+    if (sql.includes('SELECT profile_id, chronic_conditions')) return [[]];
+    if (sql.includes('SELECT emr_id, diagnosis')) return role === 'NURSE' ? reject(sql) : [[{ emr_id: 1, diagnosis: 'Private fixture diagnosis' }]];
+    if (sql.includes('WITH reporting_window')) {
+      assert.equal(sql.includes('AS reorder_rank'), role === 'NURSE');
+      return [[{
+        usage_rank: 1, reorder_rank: 1, medicine_id: 1, name: 'Fixture medicine', availability: 'IN_STOCK',
+        quantity_prescribed: 5, quantity_dispensed: 2, quantity_returned: 1, net_dispensed: 1,
+        stock_status: 'CRITICAL_BUFFER', total_stock_on_hand: 7, suggested_reorder_qty: 23, reorder_level: 15,
+      }]];
+    }
+    if (sql.includes('FROM MEDICINE_BATCHES b')) {
+      return role !== 'NURSE' ? reject(sql) : [[{ name: 'Fixture medicine', batch_no: 'SecretBatch', quantity_on_hand: 7, expiry_date: '2027-01-01' }]];
+    }
+    return reject(sql);
+  });
+  const analytics = path => request('/api/analytics/' + path, { roles: ['DOCTOR'] });
+  for (role of ['NURSE', 'DOCTOR', 'DENTIST']) {
+    const nurse = role === 'NURSE';
+    const summary = await analytics('summary');
+    assert.equal(summary.status, 200, role);
+    const data = await summary.json();
+    assert.equal(data.clinical.surveillance.fluStats.cases_past_7_days, 1);
+    assert.equal(data.clinical.topDiagnoses?.[0]?.diagnosis ?? null, nurse ? null : 'Private fixture diagnosis');
+    assert.equal(data.pharmacy.dispensing[0].availability, 'IN_STOCK');
+    assert.equal(Object.hasOwn(data.pharmacy.dispensing[0], 'total_stock_on_hand'), false);
+    assert.equal(data.pharmacy.inventory?.lowStockMeds[0]?.batch_no ?? null, nurse ? 'SecretBatch' : null);
+    assert.equal((await analytics('by-department')).status, 200);
+    for (const format of ['csv', 'excel', 'pdf']) {
+      const response = await analytics('export/' + format);
+      assert.equal(response.status, 200, role + ' ' + format);
+      let content;
+      if (format === 'excel') {
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(await response.arrayBuffer());
+        content = workbook.worksheets.flatMap(sheet => [sheet.name, JSON.stringify(sheet.getSheetValues())]).join('\n');
+      } else {
+        content = format === 'pdf' ? await readPdfText(response) : await response.text();
+      }
+      assert.match(content, /respiratory surveillance/i);
+      assert.match(content, /in stock/i);
+      assert.equal(content.includes('Private fixture diagnosis'), !nurse);
+      assert.equal(content.includes('SecretBatch'), nurse);
+      assert.equal(/reorder priorities/i.test(content), nurse);
+      assert.doesNotMatch(content, /campus (?:roles|headcount)/i);
+    }
+  }
+  assert.deepEqual(unexpected, []);
+});
 
 test('the mounted liveness route applies the HTTP allow-list and security headers', async t => {
   t.mock.method(pool, 'query', () => assert.fail('Liveness probe accessed MySQL'));
@@ -201,6 +355,7 @@ test('the feature routes are mounted behind authentication', async () => {
     ['PUT', '/api/profile/theme'],
     ['POST', '/api/profile/fcm-token'],
     ['GET', '/api/analytics/summary'],
+    ['GET', '/api/analytics/report-access'],
     ['GET', '/api/analytics/export/csv'],
     ['GET', '/api/inventory/batches'],
     ['POST', '/api/inventory/receive'],
