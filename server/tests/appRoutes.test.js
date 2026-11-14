@@ -60,6 +60,28 @@ const request = (path, { roles, userId = 21, method = 'GET', headers = {}, json 
   return fetch(baseUrl + path, { method, headers, body });
 };
 
+test('account appearance reads only the authenticated user and shares desktop preference writes', async t => {
+  const theme = { theme_mode: 'dark', theme_preset: 'blossom' };
+  t.mock.method(pool, 'query', async (sql, params) => {
+    if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
+    if (sql.startsWith('SELECT theme_mode, theme_preset')) {
+      assert.deepEqual(params, [21]);
+      return [[theme]];
+    }
+    assert.match(sql, /^UPDATE USERS SET theme_mode/);
+    assert.deepEqual(params, ['light', 'sunrise', 21]);
+    return [{ affectedRows: 1 }];
+  });
+  assert.equal((await request('/api/profile/theme')).status, 401);
+  const read = await request('/api/profile/theme?user_id=42', { roles: ['STUDENT'] });
+  assert.equal(read.status, 200);
+  assert.deepEqual(await read.json(), theme);
+  const invalid = await request('/api/profile/theme', { roles: ['STUDENT'], method: 'PUT', json: { theme_mode: 'system', theme_preset: 'other' } });
+  assert.equal(invalid.status, 400);
+  const save = await request('/api/profile/theme', { roles: ['STUDENT'], method: 'PUT', json: { theme_mode: 'light', theme_preset: 'sunrise', user_id: 42 } });
+  assert.equal(save.status, 200);
+});
+
 test('inventory expiry alerts and summary use a 30-day window', async t => {
   const expiryQueries = [];
   t.mock.method(pool, 'query', async sql => {

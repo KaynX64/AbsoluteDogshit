@@ -9,7 +9,7 @@
 
 ## Security invariants
 
-See [the historical audit](../audit.md) for earlier findings. Confirm current behavior from the implementation.
+Confirm current behavior from the implementation and tests. Older documentation references `audit.md`, which is absent from this checkout; do not treat that reference as a completed current security assessment.
 
 - TLS is required by default. Keep `ALLOW_INSECURE_HTTP=true` for isolated local testing.
 - Never widen CORS to `cors()` allow-all — that was the vulnerability.
@@ -28,3 +28,12 @@ See [the historical audit](../audit.md) for earlier findings. Confirm current be
   `DoctorConsole.tsx` · `AdminConsole.tsx` · `InventoryManager.tsx` · `NurseConsole.tsx` · `QrIntakeScanner.tsx` (paths in the desktop slice index) · `mobile/lib/screens/patient_portal_screen.dart` ~123 KB.
 - Task routing: auth/session ⇒ `server/src/auth/`; API endpoints ⇒ [server route map](../server/src/routes/AGENTS.md); desktop UI ⇒ `desktop/src/features/`; Electron window, TLS and updates ⇒ `desktop/electron/window.cjs`, `certificatePolicy.cjs` and `updates.cjs`; offline queue ⇒ [desktop storage guide](../desktop/AGENTS.md#offline-storage) and [server route map](../server/src/routes/AGENTS.md); mobile screen ⇒ `mobile/lib/screens/`; infra/env ⇒ `server/.env.example` + `docker-compose.yml`.
 - Conventions: `server/` is ESM-only (`"type":"module"` — never `require`); Electron main is CJS (`.cjs`); renderer is TypeScript; mobile is Dart; MySQL table names are UPPERCASE.
+
+## Documentation maintenance — part of every change
+
+- Start broad analysis with the [codebase overview](../CODEBASE-OVERVIEW.md), then read the relevant module guide. Use indexes and symbol searches to keep source reads focused; verify behavior against code and tests.
+- Update affected Markdown in the same change when behavior, routes, ownership, configuration, setup commands, security assumptions or verification steps change. Documentation is part of completion, not a deferred task.
+- Edit the authoritative `AGENTS-parts/` file when an `AGENTS.md` is a split index. Keep indexes short and fix their links when moving or adding guidance. Preserve the existing 7 KB per-file convention by splitting long guidance at meaningful section boundaries.
+- Keep developer navigation and invariants in the nearest applicable `AGENTS.md`; keep user-facing setup and workflows in the relevant README. Update the overview only when the system-level explanation changes. Link to an existing authority instead of copying detailed rules across files.
+- After changing mapped source, update its code-slice map and run the verifier listed above. For documentation-only edits, check affected paths, links and commands; do not shift slice ranges when source is unchanged.
+- Describe current behavior separately from historical notes or proposed work. Report what was actually inspected or tested and disclose skipped checks. Do not turn source inspection into a claim of legal compliance or deployment readiness.

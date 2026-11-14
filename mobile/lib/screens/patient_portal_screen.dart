@@ -2,6 +2,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../theme/app_palette.dart';
+import '../theme/account_theme_controller.dart';
+import '../widgets/account_settings_button.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:geolocator/geolocator.dart';
@@ -271,9 +274,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
 
     if (stillFailing.isEmpty && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ Queued SOS alert delivered to campus responders.'),
-          backgroundColor: Color(0xFF15803D),
+        SnackBar(
+          content: const Text('✅ Queued SOS alert delivered to campus responders.'),
+          backgroundColor: AppPalette.of(context).background(0xFF15803D),
         ),
       );
     }
@@ -322,9 +325,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
         await _fetchActiveQueueTicket();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Privacy consent recorded under R.A. 10173. Access restored.'),
-              backgroundColor: Color(0xFF284E3A),
+            SnackBar(
+              content: const Text('Privacy consent recorded under R.A. 10173. Access restored.'),
+              backgroundColor: AppPalette.of(context).background(0xFF284E3A),
             ),
           );
         }
@@ -343,6 +346,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
         },
       );
       if (res.statusCode == 200) {
+        if (mounted) AccountThemeScope.of(context).reset();
         await _storage.deleteAll();
         if (mounted) {
           Navigator.pushAndRemoveUntil(
@@ -362,10 +366,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
       barrierDismissible: !isMandatory,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(rs.r(20))),
-        backgroundColor: Colors.white,
+        backgroundColor: AppPalette.of(context).surface,
         title: Row(
           children: [
-            const Icon(Icons.privacy_tip_outlined, color: Color(0xFF284E3A)),
+            Icon(Icons.privacy_tip_outlined, color: AppPalette.of(context).color(0xFF284E3A)),
             SizedBox(width: rs.w(8)),
             Expanded(
               child: Text(
@@ -375,7 +379,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
             ),
           ],
         ),
-        content: const SingleChildScrollView(
+        content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -384,17 +388,17 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 13,
-                  color: Color(0xFF284E3A),
+                  color: AppPalette.of(context).color(0xFF284E3A),
                 ),
               ),
-              SizedBox(height: 10),
+              const SizedBox(height: 10),
               Text(
                 'Pangasinan State University Infirmary collects and processes your Protected Health Information (PHI) '
                 'for clinical consultation, emergency dispatch, and digital certification.\n\n'
                 '• All clinical data is encrypted with AES-256-GCM.\n'
                 '• Stored under statutory 5-year retention lifecycle.\n'
                 '• Access monitored with immutable SHA-256 hash chains.',
-                style: TextStyle(fontSize: 13.5, height: 1.5, color: Color(0xFF5A635B)),
+                style: TextStyle(fontSize: 13.5, height: 1.5, color: AppPalette.of(context).color(0xFF5A635B)),
               ),
             ],
           ),
@@ -403,6 +407,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
           if (isMandatory)
             TextButton(
               onPressed: () async {
+                if (mounted) AccountThemeScope.of(context).reset();
                 await _storage.deleteAll();
                 if (mounted) {
                   Navigator.pushAndRemoveUntil(
@@ -421,8 +426,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
             ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF284E3A),
-              foregroundColor: Colors.white,
+              backgroundColor: AppPalette.of(context).background(0xFF284E3A),
+              foregroundColor: AppPalette.of(context).onPrimary,
               shape: const StadiumBorder(),
             ),
             onPressed: () async {
@@ -442,24 +447,24 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(rs.r(20))),
-        backgroundColor: Colors.white,
+        backgroundColor: AppPalette.of(context).surface,
         title: Text(
           'Revoke Consent?',
           style: TextStyle(
             fontWeight: FontWeight.w800,
-            color: const Color(0xFF7A2E26),
+            color: AppPalette.of(context).color(0xFF7A2E26),
             fontSize: rs.sp(16),
           ),
         ),
         content: Text(
           'Under R.A. 10173, revoking consent will suspend your access to digital health passes, prescriptions, and online scheduling.',
-          style: TextStyle(fontSize: rs.sp(13), color: const Color(0xFF5A635B)),
+          style: TextStyle(fontSize: rs.sp(13), color: AppPalette.of(context).color(0xFF5A635B)),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF7A2E26),
+              backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
               foregroundColor: Colors.white,
               shape: const StadiumBorder(),
             ),
@@ -592,9 +597,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
     if (_isDispatchingSOS) return;
     if (!_sosConsent) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please check the consent box before triggering SOS.'),
-          backgroundColor: Color(0xFF7A2E26),
+        SnackBar(
+          content: const Text('Please check the consent box before triggering SOS.'),
+          backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
         ),
       );
       return;
@@ -706,14 +711,14 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: AppPalette.of(context).surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(rs.r(20))),
-        icon: const Icon(Icons.check_circle_outline, color: Color(0xFF284E3A), size: 54),
+        icon: Icon(Icons.check_circle_outline, color: AppPalette.of(context).color(0xFF284E3A), size: 54),
         title: Text(
           'SOS Alert Active',
           style: TextStyle(
             fontWeight: FontWeight.w800,
-            color: const Color(0xFF284E3A),
+            color: AppPalette.of(context).color(0xFF284E3A),
             fontSize: rs.sp(17),
           ),
         ),
@@ -722,15 +727,15 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: rs.sp(13.5),
-            color: const Color(0xFF5A635B),
+            color: AppPalette.of(context).color(0xFF5A635B),
             height: 1.4,
           ),
         ),
         actions: [
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF284E3A),
-              foregroundColor: Colors.white,
+              backgroundColor: AppPalette.of(context).background(0xFF284E3A),
+              foregroundColor: AppPalette.of(context).onPrimary,
               shape: const StadiumBorder(),
             ),
             onPressed: () => Navigator.pop(ctx),
@@ -761,6 +766,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
     if (EmergencyAlertService().isResponderActive) {
       EmergencyAlertService().stopResponderListener();
     }
+    if (mounted) AccountThemeScope.of(context).reset();
     await _storage.delete(key: 'jwt_token');
     await _storage.delete(key: 'user_data');
     if (!mounted) return;
@@ -800,7 +806,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
   @override
   Widget build(BuildContext context) {
     final rs = Rs.of(context);
-    const primaryGreen = Color(0xFF284E3A);
+    final primaryGreen = AppPalette.of(context).color(0xFF284E3A);
     final firstName = widget.user['first_name'] ?? 'User';
     final lastName = widget.user['last_name'] ?? '';
     final initials = _getInitials(firstName, lastName);
@@ -816,7 +822,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
     return SessionTimeoutListener(
       timeoutMinutes: 480,
       child: Scaffold(
-        backgroundColor: const Color(0xFFF7F9F6),
+        backgroundColor: AppPalette.of(context).background(0xFFF7F9F6),
         appBar: PreferredSize(
           preferredSize: Size.fromHeight(rs.h(64).clamp(56.0, 72.0)),
           child: SafeArea(
@@ -837,7 +843,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                         style: TextStyle(
                           fontSize: rs.sp(18),
                           fontWeight: FontWeight.w900,
-                          color: const Color(0xFF191C1A),
+                          color: AppPalette.of(context).color(0xFF191C1A),
                           letterSpacing: -0.5,
                         ),
                       ),
@@ -848,8 +854,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                       Container(
                         width: rs.w(36).clamp(32.0, 42.0),
                         height: rs.w(36).clamp(32.0, 42.0),
-                        decoration: const BoxDecoration(
-                          color: Color(0xFFE5EDE4),
+                        decoration: BoxDecoration(
+                          color: AppPalette.of(context).color(0xFFE5EDE4),
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
@@ -859,23 +865,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                         ),
                       ),
                       SizedBox(width: rs.w(8)),
-                      Container(
-                        width: rs.w(36).clamp(32.0, 42.0),
-                        height: rs.w(36).clamp(32.0, 42.0),
-                        decoration: const BoxDecoration(
-                          color: Color(0xFFE6DDCF),
-                          shape: BoxShape.circle,
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          initials,
-                          style: TextStyle(
-                            fontSize: rs.sp(12),
-                            fontWeight: FontWeight.w800,
-                            color: const Color(0xFF4A4133),
-                          ),
-                        ),
-                      ),
+                      AccountSettingsButton(initials: initials),
                     ],
                   ),
                 ],
@@ -898,15 +888,15 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
     return Container(
       width: double.infinity,
       padding: EdgeInsets.symmetric(horizontal: rs.w(16), vertical: rs.h(10)),
-      decoration: const BoxDecoration(
-        color: Color(0xFFFDE8E8),
+      decoration: BoxDecoration(
+        color: AppPalette.of(context).color(0xFFFDE8E8),
         border: Border(
-          bottom: BorderSide(color: Color(0xFFF8B4B4), width: 1),
+          bottom: BorderSide(color: AppPalette.of(context).color(0xFFF8B4B4), width: 1),
         ),
       ),
       child: Row(
         children: [
-          const Icon(Icons.wifi_off_rounded, size: 16, color: Color(0xFF7A2E26)),
+          Icon(Icons.wifi_off_rounded, size: 16, color: AppPalette.of(context).color(0xFF7A2E26)),
           SizedBox(width: rs.w(8)),
           Expanded(
             child: Text(
@@ -914,7 +904,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
               style: TextStyle(
                 fontSize: rs.sp(12),
                 fontWeight: FontWeight.w600,
-                color: const Color(0xFF7A2E26),
+                color: AppPalette.of(context).color(0xFF7A2E26),
               ),
             ),
           ),
@@ -930,10 +920,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
   Widget _buildCustomBottomNav(Rs rs) {
     final navHeight = rs.h(66).clamp(58.0, 74.0);
     return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFFF7F9F6),
+      decoration: BoxDecoration(
+        color: AppPalette.of(context).color(0xFFF7F9F6),
         border: Border(
-          top: BorderSide(color: Color(0xFFE5EDE4), width: 1.0),
+          top: BorderSide(color: AppPalette.of(context).color(0xFFE5EDE4), width: 1.0),
         ),
       ),
       child: SafeArea(
@@ -1006,9 +996,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
     required IconData selectedIcon,
   }) {
     final isSelected = _currentIndex == index;
-    const primaryGreen = Color(0xFF284E3A);
-    const softSagePill = Color(0xFFE2EBE1);
-    const textSub = Color(0xFF5A635B);
+    final primaryGreen = AppPalette.of(context).color(0xFF284E3A);
+    final softSagePill = AppPalette.of(context).color(0xFFE2EBE1);
+    final textSub = AppPalette.of(context).color(0xFF5A635B);
 
     final pillWidth = rs.w(52).clamp(40.0, 56.0);
     final pillHeight = rs.h(30).clamp(24.0, 34.0);
@@ -1060,8 +1050,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
     required int index,
     required bool isActive,
   }) {
-    const sosActiveRed = Color(0xFFA03B30);
-    const sosInactivePeach = Color(0xFFF6E2DB);
+    final sosActiveRed = AppPalette.of(context).color(0xFFA03B30);
+    final sosInactivePeach = AppPalette.of(context).color(0xFFF6E2DB);
 
     final pillWidth = rs.w(52).clamp(40.0, 56.0);
     final pillHeight = rs.h(30).clamp(24.0, 34.0);
@@ -1113,8 +1103,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
 
   Widget _buildOverviewTab(String firstName) {
     final rs = Rs.of(context);
-    const primaryGreen = Color(0xFF284E3A);
-    const textSub = Color(0xFF5A635B);
+    final primaryGreen = AppPalette.of(context).color(0xFF284E3A);
+    final textSub = AppPalette.of(context).color(0xFF5A635B);
 
     final hp = _profileData?['healthProfile'] ?? {};
     final u = _profileData?['user'] ?? widget.user;
@@ -1154,7 +1144,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                 style: TextStyle(
                   fontSize: rs.sp(28),
                   fontWeight: FontWeight.w800,
-                  color: const Color(0xFF191C1A),
+                  color: AppPalette.of(context).color(0xFF191C1A),
                   letterSpacing: -0.5,
                 ),
               ),
@@ -1174,7 +1164,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
               Container(
                 padding: EdgeInsets.all(rs.w(20)),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFE2EBE1),
+                  color: AppPalette.of(context).color(0xFFE2EBE1),
                   borderRadius: BorderRadius.circular(rs.r(24)),
                 ),
                 child: Column(
@@ -1191,7 +1181,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                               style: TextStyle(
                                 fontSize: rs.sp(14),
                                 fontWeight: FontWeight.w700,
-                                color: const Color(0xFF191C1A),
+                                color: AppPalette.of(context).color(0xFF191C1A),
                               ),
                             ),
                           ],
@@ -1204,7 +1194,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                     Container(
                       padding: EdgeInsets.all(rs.w(16)),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: AppPalette.of(context).surface,
                         borderRadius: BorderRadius.circular(rs.r(20)),
                         boxShadow: [
                           BoxShadow(
@@ -1218,7 +1208,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                           ? SizedBox(
                               height: qrSize,
                               width: qrSize,
-                              child: const Center(
+                              child: Center(
                                 child: CircularProgressIndicator(
                                   color: primaryGreen,
                                   strokeWidth: 2,
@@ -1231,6 +1221,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                     data: _qrToken,
                                     version: QrVersions.auto,
                                     size: qrSize,
+                                    backgroundColor: Colors.white,
                                   ),
                                 )
                               : SizedBox(
@@ -1256,7 +1247,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                       style: TextStyle(
                         fontSize: rs.sp(18),
                         fontWeight: FontWeight.w800,
-                        color: const Color(0xFF191C1A),
+                        color: AppPalette.of(context).color(0xFF191C1A),
                       ),
                     ),
                     SizedBox(height: rs.h(2)),
@@ -1290,8 +1281,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                           vertical: rs.h(8),
                         ),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF2F7F1),
-                          border: Border.all(color: const Color(0xFFDCE8DB)),
+                          color: AppPalette.of(context).color(0xFFF2F7F1),
+                          border: Border.all(color: AppPalette.of(context).color(0xFFDCE8DB)),
                           borderRadius: BorderRadius.circular(rs.r(999)),
                         ),
                         child: Row(
@@ -1333,7 +1324,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                   onPressed: () => _fetchQRPass(),
                                   style: OutlinedButton.styleFrom(
                                     foregroundColor: primaryGreen,
-                                    side: const BorderSide(color: primaryGreen),
+                                    side: BorderSide(color: primaryGreen),
                                     shape: const StadiumBorder(),
                                     padding: EdgeInsets.symmetric(vertical: rs.h(10)),
                                   ),
@@ -1359,7 +1350,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                 child: ElevatedButton(
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: primaryGreen,
-                                    foregroundColor: Colors.white,
+                                    foregroundColor: AppPalette.of(context).onPrimary,
                                     elevation: 0,
                                     shape: const StadiumBorder(),
                                     padding: EdgeInsets.symmetric(vertical: rs.h(12)),
@@ -1399,7 +1390,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                       ),
                                     ),
                                     SizedBox(width: rs.w(4)),
-                                    const Icon(
+                                    Icon(
                                       Icons.north_east_rounded,
                                       size: 14,
                                       color: primaryGreen,
@@ -1410,7 +1401,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                               ElevatedButton(
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: primaryGreen,
-                                  foregroundColor: Colors.white,
+                                  foregroundColor: AppPalette.of(context).onPrimary,
                                   elevation: 0,
                                   shape: const StadiumBorder(),
                                   padding: EdgeInsets.symmetric(
@@ -1446,7 +1437,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                 style: TextStyle(
                   fontSize: rs.sp(16),
                   fontWeight: FontWeight.w800,
-                  color: const Color(0xFF191C1A),
+                  color: AppPalette.of(context).color(0xFF191C1A),
                 ),
               ),
               SizedBox(height: rs.h(12)),
@@ -1458,7 +1449,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                       child: Container(
                         padding: EdgeInsets.all(rs.w(16)),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFEDEBF7),
+                          color: AppPalette.of(context).color(0xFFEDEBF7),
                           borderRadius: BorderRadius.circular(rs.r(20)),
                         ),
                         child: Column(
@@ -1470,12 +1461,12 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                 Icon(
                                   Icons.medication_outlined,
                                   size: rs.w(24),
-                                  color: const Color(0xFF5B4EA1),
+                                  color: AppPalette.of(context).color(0xFF5B4EA1),
                                 ),
-                                const Icon(
+                                Icon(
                                   Icons.north_east_rounded,
                                   size: 16,
-                                  color: Color(0xFF5B4EA1),
+                                  color: AppPalette.of(context).color(0xFF5B4EA1),
                                 ),
                               ],
                             ),
@@ -1485,7 +1476,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                               style: TextStyle(
                                 fontWeight: FontWeight.w800,
                                 fontSize: rs.sp(14),
-                                color: const Color(0xFF261D52),
+                                color: AppPalette.of(context).color(0xFF261D52),
                               ),
                             ),
                             SizedBox(height: rs.h(4)),
@@ -1493,7 +1484,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                               'Your medication, made clear.',
                               style: TextStyle(
                                 fontSize: rs.sp(11.5),
-                                color: const Color(0xFF5A5285),
+                                color: AppPalette.of(context).color(0xFF5A5285),
                               ),
                             ),
                           ],
@@ -1508,7 +1499,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                       child: Container(
                         padding: EdgeInsets.all(rs.w(16)),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF7F1E6),
+                          color: AppPalette.of(context).color(0xFFF7F1E6),
                           borderRadius: BorderRadius.circular(rs.r(20)),
                         ),
                         child: Column(
@@ -1520,12 +1511,12 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                 Icon(
                                   Icons.description_outlined,
                                   size: rs.w(24),
-                                  color: const Color(0xFF8C6826),
+                                  color: AppPalette.of(context).color(0xFF8C6826),
                                 ),
-                                const Icon(
+                                Icon(
                                   Icons.north_east_rounded,
                                   size: 16,
-                                  color: Color(0xFF8C6826),
+                                  color: AppPalette.of(context).color(0xFF8C6826),
                                 ),
                               ],
                             ),
@@ -1535,7 +1526,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                               style: TextStyle(
                                 fontWeight: FontWeight.w800,
                                 fontSize: rs.sp(14),
-                                color: const Color(0xFF422F0A),
+                                color: AppPalette.of(context).color(0xFF422F0A),
                               ),
                             ),
                             SizedBox(height: rs.h(4)),
@@ -1543,7 +1534,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                               'Ready for your next step.',
                               style: TextStyle(
                                 fontSize: rs.sp(11.5),
-                                color: const Color(0xFF6B5731),
+                                color: AppPalette.of(context).color(0xFF6B5731),
                               ),
                             ),
                           ],
@@ -1559,7 +1550,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
               Container(
                 padding: EdgeInsets.all(rs.w(20)),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF244333),
+                  color: AppPalette.of(context).color(0xFF244333),
                   borderRadius: BorderRadius.circular(rs.r(24)),
                 ),
                 child: Column(
@@ -1570,10 +1561,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                       children: [
                         Row(
                           children: [
-                            const Icon(
+                            Icon(
                               Icons.favorite_border_rounded,
                               size: 16,
-                              color: Color(0xFFB7DFCA),
+                              color: AppPalette.of(context).color(0xFF191C1A),
                             ),
                             SizedBox(width: rs.w(8)),
                             Text(
@@ -1582,7 +1573,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                 fontSize: rs.sp(10),
                                 letterSpacing: 1.8,
                                 fontWeight: FontWeight.w700,
-                                color: const Color(0xFFB7DFCA),
+                                color: AppPalette.of(context).color(0xFF191C1A),
                               ),
                             ),
                           ],
@@ -1601,7 +1592,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                           width: rs.w(44),
                           height: rs.w(44),
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.15),
+                            color: AppPalette.of(context).surface.withValues(alpha: 0.15),
                             shape: BoxShape.circle,
                           ),
                           alignment: Alignment.center,
@@ -1736,23 +1727,23 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
               Container(
                 padding: EdgeInsets.all(rs.w(18)),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppPalette.of(context).surface,
                   borderRadius: BorderRadius.circular(rs.r(20)),
-                  border: Border.all(color: const Color(0xFFE2EBE2)),
+                  border: Border.all(color: AppPalette.of(context).color(0xFFE2EBE2)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.circle, size: 8, color: primaryGreen),
+                        Icon(Icons.circle, size: 8, color: primaryGreen),
                         SizedBox(width: rs.w(8)),
                         Text(
                           'Your campus infirmary',
                           style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: rs.sp(13),
-                            color: const Color(0xFF191C1A),
+                            color: AppPalette.of(context).color(0xFF191C1A),
                           ),
                         ),
                       ],
@@ -1795,9 +1786,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
               Container(
                 padding: EdgeInsets.all(rs.w(18)),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppPalette.of(context).surface,
                   borderRadius: BorderRadius.circular(rs.r(20)),
-                  border: Border.all(color: const Color(0xFFE2EBE2)),
+                  border: Border.all(color: AppPalette.of(context).color(0xFFE2EBE2)),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1813,7 +1804,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                             style: TextStyle(
                               fontWeight: FontWeight.w700,
                               fontSize: rs.sp(13),
-                              color: const Color(0xFF191C1A),
+                              color: AppPalette.of(context).color(0xFF191C1A),
                             ),
                           ),
                           SizedBox(height: rs.h(4)),
@@ -1851,10 +1842,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
       width: double.infinity,
       padding: EdgeInsets.all(rs.w(18)),
       decoration: BoxDecoration(
-        color: isServing ? const Color(0xFFFEF3C7) : const Color(0xFFE5EDE4),
+        color: isServing ? AppPalette.of(context).color(0xFFFEF3C7) : AppPalette.of(context).color(0xFFE5EDE4),
         borderRadius: BorderRadius.circular(rs.r(22)),
         border: Border.all(
-          color: isServing ? Colors.amber.shade700 : const Color(0xFF284E3A),
+          color: isServing ? Colors.amber.shade700 : AppPalette.of(context).color(0xFF284E3A),
           width: 1.5,
         ),
       ),
@@ -1871,20 +1862,20 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                     fontWeight: FontWeight.w900,
                     fontSize: rs.sp(11),
                     letterSpacing: 1.5,
-                    color: isServing ? Colors.amber.shade900 : const Color(0xFF284E3A),
+                    color: isServing ? Colors.amber.shade900 : AppPalette.of(context).color(0xFF284E3A),
                   ),
                 ),
               ),
               Container(
                 padding: EdgeInsets.symmetric(horizontal: rs.w(10), vertical: rs.h(4)),
                 decoration: BoxDecoration(
-                  color: isServing ? Colors.amber.shade800 : const Color(0xFF284E3A),
+                  color: isServing ? Colors.amber.shade800 : AppPalette.of(context).color(0xFF284E3A),
                   borderRadius: BorderRadius.circular(rs.r(16)),
                 ),
                 child: Text(
                   isServing ? 'YOUR TURN' : 'WAITING',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: isServing ? Colors.white : AppPalette.of(context).onPrimary,
                     fontSize: rs.sp(9.5),
                     fontWeight: FontWeight.bold,
                   ),
@@ -1901,7 +1892,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                 style: TextStyle(
                   fontSize: rs.sp(36),
                   fontWeight: FontWeight.w900,
-                  color: isServing ? Colors.amber.shade900 : const Color(0xFF284E3A),
+                  color: isServing ? Colors.amber.shade900 : AppPalette.of(context).color(0xFF284E3A),
                 ),
               ),
               Column(
@@ -1911,7 +1902,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                     isServing ? 'Proceed To' : 'Patients Ahead',
                     style: TextStyle(
                       fontSize: rs.sp(11),
-                      color: const Color(0xFF5A635B),
+                      color: AppPalette.of(context).color(0xFF5A635B),
                     ),
                   ),
                   Text(
@@ -1919,7 +1910,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                     style: TextStyle(
                       fontSize: rs.sp(isServing ? 14 : 20),
                       fontWeight: FontWeight.bold,
-                      color: const Color(0xFF191C1A),
+                      color: AppPalette.of(context).color(0xFF191C1A),
                     ),
                   ),
                 ],
@@ -1929,7 +1920,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
           SizedBox(height: rs.h(6)),
           Text(
             'Practitioner: ${ticket['doctor_name']} • Est: ~${waitMins > 0 ? waitMins : 5} mins',
-            style: TextStyle(fontSize: rs.sp(12), color: const Color(0xFF5A635B)),
+            style: TextStyle(fontSize: rs.sp(12), color: AppPalette.of(context).color(0xFF5A635B)),
           ),
         ],
       ),
@@ -1942,18 +1933,18 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
 
   Widget _buildSOSTab() {
     final rs = Rs.of(context);
-    const textSub = Color(0xFF5A635B);
-    const textMain = Color(0xFF191C1A);
-    const primaryGreen = Color(0xFF284E3A);
+    final textSub = AppPalette.of(context).color(0xFF5A635B);
+    final textMain = AppPalette.of(context).color(0xFF191C1A);
+    final primaryGreen = AppPalette.of(context).color(0xFF284E3A);
 
-    const peachCardBg = Color(0xFFF9EDE5);
-    const demoBadgeBg = Color(0xFFF2D9CE);
-    const demoBadgeText = Color(0xFF8D3F33);
-    const sirenCircleBg = Color(0xFFF1D8CC);
-    const activeCrimson = Color(0xFFA03B30);
-    const activeHalo = Color(0xFFF4C8C1);
-    const inactiveCircle = Color(0xFFBFA298);
-    const inactiveHalo = Color(0xFFE8D8CF);
+    final peachCardBg = AppPalette.of(context).color(0xFFF9EDE5);
+    final demoBadgeBg = AppPalette.of(context).color(0xFFF2D9CE);
+    final demoBadgeText = AppPalette.of(context).color(0xFF8D3F33);
+    final sirenCircleBg = AppPalette.of(context).color(0xFFF1D8CC);
+    final activeCrimson = AppPalette.of(context).background(0xFFA03B30);
+    final activeHalo = AppPalette.of(context).color(0xFFF4C8C1);
+    final inactiveCircle = AppPalette.of(context).color(0xFFBFA298);
+    final inactiveHalo = AppPalette.of(context).color(0xFFE8D8CF);
 
     final isOffline = !ConnectivityService().isOnline;
     final maxContentWidth = rs.isTablet ? 560.0 : double.infinity;
@@ -2000,8 +1991,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                     margin: EdgeInsets.only(bottom: rs.h(16)),
                     padding: EdgeInsets.all(rs.w(16)),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFDE8E8),
-                      border: Border.all(color: const Color(0xFFF8B4B4)),
+                      color: AppPalette.of(context).color(0xFFFDE8E8),
+                      border: Border.all(color: AppPalette.of(context).color(0xFFF8B4B4)),
                       borderRadius: BorderRadius.circular(rs.r(16)),
                     ),
                     child: Column(
@@ -2011,7 +2002,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                           children: [
                             Icon(
                               Icons.wifi_off_rounded,
-                              color: const Color(0xFF7A2E26),
+                              color: AppPalette.of(context).color(0xFF7A2E26),
                               size: rs.w(20),
                             ),
                             SizedBox(width: rs.w(8)),
@@ -2021,7 +2012,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                 style: TextStyle(
                                   fontSize: rs.sp(14),
                                   fontWeight: FontWeight.w800,
-                                  color: const Color(0xFF7A2E26),
+                                  color: AppPalette.of(context).color(0xFF7A2E26),
                                 ),
                               ),
                             ),
@@ -2032,7 +2023,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                           "In-app SOS can't reach the campus server without internet. But these buttons work with no data connection:",
                           style: TextStyle(
                             fontSize: rs.sp(12.5),
-                            color: const Color(0xFF7A2E26),
+                            color: AppPalette.of(context).color(0xFF7A2E26),
                             height: 1.4,
                           ),
                         ),
@@ -2104,7 +2095,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                           Container(
                             width: rs.w(38),
                             height: rs.w(38),
-                            decoration: const BoxDecoration(
+                            decoration: BoxDecoration(
                               color: sirenCircleBg,
                               shape: BoxShape.circle,
                             ),
@@ -2161,7 +2152,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                 side: BorderSide(
                                   color: _sosConsent
                                       ? activeCrimson
-                                      : const Color(0xFFC7AAA0),
+                                      : AppPalette.of(context).color(0xFFC7AAA0),
                                   width: 1.8,
                                 ),
                                 onChanged: (val) =>
@@ -2311,9 +2302,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                     vertical: rs.h(18),
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: AppPalette.of(context).surface,
                     borderRadius: BorderRadius.circular(rs.r(22)),
-                    border: Border.all(color: const Color(0xFFE2EBE2)),
+                    border: Border.all(color: AppPalette.of(context).color(0xFFE2EBE2)),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.center,
@@ -2332,13 +2323,13 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                         height: rs.h(48).clamp(44.0, 54.0),
                         child: ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFE2EBE1),
+                            backgroundColor: AppPalette.of(context).background(0xFFE2EBE1),
                             foregroundColor: primaryGreen,
                             elevation: 0,
                             shape: const StadiumBorder(),
                           ),
                           onPressed: () => _launchDialer('911'),
-                          icon: const Icon(
+                          icon: Icon(
                             Icons.phone_outlined,
                             size: 18,
                             color: primaryGreen,
@@ -2371,7 +2362,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
       height: rs.h(48).clamp(44.0, 54.0),
       child: ElevatedButton(
         style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF7A2E26),
+          backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
           foregroundColor: Colors.white,
           shape: const StadiumBorder(),
           elevation: 0,
@@ -2391,8 +2382,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
       height: rs.h(44).clamp(40.0, 50.0),
       child: OutlinedButton(
         style: OutlinedButton.styleFrom(
-          foregroundColor: const Color(0xFF7A2E26),
-          side: const BorderSide(color: Color(0xFF7A2E26)),
+          foregroundColor: AppPalette.of(context).color(0xFF7A2E26),
+          side: BorderSide(color: AppPalette.of(context).color(0xFF7A2E26)),
           shape: const StadiumBorder(),
         ),
         onPressed: () => OfflineSosService().composeEmergencySms(phone, body: body),
@@ -2410,12 +2401,12 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
 
   Widget _buildProfileTab(String initials) {
     final rs = Rs.of(context);
-    const primaryGreen = Color(0xFF284E3A);
-    const softSage = Color(0xFFE5EDE4);
-    const textSub = Color(0xFF5A635B);
+    final primaryGreen = AppPalette.of(context).color(0xFF284E3A);
+    final softSage = AppPalette.of(context).color(0xFFE5EDE4);
+    final textSub = AppPalette.of(context).color(0xFF5A635B);
 
     if (_loadingProfile && _profileData == null) {
-      return const Center(child: CircularProgressIndicator(color: primaryGreen));
+      return Center(child: CircularProgressIndicator(color: primaryGreen));
     }
 
     final hp = _profileData?['healthProfile'] ?? {};
@@ -2470,7 +2461,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                 style: TextStyle(
                   fontSize: rs.sp(28),
                   fontWeight: FontWeight.w800,
-                  color: const Color(0xFF191C1A),
+                  color: AppPalette.of(context).color(0xFF191C1A),
                   letterSpacing: -0.5,
                 ),
               ),
@@ -2485,9 +2476,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
               Container(
                 padding: EdgeInsets.all(rs.w(20)),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppPalette.of(context).surface,
                   borderRadius: BorderRadius.circular(rs.r(24)),
-                  border: Border.all(color: const Color(0xFFE2EBE2)),
+                  border: Border.all(color: AppPalette.of(context).color(0xFFE2EBE2)),
                 ),
                 child: Column(
                   children: [
@@ -2496,8 +2487,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                         Container(
                           width: rs.w(54).clamp(46.0, 60.0),
                           height: rs.w(54).clamp(46.0, 60.0),
-                          decoration: const BoxDecoration(
-                            color: Color(0xFFE6DDCF),
+                          decoration: BoxDecoration(
+                            color: AppPalette.of(context).color(0xFFE6DDCF),
                             shape: BoxShape.circle,
                           ),
                           alignment: Alignment.center,
@@ -2506,7 +2497,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                             style: TextStyle(
                               fontSize: rs.sp(18),
                               fontWeight: FontWeight.w800,
-                              color: const Color(0xFF4A4133),
+                              color: AppPalette.of(context).color(0xFF4A4133),
                             ),
                           ),
                         ),
@@ -2520,7 +2511,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                 style: TextStyle(
                                   fontSize: rs.sp(18),
                                   fontWeight: FontWeight.w800,
-                                  color: const Color(0xFF191C1A),
+                                  color: AppPalette.of(context).color(0xFF191C1A),
                                 ),
                               ),
                               SizedBox(height: rs.h(2)),
@@ -2557,8 +2548,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                           vertical: rs.h(10),
                         ),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF2F7F1),
-                          border: Border.all(color: const Color(0xFFDCE8DB)),
+                          color: AppPalette.of(context).color(0xFFF2F7F1),
+                          border: Border.all(color: AppPalette.of(context).color(0xFFDCE8DB)),
                           borderRadius: BorderRadius.circular(rs.r(14)),
                         ),
                         child: Row(
@@ -2640,9 +2631,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
               Container(
                 padding: EdgeInsets.all(rs.w(20)),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppPalette.of(context).surface,
                   borderRadius: BorderRadius.circular(rs.r(24)),
-                  border: Border.all(color: const Color(0xFFE2EBE2)),
+                  border: Border.all(color: AppPalette.of(context).color(0xFFE2EBE2)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2652,7 +2643,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                       style: TextStyle(
                         fontSize: rs.sp(16),
                         fontWeight: FontWeight.w800,
-                        color: const Color(0xFF191C1A),
+                        color: AppPalette.of(context).color(0xFF191C1A),
                       ),
                     ),
                     SizedBox(height: rs.h(16)),
@@ -2674,7 +2665,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                 style: TextStyle(
                                   fontSize: rs.sp(14),
                                   fontWeight: FontWeight.w600,
-                                  color: const Color(0xFF191C1A),
+                                  color: AppPalette.of(context).color(0xFF191C1A),
                                 ),
                               ),
                             ],
@@ -2699,7 +2690,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                 style: TextStyle(
                                   fontSize: rs.sp(14),
                                   fontWeight: FontWeight.w600,
-                                  color: const Color(0xFF191C1A),
+                                  color: AppPalette.of(context).color(0xFF191C1A),
                                 ),
                               ),
                             ],
@@ -2721,7 +2712,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                 style: TextStyle(
                                   fontSize: rs.sp(14),
                                   fontWeight: FontWeight.w600,
-                                  color: const Color(0xFF191C1A),
+                                  color: AppPalette.of(context).color(0xFF191C1A),
                                 ),
                               ),
                             ],
@@ -2751,7 +2742,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                 style: TextStyle(
                                   fontSize: rs.sp(17),
                                   fontWeight: FontWeight.w800,
-                                  color: const Color(0xFF191C1A),
+                                  color: AppPalette.of(context).color(0xFF191C1A),
                                 ),
                               ),
                             ],
@@ -2774,7 +2765,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                 style: TextStyle(
                                   fontSize: rs.sp(15),
                                   fontWeight: FontWeight.w700,
-                                  color: const Color(0xFF7A2E26),
+                                  color: AppPalette.of(context).color(0xFF7A2E26),
                                 ),
                               ),
                             ],
@@ -2799,7 +2790,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                 style: TextStyle(
                                   fontSize: rs.sp(14),
                                   fontWeight: FontWeight.w600,
-                                  color: const Color(0xFF191C1A),
+                                  color: AppPalette.of(context).color(0xFF191C1A),
                                 ),
                               ),
                             ],
@@ -2819,7 +2810,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                 style: TextStyle(
                                   fontSize: rs.sp(14),
                                   fontWeight: FontWeight.w600,
-                                  color: const Color(0xFF191C1A),
+                                  color: AppPalette.of(context).color(0xFF191C1A),
                                 ),
                               ),
                             ],
@@ -2841,7 +2832,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                           style: TextStyle(
                             fontSize: rs.sp(14),
                             fontWeight: FontWeight.w600,
-                            color: const Color(0xFF191C1A),
+                            color: AppPalette.of(context).color(0xFF191C1A),
                           ),
                         ),
                       ],
@@ -2901,9 +2892,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
               Container(
                 padding: EdgeInsets.all(rs.w(20)),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppPalette.of(context).surface,
                   borderRadius: BorderRadius.circular(rs.r(24)),
-                  border: Border.all(color: const Color(0xFFE2EBE2)),
+                  border: Border.all(color: AppPalette.of(context).color(0xFFE2EBE2)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2913,7 +2904,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                       style: TextStyle(
                         fontSize: rs.sp(16),
                         fontWeight: FontWeight.w800,
-                        color: const Color(0xFF191C1A),
+                        color: AppPalette.of(context).color(0xFF191C1A),
                       ),
                     ),
                     SizedBox(height: rs.h(14)),
@@ -2947,7 +2938,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                   style: TextStyle(
                                     fontSize: rs.sp(13.5),
                                     fontWeight: FontWeight.w600,
-                                    color: const Color(0xFF191C1A),
+                                    color: AppPalette.of(context).color(0xFF191C1A),
                                   ),
                                 ),
                               ),
@@ -2964,9 +2955,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
               Container(
                 padding: EdgeInsets.all(rs.w(20)),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: AppPalette.of(context).surface,
                   borderRadius: BorderRadius.circular(rs.r(24)),
-                  border: Border.all(color: const Color(0xFFE2EBE2)),
+                  border: Border.all(color: AppPalette.of(context).color(0xFFE2EBE2)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2979,7 +2970,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                           style: TextStyle(
                             fontSize: rs.sp(16),
                             fontWeight: FontWeight.w800,
-                            color: const Color(0xFF191C1A),
+                            color: AppPalette.of(context).color(0xFF191C1A),
                           ),
                         ),
                         TextButton(
@@ -3022,7 +3013,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                       style: TextStyle(
                         fontSize: rs.sp(14),
                         fontWeight: FontWeight.w600,
-                        color: const Color(0xFF191C1A),
+                        color: AppPalette.of(context).color(0xFF191C1A),
                       ),
                     ),
                     SizedBox(height: rs.h(14)),
@@ -3041,7 +3032,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                       style: TextStyle(
                         fontSize: rs.sp(14),
                         fontWeight: FontWeight.w600,
-                        color: const Color(0xFF191C1A),
+                        color: AppPalette.of(context).color(0xFF191C1A),
                       ),
                     ),
                     Text(
@@ -3055,10 +3046,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
 
               // Settings links
               Material(
-                color: Colors.white,
+                color: AppPalette.of(context).surface,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(rs.r(24)),
-                  side: const BorderSide(color: Color(0xFFE2EBE2)),
+                  side: BorderSide(color: AppPalette.of(context).color(0xFFE2EBE2)),
                 ),
                 clipBehavior: Clip.antiAlias,
                 child: Column(
@@ -3107,8 +3098,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                         style: TextStyle(
                           fontSize: rs.sp(11.5),
                           color: _hasConsented
-                              ? const Color(0xFF284E3A)
-                              : const Color(0xFF7A2E26),
+                              ? AppPalette.of(context).color(0xFF284E3A)
+                              : AppPalette.of(context).color(0xFF7A2E26),
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -3121,7 +3112,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                               child: Text(
                                 'Revoke',
                                 style: TextStyle(
-                                  color: const Color(0xFF7A2E26),
+                                  color: AppPalette.of(context).color(0xFF7A2E26),
                                   fontSize: rs.sp(12),
                                   fontWeight: FontWeight.w600,
                                 ),

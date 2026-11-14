@@ -2,6 +2,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../theme/app_palette.dart';
+import '../theme/account_theme_controller.dart';
+import '../widgets/account_settings_button.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/api_config.dart';
@@ -10,7 +13,6 @@ import '../widgets/valetudo_logo.dart';
 import '../widgets/sos_alert_actions.dart';
 import '../services/emergency_alert_service.dart';
 import 'login_screen.dart';
-import 'change_password_screen.dart';
 
 class ResponderScreen extends StatefulWidget {
   final Map<String, dynamic> user;
@@ -27,12 +29,12 @@ class _ResponderScreenState extends State<ResponderScreen> {
   Timer? _pollingTimer;
   int? _lastAlertAlarmedId;
 
-  static const primaryCrimson = Color(0xFF7A2E26);
-  static const primaryGreen = Color(0xFF284E3A);
-  static const softSage = Color(0xFFE5EDE4);
-  static const textMain = Color(0xFF191C1A);
-  static const textSub = Color(0xFF5A635B);
-  static const borderColor = Color(0xFFE2EBE2);
+  Color get primaryCrimson => AppPalette.of(context).color(0xFF7A2E26);
+  Color get primaryGreen => AppPalette.of(context).color(0xFF284E3A);
+  Color get softSage => AppPalette.of(context).color(0xFFE5EDE4);
+  Color get textMain => AppPalette.of(context).color(0xFF191C1A);
+  Color get textSub => AppPalette.of(context).color(0xFF5A635B);
+  Color get borderColor => AppPalette.of(context).color(0xFFE2EBE2);
 
   @override
   void initState() {
@@ -127,7 +129,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('${result['error'] ?? 'Update failed. Check your connection.'}'),
-            backgroundColor: primaryCrimson,
+            backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
           ),
         );
       }
@@ -143,9 +145,9 @@ class _ResponderScreenState extends State<ResponderScreen> {
     if (lat == 0.0 && lng == 0.0) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('GPS coordinates not available for this alert.'),
-            backgroundColor: primaryCrimson,
+          SnackBar(
+            content: const Text('GPS coordinates not available for this alert.'),
+            backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
           ),
         );
       }
@@ -173,7 +175,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Could not open Google Maps: $e'),
-            backgroundColor: primaryCrimson,
+            backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
           ),
         );
       }
@@ -186,7 +188,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
     final maxContentWidth = rs.isTablet ? 640.0 : double.infinity;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F9F6),
+      backgroundColor: AppPalette.of(context).background(0xFFF7F9F6),
       appBar: PreferredSize(
         preferredSize: Size.fromHeight(rs.h(64).clamp(56.0, 74.0)),
         child: SafeArea(
@@ -215,18 +217,11 @@ class _ResponderScreenState extends State<ResponderScreen> {
                 ),
                 Row(
                   children: [
-                    IconButton(
-                      icon: Icon(
-                        Icons.key,
-                        size: rs.w(20).clamp(18.0, 22.0),
-                        color: textSub,
-                      ),
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const ChangePasswordScreen(),
-                        ),
-                      ),
+                    AccountSettingsButton(
+                      initials: [widget.user['first_name'], widget.user['last_name']]
+                          .whereType<String>()
+                          .where((name) => name.isNotEmpty)
+                          .map((name) => name[0].toUpperCase()).join(),
                     ),
                     IconButton(
                       icon: Icon(
@@ -261,6 +256,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
                             );
                           } catch (_) {}
                         }
+                        if (context.mounted) AccountThemeScope.of(context).reset();
                         await _storage.deleteAll();
                         if (!context.mounted) return;
                         Navigator.pushAndRemoveUntil(
@@ -325,7 +321,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
                       vertical: rs.h(10),
                     ),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF7EFE9),
+                      color: AppPalette.of(context).color(0xFFF7EFE9),
                       borderRadius: BorderRadius.circular(rs.r(16)),
                     ),
                     child: Row(
@@ -368,7 +364,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
                     Center(
                       child: Padding(
                         padding: EdgeInsets.all(rs.h(32)),
-                        child: const CircularProgressIndicator(
+                        child: CircularProgressIndicator(
                           color: primaryCrimson,
                         ),
                       ),
@@ -381,7 +377,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
                       ),
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: AppPalette.of(context).surface,
                         borderRadius: BorderRadius.circular(rs.r(24)),
                         border: Border.all(color: borderColor),
                       ),
@@ -435,7 +431,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
       margin: EdgeInsets.only(bottom: rs.h(14)),
       padding: EdgeInsets.all(rs.w(20)),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppPalette.of(context).surface,
         borderRadius: BorderRadius.circular(rs.r(24)),
         border: Border.all(color: borderColor),
       ),
@@ -452,7 +448,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
                       width: rs.w(38),
                       height: rs.w(38),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF7EFE9),
+                        color: AppPalette.of(context).color(0xFFF7EFE9),
                         borderRadius: BorderRadius.circular(rs.r(10)),
                       ),
                       child: Icon(
@@ -497,8 +493,8 @@ class _ResponderScreenState extends State<ResponderScreen> {
                 ),
                 decoration: BoxDecoration(
                   color: status == 'dispatched'
-                      ? const Color(0xFFE5EDE4)
-                      : const Color(0xFFFDE8E8),
+                      ? AppPalette.of(context).color(0xFFE5EDE4)
+                      : AppPalette.of(context).color(0xFFFDE8E8),
                   borderRadius: BorderRadius.circular(rs.r(12)),
                 ),
                 child: Text(
@@ -558,7 +554,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
 
           // GPS coordinates row — fully tappable
           Material(
-            color: const Color(0xFFE2EBE1),
+            color: AppPalette.of(context).color(0xFFE2EBE1),
             borderRadius: BorderRadius.circular(rs.r(14)),
             child: InkWell(
               onTap: () => _openGoogleMaps(lat, lng),
@@ -649,7 +645,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: primaryGreen,
-                  foregroundColor: Colors.white,
+                  foregroundColor: AppPalette.of(context).onPrimary,
                   elevation: 0,
                   shape: const StadiumBorder(),
                 ),
@@ -683,7 +679,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
                       child: OutlinedButton(
                         style: OutlinedButton.styleFrom(
                           foregroundColor: primaryGreen,
-                          side: const BorderSide(color: borderColor),
+                          side: BorderSide(color: borderColor),
                           shape: const StadiumBorder(),
                           padding: EdgeInsets.symmetric(vertical: rs.h(10)),
                         ),
@@ -718,7 +714,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
                       child: OutlinedButton(
                         style: OutlinedButton.styleFrom(
                           foregroundColor: primaryGreen,
-                          side: const BorderSide(color: borderColor),
+                          side: BorderSide(color: borderColor),
                           shape: const StadiumBorder(),
                         ),
                         onPressed: () =>
@@ -759,7 +755,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
           horizontal: rs.w(12),
         ),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppPalette.of(context).surface,
           borderRadius: BorderRadius.circular(rs.r(18)),
           border: Border.all(color: borderColor),
         ),
