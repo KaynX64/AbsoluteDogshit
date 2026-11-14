@@ -60,6 +60,41 @@ const request = (path, { roles, userId = 21, method = 'GET', headers = {}, json 
   return fetch(baseUrl + path, { method, headers, body });
 };
 
+test('inventory expiry alerts and summary use a 30-day window', async t => {
+  const expiryQueries = [];
+  t.mock.method(pool, 'query', async sql => {
+    if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
+    if (sql.includes('CASE') && sql.includes('days_until_expiry')) {
+      expiryQueries.push(sql);
+      return [[{
+        batch_id: 1, name: 'Fixture medicine', generic_name: 'Fixture generic',
+        batch_no: 'Fixture batch', quantity_on_hand: 7, expiry_date: '2027-01-01',
+        days_until_expiry: 2, alert_level: 'CRITICAL (<30d)',
+      }]];
+    }
+    if (sql.includes('COALESCE(m.reorder_level')) return [[{ count: 0 }]];
+    if (sql.includes('DATEDIFF(b.expiry_date, CURDATE()) <= 30')) {
+      expiryQueries.push(sql);
+      return [[{ count: 1 }]];
+    }
+    if (sql.includes('b.expiry_date <= CURDATE()')) return [[{ count: 0 }]];
+    assert.fail(`Unexpected inventory query: ${sql}`);
+  });
+
+  const options = { roles: ['NURSE'] };
+  const expiryResponse = await request('/api/inventory/expiring-soon', options);
+  assert.equal(expiryResponse.status, 200);
+  assert.equal((await expiryResponse.json()).length, 1);
+  const summaryResponse = await request('/api/inventory/dashboard-summary', options);
+  assert.equal(summaryResponse.status, 200);
+  assert.equal((await summaryResponse.json()).expiringSoonCount, 1);
+  assert.equal(expiryQueries.length, 2);
+  for (const sql of expiryQueries) {
+    assert.match(sql, /DATEDIFF\(b\.expiry_date, CURDATE\(\)\) <= 30/);
+    assert.doesNotMatch(sql, /DATEDIFF\(b\.expiry_date, CURDATE\(\)\) <= 90/);
+  }
+});
+
 test('analytics headcount scope skips all other loaders and limits every report format', async t => {
   let codes = ['ANALYTICS_VIEW', 'ANALYTICS_HEADCOUNT', 'ANALYTICS_EXPORT'];
   const unexpected = [];
