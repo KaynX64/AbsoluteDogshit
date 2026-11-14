@@ -158,7 +158,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'valetudo.',
+                            'LeoVital',
                             style: TextStyle(
                               fontSize: rs.sp(17),
                               fontWeight: FontWeight.w900,

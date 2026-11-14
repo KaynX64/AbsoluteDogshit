@@ -84,6 +84,7 @@ class _ConsultationSchedulerScreenState
 
   List<dynamic> _myAppointments = [];
   bool _loadingHistory = false;
+  bool _isAppointmentGridView = false;
 
   static const primaryGreen = Color(0xFF284E3A);
   static const softSage = Color(0xFFE5EDE4);
@@ -922,7 +923,84 @@ class _ConsultationSchedulerScreenState
               ],
             ),
           ),
+          if (_activeSubTab == 1) ...[
+            SizedBox(height: rs.h(8)),
+            Align(
+              alignment: Alignment.centerRight,
+              child: _buildHistoryLayoutSelector(rs),
+            ),
+          ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildHistoryLayoutSelector(Rs rs) {
+    return Container(
+      padding: EdgeInsets.all(rs.w(3)),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F6F3),
+        border: Border.all(color: borderColor),
+        borderRadius: BorderRadius.circular(rs.r(14)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildHistoryLayoutOption(rs, isGrid: false),
+          _buildHistoryLayoutOption(rs, isGrid: true),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHistoryLayoutOption(Rs rs, {required bool isGrid}) {
+    final selected = _isAppointmentGridView == isGrid;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: isGrid ? 'Grid layout' : 'List layout',
+      child: GestureDetector(
+        onTap: () => setState(() => _isAppointmentGridView = isGrid),
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: EdgeInsets.symmetric(
+            horizontal: rs.w(10),
+            vertical: rs.h(7),
+          ),
+          decoration: BoxDecoration(
+            color: selected ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(rs.r(11)),
+            boxShadow: selected
+                ? const [
+                    BoxShadow(
+                      color: Color(0x12000000),
+                      blurRadius: 4,
+                      offset: Offset(0, 1),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isGrid ? Icons.grid_view_rounded : Icons.view_agenda_outlined,
+                size: rs.w(16),
+                color: selected ? primaryGreen : textSub,
+              ),
+              SizedBox(width: rs.w(5)),
+              Text(
+                isGrid ? 'Grid' : 'List',
+                style: TextStyle(
+                  fontSize: rs.sp(11.5),
+                  fontWeight: FontWeight.w700,
+                  color: selected ? primaryGreen : textSub,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1558,6 +1636,67 @@ class _ConsultationSchedulerScreenState
       );
     }
 
+    if (_isAppointmentGridView) {
+      final columnCount = rs.isTablet ? 3 : 2;
+      return RefreshIndicator(
+        color: primaryGreen,
+        onRefresh: _fetchMyAppointments,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                rs.w(20),
+                rs.h(8),
+                rs.w(20),
+                rs.h(8),
+              ),
+              sliver: SliverToBoxAdapter(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: List.generate(columnCount, (columnIndex) {
+                    return Expanded(
+                      child: Padding(
+                        padding: EdgeInsets.only(
+                          right: columnIndex == columnCount - 1 ? 0 : rs.w(12),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            for (
+                              var index = columnIndex;
+                              index < _myAppointments.length;
+                              index += columnCount
+                            )
+                              Padding(
+                                padding: EdgeInsets.only(
+                                  bottom:
+                                      index + columnCount <
+                                          _myAppointments.length
+                                      ? rs.h(12)
+                                      : 0,
+                                ),
+                                child: SizedBox(
+                                  width: double.infinity,
+                                  child: _buildAppointmentGridCard(
+                                    _myAppointments[index],
+                                    rs,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return RefreshIndicator(
       color: primaryGreen,
       onRefresh: _fetchMyAppointments,
@@ -1738,6 +1877,151 @@ class _ConsultationSchedulerScreenState
           );
         },
       ),
+    );
+  }
+
+  Widget _buildAppointmentGridCard(dynamic item, Rs rs) {
+    final status = (item['status'] ?? 'scheduled').toString().toLowerCase();
+    final isConfirmed = status == 'scheduled' || status == 'checked_in';
+    final isCompleted = status == 'completed';
+    final statusColor = isConfirmed
+        ? primaryGreen
+        : isCompleted
+        ? const Color(0xFF15803D)
+        : const Color(0xFF9B1C1C);
+    final statusBackground = isConfirmed
+        ? softSage
+        : isCompleted
+        ? const Color(0xFFE2EBE1)
+        : const Color(0xFFFDE8E8);
+
+    return RepaintBoundary(
+      child: Container(
+        padding: EdgeInsets.all(rs.w(14)),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(rs.r(18)),
+          border: Border.all(color: borderColor),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Container(
+                padding: EdgeInsets.symmetric(
+                  horizontal: rs.w(8),
+                  vertical: rs.h(4),
+                ),
+                decoration: BoxDecoration(
+                  color: statusBackground,
+                  borderRadius: BorderRadius.circular(rs.r(10)),
+                ),
+                child: Text(
+                  status == 'scheduled' ? 'CONFIRMED' : status.toUpperCase(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: rs.sp(10.5),
+                    fontWeight: FontWeight.w800,
+                    color: statusColor,
+                  ),
+                ),
+              ),
+            ),
+            SizedBox(height: rs.h(8)),
+            Text(
+              (item['appointment_type'] ?? 'General consultation').toString(),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: rs.sp(16),
+                fontWeight: FontWeight.w800,
+                color: textMain,
+              ),
+            ),
+            SizedBox(height: rs.h(5)),
+            _buildAppointmentGridDetail(
+              rs,
+              Icons.event_outlined,
+              _formatDateTime(item['formatted_date_time'] ?? item['date_time']),
+              color: textMain,
+            ),
+            SizedBox(height: rs.h(4)),
+            _buildAppointmentGridDetail(
+              rs,
+              Icons.person_outline,
+              'Dr. ${item['doctor_first_name'] ?? ''} ${item['doctor_last_name'] ?? ''}',
+            ),
+            SizedBox(height: rs.h(4)),
+            _buildAppointmentGridDetail(
+              rs,
+              Icons.location_on_outlined,
+              'Medical Clinic · Room 1',
+            ),
+            if (item['notes'] != null &&
+                item['notes'].toString().isNotEmpty) ...[
+              SizedBox(height: rs.h(7)),
+              Text(
+                item['notes'].toString(),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: rs.sp(12), color: textSub),
+              ),
+            ],
+            if (status == 'scheduled') ...[
+              SizedBox(height: rs.h(8)),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton.icon(
+                  onPressed: () => _cancelAppointment(item['appointment_id']),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF7A2E26),
+                    padding: EdgeInsets.symmetric(vertical: rs.h(4)),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  icon: Icon(Icons.event_busy_outlined, size: rs.w(15)),
+                  label: Text(
+                    'Cancel',
+                    style: TextStyle(
+                      fontSize: rs.sp(12),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAppointmentGridDetail(
+    Rs rs,
+    IconData icon,
+    String text, {
+    Color color = textSub,
+  }) {
+    return Row(
+      children: [
+        Icon(icon, size: rs.w(14), color: textSub),
+        SizedBox(width: rs.w(5)),
+        Expanded(
+          child: Text(
+            text,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: rs.sp(12),
+              color: color,
+              fontWeight: color == textMain
+                  ? FontWeight.w700
+                  : FontWeight.normal,
+            ),
+          ),
+        ),
+      ],
     );
   }
 

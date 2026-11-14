@@ -84,7 +84,7 @@ class ValetudoMobileApp extends StatelessWidget {
           iconTheme: IconThemeData(color: textMain),
           titleTextStyle: TextStyle(
             color: textMain,
-            fontSize: 18,
+            fontSize: 19,
             fontWeight: FontWeight.w800,
           ),
         ),
@@ -94,13 +94,13 @@ class ValetudoMobileApp extends StatelessWidget {
           labelTextStyle: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.selected)) {
               return const TextStyle(
-                fontSize: 11.5,
+                fontSize: 12,
                 fontWeight: FontWeight.w700,
                 color: primaryGreen,
               );
             }
             return const TextStyle(
-              fontSize: 11.5,
+              fontSize: 12,
               fontWeight: FontWeight.w500,
               color: Color(0xFF5A635B),
             );
