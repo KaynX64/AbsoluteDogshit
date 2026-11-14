@@ -29,9 +29,11 @@ npm run test:smoke
 npm run test:smoke -- 'release/alternate/win-unpacked/Valetudo HealthLink.exe'
 ```
 
-The packaged smoke test launches the unpacked app with a temporary profile, uses synthetic renderer fixtures, and reports login and role-switch timings. It checks the preload bridge, local assets, SQLite replay, encounter submission, role switching, profile saves, and staff analytics permissions. Use a recent Node.js release with native WebSocket and SQLite support.
+The packaged smoke test launches the unpacked app with a temporary profile, uses synthetic renderer fixtures, and reports login, fixture sign-in, role-switch timings, and renderer JavaScript heap snapshots. It checks the preload bridge, local assets, SQLite replay, encounter submission, role switching, profile saves, and staff analytics permissions. Use a recent Node.js release with native WebSocket and SQLite support.
 
 ## Desktop interaction
+
+Hover over an analytics line graph to highlight the nearest reporting day and see its count. Use **View data** to read the same values with the keyboard.
 
 Use the sidebar to change workspaces. In tab groups, use Left and Right Arrow to move, and Home or End to jump to the first or last tab. Doctor/Dentist and Analytics activate local panels as focus moves. Account and Inventory views activate with Enter or Space.
 
@@ -41,7 +43,7 @@ Controls lift or press by 1 px, with 90 ms press feedback and a 140 ms release. 
 
 The packaged smoke suite exercises native keyboard input, review draft retention, pending and failed saves, analytics revocation, reduced motion, and narrow dialog layout.
 
-The consoles load eagerly. In paired local packaged runs, role-level lazy loading reduced initial JavaScript from 866 KB to 336 KB but increased login readiness from about 0.85 s to 0.96 s and first switches into Nurse, Admin, and Responder from 4–42 ms to roughly 330–350 ms. The smoke test can be rerun against future builds to compare that tradeoff.
+The consoles load eagerly. QR decoding loads on first use, and the updater module loads after the window is shown. Audit and system-health reads start when staff open the corresponding view. In paired local packaged runs, role-level lazy loading reduced initial JavaScript from 866 KB to 336 KB but increased login readiness from about 0.85 s to 0.96 s and first switches into Nurse, Admin, and Responder from 4–42 ms to roughly 330–350 ms. The smoke test can be rerun against future builds to compare that tradeoff.
 
 ## Offline icons and fonts
 

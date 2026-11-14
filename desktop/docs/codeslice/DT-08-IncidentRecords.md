@@ -3,7 +3,7 @@
 Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172` · check from repo root: `python3 scripts/verify_codeslice.py desktop/docs/codeslice .`
 
 ## DT-08 · desktop/src/features/emergency/IncidentRecords.tsx
-**LOC:** 998 · **Anchor commit:** working tree · **Role:** Admin view of documented SOS incidents: searchable list, server PDF preview, save and print (MinIO archive)
+**LOC:** 994 · **Anchor commit:** working tree · **Role:** Admin view of documented SOS incidents: searchable list, server PDF preview, save and print (MinIO archive)
 **Mounted by:** AdminConsole.tsx L1684 (activeTab === 'incidents')
 **API surface:** GET /api/emergency/incident-reports?search= (L66, L68) · GET /api/emergency/incident-reports/:reportId/pdf (L109)
 **Socket events:** on emergency:incident_reported -> refetch records (L97)
@@ -13,8 +13,8 @@ Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172`
 |---|-------|--------|-------------|
 | 1 | 1-14 | useActionFeedback | imports for the dialog and feedback, shared desktop events, API, theme and icons |
 | 2 | 15-44 | export interface IncidentRecord | exported IncidentRecord type: reportId, incidentDetails, treatmentNotes, pdfAvailable/pdfS3Key, patient, alert |
-| 3 | 45-63 | printIframeRef | component start; useState: records, loading, error, search, selectedRecord, PDF preview states, activeModalTab |
-| 4 | 64-88 | fetchRecords | fetchRecords: GET /api/emergency/incident-reports with optional search param; Bearer auth; error state |
+| 3 | 45-64 | printIframeRef | component start; useState: records, loading, error, search, selectedRecord, PDF preview states, activeModalTab |
+| 4 | 65-88 | fetchRecords | fetchRecords: GET /api/emergency/incident-reports with optional search param; Bearer auth; error state |
 | 5 | 89-105 | emergency:incident_reported | mount effect: initial fetchRecords; shared desktop socket; on emergency:incident_reported refetch |
 | 6 | 106-118 | fetchPdfBlob | fetchPdfBlob: GET /api/emergency/incident-reports/:reportId/pdf as Blob (server-generated PDF) |
 | 7 | 119-151 | handleView | handleView opens modal tab preview + loads blob URL; handleCloseModal revokes URL, resets state |
@@ -32,4 +32,4 @@ Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172`
 | 19 | 790-888 | PDF Document | modal toolbar: PDF Document / Incident Summary tab pills, Save PDF, Print, close buttons |
 | 20 | 889-926 | printIframeRef | preview tab: retrieving-PDF spinner, PDF error + Retry, blob-URL iframe (printIframeRef) |
 | 21 | 927-962 | Dispatch & Resolution Timeline | details tab: Patient Identification grid; Dispatch & Resolution Timeline (SOS, ack, GPS) |
-| 22 | 963-998 | Incident Narrative & Findings | details tab: narrative + treatment blocks; modal and component close |
+| 22 | 963-994 | Incident Narrative & Findings | details tab: narrative + treatment blocks; modal and component close |

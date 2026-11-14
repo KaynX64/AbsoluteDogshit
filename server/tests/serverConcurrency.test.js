@@ -137,7 +137,7 @@ test('startup waits for dependency checks and closes the Socket.IO HTTP listener
 
 test('prescription expiry skips a row being cancelled and audits only its committed transition', { skip }, async t => {
   const db = await fixture(t);
-  const { expireDuePrescriptions } = await import('../src/services/prescriptions/expirePrescriptions.js');
+  const { expireDuePrescriptions } = await import('../src/documents/prescriptions/expirePrescriptions.js');
   await db.query("INSERT INTO EMR_RECORDS (emr_id, patient_user_id, doctor_user_id, chief_complaint, diagnosis) VALUES (1, 1, 2, 'fixture', 'fixture')");
   await db.query(`INSERT INTO PRESCRIPTIONS
     (prescription_id, emr_id, patient_user_id, doctor_user_id, issued_at, expires_at, qr_token)
@@ -178,6 +178,19 @@ test('concurrent reminder workers accept an appointment email once', { skip }, a
   assert.deepEqual(io.emit.mock.calls.map(call => call.arguments[0]), ['appointment:reminder:1']);
   const [rows] = await db.query('SELECT reminder_sent FROM APPOINTMENTS ORDER BY appointment_id');
   assert.deepEqual(rows.map(row => row.reminder_sent), [1, 0]);
+});
+
+test('reminder runs cap each batch and drain the remaining appointments on the next run', { skip }, async t => {
+  const db = await fixture(t);
+  const { sendDueAppointmentReminders } = await withoutFirebaseCredentials(t, () => import('../src/workers/appointmentReminderWorker.js'));
+  const log = t.mock.method(console, 'log', () => {});
+  await db.query(`INSERT INTO APPOINTMENTS (patient_user_id, doctor_user_id, date_time, appointment_type)
+    VALUES ` + Array(51).fill("(1, 2, NOW() + INTERVAL 1 HOUR, 'Medical')").join(','));
+  const first = await sendDueAppointmentReminders();
+  assert.deepEqual(first.metrics, { attempted: 50, delivered: 50 });
+  const second = await sendDueAppointmentReminders();
+  assert.deepEqual(second.metrics, { attempted: 1, delivered: 1 });
+  assert.equal(log.mock.calls.filter(call => call.arguments[0] === '[Email Dispatch Simulation] reminder').length, 51);
 });
 
 test('replay commits a mixed batch and concurrent duplicates reuse the recorded outcome', { skip }, async t => {
@@ -730,4 +743,71 @@ test('concurrent incident filing publishes a single report after commit', { skip
     if (!pdfKey) await setTimeout(25);
   }
   assert.ok(pdfKey);
+});
+
+
+test('PDF recovery skips another process holding the database lock and then resumes', { skip }, async t => {
+  const db = await fixture(t);
+  const { backfillDocumentPdfs } = await import('../src/workers/documentPdfBackfillWorker.js');
+  const connection = await db.getConnection();
+  try {
+    await connection.query("SELECT GET_LOCK(CONCAT('valetudo-pdfs:', SHA1(LOWER(DATABASE()))), 0)");
+    assert.deepEqual(await backfillDocumentPdfs(), { skipped: true });
+  } finally {
+    try {
+      await connection.query("SELECT RELEASE_LOCK(CONCAT('valetudo-pdfs:', SHA1(LOWER(DATABASE()))))");
+    } finally {
+      connection.release();
+    }
+  }
+  const result = await backfillDocumentPdfs();
+  assert.equal(result.degraded, false);
+  assert.equal(result.metrics.attempted, 0);
+});
+
+
+test('formulary preserves zero reorder level and rejects deductions from archived lots', { skip }, async t => {
+  const db = await fixture(t);
+  const { request } = await mountedApi(t);
+  const nurse = { userId: 3, roles: ['NURSE'] };
+  const created = await request('/inventory/medicines', {
+    ...nurse, method: 'POST',
+    json: { name: 'Fixture', generic_name: 'Fixture', form: 'Tablet', strength: '10mg', reorder_level: 0 },
+  });
+  assert.equal(created.status, 201);
+  const { medicineId } = await created.json();
+  const [[medicine]] = await db.query('SELECT reorder_level FROM MEDICINES WHERE medicine_id = ?', [medicineId]);
+  assert.equal(medicine.reorder_level, 0);
+  const [lot] = await db.query(
+    `INSERT INTO MEDICINE_BATCHES (medicine_id, batch_no, manufacture_date, expiry_date, quantity_on_hand, deleted_at)
+     VALUES (?, 'archived', CURDATE() - INTERVAL 1 DAY, CURDATE() + INTERVAL 1 DAY, 2, NOW())`,
+    [medicineId],
+  );
+  const rejected = await request('/inventory/deduct', {
+    ...nurse, method: 'POST', json: { batch_id: lot.insertId, quantity_deducted: 1 },
+  });
+  assert.equal(rejected.status, 400);
+  const [[stock]] = await db.query('SELECT quantity_on_hand FROM MEDICINE_BATCHES WHERE batch_id = ?', [lot.insertId]);
+  assert.equal(stock.quantity_on_hand, 2);
+});
+
+test('concurrent prescription cancellations return stock and write the return ledger once', { skip }, async t => {
+  const db = await fixture(t);
+  const { request, emit } = await mountedApi(t);
+  await db.query("INSERT INTO MEDICINES (medicine_id, name, generic_name, form, strength, unit) VALUES (1, 'Fixture', 'Fixture', 'Tablet', '10mg', 'pcs')");
+  await db.query(`INSERT INTO MEDICINE_BATCHES (batch_id, medicine_id, batch_no, manufacture_date, expiry_date, quantity_on_hand)
+    VALUES (1, 1, 'fixture', CURDATE() - INTERVAL 1 DAY, CURDATE() + INTERVAL 1 DAY, 3)`);
+  await db.query("INSERT INTO EMR_RECORDS (emr_id, patient_user_id, doctor_user_id, chief_complaint, diagnosis) VALUES (1, 1, 2, 'fixture', 'fixture')");
+  await db.query("INSERT INTO PRESCRIPTIONS (prescription_id, emr_id, patient_user_id, doctor_user_id, expires_at, qr_token) VALUES (1, 1, 1, 2, CURDATE(), 'fixture-cancel')");
+  await db.query("INSERT INTO PRESCRIPTION_ITEMS (item_id, prescription_id, medicine_id, dosage, frequency, duration_days) VALUES (1, 1, 1, '10mg', 'daily', 1)");
+  await db.query("INSERT INTO INVENTORY_LOGS (batch_id, prescription_item_id, quantity_change, transaction_type, performed_by) VALUES (1, 1, -2, 'dispense', 2)");
+  const cancel = () => request('/documents/prescriptions/1/cancel', { method: 'PATCH', json: { reason: 'Fixture' } });
+  const results = await Promise.all([cancel(), cancel()]);
+  assert.deepEqual(results.map(response => response.status).sort(), [200, 409]);
+  assert.equal((await results.find(response => response.status === 409).json()).code, 'INVALID_STATE');
+  const [returns] = await db.query("SELECT quantity_change FROM INVENTORY_LOGS WHERE transaction_type = 'return'");
+  assert.deepEqual(returns, [{ quantity_change: 2 }]);
+  const [[stock]] = await db.query('SELECT quantity_on_hand FROM MEDICINE_BATCHES WHERE batch_id = 1');
+  assert.equal(stock.quantity_on_hand, 5);
+  assert.equal(emit.mock.calls.filter(call => call.arguments[0] === 'inventory:updated').length, 1);
 });

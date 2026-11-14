@@ -9,6 +9,7 @@ Electron 44 (main process = CommonJS `.cjs`) + Vite 6 + React 19 + TypeScript 5.
 - `app-config.json` (`apiBaseUrl`) is read by main at runtime **and** imported by the renderer at build time — see the gotcha below.
 - `certificate-error` policy (security-critical, do not loosen): dev builds tolerate the self-signed cert for local-API and Vite URLs; packaged builds only when `apiBaseUrl` is a loopback host **and** the failing URL is same-origin with it (`isSameOrigin` also blocks userinfo tricks). Any other certificate error stands.
 - `preload.cjs` exposes a minimal `contextBridge` surface (`window.electronAPI`) — extend it deliberately; keep `nodeIntegration: false` / `contextIsolation: true` (current settings).
+- **Title bar** (Windows 11 22H2+, build 22621+): the native caption is hidden, `backgroundMaterial: 'acrylic'` makes the window translucent over the blurred desktop (system light/dark tint), and `src/app/TitleBar.tsx` draws the title strip over a transparent `titleBarOverlay` (Windows still draws min/max/close). Older Windows/modern non-Windows keeps the native caption and `--titlebar-h` stays `0`. `WINDOW_TITLE` / `TITLEBAR_HEIGHT` / `CUSTOM_TITLE_BAR` live in `electron/config.cjs`; the renderer gets them through the synchronous `window-chrome` IPC because sandboxed preloads cannot require local modules. Keep the 34px in `config.cjs` and the `--titlebar-h` CSS value in sync.
 - `electron-updater` checks a generic `http://localhost:8080/` feed (campus-LAN update server) — intentional, not a bug.
 
 ## #1 gotcha — the API URL is baked at build time
@@ -34,10 +35,15 @@ The shell owns session state and one authenticated Socket.IO connection per wind
 
 The incident-report listener stays in the shell across role switches. Doctor and Dentist share one console instance when switching directly between those roles.
 
-- **Admin.** Keep incident navigation gated by `INCIDENT_RECORDS_VIEW`, Database Studio by `DATABASE_MANAGE`, and server policy by the Super Admin check. Staff analytics overrides have their own save action in the account editor. The Qualified Responder grant uses its dedicated endpoint and reports failures separately from profile saves.
+- **Admin.** Keep incident navigation gated by `INCIDENT_RECORDS_VIEW`, Database Studio by `DATABASE_MANAGE`, and server policy by the Super Admin check. System health shows per-process worker telemetry and the oldest pending PDF. Audit filters use the viewer’s current role list when the server provides it. Staff analytics overrides have their own save action in the account editor. The Qualified Responder grant uses its dedicated endpoint and reports failures separately from profile saves.
 - **Consultations and documents.** Past EMR history and the archive timeline use the same paginated history hook and SQLite fallback. The active attachment strip requests metadata first. Keep issuer history, signature enrollment, and PDF actions wired through the existing controller callbacks.
 - **Nurse and emergency.** Station counts come from live data. Keep the shared SOS band and confirmation portal on the relevant nurse views. AppShell mounts the incident report popup once. Its realtime prompt is addressed to the desktop window that resolved the alert.
 - **Analytics.** Keep one scoped snapshot for all tabs. Focus refresh clears revoked data. Report authorization is rechecked before building the print portal.
+
+## Runtime ownership
+
+- QR capture owns camera tracks, its decode loop, and uploaded image URLs in `useQrCapture.ts`. The decoder loads on demand. Document previews cancel pending reads and revoke blob URLs on replacement or unmount.
+- Admin audit and telemetry requests follow the active view and its current grants. Dispatch keeps its polling fallback and gives realtime refreshes priority.
 
 ## Shared desktop interaction
 

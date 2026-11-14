@@ -475,3 +475,29 @@ test('Database Studio rolls back and releases when an audit write fails', async 
   assert.equal((await response.json()).error, 'Fixture audit failure');
   assert.deepEqual(calls, ['begin', 'insert', 'rollback', 'release']);
 });
+
+
+test('audit pagination keeps the array contract and applies the cursor under the live grant', async t => {
+  const queries = [];
+  t.mock.method(pool, 'query', async (sql, params) => {
+    if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
+    if (sql.includes('FROM USER_ROLES') && !sql.includes('FROM PHI_ACCESS_LOGS')) return [[{ code: 'ADMIN' }]];
+    if (sql.includes('FROM ADMIN_PERMISSIONS')) return [[{ code: 'AUDIT_VIEW' }]];
+    if (sql.includes('FROM PHI_ACCESS_LOGS') || sql.includes('FROM AUDIT_LOGS')) {
+      queries.push({ sql, params });
+      return [[{ id: 8 }]];
+    }
+    assert.fail('Unexpected audit query');
+  });
+  for (const path of ['/api/admin/audit-logs', '/api/admin/phi-access-logs']) {
+    const session = { roles: ['ADMIN'] };
+    assert.equal((await request(path + '?before=0', session)).status, 400);
+    const result = await request(path + '?before=9&limit=1', session);
+    assert.equal(result.status, 200);
+    assert.deepEqual(await result.json(), [{ id: 8 }]);
+  }
+  assert.deepEqual(queries.map(query => query.params), [['9', 1], ['9', 1]]);
+  assert.match(queries[0].sql, /WHERE a.audit_id < \?/);
+  assert.match(queries[1].sql, /WHERE p.access_id < \?/);
+  assert.match(queries[1].sql, /GROUP_CONCAT/);
+});

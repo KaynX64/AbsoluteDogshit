@@ -1,4 +1,4 @@
-import { logAudit } from '../../utils/auditLogger.js';
+import { logAudit } from '../utils/auditLogger.js';
 
 export async function planStock(connection, requestedByMedicine) {
   // ── FEFO Verification & Batch Allocation ────────────────────────────────
@@ -8,7 +8,7 @@ export async function planStock(connection, requestedByMedicine) {
     const medId = Number(medIdStr);
 
     const [medRows] = await connection.query(
-      'SELECT medicine_id, name, generic_name, is_active FROM MEDICINES WHERE medicine_id = ? AND deleted_at IS NULL',
+      'SELECT medicine_id, name, generic_name, is_active FROM MEDICINES WHERE medicine_id = ? AND deleted_at IS NULL FOR UPDATE',
       [medId]
     );
 
@@ -128,4 +128,73 @@ export async function applyStockDeductions(connection, { plannedDeductions, form
   if (formularyDispenseLines.some((line) => line.quantity_to_link !== 0)) {
     throw new Error('Prescription item quantities do not match the planned inventory deductions.');
   }
+}
+
+export async function restorePrescriptionStock(connection, { prescriptionId, userId, ipAddress }) {
+  // ── Trace & restore deducted stock batches ───────────────────────────
+  const [dispenseLogs] = await connection.query(
+    `SELECT l.log_id, l.batch_id, l.prescription_item_id,
+            ABS(l.quantity_change) AS qty_dispensed
+     FROM INVENTORY_LOGS l
+     WHERE l.transaction_type = 'dispense'
+       AND (
+         l.prescription_item_id IN (
+           SELECT item_id FROM PRESCRIPTION_ITEMS WHERE prescription_id = ?
+         )
+         OR (
+           l.prescription_item_id IS NULL
+           AND l.reason LIKE ?
+         )
+       )
+     ORDER BY l.batch_id, l.log_id
+     FOR UPDATE`,
+    [prescriptionId, `Automated FEFO dispense for Prescription #${prescriptionId} (%`]
+  );
+  const restoredBatches = new Set();
+
+  for (const log of dispenseLogs) {
+    const [batchRows] = await connection.query(
+      'SELECT quantity_on_hand FROM MEDICINE_BATCHES WHERE batch_id = ? FOR UPDATE',
+      [log.batch_id]
+    );
+
+    if (batchRows.length > 0) {
+      const currentQty = batchRows[0].quantity_on_hand;
+      const restoredQty = currentQty + log.qty_dispensed;
+      restoredBatches.add(log.batch_id);
+
+      await connection.query(
+        'UPDATE MEDICINE_BATCHES SET quantity_on_hand = ? WHERE batch_id = ?',
+        [restoredQty, log.batch_id]
+      );
+
+      await connection.query(
+        `INSERT INTO INVENTORY_LOGS
+         (batch_id, prescription_item_id, quantity_change, transaction_type, reason, performed_by)
+         VALUES (?, ?, ?, 'return', ?, ?)`,
+        [
+          log.batch_id,
+          log.prescription_item_id,
+          log.qty_dispensed,
+          `Restored stock from cancelled Prescription #${prescriptionId}`,
+          userId,
+        ]
+      );
+
+      await logAudit(connection, {
+        userId: userId,
+        action: 'UPDATE',
+        table: 'MEDICINE_BATCHES',
+        recordId: log.batch_id,
+        oldValue: { quantity_on_hand: currentQty },
+        newValue: {
+          quantity_on_hand: restoredQty,
+          prescription_id: prescriptionId,
+          restored_qty: log.qty_dispensed,
+        },
+        ipAddress: ipAddress,
+      });
+    }
+  }
+  return restoredBatches.size;
 }

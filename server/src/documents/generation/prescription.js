@@ -7,10 +7,10 @@ import { storeDocumentPdf } from './storage.js';
 
 // ─── PRESCRIPTIONS ────────────────────────────────────────────────────────
 
-export async function generateAndStorePrescriptionPDF(prescriptionId) {
+export async function generateAndStorePrescriptionPDF(prescriptionId, database = pool) {
   try {
     // 1. Fetch header + patient + doctor
-    const [rows] = await pool.query(
+    const [rows] = await database.query(
          `SELECT p.prescription_id, p.issued_at, p.expires_at, p.notes, p.qr_token, p.signature_metadata,
               pt.first_name, pt.last_name,
               sp.student_no, sp.course,
@@ -39,7 +39,7 @@ export async function generateAndStorePrescriptionPDF(prescriptionId) {
     // 2. Fetch line items
     //    LEFT JOIN + COALESCE so outside (non-formulary) drugs — which have a
     //    NULL medicine_id and a free-text outside_name — still render on the PDF.
-    const [items] = await pool.query(
+    const [items] = await database.query(
       `SELECT pi.dosage, pi.frequency, pi.route, pi.duration_days,
               pi.quantity_prescribed, pi.quantity_dispensed, pi.instructions,
               COALESCE(m.name, pi.outside_name) AS medicine_name,
@@ -84,15 +84,19 @@ export async function generateAndStorePrescriptionPDF(prescriptionId) {
     });
 
     const key = await storeDocumentPdf('prescriptions/rx', prescriptionId, buffer, storageKey =>
-      pool.query('UPDATE PRESCRIPTIONS SET pdf_s3_key = ? WHERE prescription_id = ?', [storageKey, prescriptionId]),
+      database.query('UPDATE PRESCRIPTIONS SET pdf_s3_key = ?, pdf_retry_at = NULL WHERE prescription_id = ? AND pdf_s3_key IS NULL AND deleted_at IS NULL', [storageKey, prescriptionId]),
     );
 
+    if (!key) {
+      const [[current]] = await database.query('SELECT pdf_s3_key FROM PRESCRIPTIONS WHERE prescription_id = ? AND deleted_at IS NULL', [prescriptionId]);
+      return current?.pdf_s3_key ?? null;
+    }
     console.log(`📄 [PDF] Prescription #${prescriptionId} stored at ${key}`);
     return key;
   } catch (err) {
     console.error(
       `⚠️ [PDF] Prescription #${prescriptionId} generation failed:`,
-      err.message
+      err.code ?? err.name
     );
     return null;
   }

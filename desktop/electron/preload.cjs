@@ -1,7 +1,28 @@
 // desktop/electron/preload.cjs
 const { contextBridge, ipcRenderer } = require('electron');
 
+/**
+ * Window chrome resolved by the main process (title text, whether the app
+ * must draw its own translucent title strip). Sandboxed preloads cannot require
+ * local modules, hence the synchronous IPC read.
+ */
+function readWindowChrome() {
+  try {
+    return ipcRenderer.sendSync('window-chrome');
+  } catch (_) {
+    return { title: 'LeoVital HealthLink - PSU Lingayen Infirmary', customTitleBar: false, titleBarHeight: 0 };
+  }
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
+  // Window chrome
+  windowChrome: readWindowChrome(),
+  onFullScreenChange: (cb) => {
+    const listener = (_e, isFullScreen) => cb(isFullScreen);
+    ipcRenderer.on('window-fullscreen', listener);
+    return () => ipcRenderer.removeListener('window-fullscreen', listener);
+  },
+
   // Printing & Notifications
   printDocument: (options) => ipcRenderer.invoke('print-document', options),
   showNotification: (options) => ipcRenderer.invoke('show-notification', options),

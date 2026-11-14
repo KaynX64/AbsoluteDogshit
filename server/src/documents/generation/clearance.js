@@ -6,9 +6,9 @@ import { storeDocumentPdf } from './storage.js';
 
 // ─── MEDICAL CLEARANCES ───────────────────────────────────────────────────
 
-export async function generateAndStoreClearancePDF(clearanceId) {
+export async function generateAndStoreClearancePDF(clearanceId, database = pool) {
   try {
-    const [rows] = await pool.query(
+    const [rows] = await database.query(
       `SELECT mc.clearance_id, mc.purpose, mc.issued_at, mc.expires_at,
               mc.qr_token, mc.signature_metadata,
               pt.first_name, pt.last_name,
@@ -57,15 +57,19 @@ export async function generateAndStoreClearancePDF(clearanceId) {
     });
 
     const key = await storeDocumentPdf('clearances/clr', clearanceId, buffer, storageKey =>
-      pool.query('UPDATE MEDICAL_CLEARANCES SET pdf_s3_key = ? WHERE clearance_id = ?', [storageKey, clearanceId]),
+      database.query('UPDATE MEDICAL_CLEARANCES SET pdf_s3_key = ?, pdf_retry_at = NULL WHERE clearance_id = ? AND pdf_s3_key IS NULL AND deleted_at IS NULL', [storageKey, clearanceId]),
     );
 
+    if (!key) {
+      const [[current]] = await database.query('SELECT pdf_s3_key FROM MEDICAL_CLEARANCES WHERE clearance_id = ? AND deleted_at IS NULL', [clearanceId]);
+      return current?.pdf_s3_key ?? null;
+    }
     console.log(`📄 [PDF] Clearance #${clearanceId} stored at ${key}`);
     return key;
   } catch (err) {
     console.error(
       `⚠️ [PDF] Clearance #${clearanceId} generation failed:`,
-      err.message
+      err.code ?? err.name
     );
     return null;
   }

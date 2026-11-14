@@ -1,7 +1,6 @@
-import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';
-import { logAudit } from '../../utils/auditLogger.js';
+import { archiveMedicine, createMedicine } from '../../inventory/formularyMutations.js';
 
 export function registerFormularyRoutes(router, io) {
   // =============================================================================
@@ -9,36 +8,21 @@ export function registerFormularyRoutes(router, io) {
   // =============================================================================
 
   router.post('/medicines', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
-    const { name, generic_name, form, strength, unit, reorder_level } = req.body;
+    const { name, generic_name, form, strength, unit, reorder_level: rawReorderLevel } = req.body;
 
     if (!name || !generic_name || !form || !strength) {
       return res.status(400).json({ error: 'name, generic_name, form, and strength are required.' });
     }
 
-    const connection = await pool.getConnection();
+    const reorder_level = rawReorderLevel === undefined || rawReorderLevel === null || rawReorderLevel === ''
+      ? 15 : Number(rawReorderLevel);
+    if (!Number.isInteger(reorder_level) || reorder_level < 0 || reorder_level > 2147483647 ||
+        (rawReorderLevel != null && !['number', 'string'].includes(typeof rawReorderLevel))) {
+      return res.status(400).json({ error: 'Reorder level must be a nonnegative integer.' });
+    }
 
     try {
-      await connection.beginTransaction();
-
-      const [result] = await connection.query(
-        `INSERT INTO MEDICINES (name, generic_name, form, strength, unit, reorder_level)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [name, generic_name, form, strength, unit || 'pcs', Number(reorder_level) || 15]
-      );
-
-      const medicineId = result.insertId;
-
-      await logAudit(connection, {
-        userId: req.user.user_id,
-        action: 'CREATE',
-        table: 'MEDICINES',
-        recordId: medicineId,
-        oldValue: null,
-        newValue: { name, generic_name, form, strength, reorder_level },
-        ipAddress: req.ip,
-      });
-
-      await connection.commit();
+      const medicineId = await createMedicine({ name, generic_name, form, strength, unit, reorder_level, userId: req.user.user_id, ipAddress: req.ip });
 
       if (io) io.emit('inventory:updated');
 
@@ -47,73 +31,24 @@ export function registerFormularyRoutes(router, io) {
         medicineId,
       });
     } catch (error) {
-      await connection.rollback();
-      console.error('Add medicine error:', error);
-      res.status(500).json({ error: 'Failed to create medicine definition.' });
-    } finally {
-      connection.release();
+      if (error.status) return res.status(error.status).json({ error: error.message });
+      console.error('[Formulary Mutation Error]:', error.code ?? error.name);
+      return res.status(500).json({ error: 'Could not save the formulary change.' });
     }
   });
 
   router.delete('/medicines/:id', authenticateToken, requireRoles('NURSE', 'ADMIN'), async (req, res) => {
     const medicineId = Number(req.params.id);
-    const connection = await pool.getConnection();
-
     try {
-      await connection.beginTransaction();
-
-      const [medRows] = await connection.query(
-        'SELECT name, generic_name, strength FROM MEDICINES WHERE medicine_id = ? AND deleted_at IS NULL',
-        [medicineId]
-      );
-
-      if (medRows.length === 0) {
-        throw new Error('Medicine definition not found or already deleted.');
-      }
-
-      const [activeBatches] = await connection.query(
-        'SELECT COALESCE(SUM(quantity_on_hand), 0) as total_stock FROM MEDICINE_BATCHES WHERE medicine_id = ? AND deleted_at IS NULL AND quantity_on_hand > 0',
-        [medicineId]
-      );
-
-      const stockRemaining = activeBatches[0]?.total_stock || 0;
-      if (stockRemaining > 0) {
-        throw new Error(
-          `Cannot delete "${medRows[0].name}". There are still ${stockRemaining} units in active stock. Dispose or dispense the stock before deleting this formulary entry.`
-        );
-      }
-
-      await connection.query(
-        'UPDATE MEDICINES SET is_active = FALSE, deleted_at = CURRENT_TIMESTAMP WHERE medicine_id = ?',
-        [medicineId]
-      );
-
-      await connection.query(
-        'UPDATE MEDICINE_BATCHES SET deleted_at = CURRENT_TIMESTAMP WHERE medicine_id = ?',
-        [medicineId]
-      );
-
-      await logAudit(connection, {
-        userId: req.user.user_id,
-        action: 'DELETE',
-        table: 'MEDICINES',
-        recordId: medicineId,
-        oldValue: medRows[0],
-        newValue: { operation: 'FORMULARY_DELETED', is_active: false },
-        ipAddress: req.ip,
-      });
-
-      await connection.commit();
+      const medicine = await archiveMedicine({ medicineId, userId: req.user.user_id, ipAddress: req.ip });
 
       if (io) io.emit('inventory:updated');
 
-      res.json({ message: `Medicine "${medRows[0].name}" (${medRows[0].strength}) deleted from formulary.` });
+      res.json({ message: `Medicine "${medicine.name}" (${medicine.strength}) deleted from formulary.` });
     } catch (error) {
-      await connection.rollback();
-      console.error('Delete medicine error:', error);
-      res.status(400).json({ error: error.message || 'Failed to delete medicine definition.' });
-    } finally {
-      connection.release();
+      if (error.status) return res.status(error.status).json({ error: error.message });
+      console.error('[Formulary Mutation Error]:', error.code ?? error.name);
+      return res.status(500).json({ error: 'Could not save the formulary change.' });
     }
   });
 }

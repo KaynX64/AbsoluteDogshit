@@ -3,7 +3,7 @@
 Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172` · check from repo root: `python3 scripts/verify_codeslice.py desktop/docs/codeslice .`
 
 ## DT-12 · desktop/src/features/emergency/ResponderConsole.tsx
-**LOC:** 501 · **Anchor commit:** working tree · **Role:** SOS dispatch console: live alert feed, alarm + tray notifications, status workflow buttons, dev test harness
+**LOC:** 513 · **Anchor commit:** working tree · **Role:** SOS dispatch console: live alert feed, alarm + tray notifications, status workflow buttons, dev test harness
 **Mounted by:** App (activeRoleView EMERGENCY_RESPONDER, L779)
 **API surface:** GET /api/emergency/active (L33), PATCH /api/emergency/:alertId/status (L98), POST /api/emergency/sos (L129, dev test)
 **Socket events:** on emergency:new_alert (L54), on emergency:status_change (L65); emit none
@@ -17,12 +17,12 @@ Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172`
 | 4 | 47-85 | emergency:new_alert | mount effect: initial fetch, socket connect; new_alert→alarm+tray notify; status_change update; 3s poll |
 | 5 | 86-118 | updateStatus | PATCH /api/emergency/:id/status (X-Client-Instance-Id header); optimistic list update; refetch |
 | 6 | 119-151 | handleTestDirectNotification | dev helpers: direct tray-notification test; POST /api/emergency/sos simulated SOS |
-| 7 | 152-161 | statusStyle | status pill colors: triggered/acknowledged/dispatched |
-| 8 | 162-177 | vd-page-head | page header: PSU Quick-Response Unit campus dispatch |
-| 9 | 178-228 | Dispatch test harness | dev-only test panel: Test OS tray banner, Trigger live SOS buttons |
+| 7 | 152-165 | statusStyle | status pill colors: triggered/acknowledged/dispatched |
+| 8 | 166-182 | vd-page-head | page header: PSU Quick-Response Unit campus dispatch |
+| 9 | 183-228 | Dispatch test harness | dev-only test panel: Test OS tray banner, Trigger live SOS buttons |
 | 10 | 229-273 | Units available | status strip: active incidents count, units available, campus; Refresh button |
-| 11 | 274-294 | All clear | loading placeholder and empty All clear state |
-| 12 | 295-348 | first_name | alert card header: patient name, ID/phone, status pill |
+| 11 | 274-300 | All clear | loading placeholder and empty All clear state |
+| 12 | 301-348 | first_name | alert card header: patient name, ID/phone, status pill |
 | 13 | 349-395 | Blood type | medical grid: blood type, allergy (warning color), reported time |
 | 14 | 396-437 | GPS coordinates | GPS row: Google Maps link with lat/lng or Not available |
-| 15 | 438-501 | Acknowledge | action row: Acknowledge / Dispatch team / Resolve / False alarm → updateStatus; card close |
+| 15 | 438-513 | Acknowledge | action row: Acknowledge / Dispatch team / Resolve / False alarm → updateStatus; card close |

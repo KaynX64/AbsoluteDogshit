@@ -121,9 +121,11 @@ export async function verifyWorkflows(run, wait, press, send) {
     const queue = await window.electronAPI.offlineGetPendingMutations();
     localStorage.setItem('valetudo_offline_mutations_queue', JSON.stringify(queue));
     window.dispatchEvent(new Event('offline-queue-changed'));
+    smoke.loginStarted = performance.now();
     smoke.login();
   })()`);
   await wait("document.querySelector('.tb-role-select')?.value === 'DOCTOR' && document.body.innerText.includes('Synthetic Patient')", 'Doctor console');
+  console.log('Sign-in to Doctor workspace: ' + await run('Math.round(performance.now() - smoke.loginStarted)') + ' ms');
   assert.equal(await run("JSON.parse(localStorage.getItem('valetudo_theme')).mode"), 'dark');
   await run("document.querySelector('.tb-replay').click()");
   await wait("smoke.calls.some(([path]) => path.endsWith('/sync/replay'))", 'replay request');
@@ -235,7 +237,36 @@ export async function verifyWorkflows(run, wait, press, send) {
       await wait("smoke.tabMotion.some(entry => entry.target.matches('.vd-page-head') && entry.target.textContent.includes('Campus emergency dispatch') && entry.duration === 240 && entry.from === null)", 'Dispatch role fade');
     }
     if (role === 'NURSE') {
-      await run("smoke.state.holdSos = true");
+      await run(`
+        const media = navigator.mediaDevices;
+        smoke.originalCamera = media.getUserMedia;
+        smoke.stoppedTracks = 0;
+        media.getUserMedia = () => new Promise(resolve => {
+          smoke.resolveCamera = () => resolve({ getTracks: () => [{ stop: () => smoke.stoppedTracks++ }] });
+        });
+        smoke.click('Turn on camera');
+      `);
+      await wait("typeof smoke.resolveCamera === 'function'", 'pending camera acquisition');
+      await run("smoke.click('Search ID'); smoke.resolveCamera()");
+      await wait("smoke.stoppedTracks === 1", 'late camera stream is released');
+      await run(`
+        navigator.mediaDevices.getUserMedia = smoke.originalCamera;
+        smoke.click('Scan', '.nc-scanner button');
+      `);
+      await wait("document.querySelector('.nc-scanner input[type=file]')", 'QR file control after camera tab returns');
+      await run(`
+        const revoke = URL.revokeObjectURL;
+        smoke.revokedImage = false;
+        URL.revokeObjectURL = function(url) { smoke.revokedImage = true; return revoke.call(this, url); };
+        const upload = document.querySelector('.nc-scanner input[type=file]');
+        const transfer = new DataTransfer();
+        transfer.items.add(new File(['invalid'], 'broken.png', { type: 'image/png' }));
+        upload.files = transfer.files;
+        upload.dispatchEvent(new Event('change', { bubbles: true }));
+        smoke.restoreRevoke = () => { URL.revokeObjectURL = revoke; };
+      `);
+      await wait("smoke.revokedImage && document.body.innerText.includes('Could not read the uploaded QR image')", 'invalid image releases its blob URL');
+      await run("smoke.restoreRevoke(); smoke.state.holdSos = true");
       await sidebarView('Expected', '8px 0', '.nc-root > section', true);
       await wait('typeof smoke.state.releaseSos === "function"', 'SOS request during workspace switch');
       await run(`
@@ -287,9 +318,12 @@ export async function verifyWorkflows(run, wait, press, send) {
     }
   }
   await wait("[...document.querySelectorAll('.sb-item')].some(button => button.innerText.includes('Incident Records'))", 'Admin incident navigation is authorized');
+  const auditRequests = "smoke.calls.filter(([path]) => ['/api/admin/phi-access-logs', '/api/admin/audit-logs', '/api/admin/telemetry'].includes(path)).length";
+  assert.equal(await run(auditRequests), 0, 'Admin landing skips audit and telemetry');
   for (const label of ['Privacy & audit', 'System health', 'Server Policy', 'Health analytics', 'Incident Records', 'Database Studio']) {
     await sidebarView(label, '8px 0', '[data-workspace-view]:has(.vd-page-head, .an-dashboard)');
   }
+  assert.equal(await run(auditRequests), 3, 'audit and telemetry load once on entry');
   await sidebarView('Incident Records', '-8px 0', '[data-workspace-view]:has(.vd-page-head)');
   await run("smoke.workspaceStart = smoke.tabMotion.length; smoke.state.showIncidentRecords = false; window.dispatchEvent(new Event('focus'))");
   await wait("![...document.querySelectorAll('.sb-item')].some(button => button.innerText.includes('Incident Records'))", 'revoked Admin destination');

@@ -48,7 +48,7 @@ async function foundationSchema(pool) {
 test('fresh schema is adopted once even when two migration runners start together', { skip }, async t => {
   const pool = await fixture(t);
   const applied = await Promise.all([runMigrations(pool), runMigrations(pool)]);
-  assert.deepEqual(applied.sort(), [0, 8]);
+  assert.deepEqual(applied.sort(), [0, 9]);
   assert.equal(await responderFlag(pool), 1);
   const readOnlyPool = {
     async getConnection() {
@@ -75,7 +75,7 @@ test('an existing schema keeps revoked responders, admin grants and saved policy
   await pool.query("DELETE FROM ADMIN_PERMISSIONS WHERE code = 'INCIDENT_RECORDS_VIEW'");
   await pool.query('UPDATE SERVER_POLICY SET revision = 4 WHERE policy_id = 1');
   await pool.query('DROP TABLE STAFF_ANALYTICS_PERMISSIONS');
-  assert.equal(await runMigrations(pool), 8);
+  assert.equal(await runMigrations(pool), 9);
   const [[staffSettings]] = await pool.query('SELECT COUNT(*) AS total FROM STAFF_ANALYTICS_PERMISSIONS');
   assert.equal(staffSettings.total, 0);
   assert.equal(await responderFlag(pool), 0);
@@ -118,14 +118,18 @@ test('legacy tables and columns are rebuilt additively and the responder backfil
   await pool.query(`INSERT INTO PRESCRIPTION_ITEMS
     (prescription_id, outside_name, dosage, frequency, duration_days, quantity_dispensed)
     VALUES (1, 'fixture', 'fixture', 'fixture', 1, 4)`);
-  assert.equal(await runMigrations(pool), 8);
+  assert.equal(await runMigrations(pool), 9);
   const [dayIndex] = await pool.query("SHOW INDEX FROM APPOINTMENTS WHERE Key_name = 'idx_app_status_datetime'");
   assert.deepEqual(dayIndex.map(row => row.Column_name), ['status', 'date_time', 'deleted_at']);
   const [activityIndex] = await pool.query("SHOW INDEX FROM INVENTORY_LOGS WHERE Key_name = 'idx_inv_activity_date'");
   assert.deepEqual(activityIndex.map(row => row.Column_name), ['transaction_type', 'created_at']);
   const [issuedIndex] = await pool.query("SHOW INDEX FROM PRESCRIPTIONS WHERE Key_name = 'idx_rx_issued_at'");
   assert.deepEqual(issuedIndex.map(row => row.Column_name), ['issued_at']);
-  assert.deepEqual(await foundationSchema(pool), freshFoundation);
+  const migratedFoundation = await foundationSchema(pool);
+  // InnoDB can place an ALTER-added index after implicit foreign-key indexes.
+  const sortIndexes = ddl => ddl.split('\n').sort().join('\n');
+  assert.deepEqual(Object.fromEntries(Object.entries(migratedFoundation).map(([key, ddl]) => [key, sortIndexes(ddl)])),
+    Object.fromEntries(Object.entries(freshFoundation).map(([key, ddl]) => [key, sortIndexes(ddl)])));
   assert.equal(await responderFlag(pool), 1);
   const [[{ quantity_prescribed }]] = await pool.query('SELECT quantity_prescribed FROM PRESCRIPTION_ITEMS');
   const [[{ expiryDays }]] = await pool.query('SELECT DATEDIFF(expires_at, issued_at) AS expiryDays FROM PRESCRIPTIONS');
@@ -138,7 +142,7 @@ test('legacy tables and columns are rebuilt additively and the responder backfil
 
 test('an interrupted responder schema change resumes with its original backfill decision', { skip }, async t => {
   const pool = await fixture(t);
-  await pool.query('ALTER TABLE INCIDENT_REPORTS DROP COLUMN pdf_s3_key');
+  await pool.query('ALTER TABLE INCIDENT_REPORTS DROP INDEX idx_pending_pdf, DROP COLUMN pdf_s3_key');
   await pool.query('ALTER TABLE USERS DROP INDEX idx_users_qualified_responder, DROP COLUMN is_qualified_responder');
   const interruptingPool = {
     async getConnection() {
@@ -156,7 +160,7 @@ test('an interrupted responder schema change resumes with its original backfill 
   assert.equal(await responderFlag(pool), 0);
   const [[{ applied_at }]] = await pool.query('SELECT applied_at FROM SCHEMA_MIGRATIONS WHERE version = 3');
   assert.equal(applied_at, null);
-  assert.equal(await runMigrations(pool), 6);
+  assert.equal(await runMigrations(pool), 7);
   assert.equal(await responderFlag(pool), 1);
 });
 

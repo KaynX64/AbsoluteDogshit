@@ -1,19 +1,56 @@
-const { app, BrowserWindow, Menu, shell, session } = require('electron');
+const { app, BrowserWindow, Menu, shell, session, nativeTheme, ipcMain } = require('electron');
 const path = require('node:path');
-const { VITE_URL } = require('./config.cjs');
+const { VITE_URL, WINDOW_TITLE, TITLEBAR_HEIGHT, CUSTOM_TITLE_BAR } = require('./config.cjs');
 const { setupAutoUpdater } = require('./updates.cjs');
+
+/** Caption glyph color for the native window buttons, per Windows theme. */
+function titleBarSymbolColor() {
+  return nativeTheme.shouldUseDarkColors ? '#eef3ef' : '#1b2b22';
+}
+
+/**
+ * App-drawn title strip. Windows never paints the system backdrop into the
+ * native caption, so the caption is hidden and the renderer draws the title
+ * text itself; Windows keeps drawing minimize/maximize/close over a
+ * transparent overlay on top of that strip.
+ */
+const customTitleBarOptions = CUSTOM_TITLE_BAR
+  ? {
+      titleBarStyle: 'hidden',
+      titleBarOverlay: {
+        color: '#00000000',
+        symbolColor: titleBarSymbolColor(),
+        height: TITLEBAR_HEIGHT,
+      },
+      backgroundMaterial: 'acrylic',
+      // Transparent window canvas so the acrylic backdrop shows through the
+      // title strip (the renderer paints everything below it).
+      backgroundColor: '#00000000',
+    }
+  : {};
 
 function createWindow() {
   const isDev = !app.isPackaged;
 
+  // The renderer needs the window chrome (title text + app-drawn title bar?)
+  // before its first paint, so answer synchronously from the preload.
+  ipcMain.on('window-chrome', (event) => {
+    event.returnValue = {
+      title: WINDOW_TITLE,
+      customTitleBar: CUSTOM_TITLE_BAR,
+      titleBarHeight: TITLEBAR_HEIGHT,
+    };
+  });
+
   const win = new BrowserWindow({
-    title: 'LeoVital HealthLink',
+    title: WINDOW_TITLE,
     width: 1300,
     height: 880,
     minWidth: 1024,
     minHeight: 720,
     autoHideMenuBar: true,
     show: false,
+    ...customTitleBarOptions,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -42,11 +79,31 @@ function createWindow() {
   }
 
   win.once('ready-to-show', () => {
-    win.setTitle('LeoVital HealthLink - PSU Lingayen Infirmary');
+    win.setTitle(WINDOW_TITLE);
     win.show();
     win.focus();
     setupAutoUpdater(win);
   });
+
+  if (CUSTOM_TITLE_BAR) {
+    // Keep the native caption buttons readable when Windows flips theme.
+    const syncTitleBarOverlay = () => {
+      if (win.isDestroyed()) return;
+      win.setTitleBarOverlay({
+        color: '#00000000',
+        symbolColor: titleBarSymbolColor(),
+        height: TITLEBAR_HEIGHT,
+      });
+    };
+    nativeTheme.on('updated', syncTitleBarOverlay);
+    win.on('closed', () => nativeTheme.removeListener('updated', syncTitleBarOverlay));
+
+    // Fullscreen hides the caption buttons, so the renderer drops the strip
+    // to give the workspace the whole screen.
+    const reportFullscreen = (isFullScreen) => win.webContents.send('window-fullscreen', isFullScreen);
+    win.on('enter-full-screen', () => reportFullscreen(true));
+    win.on('leave-full-screen', () => reportFullscreen(false));
+  }
 
   win.webContents.on('before-input-event', (event, input) => {
     const key = (input.key || '').toLowerCase();

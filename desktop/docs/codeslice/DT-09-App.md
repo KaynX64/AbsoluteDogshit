@@ -19,4 +19,4 @@ The incident report listener stays mounted at shell level across role switches. 
 | 7 | 292-303 | <Sidebar | <Sidebar |
 | 8 | 304-391 | <TopBar | <TopBar |
 | 9 | 392-515 | <IncidentReportModal | <IncidentReportModal |
-| 10 | 516-522 | export default function App | export default function App |
+| 10 | 516-529 | export default function App | export default function App |

@@ -1,16 +1,36 @@
 import { pool } from '../../db/pool.js';
 import { requirePermission } from '../../middleware/rbac.js';
 import { isRedisActive } from '../../utils/redisClient.js';
+import { getWorkerStats } from '../../workers/scheduler.js';
+
+function readAuditPage(req, res) {
+  const { before, limit } = req.query;
+  if ((before !== undefined && (typeof before !== 'string' || !/^[1-9]\d{0,18}$/.test(before) || BigInt(before) > 9223372036854775807n)) ||
+      (limit !== undefined && (typeof limit !== 'string' || !/^(?:[1-9]\d?|100)$/.test(limit)))) {
+    res.status(400).json({ error: 'Use a positive before ID and a limit from 1 to 100.' });
+    return null;
+  }
+  return { before, limit: Number(limit ?? 100) };
+}
 
 export function registerPhiAccessLogRoute(router) {
   // 2. GET /api/admin/phi-access-logs - PHI Surveillance Log
   router.get('/phi-access-logs', requirePermission('AUDIT_VIEW'), async (req, res) => {
+    const page = readAuditPage(req, res);
+    if (!page) return;
     try {
       const [logs] = await pool.query(
         `SELECT p.access_id as id,
               CONCAT(v.first_name, ' ', v.last_name) as viewer_name,
               v.email as viewer_email,
-              COALESCE(r.code, 'STAFF') as viewer_role,
+              COALESCE((
+                SELECT MIN(r.code) FROM USER_ROLES ur JOIN ROLES r ON r.role_id = ur.role_id
+                WHERE ur.user_id = v.user_id
+              ), 'STAFF') as viewer_role,
+              (
+                SELECT GROUP_CONCAT(r.code ORDER BY r.code) FROM USER_ROLES ur JOIN ROLES r ON r.role_id = ur.role_id
+                WHERE ur.user_id = v.user_id
+              ) as viewer_roles,
               CONCAT(pt.first_name, ' ', pt.last_name) as patient_name,
               sp.student_no,
               p.table_affected,
@@ -19,16 +39,16 @@ export function registerPhiAccessLogRoute(router) {
               p.ip_address
        FROM PHI_ACCESS_LOGS p
        JOIN USERS v ON p.user_id = v.user_id
-       LEFT JOIN USER_ROLES ur ON v.user_id = ur.user_id
-       LEFT JOIN ROLES r ON ur.role_id = r.role_id
        JOIN USERS pt ON p.patient_user_id = pt.user_id
        LEFT JOIN STUDENT_PROFILES sp ON pt.user_id = sp.user_id
+       ${page.before ? 'WHERE p.access_id < ?' : ''}
        ORDER BY p.access_id DESC
-       LIMIT 100`
+       LIMIT ?`,
+        page.before ? [page.before, page.limit] : [page.limit]
       );
       res.json(logs);
     } catch (error) {
-      console.error('Failed to retrieve PHI access logs:', error);
+      console.error('Failed to retrieve PHI access logs:', error.code ?? error.name);
       res.status(500).json({ error: 'Failed to retrieve PHI access logs.' });
     }
   });
@@ -37,6 +57,8 @@ export function registerPhiAccessLogRoute(router) {
 export function registerAuditAndTelemetryRoutes(router) {
   // 4. GET /api/admin/audit-logs - Append-only Hash Chain
   router.get('/audit-logs', requirePermission('AUDIT_VIEW'), async (req, res) => {
+    const page = readAuditPage(req, res);
+    if (!page) return;
     try {
       const [logs] = await pool.query(
         `SELECT a.audit_id as id,
@@ -49,8 +71,10 @@ export function registerAuditAndTelemetryRoutes(router) {
               a.ip_address
        FROM AUDIT_LOGS a
        LEFT JOIN USERS u ON a.user_id = u.user_id
+       ${page.before ? 'WHERE a.audit_id < ?' : ''}
        ORDER BY a.audit_id DESC
-       LIMIT 100`
+       LIMIT ?`,
+        page.before ? [page.before, page.limit] : [page.limit]
       );
       res.json(logs);
     } catch (error) {
@@ -76,6 +100,7 @@ export function registerAuditAndTelemetryRoutes(router) {
           engine: 'Redis 7.0 (In-Memory Queue Cache)',
           status: isRedisActive() ? 'Operational' : 'Fallback (Direct DB)',
         },
+        workers: getWorkerStats(),
         server: {
           uptimeSeconds: Math.floor(process.uptime()),
           memoryUsageMB: (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2),

@@ -1,3 +1,4 @@
+import WorkerHealth from './WorkerHealth';
 import { useTabMotion } from '../../shared/ui/selectionMotion';
 import { navigateTabs } from '../../shared/ui/tabKeyboard';
 import { useConfirmAction } from '../../shared/ui/ConfirmAction';
@@ -290,48 +291,31 @@ export default function AdminConsole({
     return (w / Math.pow(h / 100, 2)).toFixed(2);
   })();
 
-  const fetchMutationLogs = async () => {
-    setLoadingLogs(true);
+  const viewFetch = async (path: string, signal?: AbortSignal) => {
     const token = localStorage.getItem('valetudo_token');
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/audit-logs`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const res = await fetch(`${API_BASE_URL}${path}`, {
+        headers: { Authorization: `Bearer ${token}` }, signal,
       });
-      if (res.ok) setMutationLogs(await res.json());
-    } catch (_) {}
-    setLoadingLogs(false);
+      if (res.ok) return await res.json();
+    } catch {
+      // A refresh can leave the last successful result visible.
+    }
+    return undefined;
   };
 
-  const fetchPhiLogs = async () => {
-    setLoadingLogs(true);
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/phi-access-logs`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) setPhiLogs(await res.json());
-    } catch (_) {}
-    setLoadingLogs(false);
+  const fetchRetention = async (signal?: AbortSignal) => {
+    const data = await viewFetch('/api/privacy/retention/status', signal);
+    if (!signal?.aborted && data) setRetentionInfo(data);
   };
 
-  const fetchRetention = async () => {
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/privacy/retention/status`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) setRetentionInfo(await res.json());
-    } catch (_) {}
-  };
-
+  const telemetryRequest = useRef<AbortController | null>(null);
   const fetchTelemetry = async () => {
-    const token = localStorage.getItem('valetudo_token');
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/telemetry`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) setTelemetry(await res.json());
-    } catch (_) {}
+    telemetryRequest.current?.abort();
+    const request = new AbortController();
+    telemetryRequest.current = request;
+    const data = await viewFetch('/api/admin/telemetry', request.signal);
+    if (!request.signal.aborted && data) setTelemetry(data);
   };
 
   const handleExecuteSweep = async () => {
@@ -356,10 +340,6 @@ export default function AdminConsole({
 
   useEffect(() => {
     fetchUsers();
-    fetchMutationLogs();
-    fetchPhiLogs();
-    fetchRetention();
-    fetchTelemetry();
     fetchPermissionCatalog();
   }, []);
 
@@ -382,14 +362,6 @@ export default function AdminConsole({
   // Refetch contextual data whenever the parent (sidebar) switches the active tab
   useEffect(() => {
     if (activeTab === 'archived') fetchArchivedUsers();
-    if (activeTab === 'audit') {
-      fetchPhiLogs();
-      fetchMutationLogs();
-    }
-    if (activeTab === 'telemetry') {
-      fetchRetention();
-      fetchTelemetry();
-    }
     if (activeTab === 'db') {
       fetchDbTables();
       setDbSearchFilter('');
@@ -398,6 +370,37 @@ export default function AdminConsole({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  const canAudit = myPerms.userId !== null && can('AUDIT_VIEW');
+  const canViewTelemetry = myPerms.userId !== null && can('TELEMETRY_VIEW');
+  const canManageRetention = myPerms.userId !== null && can('RETENTION_MANAGE');
+
+  useEffect(() => {
+    if (activeTab !== 'audit' || !canAudit) return;
+    const request = new AbortController();
+    setLoadingLogs(true);
+    void Promise.all([
+      viewFetch('/api/admin/phi-access-logs', request.signal),
+      viewFetch('/api/admin/audit-logs', request.signal),
+    ]).then(([phi, mutations]) => {
+      if (request.signal.aborted) return;
+      if (Array.isArray(phi)) setPhiLogs(phi);
+      if (Array.isArray(mutations)) setMutationLogs(mutations);
+      setLoadingLogs(false);
+    });
+    return () => request.abort();
+  }, [activeTab, canAudit]);
+
+  useEffect(() => {
+    if (activeTab !== 'telemetry') return;
+    const request = new AbortController();
+    if (canManageRetention) void fetchRetention(request.signal);
+    if (canViewTelemetry) void fetchTelemetry();
+    return () => {
+      request.abort();
+      telemetryRequest.current?.abort();
+    };
+  }, [activeTab, canManageRetention, canViewTelemetry]);
 
   /* ── Derived lists (unchanged) ───────────────────────────────── */
   const processedUsers = usersList
@@ -440,7 +443,7 @@ export default function AdminConsole({
         (log.purpose || '').toLowerCase().includes(query) ||
         (log.ip_address || '').toLowerCase().includes(query) ||
         (log.student_no || '').toLowerCase().includes(query);
-      const matchesRole = phiRoleFilter === 'ALL' || log.viewer_role === phiRoleFilter;
+      const matchesRole = phiRoleFilter === 'ALL' || (log.viewer_roles ?? log.viewer_role).split(',').includes(phiRoleFilter);
       const matchesTable = phiTableFilter === 'ALL' || log.table_affected === phiTableFilter;
       return matchesSearch && matchesRole && matchesTable;
     })
@@ -1133,30 +1136,30 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
             {[
               {
                 label: 'Central MySQL 8.0 database',
-                value: telemetry?.database?.totalUsers ?? 128,
+                value: telemetry?.database?.totalUsers ?? '—',
                 sub: 'Registered accounts',
-                status: telemetry?.database?.status ?? 'Operational',
+                status: telemetry?.database?.status ?? 'Unknown',
                 icon: <I.Database />,
               },
               {
                 label: 'Redis 7.0 queue cache',
-                value: 3,
-                sub: 'Pending queue jobs',
-                status: telemetry?.cache?.status ?? 'Operational',
+                value: telemetry?.cache?.status ? 'Redis' : '—',
+                sub: 'Cache status',
+                status: telemetry?.cache?.status ?? 'Unknown',
                 icon: <I.Activity />,
               },
               {
                 label: 'Socket.IO gateway',
-                value: 'Connected',
-                sub: 'Queue & SOS relays · port 5000',
-                status: 'Operational',
+                value: 'Socket.IO',
+                sub: 'Queue and SOS relays',
+                status: 'See connection status above',
                 icon: <I.Activity />,
               },
               {
                 label: 'R.A. 10173 cryptographic ledger',
-                value: telemetry?.database?.totalAuditBlocks ?? '8,406',
-                sub: 'Verified hash-chain blocks',
-                status: 'Valid',
+                value: telemetry?.database?.totalAuditBlocks ?? '—',
+                sub: 'Recorded audit blocks',
+                status: 'Block count',
                 icon: <I.Shield />,
               },
             ].map((card, i) => (
@@ -1203,6 +1206,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
 
           {/* Live server ping monitor */}
           <ServerPingMonitor />
+          {can('TELEMETRY_VIEW') && <WorkerHealth workers={telemetry?.workers} onRefresh={fetchTelemetry} />}
 
           {/* Retention governance panel — RETENTION_MANAGE permission */}
           {can('RETENTION_MANAGE') ? (

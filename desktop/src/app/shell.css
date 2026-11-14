@@ -1,10 +1,66 @@
 /* ═══════════════════════════════════════════════════════════════════
+   WINDOW TITLE STRIP — app-drawn acrylic title bar (desktop only)
+   The main process hides the native caption on Windows 11 22H2+ and asks
+   Windows for a transparent title-bar overlay, so this strip stays
+   transparent and the Acrylic backdrop (translucent wallpaper blur, system
+   theme) shows through it. `--titlebar-h` is 0 whenever the native caption
+   is in use, which keeps the browser build and older Windows untouched.
+   ═══════════════════════════════════════════════════════════════════ */
+:root { --titlebar-h: 0px; }
+
+html[data-titlebar='overlay'] { --titlebar-h: 34px; }
+html[data-titlebar='overlay'][data-titlebar-fullscreen='true'] { --titlebar-h: 0px; }
+
+/* Let the backdrop through: nothing may paint behind the strip. Every
+   screen below paints its own canvas (app-shell / login-shell). */
+html[data-titlebar='overlay'],
+html[data-titlebar='overlay'] body,
+html[data-titlebar='overlay'] #root { background: transparent; }
+
+.app-titlebar {
+  flex: 0 0 auto;
+  position: relative;
+  /* Above modals (100) and drawers (60) so the title row is never dimmed,
+     below toasts (200). */
+  z-index: 150;
+  height: var(--titlebar-h);
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  background: transparent;          /* the acrylic backdrop shows through */
+  color: rgba(20, 34, 25, 0.82);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-app-region: drag;         /* drag + double-click to maximize */
+}
+
+/* Keep the title clear of the native minimize/maximize/close buttons. */
+.app-titlebar-text {
+  padding-right: 140px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Light glyphs once the Windows theme turns the backdrop dark. */
+@media (prefers-color-scheme: dark) {
+  .app-titlebar { color: rgba(235, 242, 237, 0.88); }
+}
+
+html[data-titlebar-fullscreen='true'] .app-titlebar { display: none; }
+
+/* ═══════════════════════════════════════════════════════════════════
    APP SHELL — warm sage canvas, soft white bloom (login-main echo)
    ═══════════════════════════════════════════════════════════════════ */
 .app-shell {
   display: grid;
   grid-template-columns: 240px 1fr;
-  min-height: 100vh;
+  /* Fit exactly under the title strip; the workspace scrolls internally so
+     the strip (and its translucent backdrop) never scrolls away. */
+  height: calc(100vh - var(--titlebar-h));
   background: var(--sage-100);
 }
 
@@ -12,7 +68,8 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
-  min-height: 100vh;
+  min-height: 0;
+  overflow-y: auto;
   /* Soft white bloom behind the top of the page — mirrors login-main. */
   background:
     radial-gradient(1100px 420px at 50% -6%, var(--bloom), transparent 70%),
@@ -58,7 +115,7 @@
   gap: 20px;
   position: sticky;
   top: 0;
-  height: 100vh;
+  height: 100%;
   overflow-y: auto;
 }
 

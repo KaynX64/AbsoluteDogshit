@@ -1,3 +1,4 @@
+import { usePreviewResource } from '../../shared/ui/usePreviewResource';
 import { useTabMotion } from '../../shared/ui/selectionMotion';
 import { navigateTabs } from '../../shared/ui/tabKeyboard';
 import Dialog from '../../shared/ui/Dialog';
@@ -185,6 +186,7 @@ export default function DoctorConsole({
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
 
   /* ── Attachment preview modal ──────────────────────────────── */
+  const preview = usePreviewResource();
   const [previewModal, setPreviewModal] = useState<{
     url: string;
     fileName: string;
@@ -504,12 +506,13 @@ export default function DoctorConsole({
     fileName: string,
     mimeType?: string
   ) => {
+    const signal = preview.begin();
     setOpeningAttachmentId(attachmentId);
     const token = localStorage.getItem('valetudo_token');
     try {
       const res = await fetch(
         `${API_BASE_URL}/api/documents/attachments/${attachmentId}/download`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` }, signal }
       );
       if (!res.ok) throw new Error('Failed to download/decrypt diagnostic file.');
       const blob = await res.blob();
@@ -519,22 +522,18 @@ export default function DoctorConsole({
         (fileName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
 
       const typedBlob = new Blob([blob], { type: detectedMime });
-      const objectUrl = URL.createObjectURL(typedBlob);
-
-      /* Revoke the previous object URL to avoid leaks */
-      setPreviewModal((prev) => {
-        if (prev?.url) URL.revokeObjectURL(prev.url);
-        return { url: objectUrl, fileName, mimeType: detectedMime };
-      });
+      const url = preview.publish(typedBlob, signal);
+      if (url) setPreviewModal({ url, fileName, mimeType: detectedMime });
     } catch (err: any) {
-      setFeedbackMsg({ type: 'error', text: `Could not open ${fileName}. ${err.message}` });
+      if (!signal.aborted) setFeedbackMsg({ type: 'error', text: `Could not open ${fileName}. ${err.message}` });
     } finally {
-      setOpeningAttachmentId(null);
+      if (!signal.aborted) setOpeningAttachmentId(null);
     }
   };
 
   const handleClosePreviewModal = () => {
-    if (previewModal?.url) URL.revokeObjectURL(previewModal.url);
+    preview.clear();
+    setOpeningAttachmentId(null);
     setPreviewModal(null);
   };
 
@@ -997,9 +996,12 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
     kind: 'prescriptions' | 'clearances',
     id: number
   ): Promise<boolean> => {
+    const signal = preview.begin();
+    setOpeningAttachmentId(null);
     const token = localStorage.getItem('valetudo_token');
     try {
       const res = await fetch(`${API_BASE_URL}/api/documents/${kind}/${id}/pdf`, {
+        signal,
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
@@ -1007,16 +1009,14 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
         throw new Error(err.error || `HTTP ${res.status}`);
       }
       const blob = new Blob([await res.blob()], { type: 'application/pdf' });
-      const objectUrl = URL.createObjectURL(blob);
+      const url = preview.publish(blob, signal);
+      if (!url) return false;
       const fileName =
         kind === 'prescriptions' ? `prescription-${id}.pdf` : `clearance-${id}.pdf`;
-      setPreviewModal((prev) => {
-        if (prev?.url) URL.revokeObjectURL(prev.url);
-        return { url: objectUrl, fileName, mimeType: 'application/pdf' };
-      });
+      setPreviewModal({ url, fileName, mimeType: 'application/pdf' });
       return true;
     } catch (err: any) {
-      setFeedbackMsg({ type: 'error', text: `Issued successfully. The PDF could not be opened (${err.message}). Download it from issuance history.` });
+      if (!signal.aborted) setFeedbackMsg({ type: 'error', text: `Issued successfully. The PDF could not be opened (${err.message}). Download it from issuance history.` });
       return false;
     }
   };

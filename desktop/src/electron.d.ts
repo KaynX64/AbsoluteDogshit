@@ -3,6 +3,14 @@ export {};
 
 declare global {
   interface ElectronAPI {
+    /**
+     * Window chrome resolved by the main process. `customTitleBar` is true
+     * when the app draws its own translucent title strip (Windows 11 22H2+); in
+     * that case the native caption is hidden and no OS title text exists.
+     */
+    windowChrome: { title: string; customTitleBar: boolean; titleBarHeight: number };
+    onFullScreenChange: (cb: (isFullScreen: boolean) => void) => () => void;
+
     printDocument: (options: { htmlContent: string }) => Promise<{ success: boolean; error?: string }>;
     showNotification: (options: { title: string; body: string }) => Promise<{ success: boolean; error?: string }>;
 

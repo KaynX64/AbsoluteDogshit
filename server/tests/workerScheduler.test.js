@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
 import { test } from 'node:test';
-import { startScheduler } from '../src/workers/scheduler.js';
+import { getWorkerStats, startScheduler } from '../src/workers/scheduler.js';
 
 test('each job skips its own busy ticks and stopping drains pending work', async t => {
   t.mock.timers.enable({ apis: ['setInterval'] });
@@ -46,12 +46,16 @@ test('a worker failure is logged and the job runs again on the next tick', async
   t.mock.timers.tick(10);
   await setImmediate();
   assert.deepEqual(log.mock.calls.map(call => call.arguments), [
-    ['[Retrying job Error]:', 'fixture failure'],
+    ['[Retrying job Error]:', 'Error'],
   ]);
 
   t.mock.timers.tick(10);
   await stop();
   assert.equal(run.mock.callCount(), 2);
+  const stats = getWorkerStats().find(job => job.name === 'Retrying job');
+  assert.equal(stats.failures, 1);
+  assert.equal(stats.outcome, 'success');
+  assert.ok(stats.lastSuccessAt);
 });
 
 test('only opted-in jobs run at startup and a busy startup run skips the next tick', async t => {

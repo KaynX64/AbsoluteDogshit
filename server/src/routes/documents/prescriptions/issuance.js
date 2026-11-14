@@ -2,7 +2,7 @@ import { authenticateToken } from '../../../auth/middleware.js';
 import { requireRoles } from '../../../middleware/rbac.js';
 import { isCalendarDate } from '../../../config/appointmentRules.js';
 import { SignerError } from '../../../documents/signing/signatory.js';
-import { issuePrescription } from '../../../services/prescriptions/issuePrescription.js';
+import { issuePrescription } from '../../../documents/prescriptions/issuePrescription.js';
 
 function quantityInt(value, minimum = 1) {
   if (typeof value !== 'number' && (typeof value !== 'string' || !/^\d+$/.test(value.trim()))) return null;

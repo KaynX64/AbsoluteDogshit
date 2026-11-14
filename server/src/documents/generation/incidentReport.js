@@ -6,9 +6,9 @@ import { storeDocumentPdf } from './storage.js';
 
 // ─── INCIDENT REPORTS ─────────────────────────────────────────────────────
 
-export async function generateAndStoreIncidentReportPDF(reportId) {
+export async function generateAndStoreIncidentReportPDF(reportId, database = pool) {
   try {
-    const [rows] = await pool.query(
+    const [rows] = await database.query(
       `SELECT ir.report_id, ir.alert_id, ir.patient_user_id, ir.resolved_at,
               ir.incident_details, ir.treatment_notes, ir.documented_by, ir.created_at,
               ir.pdf_s3_key,
@@ -97,15 +97,19 @@ export async function generateAndStoreIncidentReportPDF(reportId) {
     });
 
     const key = await storeDocumentPdf('incident-reports/incident', reportId, buffer, storageKey =>
-      pool.query('UPDATE INCIDENT_REPORTS SET pdf_s3_key = ? WHERE report_id = ?', [storageKey, reportId]),
+      database.query('UPDATE INCIDENT_REPORTS SET pdf_s3_key = ?, pdf_retry_at = NULL WHERE report_id = ? AND pdf_s3_key IS NULL', [storageKey, reportId]),
     );
 
+    if (!key) {
+      const [[current]] = await database.query('SELECT pdf_s3_key FROM INCIDENT_REPORTS WHERE report_id = ?', [reportId]);
+      return current?.pdf_s3_key ?? null;
+    }
     console.log(`📄 [PDF] Incident Report #${reportId} stored in MinIO at ${key}`);
     return key;
   } catch (err) {
     console.error(
       `⚠️ [PDF] Incident Report #${reportId} generation failed:`,
-      err.message
+      err.code ?? err.name
     );
     return null;
   }

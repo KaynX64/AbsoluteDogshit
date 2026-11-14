@@ -1,4 +1,4 @@
-import { expireDuePrescriptions } from '../services/prescriptions/expirePrescriptions.js';
+import { expireDuePrescriptions } from '../documents/prescriptions/expirePrescriptions.js';
 
 export async function processPrescriptionExpiry(io) {
   const ids = await expireDuePrescriptions();

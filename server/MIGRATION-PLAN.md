@@ -15,6 +15,7 @@
 - Migration 007 adds Operations, Clinical, Pharmacy, Headcount, and Export analytics permissions. Existing Limited Admins with View analytics receive Headcount once. Super Admins can grant additional analytics access in account settings. Deploy the server and desktop together because the analytics summary now returns scoped blocks.
 - The clinical and pharmacy workflow refinement uses the existing grants. Surveillance and Dispensing are derived scopes. Deploy the server and desktop together for the nested summary changes. This refinement adds no migration.
 - Migration 008 creates the staff analytics settings table. It leaves the table empty so nurses, doctors and dentists inherit their existing defaults. Apply migration 008 before serving analytics with the updated server.
+- Migration 009 adds nullable PDF retry timestamps and pending-PDF indexes to prescriptions, clearances and incident reports. It leaves stored PDF keys intact. Allow the startup migration to finish before serving traffic with the updated server.
 
 ## Rehearsal and recovery
 

@@ -1,7 +1,6 @@
-import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';
-import { logAudit } from '../../utils/auditLogger.js';
+import { receiveStock } from '../../inventory/stockMutations.js';
 
 export function registerInventoryReceiving(router, io) {
   // =============================================================================
@@ -25,67 +24,8 @@ export function registerInventoryReceiving(router, io) {
       return res.status(400).json({ error: 'Expiry date must be later than manufacture date.' });
     }
 
-    const connection = await pool.getConnection();
-
     try {
-      await connection.beginTransaction();
-
-      const [medRows] = await connection.query(
-        'SELECT name FROM MEDICINES WHERE medicine_id = ? AND deleted_at IS NULL',
-        [medicine_id]
-      );
-      if (medRows.length === 0) throw new Error('Medicine not found in master formulary.');
-
-      const [existingBatch] = await connection.query(
-        'SELECT batch_id, quantity_on_hand FROM MEDICINE_BATCHES WHERE medicine_id = ? AND batch_no = ? FOR UPDATE',
-        [medicine_id, batch_no]
-      );
-
-      let targetBatchId;
-      let newQty;
-
-      if (existingBatch.length > 0) {
-        targetBatchId = existingBatch[0].batch_id;
-        newQty = existingBatch[0].quantity_on_hand + Number(quantity_received);
-
-        await connection.query(
-          'UPDATE MEDICINE_BATCHES SET quantity_on_hand = ?, supplier = ? WHERE batch_id = ?',
-          [newQty, supplier || null, targetBatchId]
-        );
-      } else {
-        const [batchResult] = await connection.query(
-          `INSERT INTO MEDICINE_BATCHES 
-           (medicine_id, batch_no, manufacture_date, expiry_date, supplier, quantity_on_hand)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [medicine_id, batch_no, manufacture_date, expiry_date, supplier || 'PSU Central Depot', Number(quantity_received)]
-        );
-        targetBatchId = batchResult.insertId;
-        newQty = Number(quantity_received);
-      }
-
-      await connection.query(
-        `INSERT INTO INVENTORY_LOGS (batch_id, quantity_change, transaction_type, reason, performed_by)
-         VALUES (?, ?, 'receive', ?, ?)`,
-        [targetBatchId, Number(quantity_received), `Shipment received from ${supplier || 'Depot'}`, req.user.user_id]
-      );
-
-      await logAudit(connection, {
-        userId: req.user.user_id,
-        action: 'CREATE',
-        table: 'MEDICINE_BATCHES',
-        recordId: targetBatchId,
-        oldValue: null,
-        newValue: {
-          medicine: medRows[0].name,
-          batch_no,
-          quantity_received: Number(quantity_received),
-          new_total_stock: newQty,
-          supplier,
-        },
-        ipAddress: req.ip,
-      });
-
-      await connection.commit();
+      const { targetBatchId, newQty } = await receiveStock({ medicine_id, batch_no, manufacture_date, expiry_date, supplier, quantity_received, userId: req.user.user_id, ipAddress: req.ip });
 
       if (io) io.emit('inventory:updated');
 
@@ -95,11 +35,11 @@ export function registerInventoryReceiving(router, io) {
         quantityOnHand: newQty,
       });
     } catch (error) {
-      await connection.rollback();
-      console.error('Stock-in error:', error);
-      res.status(400).json({ error: error.message || 'Failed to process shipment intake.' });
-    } finally {
-      connection.release();
+      if (!error.status) {
+        console.error('[Inventory] Stock mutation failed.', error.code ?? error.name);
+        return res.status(500).json({ error: 'Could not save the stock movement.' });
+      }
+      res.status(error.status).json({ error: error.message });
     }
   });
 }

@@ -99,6 +99,42 @@
 .an-trend svg text { fill: var(--an-muted); font-size: 14px; }
 .an-trend svg polyline { fill: none; stroke: var(--an-accent); stroke-width: 2.5; vector-effect: non-scaling-stroke; }
 .an-trend svg circle { fill: var(--an-accent); }
+.an-trend-plot { position: relative; }
+.an-trend-hit { fill: transparent; cursor: crosshair; }
+.an-trend svg .an-trend-hover line {
+  stroke: var(--an-muted);
+  stroke-dasharray: 3 4;
+  vector-effect: non-scaling-stroke;
+}
+.an-trend svg .an-trend-hover circle {
+  stroke: var(--an-paper);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.an-trend-readout {
+  position: absolute;
+  inset-block-end: 1.45em;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: .4em;
+  width: max-content;
+  max-width: min(11em, 100%);
+  box-sizing: border-box;
+  padding: .25em .55em;
+  border: 1px solid var(--an-border);
+  border-radius: 6px;
+  background: var(--an-paper);
+  color: var(--an-ink);
+  font-size: .75em;
+  text-align: center;
+  pointer-events: none;
+}
+@media print {
+  .an-trend-hover, .an-trend-readout { display: none; }
+}
 .an-trend figcaption { margin-top: .25em; font-size: .8125em; }
 .an-values { margin-top: .6em; }
 .an-values summary { width: fit-content; min-height: 2.15em; font-size: .8125em; font-weight: 650; }

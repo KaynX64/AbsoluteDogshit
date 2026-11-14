@@ -28,6 +28,7 @@ import IncidentReportModal from '../features/emergency/IncidentReportModal';
 
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
+import TitleBar from './TitleBar';
 import LoginScreen from './LoginScreen';
 import { useSessionTimeout } from './useSessionTimeout';
 
@@ -277,18 +278,23 @@ const handleChangePassword = async (e: React.FormEvent) => {
 }, []);
   if (!user) {
     return (
-      <LoginScreen
-        email={email}
-        setEmail={setEmail}
-        password={password}
-        setPassword={setPassword}
-        error={error}
-        onSubmit={handleLogin}
-      />
+      <>
+        <TitleBar />
+        <LoginScreen
+          email={email}
+          setEmail={setEmail}
+          password={password}
+          setPassword={setPassword}
+          error={error}
+          onSubmit={handleLogin}
+        />
+      </>
     );
   }
 
   return (
+    <>
+    <TitleBar />
     <DesktopSocketContext.Provider value={desktopSocket}>
     <div className="app-shell" data-theme-mode={mode} data-theme-preset={preset}>
       <Sidebar
@@ -505,6 +511,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
       )}
     </div>
     </DesktopSocketContext.Provider>
+    </>
   );
 }
 

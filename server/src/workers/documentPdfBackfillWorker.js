@@ -1,35 +1,34 @@
+import { createHash } from 'node:crypto';
 import { pool } from '../db/pool.js';
-import {
-  generateAndStorePrescriptionPDF,
-  generateAndStoreClearancePDF,
-  generateAndStoreIncidentReportPDF,
-} from '../documents/documentService.js';
+import { recoverMissingPdfs } from '../documents/pdfRecovery.js';
 
 export async function backfillDocumentPdfs() {
-  const [missingRx] = await pool.query(
-    `SELECT prescription_id FROM PRESCRIPTIONS
-         WHERE pdf_s3_key IS NULL AND deleted_at IS NULL
-         ORDER BY prescription_id DESC LIMIT 20`
-  );
-  for (const rx of missingRx) {
-    await generateAndStorePrescriptionPDF(rx.prescription_id);
-  }
-
-  const [missingClr] = await pool.query(
-    `SELECT clearance_id FROM MEDICAL_CLEARANCES
-         WHERE pdf_s3_key IS NULL AND deleted_at IS NULL
-         ORDER BY clearance_id DESC LIMIT 20`
-  );
-  for (const clr of missingClr) {
-    await generateAndStoreClearancePDF(clr.clearance_id);
-  }
-
-  const [missingReports] = await pool.query(
-    `SELECT report_id FROM INCIDENT_REPORTS
-         WHERE pdf_s3_key IS NULL
-         ORDER BY report_id DESC LIMIT 20`
-  );
-  for (const ir of missingReports) {
-    await generateAndStoreIncidentReportPDF(ir.report_id);
+  const connection = await pool.getConnection();
+  let reusable = false;
+  let locked = false;
+  let lockName;
+  try {
+    const [[{ databaseName }]] = await connection.query('SELECT DATABASE() AS databaseName');
+    lockName = 'valetudo-pdfs:' + createHash('sha1').update(databaseName.toLowerCase()).digest('hex');
+    const [[{ acquired }]] = await connection.query('SELECT GET_LOCK(?, 0) AS acquired', [lockName]);
+    if (acquired === 0) {
+      reusable = true;
+      return { skipped: true };
+    }
+    if (acquired !== 1) throw new Error('Could not acquire PDF recovery lock.');
+    locked = true;
+    const metrics = await recoverMissingPdfs({ database: connection });
+    return { metrics, degraded: metrics.failed > 0 || metrics.queryFailures > 0 };
+  } finally {
+    if (locked) {
+      try {
+        const [[{ released }]] = await connection.query('SELECT RELEASE_LOCK(?) AS released', [lockName]);
+        reusable = released === 1;
+      } catch {
+        reusable = false;
+      }
+    }
+    if (reusable) connection.release();
+    else connection.destroy();
   }
 }

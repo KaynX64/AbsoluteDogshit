@@ -1,9 +1,9 @@
-import { planStock, applyStockDeductions } from './stock.js';
+import { planStock, applyStockDeductions } from '../../inventory/prescriptionStock.js';
 import crypto from 'crypto';
 import { pool } from '../../db/pool.js';
 import { logAudit } from '../../utils/auditLogger.js';
 import { encrypt } from '../../utils/cryptoVault.js';
-import { generateAndStorePrescriptionPDF } from '../../documents/documentService.js';
+import { generateAndStorePrescriptionPDF } from '../documentService.js';
 import { JWT_SECRET } from '../../utils/secrets.js';
 import {
   SignerError,
@@ -13,7 +13,7 @@ import {
   assertEmrBelongsToPatient,
   assertAppointmentInQueue,
   resolveExpiryDate,
-} from '../../documents/signing/signatory.js';
+} from '../signing/signatory.js';
 
 export async function issuePrescription({
   doctorUserId, patient_user_id, appointment_id, emr_id, expires_at, notes,

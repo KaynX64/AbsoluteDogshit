@@ -24,7 +24,7 @@ export async function startServer(server, { io, isHttps, signal }) {
     { name: 'Reminder Worker', intervalMs: 15 * 60 * 1000, run: () => sendDueAppointmentReminders(io) },
     { name: 'Auto-No-Show Worker', intervalMs: 60 * 1000, run: () => processAppointmentNoShows(io), runImmediately: true },
     { name: 'Prescription Expiry Worker', intervalMs: 30 * 60 * 1000, run: () => processPrescriptionExpiry(io), runImmediately: true },
-    { name: 'PDF Backfill Worker', intervalMs: 6 * 60 * 60 * 1000, run: backfillDocumentPdfs },
+    { name: 'PDF Backfill Worker', intervalMs: 5 * 60 * 1000, run: backfillDocumentPdfs, runImmediately: true },
   ]);
   server.once('close', () => { void stopWorkers(); });
   return stopWorkers;

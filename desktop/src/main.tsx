@@ -8,6 +8,13 @@ import { bootstrapTheme } from './theme/ThemeProvider.tsx'
 // dark mode / non-default presets never flash the light-brand default.
 bootstrapTheme()
 
+// Tell CSS up front whether the window draws its own Mica title strip, so the
+// chrome height is reserved on the very first paint (and not at all when the
+// native caption is in use).
+if (window.electronAPI?.windowChrome?.customTitleBar) {
+  document.documentElement.dataset.titlebar = 'overlay'
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

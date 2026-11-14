@@ -1,7 +1,8 @@
+import { usePreviewResource } from '../../shared/ui/usePreviewResource';
 // desktop/src/features/documents/SignatureEnrollment.tsx
 // "My signature" panel for DOCTOR / DENTIST. Works in the Electron app or a
 // browser on the tablet. Same screen is used to enroll AND to renew.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import SignaturePad from './SignaturePad';
 import type { SignaturePadHandle } from './SignaturePad';
 import { T, cardStyle, sectionTitle, btnPrimary, btnGhost } from '../../theme';
@@ -16,6 +17,8 @@ export default function SignatureEnrollment({
   onClose?: () => void;
   onSaved?: () => void;
 }) {
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const padRef = useRef<SignaturePadHandle>(null);
   const [current, setCurrent] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
@@ -24,27 +27,36 @@ export default function SignatureEnrollment({
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const load = useCallback(async () => {
+  const preview = usePreviewResource();
+  const load = async () => {
+    const signal = preview.begin();
     try {
-      const s = await fetch(`${API_BASE_URL}/api/signature/me/status`, { headers: authHeader() });
+      const s = await fetch(`${API_BASE_URL}/api/signature/me/status`, { headers: authHeader(), signal });
+      if (!s.ok) throw new Error();
       const st = await s.json();
+      if (signal.aborted) return;
       setUpdatedAt(st.updated_at || null);
       if (st.enrolled) {
-        const r = await fetch(`${API_BASE_URL}/api/signature/me/image`, { headers: authHeader() });
-        if (r.ok) setCurrent(URL.createObjectURL(await r.blob()));
+        const r = await fetch(`${API_BASE_URL}/api/signature/me/image`, { headers: authHeader(), signal });
+        if (r.ok) {
+          const url = preview.publish(await r.blob(), signal);
+          if (url) setCurrent(url);
+        }
       } else {
+        preview.clear();
         setCurrent(null);
         setDrawing(true); // first time: go straight to the pad
       }
     } catch {
-      setMsg({ ok: false, text: 'Could not reach the server.' });
+      if (!signal.aborted) setMsg({ ok: false, text: 'Could not reach the server.' });
     }
-  }, []);
+  };
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, []);
 
   const save = async () => {
     const blob = await padRef.current?.toPngBlob();
+    if (!mounted.current) return;
     if (!blob) return setMsg({ ok: false, text: 'Please draw your signature first.' });
     setBusy(true);
     setMsg(null);
@@ -56,6 +68,7 @@ export default function SignatureEnrollment({
       });
       const body = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(body.error || 'Save failed.');
+      if (!mounted.current) return;
       setMsg({ ok: true, text: 'Signature saved. New documents will use it.' });
       setDrawing(false);
       setEmpty(true);

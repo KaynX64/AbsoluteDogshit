@@ -5,7 +5,7 @@ import Icon from '../../shared/ui/Icon';
 import { I } from './adminIcons';
 
 interface PhiAccessRow {
-  id: number; viewer_name: string; viewer_role: string; viewer_email: string;
+  id: number; viewer_name: string; viewer_role: string; viewer_roles?: string | null; viewer_email: string;
   patient_name: string; student_no?: string | null; table_affected: string;
   purpose: string; ip_address: string; accessed_at: string;
 }
@@ -201,7 +201,7 @@ export default function AuditPanels({
                         <td>
                           <div style={{ fontWeight: 700, color: T.primary }}>{log.viewer_name}</div>
                           <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>
-                            {log.viewer_role} · {log.viewer_email}
+                            {log.viewer_roles?.split(',').join(', ') || log.viewer_role} · {log.viewer_email}
                           </div>
                         </td>
                         <td>

@@ -1,7 +1,7 @@
 import TriageVitalsFields from './TriageVitalsFields';
 // desktop/src/features/appointments/QrIntakeScanner.tsx
-import React, { useState, useEffect, useId, useRef } from 'react';
-import jsQR from 'jsqr';
+import React, { useState, useId, useRef } from 'react';
+import { useQrCapture } from './useQrCapture';
 import { API_BASE_URL } from '../../config/api';
 import { T } from '../../theme';
 import Icon from '../../shared/ui/Icon';
@@ -91,7 +91,6 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
   const [cameraError, setCameraError] = useState('');
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const animationFrameId = useRef<number | null>(null);
 
   /* ── Resolve the current palette at render time so intake follows theme changes. ── */
   const C = {
@@ -364,79 +363,13 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
     }
   };
 
-  const startCamera = async () => {
-    setCameraError('');
-    setIsCameraActive(true);
-    setScanStatus('Webcam active. Center the student QR code.');
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
-      });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.setAttribute('playsinline', 'true');
-        videoRef.current.play();
-        requestAnimationFrame(tickScan);
-      }
-    } catch (err: any) {
-      setCameraError('Cannot access webcam: ' + err.message);
-      setIsCameraActive(false);
-    }
-  };
-
-  const stopCamera = () => {
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach((t) => t.stop());
-      videoRef.current.srcObject = null;
-    }
-    if (animationFrameId.current) {
-      cancelAnimationFrame(animationFrameId.current);
-      animationFrameId.current = null;
-    }
-    setIsCameraActive(false);
-  };
-
-  const tickScan = () => {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (video && video.readyState === video.HAVE_ENOUGH_DATA && canvas) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      if (ctx) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = jsQR(imageData.data, imageData.width, imageData.height, {
-          inversionAttempts: 'attemptBoth',
-        });
-        if (code && code.data && code.data.length > 20) {
-          verifyToken(code.data);
-          return;
-        }
-      }
-    }
-    animationFrameId.current = requestAnimationFrame(tickScan);
-  };
-
-  useEffect(() => () => stopCamera(), []);
-
-  const handleQrFileUpload = (file: File) => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.drawImage(img, 0, 0);
-      const imageData = ctx.getImageData(0, 0, img.width, img.height);
-      const code = jsQR(imageData.data, imageData.width, imageData.height);
-      if (code && code.data) verifyToken(code.data);
-      else setScanStatus('No QR code found in the uploaded image.');
-    };
-    img.src = URL.createObjectURL(file);
-  };
+  const { startCamera, stopCamera, readFile } = useQrCapture(videoRef, canvasRef, {
+    onCode: verifyToken,
+    onActive: setIsCameraActive,
+    onError: setCameraError,
+    onStatus: setScanStatus,
+  });
+  const handleQrFileUpload = (file: File) => { void readFile(file); };
 
   const formatLastVerified = (raw: string): string => {
     if (!raw) return '';
@@ -576,7 +509,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
                 type="button"
                 onClick={() => {
                   setScanMode(tab.id);
-                  if (tab.id !== 'camera') stopCamera();
+                  stopCamera();
                   setScanStatus('');
                 }}
                 style={{

@@ -1,3 +1,4 @@
+import { usePreviewResource } from '../../shared/ui/usePreviewResource';
 import { navigateTabs } from '../../shared/ui/tabKeyboard';
 import { useTabMotion } from '../../shared/ui/selectionMotion';
 import { useActionFeedback } from '../../shared/ui/feedback';
@@ -107,10 +108,10 @@ export default function IncidentRecords() {
   }, [socket]);
 
   // ── PDF Blob Fetcher ───────────────────────────────────────────────────────
-  const fetchPdfBlob = async (reportId: number): Promise<Blob> => {
+  const fetchPdfBlob = async (reportId: number, signal?: AbortSignal): Promise<Blob> => {
     const token = localStorage.getItem('valetudo_token');
     const res = await fetch(`${API_BASE_URL}/api/emergency/incident-reports/${reportId}/pdf`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}` }, signal,
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -120,34 +121,29 @@ export default function IncidentRecords() {
   };
 
   // ── View & Preview Modal ───────────────────────────────────────────────────
+  const preview = usePreviewResource();
   const handleView = async (record: IncidentRecord) => {
+    preview.clear();
+    const signal = preview.begin();
     setSelectedRecord(record);
     setActiveModalTab('preview');
     setLoadingPdf(true);
     setPdfError(null);
-
-    if (previewPdfUrl) {
-      URL.revokeObjectURL(previewPdfUrl);
-      setPreviewPdfUrl(null);
-    }
-
+    setPreviewPdfUrl(null);
     try {
-      const blob = await fetchPdfBlob(record.reportId);
-      const url = URL.createObjectURL(blob);
-      setPreviewPdfUrl(url);
+      const blob = await fetchPdfBlob(record.reportId, signal);
+      const url = preview.publish(blob, signal);
+      if (url) setPreviewPdfUrl(url);
     } catch (err: any) {
-      console.error('[IncidentRecords] Error fetching PDF preview:', err);
-      setPdfError(err.message || 'Unable to open PDF preview.');
+      if (!signal.aborted) setPdfError(err.message || 'Unable to open PDF preview.');
     } finally {
-      setLoadingPdf(false);
+      if (!signal.aborted) setLoadingPdf(false);
     }
   };
 
   const handleCloseModal = () => {
-    if (previewPdfUrl) {
-      URL.revokeObjectURL(previewPdfUrl);
-      setPreviewPdfUrl(null);
-    }
+    preview.clear();
+    setPreviewPdfUrl(null);
     setSelectedRecord(null);
     setPdfError(null);
   };

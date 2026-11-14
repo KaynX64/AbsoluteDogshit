@@ -8,7 +8,9 @@ import incidentRecordsPermission from './migrations/006-incident-records-permiss
 import analyticsScopes from './migrations/007-analytics-scopes.js';
 import staffAnalyticsPermissions from './migrations/008-staff-analytics-permissions.js';
 
-const migrations = [foundation, clinicalDocuments, responders, appointmentDayIndex, pharmacyActivityIndexes, incidentRecordsPermission, analyticsScopes, staffAnalyticsPermissions];
+import pdfRetry from './migrations/009-pdf-retry.js';
+
+const migrations = [foundation, clinicalDocuments, responders, appointmentDayIndex, pharmacyActivityIndexes, incidentRecordsPermission, analyticsScopes, staffAnalyticsPermissions, pdfRetry];
 const requiredTables = [
   'USERS', 'ROLES', 'USER_ROLES', 'STAFF_PROFILES', 'HEALTH_PROFILES', 'EMERGENCY_ALERTS',
   'PRESCRIPTIONS', 'PRESCRIPTION_ITEMS', 'INVENTORY_LOGS', 'MEDICAL_CLEARANCES', 'AUDIT_LOGS', 'APPOINTMENTS',

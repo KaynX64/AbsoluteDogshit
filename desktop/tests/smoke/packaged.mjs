@@ -108,7 +108,11 @@ try {
       : { ...event, type: 'rawKeyDown' });
     await send('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
   }
+  const startupHeap = await send('Runtime.getHeapUsage');
   await verifyWorkflows(run, wait, press, send);
+  const workflowHeap = await send('Runtime.getHeapUsage');
+  console.log('Renderer JS heap used, login → after workflows: ' +
+    [startupHeap, workflowHeap].map(snapshot => (snapshot.usedSize / 1048576).toFixed(1) + ' MiB').join(' → '));
   console.log('Packaged Electron smoke checks passed.');
 } finally {
   socket?.close();

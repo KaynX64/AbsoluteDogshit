@@ -1,10 +1,8 @@
-import { pool } from '../../db/pool.js';
+import { inTransaction } from '../../db/transaction.js';
 import { logAudit } from '../../utils/auditLogger.js';
 
-export async function expireDuePrescriptions() {
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
+export function expireDuePrescriptions() {
+  return inTransaction(async connection => {
     const [expired] = await connection.query(
       `SELECT p.prescription_id
          FROM PRESCRIPTIONS p
@@ -39,12 +37,6 @@ export async function expireDuePrescriptions() {
       });
     }
 
-    await connection.commit();
     return ids;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+  });
 }

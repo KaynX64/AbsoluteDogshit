@@ -1,6 +1,6 @@
 import { useActionFeedback } from '../../shared/ui/feedback';
 // desktop/src/features/emergency/ResponderConsole.tsx
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { subscribeToDesktopEvents, useDesktopSocket } from '../../platform/realtime/desktopRealtime';
 import { T, btnPrimary, btnGhost } from '../../theme';
 import { API_BASE_URL } from '../../config/api';
@@ -22,25 +22,34 @@ export default function ResponderConsole() {
       osc.frequency.setValueAtTime(850, audioCtx.currentTime);
       osc.connect(gain);
       gain.connect(audioCtx.destination);
+      osc.onended = () => { void audioCtx.close().catch(() => {}); };
       osc.start();
       osc.stop(audioCtx.currentTime + 0.6);
     } catch (_) {}
   };
 
-  /* ── Data fetchers (identical) ───────────────────────────── */
-  const fetchAlerts = async (silent = false) => {
+  const alertRequest = useRef<AbortController | null>(null);
+  const fetchAlerts = async (silent = false, replace = true) => {
+    if (alertRequest.current && !replace) return;
+    alertRequest.current?.abort();
+    const request = new AbortController();
+    alertRequest.current = request;
     if (!silent) setLoading(true);
     const token = localStorage.getItem('valetudo_token');
     try {
       const res = await fetch(`${API_BASE_URL}/api/emergency/active`, {
         headers: { Authorization: `Bearer ${token}` },
+        signal: request.signal,
       });
       const data = await res.json();
-      if (Array.isArray(data)) setActiveAlerts(data);
+      if (!request.signal.aborted && Array.isArray(data)) setActiveAlerts(data);
     } catch (err) {
-      console.error('Failed to fetch alerts:', err);
+      if (!request.signal.aborted) console.error('Failed to fetch alerts:', err);
     } finally {
-      if (!silent) setLoading(false);
+      if (alertRequest.current === request) {
+        alertRequest.current = null;
+        setLoading(false);
+      }
     }
   };
 
@@ -75,9 +84,12 @@ export default function ResponderConsole() {
       on('reconnect', () => fetchAlerts(true));
     });
 
-    const interval = setInterval(() => fetchAlerts(true), 3000);
+    const interval = setInterval(() => fetchAlerts(true, false), 3000);
 
     return () => {
+      const pending = alertRequest.current;
+      alertRequest.current = null;
+      pending?.abort();
       clearInterval(interval);
       unsubscribe();
     };

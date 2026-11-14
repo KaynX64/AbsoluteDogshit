@@ -1,10 +1,14 @@
 import crypto from 'node:crypto';
-import { uploadToS3 } from '../../utils/s3Vault.js';
+import { deleteFromS3, uploadToS3 } from '../../utils/s3Vault.js';
 
 export async function storeDocumentPdf(prefix, id, buffer, saveKey) {
   const suffix = crypto.randomBytes(4).toString('hex');
   const key = prefix + '-' + id + '-' + suffix + '.pdf';
   await uploadToS3({ buffer, key, mimeType: 'application/pdf' });
-  await saveKey(key);
+  const [result] = await saveKey(key);
+  if (!result.affectedRows) {
+    await deleteFromS3(key).catch(() => console.error('[PDF] Could not remove an unpublished upload.'));
+    return null;
+  }
   return key;
 }
