@@ -51,7 +51,11 @@ Controls lift or press by 1 px, with 90 ms press feedback and a 140 ms release. 
 
 The packaged smoke suite exercises native keyboard input, review draft retention, pending and failed saves, analytics revocation, reduced motion, and narrow dialog layout.
 
-The consoles load eagerly. QR decoding loads on first use, and the updater module loads after the window is shown. Audit and system-health reads start when staff open the corresponding view. In paired local packaged runs, role-level lazy loading reduced initial JavaScript from 866 KB to 336 KB but increased login readiness from about 0.85 s to 0.96 s and first switches into Nurse, Admin, and Responder from 4–42 ms to roughly 330–350 ms. The smoke test can be rerun against future builds to compare that tradeoff.
+The sign-in screen loads first. The renderer starts loading a single shared staff console bundle during idle time after rendering sign-in. If staff sign in while that bundle is still loading, the form waits for it before opening the workspace. Role switches then use the loaded bundle. QR decoding loads on first use, and the updater loads after the window is shown. Audit and system-health reads start when staff open the corresponding view.
+
+Offline storage opens on the first signed-in account. The first sign-in after upgrading may need to migrate the legacy SQLite database before offline actions become available.
+
+In three alternating packaged smoke runs with temporary profiles, initial JavaScript fell from 770 KB to 336 KB and median time to the sign-in form went from 731 ms to 675 ms. Individual startup times varied.
 
 ## Offline storage
 

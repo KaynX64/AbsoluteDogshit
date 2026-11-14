@@ -13,6 +13,7 @@ import { installFixtures, verifyWorkflows } from './workflows.mjs';
 const executable = resolve(process.argv[2] ?? 'release/win-unpacked/Valetudo HealthLink.exe');
 await access(executable);
 const profile = await mkdtemp(join(tmpdir(), 'valetudo-packaged-smoke-'));
+const expectDeferredStorage = process.argv.includes('--deferred-storage');
 let app;
 let socket;
 
@@ -95,6 +96,11 @@ try {
   await send('Network.enable');
   await send('Network.setBlockedURLs', { urls: ['http://*', 'https://*', 'ws://*', 'wss://*'] });
   await wait("document.querySelector('form input') && window.electronAPI", 'login form and preload');
+  const loginReadyMs = Math.round(performance.now() - started);
+  if (expectDeferredStorage) {
+    await access(legacyPath);
+    await assert.rejects(access(join(storage, 'offline-storage.key')), { code: 'ENOENT' });
+  }
   assert.match(await run('window.electronAPI.getAppVersion()'), /^\d+\.\d+\.\d+/);
   await wait('[...document.images].some(img => img.complete && img.naturalWidth > 0)', 'local logo');
   for (const font of ['18px "Material Symbols Outlined"', '700 18px Inter', '600 18px "JetBrains Mono"']) {
@@ -111,20 +117,9 @@ try {
     icon.remove();
     return iconWidth > 0 && iconWidth < textWidth;
   })()`), true, 'Material Symbols renders an icon ligature offline');
-  const encryptedPath = join(storage, 'valetudo_offline_encrypted.db');
-  await access(join(storage, 'offline-storage.key'));
-  await assert.rejects(access(legacyPath), { code: 'ENOENT' });
-  const bytes = await readFile(encryptedPath);
-  assert.notEqual(bytes.subarray(0, 16).toString(), 'SQLite format 3\0');
-  assert.equal(bytes.includes(Buffer.from('Synthetic complaint from old SQLite')), false);
-  const plain = new DatabaseSync(encryptedPath, { readOnly: true });
-  try {
-    assert.throws(() => plain.prepare('SELECT * FROM LOCAL_SYNC_LOGS').all());
-  } finally {
-    plain.close();
-  }
-  const rendererMs = await run("performance.getEntriesByType('paint').find(entry => entry.name === 'first-contentful-paint')?.startTime ?? null");
-  console.log('Packaged login ready in ' + Math.round(performance.now() - started) + ' ms' +
+  await wait("performance.getEntriesByName('first-contentful-paint').length", 'first contentful paint');
+  const rendererMs = await run("performance.getEntriesByName('first-contentful-paint')[0].startTime");
+  console.log('Packaged login ready in ' + loginReadyMs + ' ms' +
     (rendererMs === null ? '' : ' (renderer first contentful paint ' + Math.round(rendererMs) + ' ms)'));
   await run('(' + installFixtures.toString() + ')()');
   async function press(key, modifiers = 0) {
@@ -137,6 +132,18 @@ try {
   }
   const startupHeap = await send('Runtime.getHeapUsage');
   await verifyWorkflows(run, wait, press, send, { offlineOnly: process.argv.includes('--offline-only') });
+  const encryptedPath = join(storage, 'valetudo_offline_encrypted.db');
+  await access(join(storage, 'offline-storage.key'));
+  await assert.rejects(access(legacyPath), { code: 'ENOENT' });
+  const bytes = await readFile(encryptedPath);
+  assert.notEqual(bytes.subarray(0, 16).toString(), 'SQLite format 3\0');
+  assert.equal(bytes.includes(Buffer.from('Synthetic complaint from old SQLite')), false);
+  const plain = new DatabaseSync(encryptedPath, { readOnly: true });
+  try {
+    assert.throws(() => plain.prepare('SELECT * FROM LOCAL_SYNC_LOGS').all());
+  } finally {
+    plain.close();
+  }
   const workflowHeap = await send('Runtime.getHeapUsage');
   console.log('Renderer JS heap used, login → after workflows: ' +
     [startupHeap, workflowHeap].map(snapshot => (snapshot.usedSize / 1048576).toFixed(1) + ' MiB').join(' → '));

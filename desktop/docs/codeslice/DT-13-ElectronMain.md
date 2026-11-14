@@ -10,5 +10,5 @@ Window and permissions in `window.cjs` and `certificatePolicy.cjs`; storage and 
 |---|---|---|---|
 | 1 | 1-11 | — | Imports and declarations |
 | 2 | 12-17 | requestSingleInstanceLock | Lock the profile and register shared handlers |
-| 3 | 18-28 | app.whenReady | Open and migrate encrypted storage before opening the window |
-| 4 | 29-31 | window-all-closed | window-all-closed |
+| 3 | 18-23 | app.whenReady | Register offline IPC and open the window. The first signed-in account opens encrypted storage. |
+| 4 | 24-26 | window-all-closed | window-all-closed |

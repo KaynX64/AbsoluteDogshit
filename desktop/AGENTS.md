@@ -46,7 +46,7 @@ The incident-report listener stays in the shell across role switches. Doctor and
 - Admin audit and telemetry requests follow the active view and its current grants. Dispatch keeps its polling fallback and gives realtime refreshes priority.
 ## Offline storage
 
-- `electron/offline/database.cjs` opens the encrypted SQLite database before the window starts. Electron `safeStorage` wraps the key for the OS profile. Keep the raw key in main and preserve the existing database when key access fails.
+- The first signed-in account opens or migrates the encrypted SQLite database through `electron/offline/database.cjs`. Electron `safeStorage` wraps the key for the OS profile. Keep the raw key in main and preserve the existing database when key access fails.
 - `electron/offline/registerHandlers.cjs` binds queue operations to the active app account. `src/platform/offline/offlineQueue.ts` imports the legacy mirror by mutation ID before clearing it and sends only the signed-in account's pending changes. Unassigned legacy entries stay encrypted until ownership can be verified. Keep clinical payloads out of browser storage.
 - The encounter form clears only after the offline write succeeds. `src/platform/offline/offlineSync.ts` advances the bootstrap checkpoint only after every page is saved. See [offline storage and rollout details](README.md#offline-storage).
 

@@ -1,14 +1,28 @@
 const { insertMutation, importLegacyQueue, unassignedAppointments, assignLegacyAppointments } = require('./queue.cjs');
 
-function registerOfflineHandlers(ipcMain, sqliteDb) {
+function registerOfflineHandlers(ipcMain, openDatabase) {
+  let sqliteDb;
+  let opening;
   const sessions = new WeakMap();
   const owner = event => sessions.get(event.sender);
   const requireDatabase = () => {
     if (!sqliteDb) throw new Error('Encrypted offline storage is unavailable. Offline changes cannot be saved.');
   };
   ipcMain.handle('offline-set-account', (event, userId) => {
-    if (Number.isSafeInteger(userId) && userId > 0) sessions.set(event.sender, userId);
-    else sessions.delete(event.sender);
+    if (!Number.isSafeInteger(userId) || userId <= 0) {
+      sessions.delete(event.sender);
+      return;
+    }
+    sessions.set(event.sender, userId);
+    if (sqliteDb) return;
+    opening ??= openDatabase().then(db => {
+      sqliteDb = db;
+    }).catch(error => {
+      console.error('[Offline storage] Could not open the encrypted database.', error.code || error.name);
+    }).finally(() => {
+      opening = undefined;
+    });
+    return opening;
   });
   ipcMain.handle('offline-import-legacy', (_event, rows) => {
     requireDatabase();

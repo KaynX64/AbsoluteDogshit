@@ -20,10 +20,10 @@ See the [desktop architecture guide](../AGENTS.md). Each desktop monolith has it
 | DT-06 | `desktop/src/features/analytics/AnalyticsDashboard.tsx` | 220 | working tree | `codeslice/DT-06-AnalyticsDashboard.md` | Scoped analytics shell and report actions |
 | DT-07 | `desktop/src/features/documents/PrescriptionGenerator.tsx` | 763 | working tree | `codeslice/DT-07-PrescriptionGenerator.md` | e-Rx form: formulary/outside drug selection, interaction warnings, stock guards, confirm-and-issue flow |
 | DT-08 | `desktop/src/features/emergency/IncidentRecords.tsx` | 994 | working tree | `codeslice/DT-08-IncidentRecords.md` | Admin view of documented SOS incidents: searchable list, server PDF preview, save and print (MinIO archive) |
-| DT-09 | `desktop/src/app/App.tsx` | 563 | working tree | `codeslice/DT-09-App.md` | App shell: login/session bootstrap, role-based console routing, offline replay badge, update banner, change-password modal |
+| DT-09 | `desktop/src/app/App.tsx` | 589 | working tree | `codeslice/DT-09-App.md` | App shell: login/session bootstrap, role-based console routing, offline replay badge, update banner, change-password modal |
 | DT-10 | `desktop/src/features/admin/CreateUserModal.tsx` | 791 | working tree | `codeslice/DT-10-CreateUserModal.md` | Admin create-user modal: role-specific fields, campus health profile, admin grants, qualified-responder flag |
 | DT-11 | `desktop/src/features/emergency/IncidentReportModal.tsx` | 543 | working tree | `codeslice/DT-11-IncidentReportModal.md` | Post-SOS-resolution incident popup: socket-driven, pre-filled patient identity, first-console-wins submit |
 | DT-12 | `desktop/src/features/emergency/ResponderConsole.tsx` | 513 | working tree | `codeslice/DT-12-ResponderConsole.md` | SOS dispatch console: live alert feed, alarm + tray notifications, status workflow buttons, dev test harness |
-| DT-13 | `desktop/electron/main.cjs` | 31 | working tree | `codeslice/DT-13-ElectronMain.md` | Electron main: window lifecycle, embedded SQLite offline store + IPC handlers, auto-updater, scoped TLS cert bypass |
+| DT-13 | `desktop/electron/main.cjs` | 26 | working tree | `codeslice/DT-13-ElectronMain.md` | Electron main: window lifecycle, embedded SQLite offline store + IPC handlers, auto-updater, scoped TLS cert bypass |
 
 ---

@@ -42,10 +42,17 @@ test('offline IPC caches, queues, and completes mutations using the existing SQL
   const db = await openOfflineDatabase(dir, wrapKeyFixture);
   t.after(() => { db.close(); rmSync(dir, { recursive: true, force: true }); });
   const handlers = new Map();
-  registerOfflineHandlers({ handle: (name, handler) => handlers.set(name, handler) }, db);
+  let opens = 0;
+  registerOfflineHandlers({ handle: (name, handler) => handlers.set(name, handler) }, async () => {
+    opens++;
+    return db;
+  });
   const event = { sender: {} };
   const call = (name, data) => handlers.get(name)(event, data);
-  call('offline-set-account', 2);
+  call('offline-set-account', null);
+  assert.equal(opens, 0, 'signed-out startup leaves offline storage closed');
+  await Promise.all([call('offline-set-account', 2), call('offline-set-account', 2)]);
+  assert.equal(opens, 1, 'concurrent account initialization shares one database open');
   const patient = {
     user_id: 1, student_no: 'fixture-1', first_name: 'Synthetic', last_name: 'Patient',
     email: null, phone: null, course: null, year_level: null, blood_type: null,

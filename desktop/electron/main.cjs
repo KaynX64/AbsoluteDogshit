@@ -15,14 +15,9 @@ registerPrintHandler(ipcMain);
 registerNotificationHandler(ipcMain);
 registerCertificatePolicy(app);
 
-app.whenReady().then(async () => {
-  let db;
-  try {
-    db = await openOfflineDatabase(path.join(app.getPath('userData'), 'valetudo_data'), safeStorage);
-  } catch (error) {
-    console.error('[Offline storage] Could not open the encrypted database.', error.code || error.name);
-  }
-  registerOfflineHandlers(ipcMain, db);
+app.whenReady().then(() => {
+  registerOfflineHandlers(ipcMain, () =>
+    openOfflineDatabase(path.join(app.getPath('userData'), 'valetudo_data'), safeStorage));
   createWindow();
 });
 

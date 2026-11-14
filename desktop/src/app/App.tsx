@@ -5,11 +5,7 @@ import { useActionFeedback } from '../shared/ui/feedback';
 import Dialog from '../shared/ui/Dialog';
 // desktop/src/app/App.tsx
 import React, { useCallback, useEffect, useState } from 'react';
-import NurseConsole from '../features/nurse/NurseConsole';
-import DoctorConsole from '../features/consultations/DoctorConsole';
-import AdminConsole from '../features/admin/AdminConsole';
 import type { AdminTab } from '../features/admin/AdminConsole';
-import ResponderConsole from '../features/emergency/ResponderConsole';
 import { useBookingBadge } from '../features/appointments/useBookingBadge';
 import { DesktopSocketContext, useDesktopSocketSession } from '../platform/realtime/desktopRealtime';
 import { bootstrapOfflineCache } from '../platform/offline/offlineSync';
@@ -19,7 +15,6 @@ import PasswordStrengthIndicator, { evaluatePassword } from '../shared/ui/Passwo
 import { T, btnPrimary, btnSubtle } from '../theme';
 import { ThemeProvider, applyThemeFromAccount, resetThemeAfterLogout, useTheme } from '../theme/ThemeProvider';
 import Icon from '../shared/ui/Icon';
-import IncidentReportModal from '../features/emergency/IncidentReportModal';
 
 
 import Sidebar from './Sidebar';
@@ -27,6 +22,16 @@ import TopBar from './TopBar';
 import TitleBar from './TitleBar';
 import LoginScreen from './LoginScreen';
 import { useSessionTimeout } from './useSessionTimeout';
+
+let consoleLoad: Promise<typeof import('./consoles')> | undefined;
+
+function loadConsoles() {
+  consoleLoad ??= import('./consoles').catch(error => {
+    consoleLoad = undefined;
+    throw error;
+  });
+  return consoleLoad;
+}
 
 /* ================================================================= */
 /* APP ROOT                                                           */
@@ -48,10 +53,22 @@ function AppShell() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [user, setUser] = useState<any>(null);
+  const [consoles, setConsoles] = useState<typeof import('./consoles')>();
   const [error, setError] = useState(() => sessionStorage.getItem('valetudo_session_expired')
     ? 'Your session expired due to inactivity. Sign in again to continue.'
     : '');
   useEffect(() => { sessionStorage.removeItem('valetudo_session_expired'); }, []);
+  useEffect(() => {
+    // Let the sign-in screen paint before loading the shared staff workspace.
+    let idle: number | undefined;
+    const frame = requestAnimationFrame(() => {
+      idle = requestIdleCallback(() => { void loadConsoles().catch(() => {}); }, { timeout: 500 });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      if (idle !== undefined) cancelIdleCallback(idle);
+    };
+  }, []);
   const [activeRoleView, setActiveRoleView] = useState<string>('');
 
   /* ── Workspace state (driven by sidebar) ─────────────────────── */
@@ -203,6 +220,12 @@ function AppShell() {
           return;
         }
 
+        const loadedConsoles = await loadConsoles().catch(() => null);
+        if (!loadedConsoles) {
+          setError('Could not load the staff workspace. Try signing in again.');
+          return;
+        }
+        setConsoles(loadedConsoles);
         localStorage.setItem('valetudo_token', data.token);
         setOfflineAccount(Number(data.user.user_id), data.token, userRoles.some(role => role === 'DOCTOR' || role === 'DENTIST'));
 
@@ -308,7 +331,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
   return api.onUpdateStatus((s) => setUpdateStatus(s));
 
 }, []);
-  if (!user) {
+  if (!user || !consoles) {
     return (
       <>
         <TitleBar />
@@ -324,6 +347,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
     );
   }
 
+  const { NurseConsole, DoctorConsole, AdminConsole, ResponderConsole, IncidentReportModal } = consoles;
   return (
     <>
     <TitleBar />
