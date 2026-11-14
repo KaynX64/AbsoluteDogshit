@@ -1,6 +1,7 @@
 // mobile/lib/screens/documents_viewer_screen.dart
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -8,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:open_filex/open_filex.dart';
+
 import '../config/api_config.dart';
 import '../utils/responsive.dart';
 
@@ -22,6 +24,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
   final _storage = const FlutterSecureStorage();
 
   int _selectedSubTab = 0;
+  bool _isGridView = false;
 
   List<dynamic> _prescriptions = [];
   bool _loadingPrescriptions = false;
@@ -92,13 +95,28 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     if (mounted) setState(() => _loadingDiagnostics = false);
   }
 
-  String _formatDate(String? rawDate) {
+  String _formatDate(String? rawDate, {bool compact = false}) {
     if (rawDate == null || rawDate.isEmpty) return 'N/A';
     try {
       final dt = DateTime.parse(rawDate).toLocal();
+      if (compact) {
+        final month = dt.month.toString().padLeft(2, '0');
+        final day = dt.day.toString().padLeft(2, '0');
+        return '$month/$day/${dt.year}';
+      }
       const months = [
-        'January', 'February', 'March', 'April', 'May', 'June',
-        'July', 'August', 'September', 'October', 'November', 'December'
+        'January',
+        'February',
+        'March',
+        'April',
+        'May',
+        'June',
+        'July',
+        'August',
+        'September',
+        'October',
+        'November',
+        'December',
       ];
       return "${months[dt.month - 1]} ${dt.day}, ${dt.year}";
     } catch (_) {
@@ -117,15 +135,20 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     try {
       final token = await _storage.read(key: 'jwt_token');
       final url = Uri.parse(
-          '${ApiConfig.baseUrl}/api/documents/$kind/$documentId/pdf');
+        '${ApiConfig.baseUrl}/api/documents/$kind/$documentId/pdf',
+      );
 
-      final res = await http.get(url, headers: {'Authorization': 'Bearer $token'});
+      final res = await http.get(
+        url,
+        headers: {'Authorization': 'Bearer $token'},
+      );
 
       if (res.statusCode != 200) {
         String msg = 'Server returned ${res.statusCode}';
         try {
           final decoded = jsonDecode(res.body);
-          if (decoded is Map && decoded['error'] != null) msg = decoded['error'];
+          if (decoded is Map && decoded['error'] != null)
+            msg = decoded['error'];
         } catch (_) {}
         throw Exception(msg);
       }
@@ -143,7 +166,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       if (result.type != ResultType.done && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Saved to ${file.path}\nCould not open automatically.'),
+            content: Text(
+              'Saved to ${file.path}\nCould not open automatically.',
+            ),
             backgroundColor: primaryGreen,
             duration: const Duration(seconds: 5),
           ),
@@ -174,7 +199,8 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
   void _showPrescriptionDocumentModal(Map<String, dynamic> rx) {
     final rs = Rs.of(context);
     final qrToken = rx['qr_token'] ?? '';
-    final verificationUrl = '${ApiConfig.baseUrl}/api/documents/verify/$qrToken';
+    final verificationUrl =
+        '${ApiConfig.baseUrl}/api/documents/verify/$qrToken';
     final items = rx['items'] as List<dynamic>? ?? [];
     final prescriptionId = rx['prescription_id'] as int?;
 
@@ -192,7 +218,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
           builder: (_, scrollController) => Container(
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(rs.r(28))),
+              borderRadius: BorderRadius.vertical(
+                top: Radius.circular(rs.r(28)),
+              ),
             ),
             padding: EdgeInsets.symmetric(
               horizontal: rs.w(22),
@@ -339,11 +367,17 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                           SizedBox(height: rs.h(4)),
                           Text(
                             "Sig: ${it['instructions'] ?? 'Take as directed'} • ${it['frequency'] ?? 'Daily'}",
-                            style: TextStyle(fontSize: rs.sp(12), color: textSub),
+                            style: TextStyle(
+                              fontSize: rs.sp(12),
+                              color: textSub,
+                            ),
                           ),
                           Text(
                             "Duration: ${it['duration_days'] ?? 3} days (Qty: ${it['quantity_prescribed'] ?? it['quantity_dispensed'] ?? 10} pcs)",
-                            style: TextStyle(fontSize: rs.sp(11.5), color: textSub),
+                            style: TextStyle(
+                              fontSize: rs.sp(11.5),
+                              color: textSub,
+                            ),
                           ),
                           if (it['is_outside'] == true)
                             Padding(
@@ -362,7 +396,8 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                     ),
                   ),
 
-                if (rx['notes'] != null && rx['notes'].toString().isNotEmpty) ...[
+                if (rx['notes'] != null &&
+                    rx['notes'].toString().isNotEmpty) ...[
                   SizedBox(height: rs.h(10)),
                   Text(
                     "Doctor Dietary Notes: ${rx['notes']}",
@@ -424,13 +459,19 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                             ),
                             Text(
                               "PRC License: ${rx['doctor_license']}",
-                              style: TextStyle(fontSize: rs.sp(11), color: textSub),
+                              style: TextStyle(
+                                fontSize: rs.sp(11),
+                                color: textSub,
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
                             Text(
                               "Issued: ${_formatDate(rx['issued_at'])}",
-                              style: TextStyle(fontSize: rs.sp(11), color: textSub),
+                              style: TextStyle(
+                                fontSize: rs.sp(11),
+                                color: textSub,
+                              ),
                             ),
                             if (rx['expires_at'] != null)
                               Text(
@@ -464,9 +505,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                       onPressed: _downloadingId == prescriptionId
                           ? null
                           : () => _downloadAndOpenPdf(
-                                documentId: prescriptionId,
-                                kind: 'prescriptions',
-                              ),
+                              documentId: prescriptionId,
+                              kind: 'prescriptions',
+                            ),
                       icon: _downloadingId == prescriptionId
                           ? const SizedBox(
                               width: 16,
@@ -529,7 +570,8 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
   void _showClearanceCertificateModal(Map<String, dynamic> c) {
     final rs = Rs.of(context);
     final qrToken = c['qr_token'] ?? '';
-    final verificationUrl = '${ApiConfig.baseUrl}/api/documents/verify/$qrToken';
+    final verificationUrl =
+        '${ApiConfig.baseUrl}/api/documents/verify/$qrToken';
     final clearanceId = c['clearance_id'] as int?;
 
     final qrSealSize = rs.w(90).clamp(76.0, 110.0);
@@ -546,7 +588,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
           builder: (_, scrollController) => Container(
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(rs.r(28))),
+              borderRadius: BorderRadius.vertical(
+                top: Radius.circular(rs.r(28)),
+              ),
             ),
             padding: EdgeInsets.symmetric(
               horizontal: rs.w(22),
@@ -720,13 +764,19 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                             ),
                             Text(
                               "PRC License: ${c['doctor_license']}",
-                              style: TextStyle(fontSize: rs.sp(11), color: textSub),
+                              style: TextStyle(
+                                fontSize: rs.sp(11),
+                                color: textSub,
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
                             Text(
                               "Issued: ${_formatDate(c['issued_at'])}",
-                              style: TextStyle(fontSize: rs.sp(11), color: textSub),
+                              style: TextStyle(
+                                fontSize: rs.sp(11),
+                                color: textSub,
+                              ),
                             ),
                           ],
                         ),
@@ -751,9 +801,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                       onPressed: _downloadingId == clearanceId
                           ? null
                           : () => _downloadAndOpenPdf(
-                                documentId: clearanceId,
-                                kind: 'clearances',
-                              ),
+                              documentId: clearanceId,
+                              kind: 'clearances',
+                            ),
                       icon: _downloadingId == clearanceId
                           ? const SizedBox(
                               width: 16,
@@ -861,11 +911,28 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                     ),
                     child: Row(
                       children: [
-                        _buildSubTabButton(rs: rs, index: 0, title: 'Prescriptions'),
-                        _buildSubTabButton(rs: rs, index: 1, title: 'Clearances'),
-                        _buildSubTabButton(rs: rs, index: 2, title: 'Lab & Imaging'),
+                        _buildSubTabButton(
+                          rs: rs,
+                          index: 0,
+                          title: 'Prescriptions',
+                        ),
+                        _buildSubTabButton(
+                          rs: rs,
+                          index: 1,
+                          title: 'Clearances',
+                        ),
+                        _buildSubTabButton(
+                          rs: rs,
+                          index: 2,
+                          title: 'Lab & Imaging',
+                        ),
                       ],
                     ),
+                  ),
+                  SizedBox(height: rs.h(8)),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: _buildLayoutSelector(rs),
                   ),
                 ],
               ),
@@ -875,8 +942,8 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
               child: _selectedSubTab == 0
                   ? _buildPrescriptionsList(rs)
                   : _selectedSubTab == 1
-                      ? _buildClearancesList(rs)
-                      : _buildDiagnosticsList(rs),
+                  ? _buildClearancesList(rs)
+                  : _buildDiagnosticsList(rs),
             ),
           ],
         ),
@@ -915,9 +982,321 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     );
   }
 
+  Widget _buildLayoutSelector(Rs rs) {
+    return Container(
+      padding: EdgeInsets.all(rs.w(3)),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F6F3),
+        border: Border.all(color: borderColor),
+        borderRadius: BorderRadius.circular(rs.r(14)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildLayoutOption(rs, isGrid: false),
+          _buildLayoutOption(rs, isGrid: true),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLayoutOption(Rs rs, {required bool isGrid}) {
+    final selected = _isGridView == isGrid;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: isGrid ? 'Grid layout' : 'List layout',
+      child: GestureDetector(
+        onTap: () => setState(() => _isGridView = isGrid),
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: EdgeInsets.symmetric(
+            horizontal: rs.w(10),
+            vertical: rs.h(7),
+          ),
+          decoration: BoxDecoration(
+            color: selected ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(rs.r(11)),
+            boxShadow: selected
+                ? const [
+                    BoxShadow(
+                      color: Color(0x12000000),
+                      blurRadius: 4,
+                      offset: Offset(0, 1),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isGrid ? Icons.grid_view_rounded : Icons.view_agenda_outlined,
+                size: rs.w(16),
+                color: selected ? primaryGreen : textSub,
+              ),
+              SizedBox(width: rs.w(5)),
+              Text(
+                isGrid ? 'Grid' : 'List',
+                style: TextStyle(
+                  fontSize: rs.sp(11.5),
+                  fontWeight: FontWeight.w700,
+                  color: selected ? primaryGreen : textSub,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDocumentGrid({
+    required Rs rs,
+    required int itemCount,
+    required Widget Function(BuildContext, int) itemBuilder,
+    required Future<void> Function() onRefresh,
+    bool includeDisclaimer = false,
+  }) {
+    final columnCount = rs.isTablet ? 3 : 2;
+    return RefreshIndicator(
+      color: primaryGreen,
+      onRefresh: onRefresh,
+      child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(rs.w(20), rs.h(8), rs.w(20), 0),
+            sliver: SliverToBoxAdapter(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: List.generate(columnCount, (columnIndex) {
+                  return Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.only(
+                        right: columnIndex == columnCount - 1 ? 0 : rs.w(12),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (
+                            var index = columnIndex;
+                            index < itemCount;
+                            index += columnCount
+                          )
+                            Padding(
+                              padding: EdgeInsets.only(bottom: rs.h(12)),
+                              child: SizedBox(
+                                width: double.infinity,
+                                child: itemBuilder(context, index),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ),
+          ),
+          if (includeDisclaimer)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(rs.w(20), rs.h(16), rs.w(20), 0),
+                child: _buildSampleDisclaimer(rs),
+              ),
+            ),
+          SliverToBoxAdapter(child: SizedBox(height: rs.h(20))),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPrescriptionGridCard(dynamic rx, Rs rs) {
+    final items = rx['items'] as List<dynamic>? ?? [];
+    final status = (rx['status'] ?? 'active').toString().toLowerCase();
+    final firstMed = items.isNotEmpty ? items[0] : null;
+    final medName = (firstMed?['medicine_name'] ?? 'Prescribed medication')
+        .toString();
+    final medStrength = firstMed == null
+        ? ''
+        : firstMed['is_outside'] == true
+        ? 'Outside Rx · ${firstMed['dosage'] ?? '—'}'
+        : '${firstMed['generic_name'] ?? ''} · ${firstMed['dosage'] ?? '500 mg'}';
+
+    return _buildDocumentGridCard(
+      rs: rs,
+      icon: Icons.medication_liquid_outlined,
+      iconColor: const Color(0xFF5B4EA1),
+      iconBackground: const Color(0xFFEDEBF7),
+      status: status.toUpperCase(),
+      statusColor: primaryGreen,
+      title: medName,
+      subtitle: medStrength,
+      details: [
+        'Dr. ${rx['doctor_first_name'] ?? ''} ${rx['doctor_last_name'] ?? ''}',
+        'Issued ${_formatDate(rx['issued_at'])}',
+        if (rx['expires_at'] != null)
+          'Valid until ${_formatDate(rx['expires_at'])}',
+      ],
+      actionLabel: 'View prescription',
+      onAction: () => _showPrescriptionDocumentModal(rx),
+    );
+  }
+
+  Widget _buildClearanceGridCard(dynamic clearance, Rs rs) {
+    final rawExpiry = clearance['expires_at'];
+    var isExpired = false;
+    if (rawExpiry != null) {
+      try {
+        isExpired = DateTime.parse(rawExpiry).isBefore(DateTime.now());
+      } catch (_) {}
+    }
+
+    return _buildDocumentGridCard(
+      rs: rs,
+      icon: Icons.description_outlined,
+      iconColor: const Color(0xFF8C6826),
+      iconBackground: const Color(0xFFF7F1E6),
+      status: isExpired ? 'EXPIRED' : 'APPROVED',
+      statusColor: isExpired ? const Color(0xFF9B1C1C) : primaryGreen,
+      title: (clearance['purpose'] ?? 'Medical clearance').toString(),
+      subtitle: 'Valid until ${_formatDate(clearance['expires_at'])}',
+      details: [
+        'Dr. ${clearance['doctor_first_name'] ?? ''} ${clearance['doctor_last_name'] ?? ''}',
+        'Issued ${_formatDate(clearance['issued_at'])}',
+      ],
+      actionLabel: 'View clearance',
+      onAction: () => _showClearanceCertificateModal(clearance),
+    );
+  }
+
+  Widget _buildDocumentGridCard({
+    required Rs rs,
+    required IconData icon,
+    required Color iconColor,
+    required Color iconBackground,
+    required String status,
+    required Color statusColor,
+    required String title,
+    required String subtitle,
+    required List<String> details,
+    required String actionLabel,
+    required VoidCallback onAction,
+  }) {
+    return Container(
+      padding: EdgeInsets.all(rs.w(13)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(rs.r(18)),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: EdgeInsets.all(rs.w(7)),
+                decoration: BoxDecoration(
+                  color: iconBackground,
+                  borderRadius: BorderRadius.circular(rs.r(9)),
+                ),
+                child: Icon(icon, size: rs.w(18), color: iconColor),
+              ),
+              SizedBox(width: rs.w(6)),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Container(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: rs.w(7),
+                      vertical: rs.h(4),
+                    ),
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(rs.r(10)),
+                    ),
+                    child: Text(
+                      status,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: rs.sp(10),
+                        fontWeight: FontWeight.w800,
+                        color: statusColor,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: rs.h(10)),
+          Text(
+            title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: rs.sp(16),
+              fontWeight: FontWeight.w800,
+              color: textMain,
+            ),
+          ),
+          if (subtitle.isNotEmpty) ...[
+            SizedBox(height: rs.h(3)),
+            Text(
+              subtitle,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: rs.sp(12.5), color: textSub),
+            ),
+          ],
+          SizedBox(height: rs.h(7)),
+          ...details.map(
+            (detail) => Padding(
+              padding: EdgeInsets.only(bottom: rs.h(3)),
+              child: Text(
+                detail,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: rs.sp(12), color: textSub),
+              ),
+            ),
+          ),
+          SizedBox(height: rs.h(8)),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton.icon(
+              onPressed: onAction,
+              style: TextButton.styleFrom(
+                foregroundColor: primaryGreen,
+                padding: EdgeInsets.symmetric(vertical: rs.h(5)),
+                visualDensity: VisualDensity.compact,
+              ),
+              icon: Icon(Icons.open_in_new_rounded, size: rs.w(14)),
+              label: Text(
+                actionLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: rs.sp(12),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildPrescriptionsList(Rs rs) {
     if (_loadingPrescriptions) {
-      return const Center(child: CircularProgressIndicator(color: primaryGreen));
+      return const Center(
+        child: CircularProgressIndicator(color: primaryGreen),
+      );
     }
 
     if (_prescriptions.isEmpty) {
@@ -949,14 +1328,22 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       );
     }
 
+    if (_isGridView) {
+      return _buildDocumentGrid(
+        rs: rs,
+        itemCount: _prescriptions.length,
+        onRefresh: _fetchPrescriptions,
+        includeDisclaimer: true,
+        itemBuilder: (context, index) =>
+            _buildPrescriptionGridCard(_prescriptions[index], rs),
+      );
+    }
+
     return RefreshIndicator(
       color: primaryGreen,
       onRefresh: _fetchPrescriptions,
       child: ListView(
-        padding: EdgeInsets.symmetric(
-          horizontal: rs.w(20),
-          vertical: rs.h(8),
-        ),
+        padding: EdgeInsets.symmetric(horizontal: rs.w(20), vertical: rs.h(8)),
         children: [
           ..._prescriptions.map((rx) {
             final items = rx['items'] as List<dynamic>? ?? [];
@@ -964,11 +1351,12 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
 
             final firstMed = items.isNotEmpty ? items[0] : null;
             final isFirstOutside = firstMed?['is_outside'] == true;
-            final medName = firstMed?['medicine_name'] ?? 'Prescribed medication';
+            final medName =
+                firstMed?['medicine_name'] ?? 'Prescribed medication';
             final medStrength = firstMed != null
                 ? (isFirstOutside
-                    ? "OUTSIDE Rx · ${firstMed['dosage'] ?? '—'} · buy at an external pharmacy"
-                    : "${firstMed['generic_name']} · ${firstMed['dosage'] ?? '500 mg'}")
+                      ? "OUTSIDE Rx · ${firstMed['dosage'] ?? '—'} · buy at an external pharmacy"
+                      : "${firstMed['generic_name']} · ${firstMed['dosage'] ?? '500 mg'}")
                 : '';
 
             return Container(
@@ -1044,7 +1432,11 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
 
                   Row(
                     children: [
-                      Icon(Icons.person_outline, size: rs.w(15), color: textSub),
+                      Icon(
+                        Icons.person_outline,
+                        size: rs.w(15),
+                        color: textSub,
+                      ),
                       SizedBox(width: rs.w(6)),
                       Expanded(
                         child: Text(
@@ -1059,7 +1451,11 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                   SizedBox(height: rs.h(4)),
                   Row(
                     children: [
-                      Icon(Icons.event_outlined, size: rs.w(15), color: textSub),
+                      Icon(
+                        Icons.event_outlined,
+                        size: rs.w(15),
+                        color: textSub,
+                      ),
                       SizedBox(width: rs.w(6)),
                       Expanded(
                         child: Text(
@@ -1125,7 +1521,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
 
   Widget _buildClearancesList(Rs rs) {
     if (_loadingClearances) {
-      return const Center(child: CircularProgressIndicator(color: primaryGreen));
+      return const Center(
+        child: CircularProgressIndicator(color: primaryGreen),
+      );
     }
 
     if (_clearances.isEmpty) {
@@ -1157,14 +1555,22 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       );
     }
 
+    if (_isGridView) {
+      return _buildDocumentGrid(
+        rs: rs,
+        itemCount: _clearances.length,
+        onRefresh: _fetchClearances,
+        includeDisclaimer: true,
+        itemBuilder: (context, index) =>
+            _buildClearanceGridCard(_clearances[index], rs),
+      );
+    }
+
     return RefreshIndicator(
       color: primaryGreen,
       onRefresh: _fetchClearances,
       child: ListView(
-        padding: EdgeInsets.symmetric(
-          horizontal: rs.w(20),
-          vertical: rs.h(8),
-        ),
+        padding: EdgeInsets.symmetric(horizontal: rs.w(20), vertical: rs.h(8)),
         children: [
           ..._clearances.map((c) {
             final rawExpiry = c['expires_at'];
@@ -1247,7 +1653,11 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
 
                   Row(
                     children: [
-                      Icon(Icons.person_outline, size: rs.w(15), color: textSub),
+                      Icon(
+                        Icons.person_outline,
+                        size: rs.w(15),
+                        color: textSub,
+                      ),
                       SizedBox(width: rs.w(6)),
                       Expanded(
                         child: Text(
@@ -1262,7 +1672,11 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                   SizedBox(height: rs.h(4)),
                   Row(
                     children: [
-                      Icon(Icons.event_outlined, size: rs.w(15), color: textSub),
+                      Icon(
+                        Icons.event_outlined,
+                        size: rs.w(15),
+                        color: textSub,
+                      ),
                       SizedBox(width: rs.w(6)),
                       Expanded(
                         child: Text(
@@ -1326,7 +1740,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
 
   Widget _buildDiagnosticsList(Rs rs) {
     if (_loadingDiagnostics) {
-      return const Center(child: CircularProgressIndicator(color: primaryGreen));
+      return const Center(
+        child: CircularProgressIndicator(color: primaryGreen),
+      );
     }
 
     if (_diagnosticAttachments.isEmpty) {
@@ -1359,21 +1775,28 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       );
     }
 
+    if (_isGridView) {
+      return _buildDocumentGrid(
+        rs: rs,
+        itemCount: _diagnosticAttachments.length,
+        onRefresh: _fetchDiagnostics,
+        itemBuilder: (context, index) =>
+            _buildDiagnosticGridCard(_diagnosticAttachments[index], rs),
+      );
+    }
+
     return RefreshIndicator(
       color: primaryGreen,
       onRefresh: _fetchDiagnostics,
       child: ListView.builder(
-        padding: EdgeInsets.symmetric(
-          horizontal: rs.w(20),
-          vertical: rs.h(8),
-        ),
+        padding: EdgeInsets.symmetric(horizontal: rs.w(20), vertical: rs.h(8)),
         itemCount: _diagnosticAttachments.length,
         itemBuilder: (context, index) {
           final doc = _diagnosticAttachments[index];
           final fileName = doc['file_name'] ?? 'Diagnostic File';
           final mime = doc['mime_type'] ?? '';
-          final isPdf = mime.contains('pdf') ||
-              fileName.toLowerCase().endsWith('.pdf');
+          final isPdf =
+              mime.contains('pdf') || fileName.toLowerCase().endsWith('.pdf');
           final isImage = mime.contains('image');
           final downloadUrl =
               '${ApiConfig.baseUrl}/api/documents/attachments/${doc['attachment_id']}/download';
@@ -1404,8 +1827,8 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                         isPdf
                             ? Icons.picture_as_pdf_outlined
                             : isImage
-                                ? Icons.image_outlined
-                                : Icons.description_outlined,
+                            ? Icons.image_outlined
+                            : Icons.description_outlined,
                         size: rs.w(20),
                         color: isPdf
                             ? const Color(0xFF9B1C1C)
@@ -1457,65 +1880,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                           vertical: rs.h(8),
                         ),
                       ),
-                      onPressed: () async {
-                        final token = await _storage.read(key: 'jwt_token');
-                        // SEC-06: fetch a single-use, 60-second download token
-                        // instead of appending the long-lived JWT to the URL
-                        // (query-string tokens leak into browser history,
-                        // proxy logs, and Referer headers).
-                        try {
-                          final res = await ApiConfig.client.post(
-                            Uri.parse('$downloadUrl-token'),
-                            headers: {
-                              'Content-Type': 'application/json',
-                              'Authorization': 'Bearer $token',
-                            },
-                          );
-
-                          if (res.statusCode != 200) {
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                      'Could not open file. Please try again.'),
-                                  backgroundColor: Color(0xFF7A2E26),
-                                ),
-                              );
-                            }
-                            return;
-                          }
-
-                          final data =
-                              jsonDecode(res.body) as Map<String, dynamic>;
-                          final dlToken = data['downloadToken'] as String?;
-                          if (dlToken == null || dlToken.isEmpty) {
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                      'Could not open file. Please try again.'),
-                                  backgroundColor: Color(0xFF7A2E26),
-                                ),
-                              );
-                            }
-                            return;
-                          }
-
-                          await launchUrl(
-                            Uri.parse('$downloadUrl?dlToken=$dlToken'),
-                            mode: LaunchMode.externalApplication,
-                          );
-                        } catch (e) {
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Network error: $e'),
-                                backgroundColor: const Color(0xFF7A2E26),
-                              ),
-                            );
-                          }
-                        }
-                      },
+                      onPressed: () => _openDiagnosticDocument(downloadUrl),
                       icon: const Icon(Icons.open_in_new, size: 14),
                       label: Text(
                         'Open & View File',
@@ -1543,6 +1908,170 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     );
   }
 
+  Widget _buildDiagnosticGridCard(dynamic doc, Rs rs) {
+    final fileName = (doc['file_name'] ?? 'Diagnostic File').toString();
+    final mime = (doc['mime_type'] ?? '').toString();
+    final isPdf =
+        mime.contains('pdf') || fileName.toLowerCase().endsWith('.pdf');
+    final isImage = mime.contains('image');
+    final iconColor = isPdf ? const Color(0xFF9B1C1C) : const Color(0xFF0284C7);
+    final downloadUrl =
+        '${ApiConfig.baseUrl}/api/documents/attachments/${doc['attachment_id']}/download';
+
+    return Container(
+      padding: EdgeInsets.all(rs.w(13)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(rs.r(18)),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: EdgeInsets.all(rs.w(7)),
+                decoration: BoxDecoration(
+                  color: isPdf
+                      ? const Color(0xFFFDE8E8)
+                      : const Color(0xFFE0F2FE),
+                  borderRadius: BorderRadius.circular(rs.r(9)),
+                ),
+                child: Icon(
+                  isPdf
+                      ? Icons.picture_as_pdf_outlined
+                      : isImage
+                      ? Icons.image_outlined
+                      : Icons.description_outlined,
+                  size: rs.w(18),
+                  color: iconColor,
+                ),
+              ),
+              SizedBox(width: rs.w(7)),
+              Expanded(
+                child: Text(
+                  _formatDate(
+                    doc['created_at'] ?? doc['encounter_date'],
+                    compact: true,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: TextStyle(
+                    fontSize: rs.sp(11.5),
+                    color: textSub,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: rs.h(10)),
+          Text(
+            fileName,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: rs.sp(16),
+              fontWeight: FontWeight.w800,
+              color: textMain,
+            ),
+          ),
+          SizedBox(height: rs.h(5)),
+          Text(
+            'Dr. ${doc['doctor_first_name'] ?? ''} ${doc['doctor_last_name'] ?? ''}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: rs.sp(12), color: textSub),
+          ),
+          Text(
+            (doc['doctor_specialty'] ?? 'Campus Physician').toString(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: rs.sp(12), color: textSub),
+          ),
+          SizedBox(height: rs.h(10)),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => _openDiagnosticDocument(downloadUrl),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: primaryGreen,
+                side: const BorderSide(color: primaryGreen),
+                shape: const StadiumBorder(),
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.symmetric(vertical: rs.h(5)),
+              ),
+              icon: Icon(Icons.open_in_new, size: rs.w(13)),
+              label: Text(
+                'Open file',
+                style: TextStyle(
+                  fontSize: rs.sp(12),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openDiagnosticDocument(String downloadUrl) async {
+    final token = await _storage.read(key: 'jwt_token');
+    // Keep the session JWT out of URLs; the download token is short-lived.
+    try {
+      final res = await ApiConfig.client.post(
+        Uri.parse('$downloadUrl-token'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (res.statusCode != 200) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not open file. Please try again.'),
+              backgroundColor: Color(0xFF7A2E26),
+            ),
+          );
+        }
+        return;
+      }
+
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final dlToken = data['downloadToken'] as String?;
+      if (dlToken == null || dlToken.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not open file. Please try again.'),
+              backgroundColor: Color(0xFF7A2E26),
+            ),
+          );
+        }
+        return;
+      }
+
+      await launchUrl(
+        Uri.parse('$downloadUrl?dlToken=$dlToken'),
+        mode: LaunchMode.externalApplication,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Network error: $e'),
+            backgroundColor: const Color(0xFF7A2E26),
+          ),
+        );
+      }
+    }
+  }
+
   Widget _buildSampleDisclaimer(Rs rs) {
     return Container(
       padding: EdgeInsets.all(rs.w(16)),
@@ -1553,11 +2082,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            Icons.verified_outlined,
-            size: rs.w(18),
-            color: primaryGreen,
-          ),
+          Icon(Icons.verified_outlined, size: rs.w(18), color: primaryGreen),
           SizedBox(width: rs.w(10)),
           Expanded(
             child: Text(

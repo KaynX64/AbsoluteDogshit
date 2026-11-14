@@ -383,7 +383,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                 'Republic Act No. 10173 (Data Privacy Act of 2012)',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
-                  fontSize: 12,
+                  fontSize: 13,
                   color: Color(0xFF284E3A),
                 ),
               ),
@@ -394,7 +394,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                 '• All clinical data is encrypted with AES-256-GCM.\n'
                 '• Stored under statutory 5-year retention lifecycle.\n'
                 '• Access monitored with immutable SHA-256 hash chains.',
-                style: TextStyle(fontSize: 12.5, height: 1.5, color: Color(0xFF5A635B)),
+                style: TextStyle(fontSize: 13.5, height: 1.5, color: Color(0xFF5A635B)),
               ),
             ],
           ),
@@ -833,7 +833,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                       ValetudoLogo(size: rs.w(34).clamp(28.0, 42.0)),
                       SizedBox(width: rs.w(8)),
                       Text(
-                        'valetudo.',
+                        'LeoVital',
                         style: TextStyle(
                           fontSize: rs.sp(18),
                           fontWeight: FontWeight.w900,
@@ -845,38 +845,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                   ),
                   Row(
                     children: [
-                      if (_isQualifiedResponder)
-                        Container(
-                          margin: const EdgeInsets.only(right: 8),
-                          padding: EdgeInsets.symmetric(
-                            horizontal: rs.w(10),
-                            vertical: rs.h(6),
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFFF7ED),
-                            border: Border.all(color: const Color(0xFFFED7AA)),
-                            borderRadius: BorderRadius.circular(rs.r(999)),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.health_and_safety_rounded,
-                                size: rs.w(14).clamp(12.0, 16.0),
-                                color: const Color(0xFFC2410C),
-                              ),
-                              SizedBox(width: rs.w(4)),
-                              Text(
-                                'Qualified Responder',
-                                style: TextStyle(
-                                  fontSize: rs.sp(10.5),
-                                  fontWeight: FontWeight.w800,
-                                  color: const Color(0xFFC2410C),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
                       Container(
                         width: rs.w(36).clamp(32.0, 42.0),
                         height: rs.w(36).clamp(32.0, 42.0),
@@ -1314,6 +1282,45 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                       ),
                     ],
 
+                    if (_isQualifiedResponder) ...[
+                      SizedBox(height: rs.h(12)),
+                      Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: rs.w(12),
+                          vertical: rs.h(8),
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF2F7F1),
+                          border: Border.all(color: const Color(0xFFDCE8DB)),
+                          borderRadius: BorderRadius.circular(rs.r(999)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.health_and_safety_rounded,
+                              size: rs.w(16),
+                              color: primaryGreen,
+                            ),
+                            SizedBox(width: rs.w(6)),
+                            Text(
+                              'Qualified Responder',
+                              style: TextStyle(
+                                fontSize: rs.sp(11.5),
+                                fontWeight: FontWeight.w700,
+                                color: primaryGreen,
+                              ),
+                            ),
+                            SizedBox(width: rs.w(6)),
+                            Icon(
+                              Icons.verified_rounded,
+                              size: rs.w(15),
+                              color: primaryGreen,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     SizedBox(height: rs.h(18)),
 
                     // Buttons collapse to a column on compact screens.
@@ -2541,6 +2548,67 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                         ),
                       ],
                     ),
+                    if (_isQualifiedResponder) ...[
+                      SizedBox(height: rs.h(14)),
+                      Container(
+                        width: double.infinity,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: rs.w(12),
+                          vertical: rs.h(10),
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF2F7F1),
+                          border: Border.all(color: const Color(0xFFDCE8DB)),
+                          borderRadius: BorderRadius.circular(rs.r(14)),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: rs.w(34),
+                              height: rs.w(34),
+                              decoration: BoxDecoration(
+                                color: softSage,
+                                borderRadius: BorderRadius.circular(rs.r(11)),
+                              ),
+                              child: Icon(
+                                Icons.health_and_safety_rounded,
+                                size: rs.w(19),
+                                color: primaryGreen,
+                              ),
+                            ),
+                            SizedBox(width: rs.w(10)),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Qualified Responder',
+                                    style: TextStyle(
+                                      fontSize: rs.sp(13),
+                                      fontWeight: FontWeight.w700,
+                                      color: primaryGreen,
+                                    ),
+                                  ),
+                                  SizedBox(height: rs.h(2)),
+                                  Text(
+                                    'Campus emergency support',
+                                    style: TextStyle(
+                                      fontSize: rs.sp(11.5),
+                                      color: textSub,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Icon(
+                              Icons.verified_rounded,
+                              size: rs.w(18),
+                              color: primaryGreen,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     SizedBox(height: rs.h(16)),
                     SizedBox(
                       width: double.infinity,

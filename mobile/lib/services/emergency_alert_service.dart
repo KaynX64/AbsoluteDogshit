@@ -755,7 +755,7 @@ class EmergencyAlertService {
                         style: TextStyle(
                           color: Colors.black,
                           fontWeight: FontWeight.w900,
-                          fontSize: 14,
+                          fontSize: 15,
                           letterSpacing: 0.5,
                         ),
                       ),
@@ -766,18 +766,18 @@ class EmergencyAlertService {
                 const Text(
                   'PSU DISASTER RISK REDUCTION & INFIRMARY PROTOCOL',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold),
+                  style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold),
                 ),
                 const Divider(color: Colors.white24, height: 20),
 
                 Text(
                   patientName,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                  style: const TextStyle(color: Colors.white, fontSize: 21, fontWeight: FontWeight.bold),
                 ),
                 Text(
                   '$roleLabel · ID: $studentNo',
-                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                  style: const TextStyle(color: Colors.white70, fontSize: 14),
                 ),
                 const SizedBox(height: 14),
 
@@ -795,33 +795,33 @@ class EmergencyAlertService {
                         ? [
                             const Text(
                               '🩸 Medical details not shared at your responder level',
-                              style: TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 13),
+                              style: TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 14),
                             ),
                             const SizedBox(height: 4),
                             const Text(
                               'Reduced payload for non-clinical responders (R.A. 10173).',
-                              style: TextStyle(color: Colors.white54, fontSize: 11),
+                              style: TextStyle(color: Colors.white54, fontSize: 12),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               '📍 Coordinates: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
-                              style: const TextStyle(color: Colors.white70, fontSize: 12),
+                              style: const TextStyle(color: Colors.white70, fontSize: 13),
                             ),
                           ]
                         : [
                             Text(
                               '🩸 Blood Type: ${bloodType ?? 'Unknown'}',
-                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               '⚠️ Allergies: ${allergies ?? 'None recorded'}',
-                              style: const TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 13),
+                              style: const TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 14),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               '📍 Coordinates: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
-                              style: const TextStyle(color: Colors.white70, fontSize: 12),
+                              style: const TextStyle(color: Colors.white70, fontSize: 13),
                             ),
                           ],
                   ),
@@ -888,7 +888,7 @@ class EmergencyAlertService {
                   },
                   child: const Text(
                     'SILENCE ALARM',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
                   ),
                 ),
               ],

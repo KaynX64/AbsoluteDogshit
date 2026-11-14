@@ -184,7 +184,7 @@ class _SplashScreenState extends State<SplashScreen> {
                               SizedBox(height: rs.h(24)),
 
                               Text(
-                                'valetudo.',
+                                'LeoVital',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   fontSize: rs.sp(38),
