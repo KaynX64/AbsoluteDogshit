@@ -37,11 +37,11 @@ const BCRYPT = '$2b$10$' + 'a'.repeat(53);
 
 describe('read-only ledger tables', () => {
   test('statutory and operational ledgers are read-only', () => {
-    for (const t of ['AUDIT_LOGS', 'PHI_ACCESS_LOGS', 'INVENTORY_LOGS']) {
+    for (const t of ['AUDIT_LOGS', 'PHI_ACCESS_LOGS', 'INVENTORY_LOGS', 'LOCAL_SYNC_LOGS']) {
       assert.equal(isReadOnlyTable(t), true, t);
     }
     assert.deepEqual([...READ_ONLY_TABLES].sort(), [
-      'AUDIT_LOGS', 'INVENTORY_LOGS', 'PHI_ACCESS_LOGS', 'QUEUE_TICKET_COUNTERS', 'SCHEMA_MIGRATIONS', 'SERVER_POLICY', 'STAFF_ANALYTICS_PERMISSIONS',
+      'AUDIT_LOGS', 'INVENTORY_LOGS', 'LOCAL_SYNC_LOGS', 'PHI_ACCESS_LOGS', 'QUEUE_TICKET_COUNTERS', 'SCHEMA_MIGRATIONS', 'SERVER_POLICY', 'STAFF_ANALYTICS_PERMISSIONS',
     ]);
     assert.equal(isReadOnlyTable('schema_migrations'), true);
   });

@@ -19,6 +19,8 @@
 
 - Migration 010 adds the Terminal permission to the admin catalog. Existing grants carry forward. A Super Admin can opt Limited Admin accounts into diagnostics.
 
+- Migration 011 rebuilds `LOCAL_SYNC_LOGS` when upgrading older schemas to remove submitted payloads and free-form errors. Mutation IDs, owners, statuses, and resulting record IDs carry forward. Rehearse the table copy and account for locks and disk space. Bring the updated server up before the updated desktop so legacy ownership checks and bounded replay are available. Historical database backups, replicas and logs follow their own retention policies.
+
 ## Rehearsal and recovery
 
 1. Run `node --test` from `server/`. Set `VALETUDO_MIGRATION_TEST_PORT` to the loopback port of an isolated MySQL 8 instance to include the migration rehearsals. The tests create randomly named databases and remove them on teardown. Set `VALETUDO_MIGRATION_TEST_PASSWORD` if that instance requires a root password.

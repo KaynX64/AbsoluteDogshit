@@ -12,12 +12,8 @@ import type { AdminTab } from '../features/admin/AdminConsole';
 import ResponderConsole from '../features/emergency/ResponderConsole';
 import { useBookingBadge } from '../features/appointments/useBookingBadge';
 import { DesktopSocketContext, useDesktopSocketSession } from '../platform/realtime/desktopRealtime';
-import {
-  getOfflineQueue,
-  replayOfflineQueue,
-  bootstrapOfflineCache,
-  refreshOfflineQueueFromBackend,
-} from '../platform/offline/offlineSync';
+import { bootstrapOfflineCache } from '../platform/offline/offlineSync';
+import { offlineQueueStatus, replayOfflineQueue, setOfflineAccount } from '../platform/offline/offlineQueue';
 import { API_BASE_URL } from '../config/api';
 import PasswordStrengthIndicator, { evaluatePassword } from '../shared/ui/PasswordStrengthIndicator';
 import { T, btnPrimary, btnSubtle } from '../theme';
@@ -91,7 +87,7 @@ function AppShell() {
 
   /* ── Connectivity & offline queue ────────────────────────────── */
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
-  const [offlineQueueCount, setOfflineQueueCount] = useState<number>(() => getOfflineQueue().length);
+  const [offlineQueue, setOfflineQueue] = useState({ pending: 0, needsReview: 0, unassigned: 0, unavailable: false });
   const [isReplaying, setIsReplaying] = useState(false);
 
   /* ── Change password modal ──────────────────────────────────── */
@@ -105,6 +101,7 @@ function AppShell() {
   // ── Session Logout & Token Invalidation ───────────────────────
   const handleSignOut = async () => {
     const token = localStorage.getItem('valetudo_token');
+    setOfflineAccount(null);
     localStorage.removeItem('valetudo_token');
     localStorage.removeItem('token');
     resetThemeAfterLogout();
@@ -142,22 +139,47 @@ function AppShell() {
   useEffect(() => {
     const updateOnline = () => setIsOnline(true);
     const updateOffline = () => setIsOnline(false);
-    const updateQueueCount = () => setOfflineQueueCount(getOfflineQueue().length);
+    let mounted = true;
+    let pending: ReturnType<typeof offlineQueueStatus> | undefined;
+    const updateQueueCount = () => {
+      const current = offlineQueueStatus();
+      pending = current;
+      void current.then(counts => {
+        if (mounted && pending === current) setOfflineQueue({ ...counts, unavailable: false });
+      }).catch(() => {
+        if (mounted && pending === current) setOfflineQueue({ pending: 0, needsReview: 0, unassigned: 0, unavailable: true });
+      });
+    };
 
     window.addEventListener('online', updateOnline);
     window.addEventListener('offline', updateOffline);
     window.addEventListener('offline-queue-changed', updateQueueCount);
 
-    // Sync the offline badge with the real SQLite queue on mount.
-    // Falls back to localStorage silently when running outside Electron.
-    refreshOfflineQueueFromBackend().catch(() => {});
+    updateQueueCount();
 
     return () => {
+      mounted = false;
       window.removeEventListener('online', updateOnline);
       window.removeEventListener('offline', updateOffline);
       window.removeEventListener('offline-queue-changed', updateQueueCount);
     };
   }, []);
+
+  useEffect(() => {
+    if (!user?.roles?.some((role: string) => ['DOCTOR', 'DENTIST', 'NURSE'].includes(role))) return;
+    const retry = () => {
+      void replayOfflineQueue().then(result => {
+        if (result.synced) return bootstrapOfflineCache();
+      }).catch(() => {});
+    };
+    if (navigator.onLine) retry();
+    window.addEventListener('online', retry);
+    desktopSocket?.on('connect', retry);
+    return () => {
+      window.removeEventListener('online', retry);
+      desktopSocket?.off('connect', retry);
+    };
+  }, [desktopSocket, user]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -182,6 +204,7 @@ function AppShell() {
         }
 
         localStorage.setItem('valetudo_token', data.token);
+        setOfflineAccount(Number(data.user.user_id), data.token, userRoles.some(role => role === 'DOCTOR' || role === 'DENTIST'));
 
         // Per-account theme: apply the preference stored on the account
         // (validated inside) so the workspace opens in the user's theme.
@@ -208,7 +231,10 @@ function AppShell() {
     setIsReplaying(true);
     try {
       const result = await replayOfflineQueue();
-      notify(`Replay complete. Synced ${result.synced} offline changes.`);
+      if (result.synced) void bootstrapOfflineCache();
+      const review = result.failed ? ` ${result.failed} need review.` : '';
+      const pending = result.remaining ? ` ${result.remaining} still queued.` : '';
+      notify(`Synced ${result.synced} offline changes.${review}${pending}`, Boolean(result.failed || result.remaining));
     } catch (err: any) {
       notify(`Replay failed. ${err.message} Use Replay to try again.`, true);
     } finally {
@@ -319,7 +345,10 @@ const handleChangePassword = async (e: React.FormEvent) => {
           user={user}
           role={activeRoleView}
           isOnline={isOnline}
-          offlineQueueCount={offlineQueueCount}
+          offlineQueueCount={offlineQueue.pending}
+          offlineNeedsReview={offlineQueue.needsReview}
+          offlineUnassigned={offlineQueue.unassigned}
+          offlineStorageUnavailable={offlineQueue.unavailable}
           isReplaying={isReplaying}
           onManualReplay={handleManualReplay}
           roleView={activeRoleView}
@@ -358,8 +387,8 @@ const handleChangePassword = async (e: React.FormEvent) => {
           type="button"
           className="update-btn update-btn-install"
           onClick={async () => {
-            if (offlineQueueCount > 0 &&
-                !await confirmAction('Restart now', `${offlineQueueCount} offline changes are still queued. They stay saved locally and sync after restart.`)) return;
+            if (offlineQueue.pending > 0 &&
+                !await confirmAction('Restart now', `${offlineQueue.pending} offline changes stay saved locally. Sign in again after restart to sync them.`)) return;
             window.electronAPI?.installUpdate();
           }}
         >

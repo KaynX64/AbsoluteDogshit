@@ -1,25 +1,10 @@
-const { app } = require('electron');
+const { randomBytes } = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs');
 
-let sqliteDb = null;
-const dbDir = path.join(app.getPath('userData'), 'valetudo_data');
-if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
-const dbPath = path.join(dbDir, 'valetudo_offline.db');
+const tables = ['LOCAL_SYNC_LOGS', 'CACHED_PATIENTS', 'CACHED_EMR_RECORDS'];
 
-try {
-  // Use Node.js native embedded SQLite (Node 22+ / Electron 32+)
-  const { DatabaseSync } = require('node:sqlite');
-  sqliteDb = new DatabaseSync(dbPath);
-  console.log('✅ [SQLite] Embedded database initialized at:', dbPath);
-} catch (err) {
-  console.warn('⚠️ [SQLite] node:sqlite unavailable; using persistent fallback storage:', err.message);
-}
-
-// Initialize SQLite Schema
-function initLocalDatabase() {
-  if (!sqliteDb) return;
-
+function initLocalDatabase(sqliteDb) {
   sqliteDb.exec(`
     CREATE TABLE IF NOT EXISTS LOCAL_SYNC_LOGS (
       sync_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,4 +60,129 @@ function initLocalDatabase() {
   `);
 }
 
-module.exports = { sqliteDb, initLocalDatabase };
+async function readKey(dir, encryptedPath, safeStorage, platform) {
+  const keyPath = path.join(dir, 'offline-storage.key');
+  if (platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text') {
+    throw new Error('An operating system key store is required.');
+  }
+  const asyncStorage = typeof safeStorage.isAsyncEncryptionAvailable === 'function';
+  const available = asyncStorage
+    ? await safeStorage.isAsyncEncryptionAvailable()
+    : safeStorage.isEncryptionAvailable();
+  if (!available) throw new Error('Operating system encryption is unavailable.');
+
+  if (fs.existsSync(keyPath)) {
+    const wrapped = fs.readFileSync(keyPath);
+    const key = asyncStorage
+      ? (await safeStorage.decryptStringAsync(wrapped)).result
+      : safeStorage.decryptString(wrapped);
+    if (!/^[a-f0-9]{64}$/.test(key)) throw new Error('Invalid offline database key.');
+    return key;
+  }
+  if (fs.existsSync(encryptedPath)) throw new Error('The offline database key is missing.');
+
+  const key = randomBytes(32).toString('hex');
+  const wrapped = asyncStorage ? await safeStorage.encryptStringAsync(key) : safeStorage.encryptString(key);
+  const tempKey = keyPath + '.tmp';
+  const fd = fs.openSync(tempKey, 'w', 0o600);
+  try {
+    fs.writeFileSync(fd, wrapped);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(tempKey, keyPath);
+  return key;
+}
+
+function openEncrypted(file, key, options) {
+  const Database = require('better-sqlite3-multiple-ciphers');
+  const db = new Database(file, options);
+  try {
+    db.pragma("cipher = 'sqlcipher'");
+    db.pragma('legacy = 4');
+    db.pragma('key = "x\'' + key + '\'"');
+    db.prepare('SELECT count(*) AS total FROM sqlite_schema').get();
+    db.pragma('temp_store = MEMORY');
+    db.pragma('secure_delete = ON');
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+}
+
+function removeDatabaseFiles(file) {
+  for (const suffix of ['', '-wal', '-shm', '-journal']) {
+    fs.rmSync(file + suffix, { force: true });
+  }
+}
+
+function copyLegacyDatabase(file, target) {
+  if (!fs.statSync(file).size) return;
+  const { DatabaseSync } = require('node:sqlite');
+  const source = new DatabaseSync(file, { readOnly: true });
+  try {
+    target.transaction(() => {
+      for (const table of tables) {
+        const original = source.prepare('SELECT * FROM ' + table);
+        original.setReadBigInts(true);
+        const columns = original.columns().map(column => column.name);
+        const insert = target.prepare('INSERT INTO ' + table + ' (' +
+          columns.map(name => '"' + name.replaceAll('"', '""') + '"').join(',') +
+          ') VALUES (' + columns.map(() => '?').join(',') + ')');
+        let copied = 0;
+        for (const row of original.iterate()) {
+          insert.run(...columns.map(name => row[name]));
+          copied++;
+        }
+        if (target.prepare('SELECT COUNT(*) AS total FROM ' + table).get().total !== copied) {
+          throw new Error('Offline migration did not copy all rows.');
+        }
+      }
+    })();
+  } finally {
+    source.close();
+  }
+}
+
+async function openOfflineDatabase(dir, safeStorage, platform = process.platform) {
+  fs.mkdirSync(dir, { recursive: true });
+  const legacy = path.join(dir, 'valetudo_offline.db');
+  const encrypted = path.join(dir, 'valetudo_offline_encrypted.db');
+  const key = await readKey(dir, encrypted, safeStorage, platform);
+  if (!fs.existsSync(encrypted)) {
+    const staging = encrypted + '.migrating';
+    removeDatabaseFiles(staging);
+    const target = openEncrypted(staging, key);
+    try {
+      initLocalDatabase(target);
+      if (fs.existsSync(legacy)) copyLegacyDatabase(legacy, target);
+    } finally {
+      target.close();
+    }
+    const verified = openEncrypted(staging, key, { readonly: true, fileMustExist: true });
+    try {
+      if (verified.pragma('integrity_check', { simple: true }) !== 'ok') {
+        throw new Error('Offline database integrity check failed.');
+      }
+    } finally {
+      verified.close();
+    }
+    fs.renameSync(staging, encrypted);
+  }
+
+  const db = openEncrypted(encrypted, key, { fileMustExist: true });
+  try {
+    // A new filename keeps older desktop builds from trying to open this database.
+    // This cleanup is retried if the app stopped after the encrypted file was published.
+    removeDatabaseFiles(legacy);
+    require('./queue.cjs').discardSyncedPayloads(db);
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+}
+
+module.exports = { openOfflineDatabase, initLocalDatabase };

@@ -214,6 +214,17 @@ test('replay commits a mixed batch and concurrent duplicates reuse the recorded 
   assert.deepEqual(await replayMutations([conflict, invalid], context), mixed.slice(1, 3));
   const [[row]] = await db.query('SELECT status, version FROM APPOINTMENTS WHERE appointment_id = 1');
   assert.deepEqual(row, { status: 'cancelled', version: 2 });
+  const [saved] = await db.query('SELECT sync_status FROM LOCAL_SYNC_LOGS ORDER BY sync_id');
+  assert.deepEqual(saved.map(entry => entry.sync_status).sort(), ['conflict', 'error', 'synced']);
+  const { request } = await mountedApi(t);
+  const owned = await request('/sync/legacy-ownership', { method: 'POST', json: { appointmentIds: [1, 2, 3] } });
+  assert.deepEqual(await owned.json(), { appointmentIds: [1, 2] });
+  const other = await request('/sync/legacy-ownership', { userId: 7, roles: ['DENTIST'], method: 'POST', json: { appointmentIds: [1, 2] } });
+  assert.deepEqual(await other.json(), { appointmentIds: [] });
+  const denied = await replayMutations([{
+    ...appointment, client_mutation_id: 'different-account', payload: { appointment_id: 2, status: 'completed' },
+  }], { user: { user_id: 7, roles: ['DENTIST'] }, deviceId: 'fixture' });
+  assert.equal(denied[0].status, 'error');
 });
 
 test('both status endpoints release a single-connection pool before concurrent queue notifications', { skip }, async t => {

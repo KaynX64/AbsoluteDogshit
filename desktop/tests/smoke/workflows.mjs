@@ -88,9 +88,17 @@ export function installFixtures() {
     }
     if (path.endsWith('/analytics/summary')) return Response.json(state.analytics);
     if (path.endsWith('/analytics/report-access')) return Response.json({ scopes: state.restrictedAnalytics.scopes });
-    if (path.endsWith('/sync/replay')) return Response.json({ results: JSON.parse(options.body).mutations.map(row => ({
-      client_mutation_id: row.client_mutation_id, status: 'synced', serverRecordId: 4,
-    })) });
+    if (path.endsWith('/sync/legacy-ownership')) {
+      const { appointmentIds } = JSON.parse(options.body);
+      return Response.json({ appointmentIds: appointmentIds.filter(id => id === 10) });
+    }
+    if (path.endsWith('/sync/replay')) {
+      const { mutations } = JSON.parse(options.body);
+      state.replayed = mutations;
+      return Response.json({ results: mutations.map(row => ({
+        client_mutation_id: row.client_mutation_id, status: 'synced', serverRecordId: 4,
+      })) });
+    }
     return Response.json([]);
   };
   window.smoke = {
@@ -117,26 +125,33 @@ export function installFixtures() {
   };
 }
 
-export async function verifyWorkflows(run, wait, press, send) {
+export async function verifyWorkflows(run, wait, press, send, { offlineOnly = false } = {}) {
   await run(`(async () => {
+    await window.electronAPI.offlineSetAccount(1);
     const queued = await window.electronAPI.offlineQueueMutation({
       client_mutation_id: 'fixture-replay', record_uuid: 'fixture-record', user_id: 1,
       table_name: 'EMR_RECORDS', action: 'CREATE',
       payload: { patient_user_id: 5, chief_complaint: 'Fixture complaint', diagnosis: 'Fixture diagnosis' },
     });
     if (!queued.success) throw Error(queued.error);
-    const queue = await window.electronAPI.offlineGetPendingMutations();
-    localStorage.setItem('valetudo_offline_mutations_queue', JSON.stringify(queue));
-    window.dispatchEvent(new Event('offline-queue-changed'));
+    const [legacy] = await window.electronAPI.offlineGetPendingMutations();
+    localStorage.setItem('valetudo_offline_mutations_queue', JSON.stringify([
+      legacy,
+      { ...legacy, client_mutation_id: 'fixture-mirror-only', record_uuid: 'fixture-mirror-record' },
+    ]));
     smoke.loginStarted = performance.now();
     smoke.login();
   })()`);
   await wait("document.querySelector('.tb-role-select')?.value === 'DOCTOR' && document.body.innerText.includes('Synthetic Patient')", 'Doctor console');
   console.log('Sign-in to Doctor workspace: ' + await run('Math.round(performance.now() - smoke.loginStarted)') + ' ms');
   assert.equal(await run("JSON.parse(localStorage.getItem('valetudo_theme')).mode"), 'dark');
-  await run("document.querySelector('.tb-replay').click()");
-  await wait("smoke.calls.some(([path]) => path.endsWith('/sync/replay'))", 'replay request');
+  await wait("smoke.state.replayed?.length === 3", 'automatic replay includes assigned legacy SQLite and mirror-only changes without duplication');
+  assert.deepEqual((await run("smoke.state.replayed.map(row => row.client_mutation_id).sort()")), [
+    'fixture-disk-only', 'fixture-mirror-only', 'fixture-replay',
+  ]);
   await wait("window.electronAPI.offlineGetPendingMutations().then(rows => rows.length === 0)", 'SQLite replay completion');
+  assert.equal(await run("localStorage.getItem('valetudo_offline_mutations_queue')"), null);
+  if (offlineOnly) return;
 
   const queue = await run(`(() => {
     const control = document.querySelector('.sb-item[aria-current=page]');

@@ -8,7 +8,7 @@ Window and permissions in `window.cjs` and `certificatePolicy.cjs`; storage and 
 
 | # | Lines | Anchor | Entry point |
 |---|---|---|---|
-| 1 | 1-9 | — | Imports and declarations |
-| 2 | 10-15 | registerOfflineHandlers(ipcMain | registerOfflineHandlers(ipcMain |
-| 3 | 16-20 | app.whenReady | app.whenReady |
-| 4 | 21-23 | window-all-closed | window-all-closed |
+| 1 | 1-11 | — | Imports and declarations |
+| 2 | 12-17 | requestSingleInstanceLock | Lock the profile and register shared handlers |
+| 3 | 18-28 | app.whenReady | Open and migrate encrypted storage before opening the window |
+| 4 | 29-31 | window-all-closed | window-all-closed |

@@ -596,10 +596,8 @@ CREATE TABLE `LOCAL_SYNC_LOGS` (
   `record_id` BIGINT NULL DEFAULT NULL,
   `record_uuid` VARCHAR(36) NOT NULL,
   `action` ENUM('CREATE', 'UPDATE', 'DELETE') NOT NULL,
-  `payload` JSON NOT NULL,
   `local_version` INT NOT NULL,
   `sync_status` ENUM('pending', 'synced', 'conflict', 'error') NOT NULL DEFAULT 'pending',
-  `error_message` TEXT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `synced_at` TIMESTAMP NULL DEFAULT NULL,
   CONSTRAINT `fk_sync_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`)

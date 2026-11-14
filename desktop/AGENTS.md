@@ -4,7 +4,7 @@ Electron 44 (main process = CommonJS `.cjs`) + Vite 6 + React 19 + TypeScript 5.
 
 ## Process model — electron/main.cjs
 
-- **Dev** (`npm run dev`): the npm script runs Vite at `https://127.0.0.1:5173` (TLS reuses `../server/certs/*.pem`; falls back to HTTP if absent) and, once the port is up, launches Electron; main loads `VITE_URL`, showing the window on first paint or after the dev page finishes loading.
+- **Dev** (`npm run dev`) starts Vite and then Electron. Generate `../server/certs/cert.pem` and `key.pem` before launching. Vite serves HTTP when these files are absent, while Electron loads the HTTPS `VITE_URL` from `electron/config.cjs`. The dev window can show after page load if first-paint readiness has not fired.
 - **Packaged**: main loads `dist/index.html` over `file://`. This is why `vite.config.mts` sets `base: './'` — keep it or asset URLs break inside the exe.
 - `app-config.json` (`apiBaseUrl`) is read by main at runtime **and** imported by the renderer at build time — see the gotcha below.
 - `certificate-error` policy (security-critical, do not loosen): dev builds tolerate the self-signed cert for local-API and Vite URLs; packaged builds only when `apiBaseUrl` is a loopback host **and** the failing URL is same-origin with it (`isSameOrigin` also blocks userinfo tricks). Any other certificate error stands.
@@ -44,7 +44,11 @@ The incident-report listener stays in the shell across role switches. Doctor and
 
 - QR capture owns camera tracks, its decode loop, and uploaded image URLs in `useQrCapture.ts`. The decoder loads on demand. Document previews cancel pending reads and revoke blob URLs on replacement or unmount.
 - Admin audit and telemetry requests follow the active view and its current grants. Dispatch keeps its polling fallback and gives realtime refreshes priority.
-- Offline writes use `electron/offline/` through preload IPC. The SQLite database and the pending mutation mirror in renderer `localStorage` are unencrypted at the application level. Both can contain patient data. `offlineSync.ts` advances the paged bootstrap checkpoint after all pages are saved.
+## Offline storage
+
+- `electron/offline/database.cjs` opens the encrypted SQLite database before the window starts. Electron `safeStorage` wraps the key for the OS profile. Keep the raw key in main and preserve the existing database when key access fails.
+- `electron/offline/registerHandlers.cjs` binds queue operations to the active app account. `src/platform/offline/offlineQueue.ts` imports the legacy mirror by mutation ID before clearing it and sends only the signed-in account's pending changes. Unassigned legacy entries stay encrypted until ownership can be verified. Keep clinical payloads out of browser storage.
+- The encounter form clears only after the offline write succeeds. `src/platform/offline/offlineSync.ts` advances the bootstrap checkpoint only after every page is saved. See [offline storage and rollout details](README.md#offline-storage).
 
 ## Shared desktop interaction
 
@@ -60,5 +64,5 @@ The incident-report listener stays in the shell across role switches. Doctor and
 
 - Read [the code-slice index](./docs/CODESLICE.md) before opening large feature files. Re-locate anchors with `rg -n` after edits.
 - Keep styles near their owners and preserve the import order in `src/index.css`. Material Symbols, Inter, and JetBrains Mono are bundled under `src/img_icons/`.
-- Never read `dist/`, `release/`, or lockfiles.
+- Use renderer source when editing UI. Inspect packaged files or lockfile entries when diagnosing a build or native dependency issue.
 - If the packaged app shows TLS/cert errors talking to `https://localhost:5000`, suspect `apiBaseUrl` (loopback check in main), not the renderer code.

@@ -10,13 +10,13 @@ The incident report listener stays mounted at shell level across role switches. 
 
 | # | Lines | Anchor | Entry point |
 |---|---|---|---|
-| 1 | 1-44 | — | Imports and declarations |
-| 2 | 45-105 | function AppShell | function AppShell |
-| 3 | 106-161 | const handleSignOut | const handleSignOut |
-| 4 | 162-205 | const handleLogin | const handleLogin |
-| 5 | 206-288 | const handleManualReplay | const handleManualReplay |
-| 6 | 289-305 | <LoginScreen | <LoginScreen |
-| 7 | 306-317 | <Sidebar | <Sidebar |
-| 8 | 318-405 | <TopBar | <TopBar |
-| 9 | 406-529 | <IncidentReportModal | <IncidentReportModal |
-| 10 | 530-536 | export default function App | export default function App |
+| 1 | 1-40 | — | Imports and declarations |
+| 2 | 41-101 | function AppShell | function AppShell |
+| 3 | 102-182 | const handleSignOut | const handleSignOut |
+| 4 | 183-227 | const handleLogin | const handleLogin |
+| 5 | 228-313 | const handleManualReplay | const handleManualReplay |
+| 6 | 314-330 | <LoginScreen | <LoginScreen |
+| 7 | 331-342 | <Sidebar | <Sidebar |
+| 8 | 343-432 | <TopBar | <TopBar |
+| 9 | 433-556 | <IncidentReportModal | <IncidentReportModal |
+| 10 | 557-563 | export default function App | export default function App |

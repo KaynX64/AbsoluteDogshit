@@ -15,7 +15,7 @@ import PrescriptionGenerator from '../documents/PrescriptionGenerator';
 import { subscribeToDesktopEvents, useDesktopSocket } from '../../platform/realtime/desktopRealtime';
 import AnalyticsDashboard from '../analytics/AnalyticsDashboard';
 import EmergencyAlertBanner from '../emergency/EmergencyAlertBanner';
-import { queueOfflineMutation } from '../../platform/offline/offlineSync';
+import { queueOfflineMutation } from '../../platform/offline/offlineQueue';
 import { T, btnPrimary, btnGhost, inputStyle } from '../../theme';
 import { API_BASE_URL } from '../../config/api';
 import SignatureEnrollment from '../documents/SignatureEnrollment';
@@ -620,26 +620,32 @@ export default function DoctorConsole({
         isDentist && chartedTeeth.length > 0 ? dentalChartData : undefined,
     };
 
-    if (!navigator.onLine) {
-      queueOfflineMutation({
-        table_name: 'EMR_RECORDS',
-        record_uuid: crypto.randomUUID(),
-        action: 'CREATE',
-        payload: encounterPayload,
-      });
-      setEncounterConfirmation(false);
-      setSelectedApp({ ...selectedApp, status: 'completed' });
-      resetForm();
-      setIsSubmittingEMR(false);
-      setFeedbackMsg({
-        text:
-          '[Offline Mode] Network unavailable. Encounter saved to local offline queue. Will auto-sync to MySQL upon reconnection.',
-        type: 'success',
-      });
-      return;
-    }
+    const saveOffline = async () => {
+      if (attachedFile) {
+        setEncounterError('Attachments require a server connection. Reconnect before finalizing or remove the attachment to save the encounter offline.');
+        return;
+      }
+      try {
+        await queueOfflineMutation({
+          table_name: 'EMR_RECORDS',
+          record_uuid: crypto.randomUUID(),
+          action: 'CREATE',
+          payload: encounterPayload,
+        });
+        setEncounterConfirmation(false);
+        setSelectedApp({ ...selectedApp, status: 'completed' });
+        resetForm();
+        setFeedbackMsg({ text: 'Encounter saved to the encrypted offline queue.', type: 'success' });
+      } catch (error) {
+        setEncounterError(error instanceof Error ? error.message : 'Could not save the offline encounter.');
+      }
+    };
 
     try {
+      if (!navigator.onLine) {
+        await saveOffline();
+        return;
+      }
       const res = await fetch(
         `${API_BASE_URL}/api/appointments/${selectedApp.appointment_id}/complete`,
         {
@@ -690,19 +696,7 @@ export default function DoctorConsole({
         return;
       }
 
-      queueOfflineMutation({
-        table_name: 'EMR_RECORDS',
-        record_uuid: crypto.randomUUID(),
-        action: 'CREATE',
-        payload: encounterPayload,
-      });
-      setEncounterConfirmation(false);
-      resetForm();
-      setFeedbackMsg({
-        text:
-          'Server unreachable. Encounter queued locally in offline storage. Will replay automatically when online.',
-        type: 'success',
-      });
+      await saveOffline();
     } finally {
       setIsSubmittingEMR(false);
     }

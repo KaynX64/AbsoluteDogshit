@@ -13,10 +13,12 @@ The implementation now separates route composition, domain transactions, and pos
 | Analytics | [Report queries](src/analytics/reportQueries.js) share aggregation across the dashboard and exports. Scope resolution, summary assembly and rendering have separate owners. | The [mounted API tests](tests/appRoutes.test.js) check summary and report scope. The concurrency tests compare report and dashboard totals. |
 | Incident filing and PDF recovery | [Incident filing](src/emergency/fileIncidentReport.js) owns the transaction. The route publishes events and generates the PDF after commit. [PDF recovery](src/documents/pdfRecovery.js) uses a database-scoped lock, processes up to 20 pending rows per document type in ascending ID order, and defers failures. | The concurrency tests cover duplicate incident filing and recovery lock contention. [Recovery unit tests](tests/pdfRecovery.test.js) cover retry scheduling and isolation after a failure. |
 
+## Replay storage
+
+The [server replay ledger](src/sync/replayService.js) retains mutation outcomes. [Migration 011](src/db/migrations/011-replay-outcomes.js) removes legacy payloads and free-form errors. The [desktop storage upgrade](../desktop/README.md#offline-storage) encrypts the cache and preserves pending work from the SQLite queue and the renderer mirror.
+
 ## Open follow-up
 
-- The [server replay ledger](src/sync/replayService.js) stores submitted payload JSON. Duplicate detection uses the mutation ID, account and recorded outcome. An outcome-only ledger would reduce stored patient data. Coordinate that change with the schema and a migration for existing rows.
-- The [desktop offline cache and queue](../desktop/README.md#offline-storage) are unencrypted at the application level. An encryption rollout needs to preserve pending work from both SQLite and the renderer mirror.
 - Cold diagnosis aggregation still accumulates distinct labels before truncating its output. Measure memory during [aggregation](src/analytics/analyticsStats.js) and report rendering with representative volumes before changing the format or caching strategy.
 
 Use the existing feature directories for related code. Keep transaction ownership with the workflow and pass its connection to participating queries. Use the mounted API tests for route contracts and disposable MySQL for transaction, locking and query-plan checks.

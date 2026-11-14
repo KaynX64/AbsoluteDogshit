@@ -28,8 +28,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showNotification: (options) => ipcRenderer.invoke('show-notification', options),
 
   // SQLite Client Offline Sync API
+  offlineSetAccount: (id) => ipcRenderer.invoke('offline-set-account', id),
+  offlineImportLegacy: (rows) => ipcRenderer.invoke('offline-import-legacy', rows),
+  offlineUnassignedAppointments: () => ipcRenderer.invoke('offline-unassigned-appointments'),
+  offlineAssignLegacy: (data) => ipcRenderer.invoke('offline-assign-legacy', data),
+  offlinePendingCount: () => ipcRenderer.invoke('offline-pending-count'),
   offlineQueueMutation: (mutation) => ipcRenderer.invoke('offline-queue-mutation', mutation),
-  offlineGetPendingMutations: () => ipcRenderer.invoke('offline-get-pending-mutations'),
+  offlineGetPendingMutations: (limit) => ipcRenderer.invoke('offline-get-pending-mutations', limit),
   offlineMarkSynced: (params) => ipcRenderer.invoke('offline-mark-synced', params),
   offlineMarkFailed: (params) => ipcRenderer.invoke('offline-mark-failed', params),
   offlineCacheBootstrap: (data) => ipcRenderer.invoke('offline-cache-bootstrap', data),

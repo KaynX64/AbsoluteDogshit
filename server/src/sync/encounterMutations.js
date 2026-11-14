@@ -1,3 +1,4 @@
+import { fail } from '../utils/httpError.js';
 import { encrypt } from '../utils/cryptoVault.js';
 import { completeEncounter, prepareEncounter } from '../appointments/completeEncounter.js';
 import { readEncounterText } from '../appointments/encounterText.js';
@@ -7,12 +8,13 @@ import { COMPLETED_APPOINTMENT_CONFLICT } from './conflicts.js';
 function assertClinicalAuthor(user) {
   const roles = (user && user.roles) || [];
   if (!roles.some((r) => ['DOCTOR', 'DENTIST'].includes(r))) {
-    throw new Error('Only a doctor or dentist may create or edit EMR records.');
+    throw fail('Only a doctor or dentist may create or edit EMR records.', 403);
   }
 }
 
 export async function createEncounter(connection, { payload, local_version }, user) {
   try {
+    assertClinicalAuthor(user);
     const encounter = prepareEncounter(payload, user);
     const serverRecordId = await completeEncounter(connection, {
       appointmentId: payload.appointment_id,
@@ -32,9 +34,15 @@ export async function createEncounter(connection, { payload, local_version }, us
 export async function updateEncounter(connection, { payload }, user) {
   const userId = user.user_id;
   const { emr_id } = payload;
-  if (!emr_id) throw new Error('emr_id is required for UPDATE');
+  if (!emr_id) throw fail('emr_id is required for UPDATE');
   assertClinicalAuthor(user);
-  const { chief_complaint, diagnosis, treatment_plan, notes } = readEncounterText(payload);
+  let text;
+  try {
+    text = readEncounterText(payload);
+  } catch (error) {
+    throw fail(error.message);
+  }
+  const { chief_complaint, diagnosis, treatment_plan, notes } = text;
 
   // Only the clinician who authored the EMR may edit it.
   const [updateResult] = await connection.query(
@@ -48,7 +56,7 @@ export async function updateEncounter(connection, { payload }, user) {
     ]
   );
   if (updateResult.affectedRows === 0) {
-    throw new Error('EMR not found, or you are not the authoring clinician.');
+    throw fail('EMR not found, or you are not the authoring clinician.', 404);
   }
   return { serverRecordId: emr_id };
 }

@@ -1,5 +1,5 @@
-const { app, ipcMain } = require('electron');
-const { sqliteDb, initLocalDatabase } = require('./offline/database.cjs');
+const { app, ipcMain, safeStorage } = require('electron');
+const { openOfflineDatabase } = require('./offline/database.cjs');
 const { registerOfflineHandlers } = require('./offline/registerHandlers.cjs');
 const { registerUpdateHandlers } = require('./updates.cjs');
 const { registerPrintHandler } = require('./printing.cjs');
@@ -7,14 +7,22 @@ const { registerNotificationHandler } = require('./notifications.cjs');
 const { registerCertificatePolicy } = require('./certificatePolicy.cjs');
 const { createWindow } = require('./window.cjs');
 
-registerOfflineHandlers(ipcMain, sqliteDb);
+const path = require('node:path');
+
+if (!app.requestSingleInstanceLock()) app.exit(0);
 registerUpdateHandlers(ipcMain);
 registerPrintHandler(ipcMain);
 registerNotificationHandler(ipcMain);
 registerCertificatePolicy(app);
 
-app.whenReady().then(() => {
-  initLocalDatabase();
+app.whenReady().then(async () => {
+  let db;
+  try {
+    db = await openOfflineDatabase(path.join(app.getPath('userData'), 'valetudo_data'), safeStorage);
+  } catch (error) {
+    console.error('[Offline storage] Could not open the encrypted database.', error.code || error.name);
+  }
+  registerOfflineHandlers(ipcMain, db);
   createWindow();
 });
 

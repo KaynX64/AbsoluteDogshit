@@ -27,6 +27,8 @@ npm test
 npm run test:smoke
 # To test a different unpacked Windows build
 npm run test:smoke -- 'release/alternate/win-unpacked/Valetudo HealthLink.exe'
+# Verify only offline migration and replay on that packaged build
+npm run test:smoke -- 'release/alternate/win-unpacked/Valetudo HealthLink.exe' --offline-only
 ```
 
 The packaged smoke test launches the unpacked app with a temporary profile, uses synthetic renderer fixtures, and reports login, fixture sign-in, role-switch timings, and renderer JavaScript heap snapshots. It checks the preload bridge, local assets, SQLite replay, encounter submission, role switching, profile saves, and staff analytics permissions. Use a recent Node.js release with native WebSocket and SQLite support.
@@ -53,7 +55,11 @@ The consoles load eagerly. QR decoding loads on first use, and the updater modul
 
 ## Offline storage
 
-Electron stores cached patient and encounter data and queued changes in `userData/valetudo_data/valetudo_offline.db`. The renderer also mirrors pending changes in `localStorage`. Both stores are currently unencrypted at the application level. Replay sends queued changes when the API reconnects. The server uses the mutation ID to recognize retries.
+Electron stores cached patient and encounter data and queued changes in `userData/valetudo_data/valetudo_offline_encrypted.db` using the SQLCipher mode of SQLite3 Multiple Ciphers. Electron's `safeStorage` protects the database key with Windows DPAPI. Keep the encrypted database and its wrapped key together for recovery under the same Windows profile. The application preserves queued changes when key access fails. Applications running under the same Windows user share that OS trust boundary.
+
+The upgrade copies and verifies the old SQLite database, then removes the old file and its SQLite sidecars. On sign-in it imports the previous `localStorage` mirror by mutation ID before clearing that key. It preserves legacy rows whose owner is unknown. For unowned encounter creations, the server verifies appointment assignment before the desktop associates the row with the signed-in clinician. Other unassigned entries stay in encrypted storage for supervised recovery. Deleting the legacy files and clearing browser storage removes live references. Earlier backups and underlying storage remnants need their own retention or cleanup process.
+
+Replaying after reconnection sends only the signed-in account's queued work. Acknowledged payloads are removed from the queue, and conflicts and rejected changes stay encrypted for review. Offline encounter saves require working encrypted storage. Attachment uploads still require a server connection.
 
 ## Offline icons and fonts
 

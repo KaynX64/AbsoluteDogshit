@@ -48,7 +48,7 @@ async function foundationSchema(pool) {
 test('fresh schema is adopted once even when two migration runners start together', { skip }, async t => {
   const pool = await fixture(t);
   const applied = await Promise.all([runMigrations(pool), runMigrations(pool)]);
-  assert.deepEqual(applied.sort(), [0, 10]);
+  assert.deepEqual(applied.sort(), [0, 11]);
   assert.equal(await responderFlag(pool), 1);
   const readOnlyPool = {
     async getConnection() {
@@ -66,6 +66,28 @@ test('fresh schema is adopted once even when two migration runners start togethe
   assert.equal(await runMigrations(readOnlyPool), 0);
 });
 
+test('replay migration removes legacy payloads and retains duplicate outcomes', { skip }, async t => {
+  const pool = await fixture(t);
+  await pool.query("ALTER TABLE LOCAL_SYNC_LOGS ADD COLUMN payload JSON NOT NULL, ADD COLUMN error_message TEXT NULL");
+  await pool.query(`
+    INSERT INTO LOCAL_SYNC_LOGS
+      (client_mutation_id, user_id, device_id, table_name, record_uuid, action, payload,
+       local_version, record_id, sync_status, error_message)
+    VALUES ('old-mutation', 2, 'desktop', 'EMR_RECORDS', 'old-record', 'CREATE',
+            JSON_OBJECT('notes', 'fixture private text'), 1, 42, 'synced', 'legacy error')
+  `);
+  assert.equal(await runMigrations(pool), 11);
+  const [columns] = await pool.query('SHOW COLUMNS FROM LOCAL_SYNC_LOGS');
+  assert.ok(columns.every(column => !['payload', 'error_message'].includes(column.Field)));
+  const [[row]] = await pool.query(`
+    SELECT client_mutation_id, user_id, record_id, sync_status FROM LOCAL_SYNC_LOGS
+  `);
+  assert.deepEqual(row, {
+    client_mutation_id: 'old-mutation', user_id: 2, record_id: 42, sync_status: 'synced',
+  });
+  assert.equal(await runMigrations(pool), 0);
+});
+
 test('an existing schema keeps revoked responders, admin grants and saved policy', { skip }, async t => {
   const pool = await fixture(t);
   await pool.query('UPDATE USERS SET is_qualified_responder = 0, qualified_responder_since = NULL WHERE user_id = 4');
@@ -75,7 +97,7 @@ test('an existing schema keeps revoked responders, admin grants and saved policy
   await pool.query("DELETE FROM ADMIN_PERMISSIONS WHERE code IN ('INCIDENT_RECORDS_VIEW', 'TERMINAL_VIEW')");
   await pool.query('UPDATE SERVER_POLICY SET revision = 4 WHERE policy_id = 1');
   await pool.query('DROP TABLE STAFF_ANALYTICS_PERMISSIONS');
-  assert.equal(await runMigrations(pool), 10);
+  assert.equal(await runMigrations(pool), 11);
   const [[terminal]] = await pool.query("SELECT code FROM ADMIN_PERMISSIONS WHERE code = 'TERMINAL_VIEW'");
   assert.equal(terminal.code, 'TERMINAL_VIEW');
   const [[staffSettings]] = await pool.query('SELECT COUNT(*) AS total FROM STAFF_ANALYTICS_PERMISSIONS');
@@ -120,7 +142,7 @@ test('legacy tables and columns are rebuilt additively and the responder backfil
   await pool.query(`INSERT INTO PRESCRIPTION_ITEMS
     (prescription_id, outside_name, dosage, frequency, duration_days, quantity_dispensed)
     VALUES (1, 'fixture', 'fixture', 'fixture', 1, 4)`);
-  assert.equal(await runMigrations(pool), 10);
+  assert.equal(await runMigrations(pool), 11);
   const [dayIndex] = await pool.query("SHOW INDEX FROM APPOINTMENTS WHERE Key_name = 'idx_app_status_datetime'");
   assert.deepEqual(dayIndex.map(row => row.Column_name), ['status', 'date_time', 'deleted_at']);
   const [activityIndex] = await pool.query("SHOW INDEX FROM INVENTORY_LOGS WHERE Key_name = 'idx_inv_activity_date'");
@@ -162,7 +184,7 @@ test('an interrupted responder schema change resumes with its original backfill 
   assert.equal(await responderFlag(pool), 0);
   const [[{ applied_at }]] = await pool.query('SELECT applied_at FROM SCHEMA_MIGRATIONS WHERE version = 3');
   assert.equal(applied_at, null);
-  assert.equal(await runMigrations(pool), 8);
+  assert.equal(await runMigrations(pool), 9);
   assert.equal(await responderFlag(pool), 1);
 });
 
