@@ -6,17 +6,17 @@
 
 `LoginScreen.tsx`, `Sidebar.tsx`, `TopBar.tsx`, and `useSessionTimeout.ts` sit alongside the shell.
 
-The incident report listener stays mounted at shell level across role switches.
+The incident report listener stays mounted at shell level across role switches. The shell uses the sidebar order in `consoleNavigation.ts` to animate staff-initiated workspace navigation.
 
 | # | Lines | Anchor | Entry point |
 |---|---|---|---|
-| 1 | 1-38 | — | Imports and declarations |
-| 2 | 39-71 | function AppShell | function AppShell |
-| 3 | 72-126 | const handleSignOut | const handleSignOut |
-| 4 | 127-170 | const handleLogin | const handleLogin |
-| 5 | 171-247 | const handleManualReplay | const handleManualReplay |
-| 6 | 248-261 | <LoginScreen | <LoginScreen |
-| 7 | 262-285 | <Sidebar | <Sidebar |
-| 8 | 286-365 | <TopBar | <TopBar |
-| 9 | 366-486 | <IncidentReportModal | <IncidentReportModal |
-| 10 | 487-493 | export default function App | export default function App |
+| 1 | 1-43 | — | Imports and declarations |
+| 2 | 44-99 | function AppShell | function AppShell |
+| 3 | 100-154 | const handleSignOut | const handleSignOut |
+| 4 | 155-198 | const handleLogin | const handleLogin |
+| 5 | 199-271 | const handleManualReplay | const handleManualReplay |
+| 6 | 272-291 | <LoginScreen | <LoginScreen |
+| 7 | 292-303 | <Sidebar | <Sidebar |
+| 8 | 304-391 | <TopBar | <TopBar |
+| 9 | 392-515 | <IncidentReportModal | <IncidentReportModal |
+| 10 | 516-522 | export default function App | export default function App |

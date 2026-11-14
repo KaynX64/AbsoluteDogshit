@@ -1,3 +1,6 @@
+import { useTabMotion } from '../../shared/ui/selectionMotion';
+import { navigateTabs } from '../../shared/ui/tabKeyboard';
+import Dialog from '../../shared/ui/Dialog';
 import EncounterEditor from './EncounterEditor';
 import HistoryPageControls from './HistoryPageControls';
 import type { ToothCondition, ToothRecord } from './Odontogram';
@@ -7,7 +10,6 @@ import ClearanceHistory, { type ClearanceHistoryRow } from './ClearanceHistory';
 import PastEmrHistory from './PastEmrHistory';
 // desktop/src/features/consultations/DoctorConsole.tsx
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import PrescriptionGenerator from '../documents/PrescriptionGenerator';
 import { subscribeToDesktopEvents, useDesktopSocket } from '../../platform/realtime/desktopRealtime';
 import AnalyticsDashboard from '../analytics/AnalyticsDashboard';
@@ -168,6 +170,8 @@ export default function DoctorConsole({
   const [diagnosis, setDiagnosis] = useState('');
   const [treatmentPlan, setTreatmentPlan] = useState('');
   const [clinicalNotes, setClinicalNotes] = useState('');
+  const [encounterError, setEncounterError] = useState('');
+  const [clearanceError, setClearanceError] = useState('');
   const [encounterConfirmation, setEncounterConfirmation] = useState(false);
   const [clearanceConfirmation, setClearanceConfirmation] = useState(false);
   const [isSubmittingEMR, setIsSubmittingEMR] = useState(false);
@@ -523,7 +527,7 @@ export default function DoctorConsole({
         return { url: objectUrl, fileName, mimeType: detectedMime };
       });
     } catch (err: any) {
-      alert(`Could not open ${fileName}: ${err.message}`);
+      setFeedbackMsg({ type: 'error', text: `Could not open ${fileName}. ${err.message}` });
     } finally {
       setOpeningAttachmentId(null);
     }
@@ -590,13 +594,14 @@ export default function DoctorConsole({
     confirmed = false
   ) => {
     e?.preventDefault();
-    if (!selectedApp || isBookingMode) return;
+    if (!selectedApp || isBookingMode || isSubmittingEMR) return;
     if (!confirmed) {
+      setEncounterError('');
       setEncounterConfirmation(true);
       return;
     }
     if (encounterFields.some(({ error }) => error)) return;
-    setEncounterConfirmation(false);
+    setEncounterError('');
     setIsSubmittingEMR(true);
     setFeedbackMsg(null);
     const token = localStorage.getItem('valetudo_token');
@@ -623,6 +628,7 @@ export default function DoctorConsole({
         action: 'CREATE',
         payload: encounterPayload,
       });
+      setEncounterConfirmation(false);
       setSelectedApp({ ...selectedApp, status: 'completed' });
       resetForm();
       setIsSubmittingEMR(false);
@@ -668,6 +674,7 @@ export default function DoctorConsole({
         }
       }
 
+      setEncounterConfirmation(false);
       await fetchAppointments('active', false);
       resetForm();
       setFeedbackMsg({
@@ -680,10 +687,7 @@ export default function DoctorConsole({
       /* Only a real network failure (fetch TypeError) is queued offline.
          Server rejections must be shown, not silently queued. */
       if (!(err instanceof TypeError)) {
-        setFeedbackMsg({
-          text: err.message || 'Failed to complete encounter.',
-          type: 'error',
-        });
+        setEncounterError(err.message || 'Could not finalize the encounter. Try again.');
         return;
       }
 
@@ -693,6 +697,7 @@ export default function DoctorConsole({
         action: 'CREATE',
         payload: encounterPayload,
       });
+      setEncounterConfirmation(false);
       resetForm();
       setFeedbackMsg({
         text:
@@ -1011,9 +1016,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
       });
       return true;
     } catch (err: any) {
-      alert(
-        `Issued successfully, but the PDF could not be opened (${err.message}). Use the Download PDF button.`
-      );
+      setFeedbackMsg({ type: 'error', text: `Issued successfully. The PDF could not be opened (${err.message}). Download it from issuance history.` });
       return false;
     }
   };
@@ -1041,8 +1044,8 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
   ];
 
   const handlePrintClearance = async () => {
-    if (!selectedApp || isBookingMode || clearanceFields.some(({ error }) => error)) return;
-    setClearanceConfirmation(false);
+    if (!selectedApp || isBookingMode || isIssuingClearance || clearanceFields.some(({ error }) => error)) return;
+    setClearanceError('');
     setIsIssuingClearance(true);
     const token = localStorage.getItem('valetudo_token');
     try {
@@ -1062,10 +1065,16 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
       });
       const data = await res.json();
       if (!res.ok) {
-        if (data.code === 'SIGNATURE_NOT_ENROLLED') setShowSignature(true);
+        if (data.code === 'SIGNATURE_NOT_ENROLLED') {
+          setClearanceConfirmation(false);
+          setShowSignature(true);
+          setFeedbackMsg({ text: data.error || 'Enroll your signature before issuing a clearance.', type: 'error' });
+          return;
+        }
         throw new Error(data.error || 'Failed to issue medical clearance.');
       }
 
+      setClearanceConfirmation(false);
       const clearanceId = data.clearanceId;
       if (showClrHistoryModal) void openClearanceHistory(selectedApp.patient_id, patientReviewName);
       if (data.pdfAvailable) await openIssuedPdf('clearances', clearanceId);
@@ -1077,10 +1086,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
         pdfId: clearanceId,
       });
     } catch (err: any) {
-      setFeedbackMsg({
-        text: 'Error issuing clearance: ' + err.message,
-        type: 'error',
-      });
+      setClearanceError('Could not issue the clearance. ' + err.message);
     } finally {
       setIsIssuingClearance(false);
     }
@@ -1102,6 +1108,9 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
 
   const canViewDentalChart = isDentist && !isBookingMode;
   const activeWorkspacePanel = workspacePanel === 'dental' && !canViewDentalChart ? 'encounter' : workspacePanel;
+  useTabMotion(activeWorkspacePanel, ['documents', 'encounter', 'dental'],
+    panel => panel === 'documents' ? 'doctor-document-panel' : `doctor-${panel}-panel`, workspacePanel === activeWorkspacePanel);
+  useTabMotion(docType, ['rx', 'clearance'], tab => `doctor-document-${tab}`);
 
   const headerTitle: Record<DoctorViewMode, string> = {
     active: 'My consultation queue',
@@ -1193,7 +1202,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
 
       {/* ── Archive (patient EMR directory) ────────────────── */}
       {viewMode === 'archive' && (
-        <section className="doctor-directory" aria-label="Patient directory">
+        <section data-workspace-view className="doctor-directory" aria-label="Patient directory">
           <form
             onSubmit={handleSearchPatientDirectory}
             className="doctor-archive-search"
@@ -1552,7 +1561,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
           <aside className="doctor-context" aria-label="Patient context and queue">
             {/* Patient safety strip */}
             {selectedApp && (
-              <section key={selectedApp.appointment_id} className="doctor-patient-card" aria-labelledby="doctor-patient-name">
+              <section key={selectedApp.appointment_id} className="doctor-patient-card" data-workspace-view aria-labelledby="doctor-patient-name">
                 <div className="doctor-patient-identity">
                   <div className="doctor-patient-heading">
                     <div className="doctor-patient-monogram" aria-hidden="true">
@@ -1734,7 +1743,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
               </section>
             )}
 
-            <section className="doctor-roster" aria-labelledby="doctor-roster-title" data-expanded={queueExpanded || !selectedApp}>
+            <section data-workspace-view className="doctor-roster" aria-labelledby="doctor-roster-title" data-expanded={queueExpanded || !selectedApp}>
               <div className="doctor-roster-heading">
                 <h2 id="doctor-roster-title">Patients</h2>
                 {!loadingAppointments && <span>{appointments.length} {appointments.length === 1 ? 'record' : 'records'}</span>}
@@ -1797,7 +1806,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
           </aside>
           <div className="doctor-patient-workspace">
           {!selectedApp && !loadingAppointments && (
-            <div className="doctor-workspace-empty">
+            <div className="doctor-workspace-empty" data-workspace-view>
               <Icon name="person_search" size={26} />
               <h2>No patient selected</h2>
               <p>{appointments.length ? 'Choose a patient from the list to open their record.' : 'Patient records will open here when available.'}</p>
@@ -1861,13 +1870,14 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
           {selectedApp && !isBookingMode && (
             <>
               <div ref={workspaceStart} aria-hidden="true" />
-              <div className="doctor-workspace-switch" role="group" aria-label="Patient workspace">
+              <div className="doctor-workspace-switch" role="tablist" aria-label="Patient workspace" onKeyDown={event => navigateTabs(event, true)}>
                 {([
                   ['documents', 'description', 'Documents'],
                   ['encounter', 'medical_services', 'Encounter'],
                   ['dental', 'dentistry', 'Dental chart'],
                 ] as const).filter(([panel]) => panel !== 'dental' || canViewDentalChart).map(([panel, icon, label]) => (
-                  <button key={panel} type="button" aria-pressed={activeWorkspacePanel === panel}
+                  <button key={panel} type="button" role="tab" id={`doctor-tab-${panel}`}
+                    aria-selected={activeWorkspacePanel === panel} tabIndex={activeWorkspacePanel === panel ? 0 : -1}
                     aria-controls={panel === 'documents' ? 'doctor-document-panel' : `doctor-${panel}-panel`}
                     onClick={(event) => {
                       if (activeWorkspacePanel === panel) return;
@@ -1887,13 +1897,13 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
           )}
 
           {/* ── INTERACTIVE ODONTOGRAM ───────────────────────── */}
-          {selectedApp && canViewDentalChart && (
+          {selectedApp && !isBookingMode && canViewDentalChart && (
             <Odontogram activeWorkspacePanel={activeWorkspacePanel} dentalChartData={dentalChartData} isArchivedMode={isArchivedMode} setDentalChartData={setDentalChartData} selectedTooth={selectedTooth} setSelectedTooth={setSelectedTooth} handleToothConditionChange={handleToothConditionChange} />
           )}
 
           {/* Bookings stay read-only until check-in */}
           {selectedApp && (isBookingMode ? (
-            <div
+            <div data-workspace-view
               style={{
                 padding: '18px 22px',
                 background: T.warningSoft,
@@ -1912,13 +1922,13 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
             </div>
           ) : (
           <div className="doctor-workspace">
-            <section id="doctor-document-panel" className="doctor-panel doctor-document-panel"
-              aria-labelledby="doctor-document-title" hidden={activeWorkspacePanel !== 'documents'}>
+            <section data-workspace-view id="doctor-document-panel" className="doctor-panel doctor-document-panel"
+              role="tabpanel" aria-labelledby="doctor-tab-documents" tabIndex={0} hidden={activeWorkspacePanel !== 'documents'}>
               <div className="doctor-panel-header">
                 <h3 id="doctor-document-title" className="doctor-panel-title">
                   Document issuance
                 </h3>
-                <div
+                <div role="tablist" aria-label="Document type" onKeyDown={event => navigateTabs(event, false)}
                   style={{
                     display: 'flex',
                     gap: 4,
@@ -1936,7 +1946,11 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                       <button
                         key={tab.id}
                         type="button"
-                        aria-pressed={isActive}
+                        role="tab"
+                        id={`doctor-document-tab-${tab.id}`}
+                        aria-controls={`doctor-document-${tab.id}`}
+                        aria-selected={isActive}
+                        tabIndex={isActive ? 0 : -1}
                         onClick={() => setDocType(tab.id)}
                         style={{
                           padding: '6px 14px',
@@ -1958,9 +1972,11 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                 </div>
               </div>
 
-              {docType === 'rx' ? (
+              <div id="doctor-document-rx" role="tabpanel" aria-labelledby="doctor-document-tab-rx"
+                tabIndex={0} hidden={docType !== 'rx'}>
                 <PrescriptionGenerator
                   key={selectedApp?.appointment_id}
+                  active={docType === 'rx'}
                   patientUserId={selectedApp?.patient_id ?? 0}
                   appointmentId={selectedApp?.appointment_id}
                   verifiedPatient={{
@@ -1995,8 +2011,9 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                     setFeedbackMsg({ text: message, type: 'error' });
                   }}
                 />
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              </div>
+              <div id="doctor-document-clearance" role="tabpanel" aria-labelledby="doctor-document-tab-clearance"
+                tabIndex={0} hidden={docType !== 'clearance'} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                   <div>
                     <label
                       htmlFor="clearance-purpose"
@@ -2157,7 +2174,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
 
                   <button
                     type="button"
-                    onClick={() => setClearanceConfirmation(true)}
+                    onClick={() => { setClearanceError(''); setClearanceConfirmation(true); }}
                     disabled={
                       !selectedApp ||
                       isIssuingClearance ||
@@ -2190,12 +2207,11 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                       ? 'Signing & spooling…'
                       : '️ Issue, sign & print clearance'}
                   </button>
-                </div>
-              )}
+              </div>
             </section>
 
             <section id="doctor-encounter-panel" className="doctor-panel doctor-encounter-panel"
-              aria-labelledby="doctor-encounter-title" hidden={activeWorkspacePanel !== 'encounter'}>
+              role="tabpanel" aria-labelledby="doctor-tab-encounter" tabIndex={0} hidden={activeWorkspacePanel !== 'encounter'}>
               <h3 id="doctor-encounter-title" className="doctor-panel-title">
                 <Icon name="medical_services" size={14} /> Clinical encounter
               </h3>
@@ -2311,11 +2327,13 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
 
       {encounterConfirmation && selectedApp && (
         <ClinicalReview title="Review encounter" patient={patientReviewName} fields={encounterFields}
+          busy={isSubmittingEMR} error={encounterError}
           action="Confirm and finalize" onClose={() => setEncounterConfirmation(false)}
           onConfirm={() => void handleFinishConsultation(undefined, true)} />
       )}
       {clearanceConfirmation && selectedApp && (
         <ClinicalReview title="Review clearance" patient={patientReviewName} fields={clearanceFields}
+          busy={isIssuingClearance} error={clearanceError}
           action="Sign and issue clearance" onClose={() => setClearanceConfirmation(false)}
           onConfirm={() => void handlePrintClearance()} />
       )}
@@ -2331,20 +2349,18 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
       )}
 
       {/* ── EMR History modal ───────────────────────────────── */}
-      {showHistoryModal && selectedApp && createPortal(
-        <PastEmrHistory setShowHistoryModal={setShowHistoryModal} selectedApp={selectedApp} loadingHistory={loadingHistory} patientHistory={patientHistory} historyPage={historyPage} handleOpenAttachment={handleOpenAttachment} openingAttachmentId={openingAttachmentId} />,
-        document.body
+      {showHistoryModal && selectedApp && (
+        <PastEmrHistory setShowHistoryModal={setShowHistoryModal} selectedApp={selectedApp} loadingHistory={loadingHistory} patientHistory={patientHistory} historyPage={historyPage} handleOpenAttachment={handleOpenAttachment} openingAttachmentId={openingAttachmentId} />
       )}
 
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* IMMUNIZATIONS MODAL                                         */}
       {/* ═══════════════════════════════════════════════════════════ */}
       {showImmunizationModal && selectedApp && (
-        <div className="modal-backdrop" onClick={closeImmunizationModal}>
+        <Dialog label="Immunizations" size="wide" busy={savingImmunizations} onDismiss={closeImmunizationModal}>
           <div
             className="modal-card"
             style={{ maxWidth: 660, padding: 0, overflow: 'hidden' }}
-            onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
             <div
@@ -2380,7 +2396,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                   <Icon name="vaccines" size={14} />
                 </div>
                 <div style={{ minWidth: 0 }}>
-                  <h3
+                  <h3 tabIndex={-1} data-dialog-initial
                     style={{
                       margin: 0,
                       fontSize: 17,
@@ -2404,6 +2420,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
               </div>
               <button
                 type="button"
+                disabled={savingImmunizations}
                 onClick={closeImmunizationModal}
                 style={{
                   background: 'none',
@@ -2655,7 +2672,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
               )}
 
               {immunizationFeedback && (
-                <div
+                <div role={immunizationFeedback.type === 'error' ? 'alert' : 'status'}
                   style={{
                     marginTop: 16,
                     padding: '12px 16px',
@@ -2739,18 +2756,14 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
               </div>
             </div>
           </div>
-        </div>
+        </Dialog>
       )}
 
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* IN-APP DIAGNOSTIC ATTACHMENT PREVIEW MODAL                  */}
       {/* ═══════════════════════════════════════════════════════════ */}
       {previewModal && (
-        <div
-          className="modal-backdrop"
-          style={{ zIndex: 999 }}
-          onClick={handleClosePreviewModal}
-        >
+        <Dialog label={previewModal.fileName} size="wide" backdropDismiss onDismiss={handleClosePreviewModal}>
           <div
             className="modal-card"
             style={{
@@ -2761,7 +2774,6 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
               flexDirection: 'column',
               padding: 22,
             }}
-            onClick={(e) => e.stopPropagation()}
           >
             <div
               style={{
@@ -2783,7 +2795,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
               >
                 <span style={{ fontSize: 22 }}><Icon name="draft" size={22} /></span>
                 <div style={{ minWidth: 0 }}>
-                  <h3
+                  <h3 tabIndex={-1} data-dialog-initial
                     style={{
                       margin: 0,
                       fontSize: 16,
@@ -2881,25 +2893,15 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
               )}
             </div>
           </div>
-        </div>
+        </Dialog>
       )}
 
       {/* ── My signature (enroll / renew) ───────────────────── */}
       {showSignature && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(15,30,23,0.45)',
-            display: 'grid',
-            placeItems: 'center',
-            zIndex: 1000,
-            padding: 16,
-            overflow: 'auto',
-          }}
-        >
-          <div style={{ width: '100%', maxWidth: 640 }}>
-            <div style={{ textAlign: 'right', marginBottom: 8 }}>
+        <Dialog label="My signature" onDismiss={() => setShowSignature(false)}>
+          <div className="modal-card" style={{ width: '100%', maxWidth: 640 }}>
+            <div className="dialog-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <h3 data-dialog-initial tabIndex={-1}>My signature</h3>
               <button
                 type="button"
                 style={btnGhost}
@@ -2913,7 +2915,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
               setSignatureStatusError(null);
             }} />
           </div>
-        </div>
+        </Dialog>
       )}
     </div>
   );

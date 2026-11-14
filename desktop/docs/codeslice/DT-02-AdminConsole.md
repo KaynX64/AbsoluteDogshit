@@ -8,19 +8,19 @@ Presentation: `HealthProfileEditor.tsx`, `ActiveAccounts.tsx`, `ArchivedAccounts
 
 | # | Lines | Anchor | Entry point |
 |---|---|---|---|
-| 1 | 1-86 | — | Imports and declarations |
-| 2 | 87-180 | export default function | export default function |
-| 3 | 181-213 | const fetchUsers | const fetchUsers |
-| 4 | 214-283 | const fetchMyPermissions | const fetchMyPermissions |
-| 5 | 284-460 | const fetchMutationLogs | const fetchMutationLogs |
-| 6 | 461-497 | const handleArchiveUser | const handleArchiveUser |
-| 7 | 498-627 | const handleOpenEditModal | const handleOpenEditModal |
-| 8 | 628-781 | const handleSaveUserProfile | const handleSaveUserProfile |
-| 9 | 782-815 | const handleAdminResetPassword | const handleAdminResetPassword |
-| 10 | 816-1015 | const fetchDbTables | const fetchDbTables |
-| 11 | 1016-1044 | <ActiveAccounts | <ActiveAccounts |
-| 12 | 1045-1058 | <ArchivedAccounts | <ArchivedAccounts |
-| 13 | 1059-1321 | <AuditPanels | <AuditPanels |
-| 14 | 1322-1694 | <DatabaseStudio | <DatabaseStudio |
-| 15 | 1695-1995 | <StaffAnalyticsPermissions | <StaffAnalyticsPermissions |
-| 16 | 1996-2284 | <HealthProfileEditor | <HealthProfileEditor |
+| 1 | 5-89 | — | Imports and declarations |
+| 2 | 90-188 | export default function | export default function |
+| 3 | 189-221 | const fetchUsers | const fetchUsers |
+| 4 | 222-291 | const fetchMyPermissions | const fetchMyPermissions |
+| 5 | 292-469 | const fetchMutationLogs | const fetchMutationLogs |
+| 6 | 470-505 | const handleArchiveUser | const handleArchiveUser |
+| 7 | 506-635 | const handleOpenEditModal | const handleOpenEditModal |
+| 8 | 636-792 | const handleSaveUserProfile | const handleSaveUserProfile |
+| 9 | 793-826 | const handleAdminResetPassword | const handleAdminResetPassword |
+| 10 | 827-1042 | const fetchDbTables | const fetchDbTables |
+| 11 | 1043-1074 | <ActiveAccounts | <ActiveAccounts |
+| 12 | 1075-1089 | <ArchivedAccounts | <ArchivedAccounts |
+| 13 | 1090-1352 | <AuditPanels | <AuditPanels |
+| 14 | 1353-1727 | <DatabaseStudio | <DatabaseStudio |
+| 15 | 1728-2028 | <StaffAnalyticsPermissions | <StaffAnalyticsPermissions |
+| 16 | 2029-2323 | <HealthProfileEditor | <HealthProfileEditor |

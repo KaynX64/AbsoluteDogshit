@@ -1,3 +1,4 @@
+import Dialog from '../../shared/ui/Dialog';
 import FormularySelect, { type MedicineMaster } from './FormularySelect';
 // desktop/src/features/documents/PrescriptionGenerator.tsx
 import React, { useState, useEffect } from 'react';
@@ -12,6 +13,7 @@ import {
 } from './interactionService';
 
 interface PrescriptionGeneratorProps {
+  active?: boolean;
   patientUserId: number;
   appointmentId?: number;
   verifiedPatient: {
@@ -100,6 +102,7 @@ export default function PrescriptionGenerator({
   onPrescriptionIssued,
   onPrescriptionError,
   onSignatureRequired,
+  active = true,
 }: PrescriptionGeneratorProps) {
   const [medicines, setMedicines] = useState<MedicineMaster[]>([]);
   const [selectedMedicineId, setSelectedMedicineId] = useState<number>(0);
@@ -112,6 +115,7 @@ export default function PrescriptionGenerator({
   const [rxInstructions, setRxInstructions] = useState('');
   const [doctorNotes, setDoctorNotes] = useState(initialNotes || '');
   const [isSaving, setIsSaving] = useState(false);
+  const [issueError, setIssueError] = useState('');
   const [showIssueConfirmation, setShowIssueConfirmation] = useState(false);
 
   /* ── Outside-drug mode state ──────────────────────────────────── */
@@ -153,9 +157,9 @@ export default function PrescriptionGenerator({
   };
 
   useEffect(() => {
-    fetchCatalog();
+    if (active) void fetchCatalog();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [active]);
 
   const selectedMed = medicines.find((m) => m.medicine_id === selectedMedicineId);
 
@@ -245,16 +249,18 @@ export default function PrescriptionGenerator({
       onPrescriptionError?.('Save your handwritten signature before issuing a prescription.');
       return;
     }
+    if (isSaving) return;
     if (!patientUserId || !appointmentId) {
       onPrescriptionError?.('Select a patient from the consultation queue first.');
       return;
     }
     if (!confirmed) {
+      setIssueError('');
       setShowIssueConfirmation(true);
       return;
     }
     if (reviewFields.some(({ error }) => error) || (!outside && (isBlocked || isOutOfStock || isOverStock))) return;
-    setShowIssueConfirmation(false);
+    setIssueError('');
     setIsSaving(true);
     const token = localStorage.getItem('valetudo_token');
 
@@ -263,7 +269,7 @@ export default function PrescriptionGenerator({
         const preCheck = await checkDrugInteractions([selectedMedicineId]).catch(() => null);
         if (preCheck?.hasInteractions) setInteractionResult(preCheck);
         if (preCheck?.blocking) {
-          onPrescriptionError?.('Prescription blocked by a contraindicated drug interaction.');
+          setIssueError('Prescription blocked by a contraindicated drug interaction. Return to the form to change the medicine.');
           return;
         }
       }
@@ -274,8 +280,12 @@ export default function PrescriptionGenerator({
       });
       const data = await res.json();
       if (!res.ok) {
-        if (data.code === 'SIGNATURE_NOT_ENROLLED') onSignatureRequired?.();
+        if (data.code === 'SIGNATURE_NOT_ENROLLED') {
+          setShowIssueConfirmation(false);
+          onSignatureRequired?.();
+        }
         if (data.code === 'INSUFFICIENT_STOCK') {
+          setShowIssueConfirmation(false);
           setStockError({
             medicine: data.medicine || medicineName,
             available: Number(data.available ?? 0),
@@ -285,6 +295,7 @@ export default function PrescriptionGenerator({
         }
         throw new Error(data.error || 'Failed to issue prescription.');
       }
+      setShowIssueConfirmation(false);
       onPrescriptionIssued?.({
         prescriptionId: data.prescriptionId,
         qrToken: data.qrToken,
@@ -293,7 +304,7 @@ export default function PrescriptionGenerator({
       });
       if (!outside) void fetchCatalog();
     } catch (err) {
-      onPrescriptionError?.('Error issuing prescription: ' + (err instanceof Error ? err.message : 'Request failed'));
+      setIssueError('Could not issue the prescription. ' + (err instanceof Error ? err.message : 'Try again.'));
     } finally {
       setIsSaving(false);
     }
@@ -612,8 +623,7 @@ export default function PrescriptionGenerator({
 
       {/* ── Stock-shortfall modal ─────────────────────────── */}
       {stockError && (
-        <div className="modal-backdrop" onClick={() => setStockError(null)}>
-          <style>{`@keyframes rxStockIn { from { opacity: 0; transform: translateY(14px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }`}</style>
+        <Dialog label="Insufficient stock" size="compact" onDismiss={() => setStockError(null)}>
           <div
             className="modal-card"
             onClick={(e) => e.stopPropagation()}
@@ -622,7 +632,6 @@ export default function PrescriptionGenerator({
               padding: 0,
               overflow: 'hidden',
               borderRadius: T.radius.xl,
-              animation: 'rxStockIn 220ms cubic-bezier(0.34, 1.3, 0.64, 1)',
             }}
           >
             <div
@@ -649,7 +658,7 @@ export default function PrescriptionGenerator({
               >
                 <Icon name="medication" size={14} />
               </div>
-              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.danger, letterSpacing: -0.3 }}>
+              <h3 tabIndex={-1} data-dialog-initial style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.danger, letterSpacing: -0.3 }}>
                 Pharmacy stock shortfall
               </h3>
               <p style={{ margin: '6px 0 0', fontSize: 12.5, color: T.textSub, lineHeight: 1.55 }}>
@@ -739,12 +748,13 @@ export default function PrescriptionGenerator({
 
             </div>
           </div>
-        </div>
+        </Dialog>
       )}
 
       {showIssueConfirmation && (
         <ClinicalReview title="Review prescription" fields={reviewFields}
           patient={[verifiedPatient?.first_name, verifiedPatient?.last_name].filter(Boolean).join(' ')}
+          busy={isSaving} error={issueError}
           action="Sign and issue prescription" onClose={() => setShowIssueConfirmation(false)}
           onConfirm={() => void handleSaveAndPrintPrescription(true)} />
       )}

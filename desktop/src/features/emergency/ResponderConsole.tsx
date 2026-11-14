@@ -1,3 +1,4 @@
+import { useActionFeedback } from '../../shared/ui/feedback';
 // desktop/src/features/emergency/ResponderConsole.tsx
 import { useEffect, useState } from 'react';
 import { subscribeToDesktopEvents, useDesktopSocket } from '../../platform/realtime/desktopRealtime';
@@ -7,6 +8,7 @@ import { CLIENT_INSTANCE_ID } from '../../platform/realtime/clientInstance';
 import Icon from '../../shared/ui/Icon';
 
 export default function ResponderConsole() {
+  const { notify, notice } = useActionFeedback();
   const [activeAlerts, setActiveAlerts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -94,7 +96,7 @@ export default function ResponderConsole() {
 
     const token = localStorage.getItem('valetudo_token');
     try {
-      await fetch(`${API_BASE_URL}/api/emergency/${alertId}/status`, {
+      const response = await fetch(`${API_BASE_URL}/api/emergency/${alertId}/status`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -103,9 +105,13 @@ export default function ResponderConsole() {
         },
         body: JSON.stringify({ status }),
       });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || 'The server rejected the status update.');
+      }
       fetchAlerts(true);
     } catch (err) {
-      alert('Failed to update status');
+      notify('Could not update the SOS status. Try again.', true);
       fetchAlerts(true);
     }
   };
@@ -118,7 +124,7 @@ export default function ResponderConsole() {
         body: 'Daniella Movida (BSIT) reported a medical emergency at PSU Lingayen Library. Allergies: Penicillin.',
       });
     } else {
-      alert('electronAPI.showNotification not detected.');
+      notify('Desktop notifications are unavailable.', true);
     }
   };
 
@@ -136,10 +142,10 @@ export default function ResponderConsole() {
       });
       if (!res.ok) {
         const data = await res.json();
-        alert('Server SOS error: ' + (data.error || 'Check server connection'));
+        notify('Server SOS error. ' + (data.error || 'Check the server connection.'), true);
       }
     } catch (err: any) {
-      alert('Could not trigger backend test SOS: ' + err.message);
+      notify('Could not trigger the test SOS. ' + err.message, true);
     }
   };
 
@@ -159,8 +165,9 @@ export default function ResponderConsole() {
 
   return (
     <div style={{ width: '100%' }}>
+      {notice}
       {/* ── Page header ─────────────────────────────────── */}
-      <div className="vd-page-head">
+      <div className="vd-page-head" data-workspace-view>
         <div className="vd-page-head-eyebrow">PSU Quick-Response Unit</div>
         <h1 className="vd-page-head-title">Campus emergency dispatch</h1>
         <p className="vd-page-head-sub">
@@ -170,7 +177,7 @@ export default function ResponderConsole() {
 
       {/* ── TEST HARNESS (dev only) ─────────────────────── */}
       {import.meta.env.DEV && (
-        <div style={{
+        <div data-workspace-view style={{
           display: 'flex', justifyContent: 'space-between',
           alignItems: 'center', gap: 12, marginBottom: 20,
           padding: '12px 16px',
@@ -266,11 +273,11 @@ export default function ResponderConsole() {
 
       {/* ── Alert list / empty state ───────────────────── */}
       {loading && activeAlerts.length === 0 ? (
-        <div style={{ padding: '60px 20px', textAlign: 'center', color: T.textSub, fontSize: 13 }}>
+        <div data-workspace-view style={{ padding: '60px 20px', textAlign: 'center', color: T.textSub, fontSize: 13 }}>
           Checking dispatch telemetry…
         </div>
       ) : activeAlerts.length === 0 ? (
-        <div style={{
+        <div data-workspace-view style={{
           padding: '60px 40px', textAlign: 'center',
           background: T.successSoft,
           border: `1px solid ${T.successBorder}`,

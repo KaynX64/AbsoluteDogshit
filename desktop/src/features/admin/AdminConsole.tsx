@@ -1,3 +1,8 @@
+import { useTabMotion } from '../../shared/ui/selectionMotion';
+import { navigateTabs } from '../../shared/ui/tabKeyboard';
+import { useConfirmAction } from '../../shared/ui/ConfirmAction';
+import { useActionFeedback } from '../../shared/ui/feedback';
+import Dialog from '../../shared/ui/Dialog';
 import HealthProfileEditor, { type HealthProfileDraft } from './HealthProfileEditor';
 import { I } from './adminIcons';
 import ActiveAccounts from './ActiveAccounts';
@@ -6,7 +11,6 @@ import AuditPanels from './AuditPanels';
 import DatabaseStudio from './DatabaseStudio';
 // desktop/src/features/admin/AdminConsole.tsx
 import React, { useState, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import AnalyticsDashboard from '../analytics/AnalyticsDashboard';
 import IncidentRecords from '../emergency/IncidentRecords';
 import CreateUserModal from './CreateUserModal';
@@ -111,6 +115,11 @@ export default function AdminConsole({
   const [editingUser, setEditingUser] = useState<any | null>(null);
   const [showCreateUserModal, setShowCreateUserModal] = useState(false);
   const [isSavingUser, setIsSavingUser] = useState(false);
+  const [resettingPassword, setResettingPassword] = useState(false);
+  const [dbBusy, setDbBusy] = useState(false);
+  const [dbError, setDbError] = useState('');
+  const { confirmAction, confirmation } = useConfirmAction();
+  const { notify, notice } = useActionFeedback();
   const [archivingUserId, setArchivingUserId] = useState<number | null>(null);
   const [userActionFeedback, setUserActionFeedback] = useState<{ text: string; isError: boolean } | null>(null);
 
@@ -326,7 +335,7 @@ export default function AdminConsole({
   };
 
   const handleExecuteSweep = async () => {
-    if (!confirm('Execute statutory 5-year data retention sweep under R.A. 10173? Expired records will be soft-deleted.')) return;
+    if (sweeping || !await confirmAction('Run retention sweep', 'Expired records will be soft-deleted under the five-year retention policy.')) return;
     setSweeping(true);
     const token = localStorage.getItem('valetudo_token');
     try {
@@ -335,10 +344,11 @@ export default function AdminConsole({
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      alert(data.message);
+      if (!res.ok) throw new Error(data.error || 'The sweep could not be completed.');
+      notify(data.message || 'Retention sweep completed.');
       fetchRetention();
     } catch (err: any) {
-      alert('Sweep failed: ' + err.message);
+      notify(`Sweep failed. ${err.message}`, true);
     } finally {
       setSweeping(false);
     }
@@ -460,9 +470,8 @@ export default function AdminConsole({
   /* ── Handlers (unchanged) ────────────────────────────────────── */
   const handleArchiveUser = async (target: any) => {
     const targetLabel = target.name || `account #${target.id}`;
-    if (!window.confirm(
-      `Archive ${targetLabel}? This disables sign-in and retains clinical and audit history.`
-    )) return;
+    if (archivingUserId !== null || !await confirmAction('Archive account',
+      `Archive ${targetLabel} (#${target.id}). This disables sign-in and retains clinical and audit history.`)) return;
 
     const targetUserId = Number(target.id);
     setArchivingUserId(targetUserId);
@@ -627,10 +636,10 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
   };
   const handleSaveUserProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingUser) return;
+    if (!editingUser || isSavingUser || resettingPassword) return;
     if (
       adminPasswordInput.trim() &&
-      !window.confirm('The temporary password has not been applied. Save profile changes without changing the password?')
+      !await confirmAction('Save profile changes', 'The temporary password you entered is pending. Continue to save the profile with the current password.')
     ) return;
     // Adjusted manage-user-account feature: protected administrator accounts
     // are read-only for limited admins (the server 403s any write anyway).
@@ -768,7 +777,10 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
         fetchUsers();
         // Refresh the Advanced editor (BMI / versions) if it was in use.
         if (editHealthLoaded) fetchEditHealthProfile(Number(editingUser.id));
-        if (!permWarning && !qrWarning) setTimeout(() => setEditingUser(null), 1200);
+        if (!permWarning && !qrWarning) {
+          setEditingUser(null);
+          notify(data.message || 'Account profile saved.');
+        }
       } else {
         setModalFeedback({ text: '' + (data.error || 'Failed to update profile.'), isError: true });
       }
@@ -780,20 +792,18 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
   };
 
   const handleAdminResetPassword = async () => {
-    if (!editingUser || !adminPasswordInput.trim()) {
-      alert('Please enter a new password (min 8 characters).');
-      return;
-    }
+    if (!editingUser || resettingPassword || isSavingUser) return;
     if (adminPasswordInput.trim().length < 8) {
-      alert('Password must be at least 8 characters long.');
+      setModalFeedback({ text: 'Enter a temporary password of at least 8 characters.', isError: true });
+      document.getElementById('admin-temporary-password')?.focus();
       return;
     }
     const accountLabel = editingUser.name
       || [editingUser.first_name, editingUser.last_name].filter(Boolean).join(' ')
       || `account #${editingUser.id}`;
-    if (!window.confirm(
-      `Reset the password for ${accountLabel} now? This immediately replaces the current password with the temporary password entered.`
-    )) return;
+    if (!await confirmAction('Reset password',
+      `Reset the password for ${accountLabel} (#${editingUser.id}). This immediately replaces the current password.`)) return;
+    setResettingPassword(true);
     const token = localStorage.getItem('valetudo_token');
     try {
       const res = await fetch(`${API_BASE_URL}/api/admin/users/${editingUser.id}/reset-password`, {
@@ -810,6 +820,8 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       }
     } catch (err: any) {
       setModalFeedback({ text: 'Network error: ' + err.message, isError: true });
+    } finally {
+      setResettingPassword(false);
     }
   };
 
@@ -865,7 +877,9 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
 
   const handleSaveDbRow = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!dbRowModal) return;
+    if (!dbRowModal || dbBusy) return;
+    setDbBusy(true);
+    setDbError('');
     const token = localStorage.getItem('valetudo_token');
     const isNew = dbRowModal.isNew;
     const currentData = { ...dbRowModal.rowData };
@@ -896,21 +910,24 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       }
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || 'Database operation failed.');
-      alert('' + result.message);
+      notify(result.message || 'Database row saved.');
       setDbRowModal(null);
       fetchTableData(selectedDbTable, tablePage);
     } catch (err: any) {
-      alert('Error: ' + err.message);
+      setDbError(`Could not save the row. ${err.message}`);
+    } finally {
+      setDbBusy(false);
     }
   };
 
   const handleDeleteDbRow = async (row: any) => {
-    if (isTableReadOnly) return;
+    if (isTableReadOnly || dbBusy) return;
     const pkCols = tableSchema.filter((c) => c.columnKey === 'PRI').map((c) => c.columnName);
     const primaryKeyObj: Record<string, any> = {};
     pkCols.forEach((col) => { primaryKeyObj[col] = row[col]; });
     const pkDescription = Object.entries(primaryKeyObj).map(([k, v]) => `${k}=${v}`).join(', ');
-    if (!confirm(`Are you sure you want to DELETE record (${pkDescription}) from table \`${selectedDbTable}\`?`)) return;
+    if (!await confirmAction('Delete database row', `Delete record (${pkDescription}) from ${selectedDbTable}.`)) return;
+    setDbBusy(true);
     const token = localStorage.getItem('valetudo_token');
     try {
       const res = await fetch(`${API_BASE_URL}/api/admin/db/tables/${selectedDbTable}/rows`, {
@@ -920,10 +937,12 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to delete row.');
-      alert('' + data.message);
+      notify(data.message || 'Database row deleted.');
       fetchTableData(selectedDbTable, tablePage);
     } catch (err: any) {
-      alert('Delete error: ' + err.message);
+      notify(`Could not delete the row. ${err.message}`, true);
+    } finally {
+      setDbBusy(false);
     }
   };
 
@@ -931,11 +950,16 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
   /* RENDER                                                          */
   /* ═══════════════════════════════════════════════════════════════ */
 
+  useTabMotion(activeTab, ['users', 'archived'], tab => `admin-account-panel-${tab}`,
+    activeTab === 'users' || activeTab === 'archived');
   const activeUsersCount = usersList.filter((u) => u.status === 'Active').length;
   const suspendedUsersCount = usersList.length - activeUsersCount;
 
   return (
     <div style={{ width: '100%' }}>
+      {notice}
+      {confirmation}
+      <div data-workspace-view>
       {/* ── Header ────────────────────────────────────────────── */}
       {(activeTab !== 'analytics' || !can('ANALYTICS_VIEW')) && <div className="vd-page-head">
         <div className="vd-page-head-eyebrow">Administration</div>
@@ -969,8 +993,9 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
 
       {(activeTab === 'users' || activeTab === 'archived') && (
         <div
-          role="group"
+          role="tablist"
           aria-label="Account views"
+          onKeyDown={event => navigateTabs(event, false)}
           style={{
             display: 'flex',
             gap: 8,
@@ -987,7 +1012,11 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
               <button
                 key={key}
                 type="button"
-                aria-pressed={isSelected}
+                role="tab"
+                id={`admin-account-tab-${key}`}
+                aria-controls={`admin-account-panel-${key}`}
+                aria-selected={isSelected}
+                tabIndex={isSelected ? 0 : -1}
                 onClick={() => changeTab(key)}
                 style={{
                   padding: '10px 14px',
@@ -1011,6 +1040,8 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: USERS                                                 */}
       {/* ═══════════════════════════════════════════════════════════ */}
+      {(activeTab === 'users' || activeTab === 'archived') && <div id="admin-account-panel-users"
+        role="tabpanel" aria-labelledby="admin-account-tab-users" tabIndex={0} hidden={activeTab !== 'users'}>
       {activeTab === 'users' && !can('USERS_MANAGE') && (<NoPermissionPanel required="USERS_MANAGE" />)}
       {activeTab === 'users' && can('USERS_MANAGE') && (
         <ActiveAccounts
@@ -1037,9 +1068,12 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           userActionFeedback={userActionFeedback}
         />
       )}
+      </div>}
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: ARCHIVED ACCOUNTS                                     */}
       {/* ═══════════════════════════════════════════════════════════ */}
+      {(activeTab === 'users' || activeTab === 'archived') && <div id="admin-account-panel-archived"
+        role="tabpanel" aria-labelledby="admin-account-tab-archived" tabIndex={0} hidden={activeTab !== 'archived'}>
       {activeTab === 'archived' && !can('USERS_MANAGE') && (<NoPermissionPanel required="USERS_MANAGE" />)}
       {activeTab === 'archived' && can('USERS_MANAGE') && (
         <ArchivedAccounts
@@ -1051,6 +1085,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           filteredArchivedUsers={filteredArchivedUsers}
         />
       )}
+      </div>}
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: AUDIT                                                */}
       {/* ═══════════════════════════════════════════════════════════ */}
@@ -1340,28 +1375,32 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
         />
       )}
 
+      </div>
+
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* MODAL: CREATE USER ACCOUNT                                 */}
       {/* ═══════════════════════════════════════════════════════════ */}
       <CreateUserModal
         isOpen={showCreateUserModal}
         onClose={() => setShowCreateUserModal(false)}
-        onCreated={fetchUsers}
+        onCreated={(message, error) => { notify(message, error); void fetchUsers(); }}
       />
 
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* MODAL: DB ROW INSERT / EDIT                                */}
       {/* ═══════════════════════════════════════════════════════════ */}
       {dbRowModal && (
-        <div className="modal-backdrop" onClick={() => setDbRowModal(null)}>
-          <div className="modal-card" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>
-                {dbRowModal.isNew ? 'Edit database row' : 'Edit database row'}
+        <Dialog label={dbRowModal.isNew ? "Insert database row" : "Edit database row"} busy={dbBusy} onDismiss={() => { setDbError(''); setDbRowModal(null); }}>
+          <div className="modal-card" style={{ maxWidth: 640 }}>
+            <div className="dialog-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <h3 tabIndex={-1} data-dialog-initial style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>
+                {dbRowModal.isNew ? 'Insert database row' : 'Edit database row'}
               </h3>
               <button
                 type="button"
-                onClick={() => setDbRowModal(null)}
+                aria-label="Close database editor"
+                disabled={dbBusy}
+                onClick={() => { setDbError(''); setDbRowModal(null); }}
                 style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: T.textSub }}
               ><Icon name="close" size={14} /></button>
             </div>
@@ -1429,24 +1468,25 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                 })}
               </div>
 
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 22, borderTop: `1px solid ${T.border}`, paddingTop: 18 }}>
-                <button type="button" onClick={() => setDbRowModal(null)} style={btnGhost}>
+              <div className="dialog-footer">
+                {dbError && <p role="alert" className="dialog-error">{dbError}</p>}
+                <button type="button" disabled={dbBusy} onClick={() => { setDbError(''); setDbRowModal(null); }} style={btnGhost}>
                   Cancel
                 </button>
-                <button type="submit" style={btnPrimary}>
-                  <Icon name="save" size={14} /> Commit to database
+                <button type="submit" style={btnPrimary} disabled={dbBusy}>
+                  <Icon name="save" size={14} /> {dbBusy ? "Saving…" : "Commit to database"}
                 </button>
               </div>
             </form>
           </div>
-        </div>
+        </Dialog>
       )}
 
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* MODAL: USER PROFILE EDIT                                   */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      {editingUser && createPortal(
-        <div className="modal-backdrop admin-profile-editor-backdrop" onClick={() => setEditingUser(null)}>
+      {editingUser && (
+        <Dialog label="Manage user account" size="wide" busy={isSavingUser || resettingPassword} className="admin-profile-editor-backdrop" onDismiss={() => setEditingUser(null)}>
           <div
             className="modal-card admin-profile-editor"
             style={{
@@ -1457,18 +1497,18 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
               padding: 0,
               overflow: 'hidden',
             }}
-            onClick={(e) => e.stopPropagation()}
           >
             <div className="admin-profile-editor__layout" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.7fr) minmax(260px, 1fr)', height: '100%' }}>
               {/* LEFT: form */}
-              <div className="admin-profile-editor__form-pane" style={{ padding: '28px 32px', minHeight: 0, overflowY: 'auto' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+              <div className="admin-profile-editor__form-pane">
+                <div className="admin-profile-editor__scroll">
+                <div className="dialog-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
                   <div>
-                    <h2 style={{ fontSize: 24, fontWeight: 800, color: T.text, margin: 0, letterSpacing: -0.5 }}>
+                    <h2 tabIndex={-1} data-dialog-initial style={{ fontSize: 24, fontWeight: 800, color: T.text, margin: 0, letterSpacing: -0.5 }}>
                       Manage user account
                     </h2>
                     <p style={{ fontSize: 13, color: T.textSub, margin: '6px 0 0' }}>
-                      {editingUser.name} · User ID {editingUser.id} · Fictional staff account
+                      {editingUser.name} · User ID {editingUser.id}
                     </p>
                   </div>
                 </div>
@@ -1512,7 +1552,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     : 'Adds every HEALTH_PROFILES column (sex, date of birth, blood type, body metrics, encrypted allergies & conditions, emergency contacts) plus system metadata.'}
                 </p>
 
-                <form onSubmit={handleSaveUserProfile} style={{ marginTop: 22 }}>
+                <form id="admin-account-form" onSubmit={handleSaveUserProfile} style={{ marginTop: 22 }}>
                   {/* Read-only shield for protected admin accounts: a disabled
                       fieldset locks every input/select/button inside at once. */}
                   <fieldset disabled={editingProtectedAdmin} style={{ border: 'none', padding: 0, margin: 0 }}>
@@ -2168,6 +2208,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       <input
                         type="password"
                         placeholder="Enter temporary password"
+                        id="admin-temporary-password"
                         value={adminPasswordInput}
                         onChange={(e) => setAdminPasswordInput(e.target.value)}
                         style={{
@@ -2179,6 +2220,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                       />
                       <button
                         type="button"
+                        disabled={resettingPassword || isSavingUser}
                         onClick={handleAdminResetPassword}
                         style={{
                           padding: '0 18px', borderRadius: T.radius.pill,
@@ -2187,7 +2229,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                           cursor: 'pointer', fontFamily: T.font,
                         }}
                       >
-                        Force reset
+                        {resettingPassword ? 'Resetting…' : 'Force reset'}
                       </button>
                     </div>
                     <div style={{ fontSize: 11, color: '#5B21B6', marginTop: 8, fontStyle: 'italic' }}>
@@ -2197,10 +2239,12 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                   )}
 
                   </fieldset>
-
+                </form>
+                </div>
+                <div className="dialog-footer admin-profile-editor__actions">
                   {modalFeedback && (
-                    <div style={{
-                      marginTop: 16, padding: '12px 16px', borderRadius: T.radius.md,
+                    <div role={modalFeedback.isError ? 'alert' : 'status'} style={{ flexBasis: '100%',
+                      padding: '12px 16px', borderRadius: T.radius.md,
                       fontSize: 12.5, fontWeight: 600,
                       background: modalFeedback.isError ? T.dangerSoft : T.successSoft,
                       color: modalFeedback.isError ? T.danger : T.success,
@@ -2210,14 +2254,14 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     </div>
                   )}
 
-                  <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 22, paddingTop: 18, borderTop: `1px solid ${T.border}` }}>
-                    <button type="button" onClick={() => setEditingUser(null)} style={btnGhost}>
+                    <button type="button" disabled={isSavingUser || resettingPassword} onClick={() => setEditingUser(null)} style={btnGhost}>
                       Close
                     </button>
                     {!editingProtectedAdmin && (
                       <button
                         type="submit"
-                        disabled={isSavingUser}
+                        form="admin-account-form"
+                        disabled={isSavingUser || resettingPassword}
                         style={{
                           ...btnPrimary,
                           opacity: isSavingUser ? 0.6 : 1,
@@ -2227,8 +2271,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                         {isSavingUser ? 'Saving…' : 'Save profile changes'}
                       </button>
                     )}
-                  </div>
-                </form>
+                </div>
               </div>
 
               {/* RIGHT: side info panel */}
@@ -2276,8 +2319,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
               </div>
             </div>
           </div>
-        </div>,
-        document.body
+        </Dialog>
       )}
     </div>
   );

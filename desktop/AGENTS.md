@@ -39,6 +39,12 @@ The incident-report listener stays in the shell across role switches. Doctor and
 - **Nurse and emergency.** Station counts come from live data. Keep the shared SOS band and confirmation portal on the relevant nurse views. AppShell mounts the incident report popup once. Its realtime prompt is addressed to the desktop window that resolved the alert.
 - **Analytics.** Keep one scoped snapshot for all tabs. Focus refresh clears revoked data. Report authorization is rechecked before building the print portal.
 
+## Shared desktop interaction
+
+- Use `src/shared/ui/Dialog.tsx` for modal workflows, `ConfirmAction.tsx` for destructive confirmations, and `feedback.tsx` for inline action status. Keep save and draft state in the feature controller.
+- Use `data-dialog-initial` on the heading for long reviews or on the safe action for destructive confirmations. Group headings and actions with `dialog-header` and `dialog-footer`. Keep form drafts safe from outside clicks.
+- Link every tab to a panel. Use `navigateTabs` with automatic activation for local views and manual activation for views that fetch on selection. Use `selectionMotion.ts` for selection-driven motion and `interactions.css` for hover and press feedback. Keep destination order in `app/consoleNavigation.ts`. Mark route content with `data-workspace-view` and keep sticky controls and urgent messages outside those targets. Only staff-initiated navigation starts a workspace transition.
+
 ## Commands
 
 `npm run dev` · `npm run build` (tsc -b + Vite) · `npm run dist` (build + electron-builder) · `npm test` · `npm run test:smoke` (Windows packaged app).
@@ -46,6 +52,6 @@ The incident-report listener stays in the shell across role switches. Doctor and
 ## Efficiency
 
 - Read [the code-slice index](./docs/CODESLICE.md) before opening large feature files. Re-locate anchors with `rg -n` after edits.
-- Keep styles near their owners and preserve the import order in `src/index.css`. Material Symbols are bundled locally.
+- Keep styles near their owners and preserve the import order in `src/index.css`. Material Symbols, Inter, and JetBrains Mono are bundled under `src/img_icons/`.
 - Never read `dist/`, `release/`, or lockfiles.
 - If the packaged app shows TLS/cert errors talking to `https://localhost:5000`, suspect `apiBaseUrl` (loopback check in main), not the renderer code.

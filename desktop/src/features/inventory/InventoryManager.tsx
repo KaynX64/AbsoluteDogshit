@@ -1,7 +1,10 @@
+import { useTabMotion } from '../../shared/ui/selectionMotion';
+import { navigateTabs } from '../../shared/ui/tabKeyboard';
+import Dialog from '../../shared/ui/Dialog';
 import InventoryAlerts from './InventoryAlerts';
 import InventoryLogs from './InventoryLogs';
 // desktop/src/features/inventory/InventoryManager.tsx
-import React, { useCallback, useState, useEffect, useRef } from 'react';
+import React, { useCallback, useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { subscribeToDesktopEvents, useDesktopSocket } from '../../platform/realtime/desktopRealtime';
 import { T, btnPrimary, btnGhost, calloutDanger, calloutInfo, calloutSuccess, inputStyle } from '../../theme';
 import { API_BASE_URL } from '../../config/api';
@@ -26,7 +29,7 @@ interface ConfirmDialogState {
   message: string;
   confirmLabel?: string;
   isDestructive?: boolean;
-  onConfirm: () => Promise<void>;
+  onConfirm: () => Promise<boolean>;
 }
 
 type InventoryNotice = { tone: 'info' | 'success' | 'error'; text: string };
@@ -61,8 +64,16 @@ function getExpiryStatus(expiryDate: string) {
 
 export default function InventoryManager({ initialTab = 'catalog' }: { initialTab?: InvTab } = {}) {
   const [activeTab, setActiveTab] = useState<InvTab>(initialTab);
+  useTabMotion(activeTab, tabs.map(tab => tab.id), tab => `inventory-panel-${tab}`);
+  const savedScroll = useRef(new Map<string, { top: number; left: number }>());
+  useLayoutEffect(() => {
+    document.getElementById(`inventory-panel-${activeTab}`)
+      ?.querySelectorAll<HTMLElement>('.inventory-table[aria-label]').forEach(table => {
+        const position = savedScroll.current.get(table.getAttribute('aria-label')!);
+        if (position) table.scrollTo({ ...position, behavior: 'instant' });
+      });
+  }, [activeTab]);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const dialogOpen = confirmDialog !== null;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submittingRef = useRef(false);
@@ -123,22 +134,6 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
       setActiveTab(initialTab);
     }
   }, [initialTab]);
-
-  useEffect(() => {
-    if (!dialogOpen) return;
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    const trigger = document.activeElement;
-    dialog.showModal();
-    dialog.querySelector('button')?.focus();
-    return () => {
-      dialog.close();
-      if (trigger instanceof HTMLElement && trigger.isConnected) {
-        trigger.focus();
-        if (document.activeElement !== trigger) document.getElementById('inventory-title')?.focus();
-      }
-    };
-  }, [dialogOpen]);
 
   const selectedBatch = batches.find((batch) => String(batch.batch_id) === batchId);
   const filteredMedicines = medicines.filter((medicine) =>
@@ -425,6 +420,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
       setAdjustBatchId('');
       setAdjustQty('1');
     }
+    return saved;
   };
 
   const handleAdjustStock = (e: React.FormEvent) => {
@@ -464,6 +460,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
       setNewMedGeneric('');
       fetchMedicines();
     }
+    return saved;
   };
 
   const handleCreateMedicine = (e: React.FormEvent) => {
@@ -500,7 +497,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
     setConfirmDialog({
       title: 'Delete Formulary Entry',
       message: `Remove "${medName}" from the active formulary and the Stock-in dropdown?\n\nAny remaining stock, including expired stock, must be cleared before the entry can be removed.`,
-      confirmLabel: 'Delete',
+      confirmLabel: 'Remove medicine',
       isDestructive: true,
       onConfirm: async () => {
         const saved = await submitInventoryChange(`medicines/${medicineId}`, { method: 'DELETE' }, {
@@ -511,6 +508,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
           fetchMedicines();
           fetchBatches();
         }
+        return saved;
       },
     });
   };
@@ -523,7 +521,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
   const formularyInputStyle = { ...inputStyle, padding: '6px 12px' };
 
   return (
-    <section className="inventory-workspace" aria-labelledby="inventory-title">
+    <section className="inventory-workspace" data-workspace-view aria-labelledby="inventory-title">
       <div className="vd-page-head inventory-heading">
         <div className="vd-page-head-eyebrow">Clinic operations</div>
         <h3 id="inventory-title" className="vd-page-head-title" tabIndex={-1}>
@@ -534,7 +532,7 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
         </p>
       </div>
 
-      <nav className="inventory-nav" aria-label="Inventory sections">
+      <div className="inventory-nav" role="tablist" aria-label="Inventory sections" onKeyDown={event => navigateTabs(event, false)}>
         {tabs.map((tab) => {
           const isActive = activeTab === tab.id;
           return (
@@ -543,10 +541,22 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
               type="button"
               className="inventory-nav-button"
               style={tab.id === 'alerts' ? { position: 'relative' } : undefined}
-              aria-current={isActive ? 'true' : undefined}
+              role="tab"
+              id={`inventory-tab-${tab.id}`}
+              aria-controls={`inventory-panel-${tab.id}`}
+              aria-selected={isActive}
+              tabIndex={isActive ? 0 : -1}
               aria-label={tab.id === 'alerts' && hasInventoryAlerts ? `${tab.label}, ${inventoryAlertCount} active ${inventoryAlertCount === 1 ? 'alert' : 'alerts'}` : undefined}
               title={tab.id === 'alerts' && hasInventoryAlerts ? `${inventoryAlertCount} expiry or reorder-buffer alert${inventoryAlertCount === 1 ? '' : 's'} ${inventoryAlertCount === 1 ? 'needs' : 'need'} attention` : undefined}
               onClick={() => {
+                if (activeTab !== tab.id) {
+                  document.getElementById(`inventory-panel-${activeTab}`)
+                    ?.querySelectorAll<HTMLElement>('.inventory-table[aria-label]').forEach(table => {
+                      savedScroll.current.set(table.getAttribute('aria-label')!, {
+                        top: table.scrollTop, left: table.scrollLeft,
+                      });
+                    });
+                }
                 setActiveTab(tab.id);
                 if (!submittingRef.current) setNotice(null);
                 if (tab.id === 'logs') fetchLogs();
@@ -583,9 +593,9 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
             </button>
           );
         })}
-      </nav>
+      </div>
 
-      {notice && (
+      {notice && !dialogOpen && (
         <div className="inventory-notice" role={notice.tone === 'error' ? 'alert' : 'status'} style={noticeStyles[notice.tone]()}>
           <Icon name={noticeIcons[notice.tone]} size={18} />
           <span>{notice.text}</span>
@@ -599,6 +609,8 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
       )}
 
       {/* ── CATALOG & DISPENSE ──────────────────────────── */}
+      <div className="inventory-tab-panel" id="inventory-panel-catalog" role="tabpanel"
+        aria-labelledby="inventory-tab-catalog" tabIndex={0} hidden={activeTab !== 'catalog'}>
       {activeTab === 'catalog' && (
         <div>
           <form className="inventory-lookup" onSubmit={handleBarcodeSubmit}>
@@ -669,6 +681,8 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                           return (
                             <tr
                               key={b.batch_id}
+                              data-clickable
+                              aria-disabled={isSubmitting || undefined}
                               onClick={selectBatch}
                               style={{
                                 cursor: 'pointer',
@@ -784,8 +798,11 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
           </div>
         </div>
       )}
+      </div>
 
       {/* ── STOCK-IN ────────────────────────────────────── */}
+      <div className="inventory-tab-panel" id="inventory-panel-stockin" role="tabpanel"
+        aria-labelledby="inventory-tab-stockin" tabIndex={0} hidden={activeTab !== 'stockin'}>
       {activeTab === 'stockin' && (
         <div className="inventory-panel inventory-standalone">
           <h4 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 800, color: T.primary }}>
@@ -881,8 +898,11 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
           </form>
         </div>
       )}
+      </div>
 
       {/* ── ADJUST & DISPOSE ────────────────────────────── */}
+      <div className="inventory-tab-panel" id="inventory-panel-adjust" role="tabpanel"
+        aria-labelledby="inventory-tab-adjust" tabIndex={0} hidden={activeTab !== 'adjust'}>
       {activeTab === 'adjust' && (
         <div className="inventory-panel inventory-standalone">
           <h4 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 800, color: T.danger }}>
@@ -962,8 +982,11 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
           </form>
         </div>
       )}
+      </div>
 
       {/* ── ALERTS & REORDER ────────────────────────────── */}
+      <div className="inventory-tab-panel" id="inventory-panel-alerts" role="tabpanel"
+        aria-labelledby="inventory-tab-alerts" tabIndex={0} hidden={activeTab !== 'alerts'}>
       {activeTab === 'alerts' && (
         <InventoryAlerts
           readStatus={readStatus}
@@ -973,7 +996,10 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
           reorderSuggestions={reorderSuggestions}
         />
       )}
+      </div>
       {/* ── LOGS ────────────────────────────────────────── */}
+      <div className="inventory-tab-panel" id="inventory-panel-logs" role="tabpanel"
+        aria-labelledby="inventory-tab-logs" tabIndex={0} hidden={activeTab !== 'logs'}>
       {activeTab === 'logs' && (
         <InventoryLogs
           filteredLogs={filteredLogs}
@@ -987,7 +1013,10 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
           emptyText={emptyText}
         />
       )}
+      </div>
       {/* ── FORMULARY MASTER ────────────────────────────── */}
+      <div className="inventory-tab-panel" id="inventory-panel-addmed" role="tabpanel"
+        aria-labelledby="inventory-tab-addmed" tabIndex={0} hidden={activeTab !== 'addmed'}>
       {activeTab === 'addmed' && (
         <div className="inventory-split inventory-formulary inventory-formulary-view">
           <div className="inventory-panel">
@@ -1167,24 +1196,13 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
           </div>
         </div>
       )}
+      </div>
 
       {/* ── CONFIRMATION MODAL ──────────────────────────── */}
       {confirmDialog && (
-        <dialog
-          ref={dialogRef}
-          className="inventory-dialog"
-          aria-labelledby="inventory-dialog-title"
-          aria-describedby="inventory-dialog-message"
-          onCancel={(event) => {
-            event.preventDefault();
-            setConfirmDialog(null);
-          }}
-          onClick={(event) => {
-            if (event.target === event.currentTarget) setConfirmDialog(null);
-          }}
-        >
+        <Dialog label={confirmDialog.title} size="compact" busy={isSubmitting} fallbackFocusId="inventory-title" onDismiss={() => { setNotice(null); setConfirmDialog(null); }}>
           <div className="modal-card">
-            <h3 id="inventory-dialog-title" style={{
+            <h3 className="dialog-header" id="inventory-dialog-title" style={{
               margin: '0 0 12px', fontSize: 17, fontWeight: 800,
               color: confirmDialog.isDestructive ? T.danger : T.primary,
             }}>
@@ -1196,20 +1214,21 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
             }}>
               {confirmDialog.message}
             </p>
-            <div className="inventory-dialog-actions">
+            <div className="inventory-dialog-actions dialog-footer">
+              {notice?.tone === 'error' && <p className="dialog-error" role="alert">{notice.text}</p>}
               <button
                 type="button"
-                onClick={() => setConfirmDialog(null)}
-                style={btnGhost}
+                disabled={isSubmitting}
+                onClick={() => { setNotice(null); setConfirmDialog(null); }}
+                data-dialog-initial style={btnGhost}
               >
                 Cancel
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  const action = confirmDialog.onConfirm;
-                  setConfirmDialog(null);
-                  void action();
+                disabled={isSubmitting}
+                onClick={async () => {
+                  if (await confirmDialog.onConfirm()) setConfirmDialog(null);
                 }}
                 style={{
                   ...btnPrimary,
@@ -1217,11 +1236,11 @@ export default function InventoryManager({ initialTab = 'catalog' }: { initialTa
                   color: confirmDialog.isDestructive ? T.textOnDanger : T.textOnPrimary,
                 }}
               >
-                {confirmDialog.confirmLabel || 'Confirm'}
+                {isSubmitting ? 'Saving…' : confirmDialog.confirmLabel || 'Confirm'}
               </button>
             </div>
           </div>
-        </dialog>
+        </Dialog>
       )}
     </section>
   );

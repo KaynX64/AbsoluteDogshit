@@ -81,13 +81,34 @@ try {
   await wait("document.querySelector('form input') && window.electronAPI", 'login form and preload');
   assert.match(await run('window.electronAPI.getAppVersion()'), /^\d+\.\d+\.\d+/);
   await wait('[...document.images].some(img => img.complete && img.naturalWidth > 0)', 'local logo');
-  assert.equal(await run("document.fonts.load('18px Material Symbols Outlined').then(fonts => fonts.some(font => font.status === 'loaded'))"), true);
+  for (const font of ['18px "Material Symbols Outlined"', '700 18px Inter', '600 18px "JetBrains Mono"']) {
+    assert.equal(await run(`document.fonts.load(${JSON.stringify(font)}, 'A').then(fonts => fonts.some(font => font.status === 'loaded'))`), true, font);
+  }
+  assert.equal(await run(`(() => {
+    const icon = document.createElement('span');
+    icon.className = 'material-symbols-outlined';
+    icon.textContent = 'monitor_heart';
+    document.body.append(icon);
+    const iconWidth = icon.getBoundingClientRect().width;
+    icon.style.fontFamily = 'sans-serif';
+    const textWidth = icon.getBoundingClientRect().width;
+    icon.remove();
+    return iconWidth > 0 && iconWidth < textWidth;
+  })()`), true, 'Material Symbols renders an icon ligature offline');
   await access(join(profile, 'valetudo_data', 'valetudo_offline.db'));
   const rendererMs = await run("performance.getEntriesByType('paint').find(entry => entry.name === 'first-contentful-paint')?.startTime ?? null");
   console.log('Packaged login ready in ' + Math.round(performance.now() - started) + ' ms' +
     (rendererMs === null ? '' : ' (renderer first contentful paint ' + Math.round(rendererMs) + ' ms)'));
   await run('(' + installFixtures.toString() + ')()');
-  await verifyWorkflows(run, wait);
+  async function press(key, modifiers = 0) {
+    const keyCodes = { Tab: 9, Escape: 27, Enter: 13, ArrowLeft: 37, ArrowRight: 39, Home: 36, End: 35 };
+    const event = { key, code: key, windowsVirtualKeyCode: keyCodes[key], modifiers };
+    await send('Input.dispatchKeyEvent', key === 'Enter'
+      ? { ...event, type: 'keyDown', text: '\r' }
+      : { ...event, type: 'rawKeyDown' });
+    await send('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+  }
+  await verifyWorkflows(run, wait, press, send);
   console.log('Packaged Electron smoke checks passed.');
 } finally {
   socket?.close();

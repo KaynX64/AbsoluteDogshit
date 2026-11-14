@@ -24,7 +24,6 @@
   padding: 32px 40px 48px;
   width: 100%;
   margin: 0 auto;
-  animation: fade-in var(--dur-slow) var(--ease-out) both;
 }
 
 @keyframes fade-in {
@@ -263,11 +262,11 @@
   border-radius: 20px;
   background: var(--surface);
   box-shadow: var(--shadow-modal);
-  animation: settings-pop-in var(--dur-base) var(--ease-out) both;
+  animation: settings-pop-in var(--interaction-dialog) var(--ease-out) both;
 }
 
 @keyframes settings-pop-in {
-  from { opacity: 0; transform: translateY(calc(-100% + 6px)); }
+  from { opacity: 0; transform: translateY(calc(-100% + 4px)); }
   to   { opacity: 1; transform: translateY(-100%); }
 }
 

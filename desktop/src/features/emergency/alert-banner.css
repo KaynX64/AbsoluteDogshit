@@ -8,7 +8,6 @@
   box-shadow: 0 12px 28px -20px rgba(180, 62, 50, 0.38);
   padding: 20px 22px;
   margin-bottom: 12px;
-  animation: fade-in var(--dur-base) var(--ease-out) both;
 }
 
 .ea-alert-head {

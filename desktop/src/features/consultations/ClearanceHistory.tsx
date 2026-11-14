@@ -1,3 +1,4 @@
+import Dialog from '../../shared/ui/Dialog';
 import { T, btnGhost } from '../../theme';
 import Icon from '../../shared/ui/Icon';
 
@@ -24,13 +25,12 @@ interface ClearanceHistoryProps {
 
 export default function ClearanceHistory({ setShowClrHistoryModal, clrHistoryPatientName, clrHistoryError, loadingClrHistory, clrHistory, handleDownloadPdf, setClrHistoryError }: ClearanceHistoryProps) {
   return (
-    <div className="modal-backdrop" onClick={() => setShowClrHistoryModal(false)}>
+    <Dialog label="Issued clearances" size="wide" backdropDismiss onDismiss={() => setShowClrHistoryModal(false)}>
       <div
         className="modal-card"
         style={{ maxWidth: 780 }}
-        onClick={(e) => e.stopPropagation()}
       >
-        <div
+        <div className="dialog-header"
           style={{
             display: 'flex',
             justifyContent: 'space-between',
@@ -41,7 +41,7 @@ export default function ClearanceHistory({ setShowClrHistoryModal, clrHistoryPat
           }}
         >
           <div>
-            <h3
+            <h3 tabIndex={-1} data-dialog-initial
               style={{
                 margin: 0,
                 color: T.primary,
@@ -211,6 +211,6 @@ export default function ClearanceHistory({ setShowClrHistoryModal, clrHistoryPat
           </div>
         )}
       </div>
-    </div>
+    </Dialog>
   );
 }

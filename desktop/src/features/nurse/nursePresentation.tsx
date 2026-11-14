@@ -119,10 +119,8 @@ const TONE: Record<Tone, { bg: string; fg: string; border: string }> = liveObjec
 export const NURSE_CSS = `
 @keyframes nc-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .4; transform: scale(.8); } }
 @keyframes nc-shimmer { from { background-position: -240px 0; } to { background-position: 320px 0; } }
-@keyframes nc-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes nc-spin { to { transform: rotate(360deg); } }
 
-.nc-root { animation: nc-rise 260ms var(--ease-out) both; }
 .nc-live-dot {
   width: 7px; height: 7px; border-radius: 50%; flex: none;
   background: var(--success); box-shadow: 0 0 0 3px rgba(45, 122, 74, .16);

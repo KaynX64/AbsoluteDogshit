@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useTabMotion } from '../../shared/ui/selectionMotion';
+import { navigateTabs } from '../../shared/ui/tabKeyboard';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { API_BASE_URL } from '../../config/api';
 import Icon from '../../shared/ui/Icon';
@@ -27,12 +29,16 @@ export default function AnalyticsDashboard() {
   const exportMenu = useRef<HTMLDetailsElement>(null);
   const jumpTarget = useRef<string | null>(null);
   const dashboard = useRef<HTMLElement>(null);
+  const title = useRef<HTMLHeadingElement>(null);
   const focusedBeforeRefresh = useRef<Element | null>(null);
   const availableTabs = data ? visibleTabs(data) : tabs;
   const activeTab = availableTabs.some(item => item.id === tab) ? tab : 'overview';
+  useTabMotion(activeTab, tabs.map(item => item.id), item => `${id}-panel-${item}`, tab === activeTab);
   const canReport = data?.scopes.includes('ANALYTICS_EXPORT') && hasReportData(data);
 
   const clearAccess = useCallback(() => {
+    const focused = document.activeElement;
+    focusedBeforeRefresh.current = dashboard.current?.contains(focused) ? focused : null;
     summaryRequest.current?.abort();
     exportRequest.current?.abort();
     latestSnapshot.current = null;
@@ -93,7 +99,7 @@ export default function AnalyticsDashboard() {
   useEffect(() => {
     const focused = focusedBeforeRefresh.current;
     if (focused && !focused.isConnected && document.activeElement === document.body) {
-      document.getElementById(`${id}-${activeTab}`)?.focus();
+      (document.getElementById(`${id}-${activeTab}`) ?? title.current)?.focus();
     }
     focusedBeforeRefresh.current = null;
     if (data && activeTab !== tab) setTab('overview');
@@ -105,17 +111,6 @@ export default function AnalyticsDashboard() {
       jumpTarget.current = null;
     }
   }, [tab]);
-
-  function switchTab(event: KeyboardEvent<HTMLButtonElement>, index: number) {
-    const last = availableTabs.length - 1;
-    const next = event.key === 'ArrowRight' ? (index + 1) % availableTabs.length
-      : event.key === 'ArrowLeft' ? (index + last) % availableTabs.length
-      : event.key === 'Home' ? 0 : event.key === 'End' ? last : null;
-    if (next === null) return;
-    event.preventDefault();
-    setTab(availableTabs[next].id);
-    document.getElementById(`${id}-${availableTabs[next].id}`)?.focus();
-  }
 
   async function download(format: 'excel' | 'pdf' | 'print') {
     if (exportRequest.current || !data || !canReport) return;
@@ -175,9 +170,9 @@ export default function AnalyticsDashboard() {
     }
   }
 
-  return <main ref={dashboard} className="an-dashboard">
+  return <main ref={dashboard} className="an-dashboard" data-workspace-view>
     <header className="an-header">
-      <div><h1>Health analytics</h1><p>Clinic activity, campus health, and pharmacy stock</p></div>
+      <div><h1 ref={title} tabIndex={-1}>Health analytics</h1><p>Clinic activity, campus health, and pharmacy stock</p></div>
       <div className="an-controls">
         <button type="button" aria-disabled={loading} onClick={() => { if (!loading) void refresh(); }}><Icon name="refresh" size={17} /> Refresh</button>
         {canReport && <details ref={exportMenu} className="an-export" onBlur={event => {
@@ -204,10 +199,10 @@ export default function AnalyticsDashboard() {
       <button type="button" onClick={() => void refresh()}>Retry</button></div>}
     {!data && loading && <div className="an-kpis an-skeleton" aria-hidden="true">{tabs.map(item => <div key={item.id} />)}</div>}
     {data && <>
-      <div role="tablist" aria-label="Analytics sections" className="an-tabs">
-        {availableTabs.map((item, index) => <button key={item.id} type="button" role="tab" id={`${id}-${item.id}`}
+      <div role="tablist" aria-label="Analytics sections" className="an-tabs" onKeyDown={event => navigateTabs(event, true)}>
+        {availableTabs.map((item) => <button key={item.id} type="button" role="tab" id={`${id}-${item.id}`}
           aria-selected={activeTab === item.id} aria-controls={`${id}-panel-${item.id}`} tabIndex={activeTab === item.id ? 0 : -1}
-          onKeyDown={event => switchTab(event, index)} onClick={() => setTab(item.id)}>{item.label}</button>)}
+          onClick={() => setTab(item.id)}>{item.label}</button>)}
       </div>
       {availableTabs.map(item => <div key={item.id} role="tabpanel" id={`${id}-panel-${item.id}`}
         aria-labelledby={`${id}-${item.id}`} tabIndex={0} hidden={activeTab !== item.id}>

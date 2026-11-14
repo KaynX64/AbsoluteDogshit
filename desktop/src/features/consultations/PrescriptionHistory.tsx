@@ -1,3 +1,4 @@
+import Dialog from '../../shared/ui/Dialog';
 import { T, btnGhost } from '../../theme';
 import Icon from '../../shared/ui/Icon';
 
@@ -27,13 +28,12 @@ interface PrescriptionHistoryProps {
 
 export default function PrescriptionHistory({ setShowRxHistoryModal, rxHistoryPatientName, rxHistoryError, loadingRxHistory, rxHistory, handleDownloadPdf, setRxHistoryError }: PrescriptionHistoryProps) {
   return (
-    <div className="modal-backdrop" onClick={() => setShowRxHistoryModal(false)}>
+    <Dialog label="Issued prescriptions" size="wide" backdropDismiss onDismiss={() => setShowRxHistoryModal(false)}>
       <div
         className="modal-card"
         style={{ maxWidth: 780 }}
-        onClick={(e) => e.stopPropagation()}
       >
-        <div
+        <div className="dialog-header"
           style={{
             display: 'flex',
             justifyContent: 'space-between',
@@ -44,7 +44,7 @@ export default function PrescriptionHistory({ setShowRxHistoryModal, rxHistoryPa
           }}
         >
           <div>
-            <h3
+            <h3 tabIndex={-1} data-dialog-initial
               style={{
                 margin: 0,
                 color: T.primary,
@@ -245,6 +245,6 @@ export default function PrescriptionHistory({ setShowRxHistoryModal, rxHistoryPa
           </div>
         )}
       </div>
-    </div>
+    </Dialog>
   );
 }

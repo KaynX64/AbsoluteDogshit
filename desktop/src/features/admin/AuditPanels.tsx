@@ -1,3 +1,5 @@
+import { useTabMotion } from '../../shared/ui/selectionMotion';
+import { navigateTabs } from '../../shared/ui/tabKeyboard';
 import { T, inputStyle } from '../../theme';
 import Icon from '../../shared/ui/Icon';
 import { I } from './adminIcons';
@@ -60,13 +62,16 @@ export default function AuditPanels({
   mutationActionFilter,
   setMutationActionFilter,
 }: AuditPanelsProps) {
+  useTabMotion(auditSubTab, ['phi', 'mutations'], tab => `admin-audit-panel-${tab}`);
   return (
     <div>
       {/* Sub-tabs — clean pill toggle */}
-      <div className="vd-subtabs" style={{ marginBottom: 20 }}>
+      <div className="vd-subtabs" role="tablist" aria-label="Audit views" onKeyDown={event => navigateTabs(event, true)} style={{ marginBottom: 20 }}>
         <button
           type="button"
           className={`vd-subtab${auditSubTab === 'phi' ? ' is-active' : ''}`}
+          role="tab" id="admin-audit-tab-phi" aria-controls="admin-audit-panel-phi"
+          aria-selected={auditSubTab === 'phi'} tabIndex={auditSubTab === 'phi' ? 0 : -1}
           onClick={() => setAuditSubTab('phi')}
         >
           <Icon name="visibility" size={14} /> PHI access
@@ -74,6 +79,8 @@ export default function AuditPanels({
         <button
           type="button"
           className={`vd-subtab${auditSubTab === 'mutations' ? ' is-active' : ''}`}
+          role="tab" id="admin-audit-tab-mutations" aria-controls="admin-audit-panel-mutations"
+          aria-selected={auditSubTab === 'mutations'} tabIndex={auditSubTab === 'mutations' ? 0 : -1}
           onClick={() => setAuditSubTab('mutations')}
         >
           <Icon name="check" size={14} /> SHA-256 mutation ledger
@@ -81,6 +88,8 @@ export default function AuditPanels({
       </div>
 
       {/* PHI */}
+      <div id="admin-audit-panel-phi" role="tabpanel"
+        aria-labelledby="admin-audit-tab-phi" tabIndex={0} hidden={auditSubTab !== 'phi'}>
       {auditSubTab === 'phi' && (
         <div>
           <div style={{
@@ -224,8 +233,11 @@ export default function AuditPanels({
           </div>
         </div>
       )}
+      </div>
 
       {/* MUTATIONS */}
+      <div id="admin-audit-panel-mutations" role="tabpanel"
+        aria-labelledby="admin-audit-tab-mutations" tabIndex={0} hidden={auditSubTab !== 'mutations'}>
       {auditSubTab === 'mutations' && (
         <div>
           <div style={{
@@ -350,6 +362,7 @@ export default function AuditPanels({
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

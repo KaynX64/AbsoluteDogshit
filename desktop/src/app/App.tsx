@@ -1,3 +1,8 @@
+import { consoleNavigation } from './consoleNavigation';
+import { useKeyboardPressFeedback, useWorkspaceMotion } from '../shared/ui/selectionMotion';
+import { useConfirmAction } from '../shared/ui/ConfirmAction';
+import { useActionFeedback } from '../shared/ui/feedback';
+import Dialog from '../shared/ui/Dialog';
 // desktop/src/app/App.tsx
 import React, { useEffect, useState } from 'react';
 import NurseConsole from '../features/nurse/NurseConsole';
@@ -37,6 +42,8 @@ import { useSessionTimeout } from './useSessionTimeout';
  * otherwise bail out of re-render and keep stale inline colors.)
  */
 function AppShell() {
+  const { confirmAction, confirmation } = useConfirmAction();
+  const { notify, notice } = useActionFeedback();
   const { mode, preset } = useTheme();
   const [updateStatus, setUpdateStatus] = useState<{ state: string; version?: string; percent?: number } | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState(false);
@@ -44,7 +51,10 @@ function AppShell() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [user, setUser] = useState<any>(null);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(() => sessionStorage.getItem('valetudo_session_expired')
+    ? 'Your session expired due to inactivity. Sign in again to continue.'
+    : '');
+  useEffect(() => { sessionStorage.removeItem('valetudo_session_expired'); }, []);
   const [activeRoleView, setActiveRoleView] = useState<string>('');
 
   /* ── Workspace state (driven by sidebar) ─────────────────────── */
@@ -54,6 +64,24 @@ function AppShell() {
     'active' | 'scheduled' | 'history' | 'archive' | 'analytics'
   >('active');
   const [nurseViewMode, setNurseViewMode] = useState<'triage' | 'expected' | 'inventory' | 'analytics'>('triage');
+
+  function destinationFor(role: string) {
+    if (role === 'ADMIN') return adminTab === 'archived' ? 'users' : adminTab;
+    if (role === 'NURSE') return nurseViewMode;
+    return role === 'EMERGENCY_RESPONDER' ? 'dispatch' : doctorViewMode;
+  }
+
+  const destination = destinationFor(activeRoleView);
+  const { workspace, requestWorkspace } = useWorkspaceMotion(
+    activeRoleView, destination, consoleNavigation(activeRoleView).map(item => item.key),
+  );
+  function navigateTo(destination: string) {
+    requestWorkspace(activeRoleView, destination);
+    if (activeRoleView === 'ADMIN') setAdminTab(destination as AdminTab);
+    if (activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST') setDoctorViewMode(destination as typeof doctorViewMode);
+    if (activeRoleView === 'NURSE') setNurseViewMode(destination as typeof nurseViewMode);
+  }
+  useKeyboardPressFeedback();
 
   /* ── Connectivity & offline queue ────────────────────────────── */
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
@@ -169,12 +197,13 @@ function AppShell() {
   };
 
   const handleManualReplay = async () => {
+    if (isReplaying) return;
     setIsReplaying(true);
     try {
       const result = await replayOfflineQueue();
-      alert(`Replay complete. Synced ${result.synced} offline mutations.`);
+      notify(`Replay complete. Synced ${result.synced} offline changes.`);
     } catch (err: any) {
-      alert(`Replay failed: ${err.message}`);
+      notify(`Replay failed. ${err.message} Use Replay to try again.`, true);
     } finally {
       setIsReplaying(false);
     }
@@ -182,6 +211,7 @@ function AppShell() {
 
 const handleChangePassword = async (e: React.FormEvent) => {
   e.preventDefault();
+  if (isSubmittingPassword) return;
   setPasswordMsg(null);
 
   // ── Strong-password policy check (mirrors the server) ─────────
@@ -194,11 +224,13 @@ const handleChangePassword = async (e: React.FormEvent) => {
           : 'Password is missing one or more required elements. Check the requirements list.',
       isError: true,
     });
+    document.getElementById('desktop-new-password')?.focus();
     return;
   }
 
   if (newPassword !== confirmPassword) {
     setPasswordMsg({ text: 'New passwords do not match.', isError: true });
+    document.getElementById('desktop-confirm-password')?.focus();
     return;
   }
 
@@ -265,21 +297,8 @@ const handleChangePassword = async (e: React.FormEvent) => {
         badgeCounts={badgeKey ? { [badgeKey]: bookingBadge } : undefined}
         onSignOut={handleSignOut}
         onChangePassword={() => { setShowPasswordModal(true); setPasswordMsg(null); }}
-        activeItem={
-          activeRoleView === 'ADMIN' ? (adminTab === 'archived' ? 'users' : adminTab)
-          : (activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST') ? doctorViewMode
-          : activeRoleView === 'NURSE' ? nurseViewMode
-          : undefined
-        }
-        onItemClick={
-          activeRoleView === 'ADMIN'
-            ? (key) => setAdminTab(key as typeof adminTab)
-            : (activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST')
-            ? (key) => setDoctorViewMode(key as typeof doctorViewMode)
-            : activeRoleView === 'NURSE'
-            ? (key) => setNurseViewMode(key as typeof nurseViewMode)
-            : undefined
-        }
+        activeItem={destination}
+        onItemClick={activeRoleView === 'EMERGENCY_RESPONDER' ? undefined : navigateTo}
       />
 
       <div className="app-main">
@@ -292,9 +311,13 @@ const handleChangePassword = async (e: React.FormEvent) => {
           onManualReplay={handleManualReplay}
           roleView={activeRoleView}
           roles={user.roles}
-          onChangeRoleView={setActiveRoleView}
+          onChangeRoleView={role => {
+            requestWorkspace(role, destinationFor(role));
+            setActiveRoleView(role);
+          }}
         />
 
+        {notice}
         {updateStatus && !updateDismissed &&
   (updateStatus.state === 'downloading' || updateStatus.state === 'downloaded') && (
   <div className="update-banner">
@@ -321,9 +344,9 @@ const handleChangePassword = async (e: React.FormEvent) => {
         <button
           type="button"
           className="update-btn update-btn-install"
-          onClick={() => {
+          onClick={async () => {
             if (offlineQueueCount > 0 &&
-                !window.confirm(`${offlineQueueCount} offline changes are still queued. Restart anyway? They stay saved locally and sync after restart.`)) return;
+                !await confirmAction('Restart now', `${offlineQueueCount} offline changes are still queued. They stay saved locally and sync after restart.`)) return;
             window.electronAPI?.installUpdate();
           }}
         >
@@ -336,6 +359,9 @@ const handleChangePassword = async (e: React.FormEvent) => {
 
         <main
           className="app-content"
+          id="desktop-workspace"
+          ref={workspace}
+          tabIndex={-1}
           style={activeRoleView === 'NURSE' && nurseViewMode === 'inventory'
             ? { padding: 0, display: 'flex', minHeight: 0, overflow: 'hidden' }
             : undefined}
@@ -343,13 +369,13 @@ const handleChangePassword = async (e: React.FormEvent) => {
           {activeRoleView === 'NURSE' && (
             <NurseConsole
               viewMode={nurseViewMode}
-              onViewModeChange={setNurseViewMode}
+              onViewModeChange={navigateTo}
             />
           )}
           {(activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST') && (
             <DoctorConsole
               viewMode={doctorViewMode}
-              onViewModeChange={setDoctorViewMode}
+              onViewModeChange={navigateTo}
               currentRole={activeRoleView}
             />
           )}
@@ -363,18 +389,20 @@ const handleChangePassword = async (e: React.FormEvent) => {
       {/* Post-resolution incident documentation popup. Server-driven: it
           only appears for accounts in the live responder audience, on any
           console view, whenever ANY responder closes an SOS as resolved. */}
+      {confirmation}
       <IncidentReportModal />
 
       {showPasswordModal && (
-        <div className="modal-backdrop" onClick={() => setShowPasswordModal(false)}>
-          <div className="modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-              <h3 style={{ margin: 0, color: T.primary, fontSize: 17, fontWeight: 800, letterSpacing: -0.3, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+        <Dialog label="Update account password" size="compact" busy={isSubmittingPassword} onDismiss={() => setShowPasswordModal(false)}>
+          <div className="modal-card" style={{ maxWidth: 460 }}>
+            <div className="dialog-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+              <h3 tabIndex={-1} data-dialog-initial style={{ margin: 0, color: T.primary, fontSize: 17, fontWeight: 800, letterSpacing: -0.3, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                 <Icon name="key" size={20} tone="primary" />
                 Update account password
               </h3>
               <button
                 type="button"
+                disabled={isSubmittingPassword}
                 onClick={() => setShowPasswordModal(false)}
                 style={{
                   background: 'none',
@@ -396,8 +424,8 @@ const handleChangePassword = async (e: React.FormEvent) => {
             </div>
 
             <form onSubmit={handleChangePassword}>
-              <label className="field-label">Current password</label>
-              <input
+              <label className="field-label" htmlFor="desktop-current-password">Current password</label>
+              <input id="desktop-current-password"
                 type="password"
                 className="field-input"
                 value={currentPassword}
@@ -406,8 +434,8 @@ const handleChangePassword = async (e: React.FormEvent) => {
                 style={{ marginBottom: 14 }}
               />
 
-              <label className="field-label">New password</label>
-              <input
+              <label className="field-label" htmlFor="desktop-new-password">New password</label>
+              <input id="desktop-new-password"
                 type="password"
                 className="field-input"
                 value={newPassword}
@@ -418,8 +446,8 @@ const handleChangePassword = async (e: React.FormEvent) => {
               <PasswordStrengthIndicator password={newPassword} />
               <div style={{ marginBottom: 14 }} />
 
-              <label className="field-label">Confirm new password</label>
-              <input
+              <label className="field-label" htmlFor="desktop-confirm-password">Confirm new password</label>
+              <input id="desktop-confirm-password"
                 type="password"
                 className="field-input"
                 value={confirmPassword}
@@ -428,7 +456,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
               />
 
               {passwordMsg && (
-                <div
+                <div role={passwordMsg.isError ? 'alert' : 'status'}
                   style={{
                     marginTop: 14,
                     padding: '10px 14px',
@@ -444,9 +472,10 @@ const handleChangePassword = async (e: React.FormEvent) => {
                 </div>
               )}
 
-              <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+              <div className="dialog-footer" style={{ marginTop: 20 }}>
                 <button
                   type="button"
+                  disabled={isSubmittingPassword}
                   onClick={() => setShowPasswordModal(false)}
                   style={{ ...btnSubtle, flex: 1, padding: 12 }}
                 >
@@ -472,7 +501,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
               </div>
             </form>
           </div>
-        </div>
+        </Dialog>
       )}
     </div>
     </DesktopSocketContext.Provider>

@@ -479,12 +479,12 @@
 }
 
 .doctor-console .doctor-workspace-switch button:hover,
-.doctor-console .doctor-workspace-switch button[aria-pressed='true'] {
+.doctor-console .doctor-workspace-switch button[aria-selected='true'] {
   color: var(--primary);
   background: var(--primary-tint);
 }
 
-.doctor-console .doctor-workspace-switch button[aria-pressed='true'] {
+.doctor-console .doctor-workspace-switch button[aria-selected='true'] {
   border-bottom-color: var(--primary);
 }
 

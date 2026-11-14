@@ -1,3 +1,7 @@
+import { navigateTabs } from '../../shared/ui/tabKeyboard';
+import { useTabMotion } from '../../shared/ui/selectionMotion';
+import { useActionFeedback } from '../../shared/ui/feedback';
+import Dialog from '../../shared/ui/Dialog';
 // desktop/src/features/emergency/IncidentRecords.tsx
 //
 // Dedicated view for reviewing, saving, and printing official Emergency Incident Records.
@@ -5,7 +9,6 @@
 // and archived into the MinIO file server.
 
 import { useEffect, useState, useRef, useMemo } from 'react';
-import { createPortal } from 'react-dom';
 import { subscribeToDesktopEvents, useDesktopSocket } from '../../platform/realtime/desktopRealtime';
 import { API_BASE_URL } from '../../config/api';
 import { T, btnPrimary, btnGhost, btnSubtle } from '../../theme';
@@ -42,6 +45,7 @@ export interface IncidentRecord {
 }
 
 export default function IncidentRecords() {
+  const { notify, notice } = useActionFeedback();
   const [records, setRecords] = useState<IncidentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +58,7 @@ export default function IncidentRecords() {
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [actionInProgressId, setActionInProgressId] = useState<number | null>(null);
   const [activeModalTab, setActiveModalTab] = useState<'preview' | 'details'>('preview');
+  useTabMotion(activeModalTab, ['preview', 'details'], tab => `incident-panel-${tab}`);
 
   const printIframeRef = useRef<HTMLIFrameElement | null>(null);
 
@@ -149,6 +154,7 @@ export default function IncidentRecords() {
 
   // ── Save (Download) PDF ────────────────────────────────────────────────────
   const handleSavePdf = async (record: IncidentRecord) => {
+    if (actionInProgressId !== null) return;
     setActionInProgressId(record.reportId);
     try {
       let url = previewPdfUrl;
@@ -166,12 +172,13 @@ export default function IncidentRecords() {
       document.body.appendChild(a);
       a.click();
       a.remove();
+      notify('PDF download requested.');
 
       if (shouldRevoke) {
         setTimeout(() => URL.revokeObjectURL(url!), 60_000);
       }
     } catch (err: any) {
-      alert(`Download failed: ${err.message}`);
+      notify(`Download failed. ${err.message} Use Save PDF to retry.`, true);
     } finally {
       setActionInProgressId(null);
     }
@@ -179,6 +186,7 @@ export default function IncidentRecords() {
 
   // ── Print PDF ──────────────────────────────────────────────────────────────
   const handlePrintPdf = async (record: IncidentRecord) => {
+    if (actionInProgressId !== null) return;
     setActionInProgressId(record.reportId);
     try {
       let url = previewPdfUrl;
@@ -191,7 +199,7 @@ export default function IncidentRecords() {
       }
 
       // If viewing in modal and iframe is ready, trigger print directly
-      if (selectedRecord?.reportId === record.reportId && printIframeRef.current?.contentWindow) {
+      if (activeModalTab === 'preview' && selectedRecord?.reportId === record.reportId && printIframeRef.current?.contentWindow) {
         printIframeRef.current.contentWindow.focus();
         printIframeRef.current.contentWindow.print();
       } else {
@@ -224,8 +232,9 @@ export default function IncidentRecords() {
           if (shouldRevoke) URL.revokeObjectURL(url!);
         }, 120_000);
       }
+      notify('Print requested.');
     } catch (err: any) {
-      alert(`Print failed: ${err.message}`);
+      notify(`Print failed. ${err.message} Use Print to retry.`, true);
     } finally {
       setActionInProgressId(null);
     }
@@ -256,6 +265,7 @@ export default function IncidentRecords() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: T.sage50 }}>
+      {!selectedRecord && notice}
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div
         style={{
@@ -728,24 +738,9 @@ export default function IncidentRecords() {
       </div>
 
       {/* ── View / Preview & Print Modal ──────────────────────────────────────── */}
-      {selectedRecord && createPortal(
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(15, 30, 23, 0.65)',
-            backdropFilter: 'blur(3px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999,
-            padding: 24,
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) handleCloseModal();
-          }}
-        >
-          <div
+      {selectedRecord && (
+        <Dialog label="Incident record" size="wide" backdropDismiss onDismiss={handleCloseModal}>
+          <div className="modal-card"
             style={{
               background: T.surface,
               borderRadius: T.radius.xl,
@@ -786,7 +781,7 @@ export default function IncidentRecords() {
                   IR-#{String(selectedRecord.reportId).padStart(4, '0')}
                 </span>
                 <div>
-                  <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: T.ink }}>
+                  <h2 tabIndex={-1} data-dialog-initial style={{ margin: 0, fontSize: 16, fontWeight: 700, color: T.ink }}>
                     Incident Record · {selectedRecord.patient.name}
                   </h2>
                   <div style={{ fontSize: 12, color: T.textSub, marginTop: 2 }}>
@@ -798,9 +793,12 @@ export default function IncidentRecords() {
               {/* Modal toolbar */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 {/* Tab switchers */}
-                <div style={{ display: 'flex', background: T.sage200, padding: 3, borderRadius: T.radius.md, marginRight: 8 }}>
+                <div role="tablist" aria-label="Incident record views" onKeyDown={event => navigateTabs(event, true)}
+                  style={{ display: 'flex', background: T.sage200, padding: 3, borderRadius: T.radius.md, marginRight: 8 }}>
                   <button
                     type="button"
+                    role="tab" id="incident-tab-preview" aria-controls="incident-panel-preview"
+                    aria-selected={activeModalTab === 'preview'} tabIndex={activeModalTab === 'preview' ? 0 : -1}
                     onClick={() => setActiveModalTab('preview')}
                     style={{
                       padding: '5px 12px',
@@ -818,6 +816,8 @@ export default function IncidentRecords() {
                   </button>
                   <button
                     type="button"
+                    role="tab" id="incident-tab-details" aria-controls="incident-panel-details"
+                    aria-selected={activeModalTab === 'details'} tabIndex={activeModalTab === 'details' ? 0 : -1}
                     onClick={() => setActiveModalTab('details')}
                     style={{
                       padding: '5px 12px',
@@ -838,7 +838,7 @@ export default function IncidentRecords() {
                 <button
                   type="button"
                   onClick={() => handleSavePdf(selectedRecord)}
-                  disabled={loadingPdf}
+                  disabled={loadingPdf || actionInProgressId !== null}
                   style={{
                     ...btnGhost,
                     display: 'inline-flex',
@@ -858,7 +858,7 @@ export default function IncidentRecords() {
                 <button
                   type="button"
                   onClick={() => handlePrintPdf(selectedRecord)}
-                  disabled={loadingPdf}
+                  disabled={loadingPdf || actionInProgressId !== null}
                   style={{
                     ...btnPrimary,
                     display: 'inline-flex',
@@ -893,11 +893,13 @@ export default function IncidentRecords() {
               </div>
             </div>
 
+            {notice}
             {/* Modal Body */}
             <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-              {activeModalTab === 'preview' ? (
-                <div style={{ flex: 1, position: 'relative', background: '#454946', display: 'flex', flexDirection: 'column' }}>
-                  {loadingPdf ? (
+              <div id="incident-panel-preview" role="tabpanel" aria-labelledby="incident-tab-preview"
+                tabIndex={0} hidden={activeModalTab !== 'preview'}
+                style={{ flex: 1, position: 'relative', background: '#454946', display: 'flex', flexDirection: 'column' }}>
+                  {activeModalTab !== 'preview' ? null : loadingPdf ? (
                     <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: '#FFFFFF' }}>
                       <div style={{ textAlign: 'center' }}>
                         <Icon name="progress_activity" size={36} />
@@ -927,10 +929,9 @@ export default function IncidentRecords() {
                       style={{ width: '100%', height: '100%', border: 'none' }}
                     />
                   ) : null}
-                </div>
-              ) : (
-                /* Details view */
-                <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
+              </div>
+              <div id="incident-panel-details" role="tabpanel" aria-labelledby="incident-tab-details"
+                tabIndex={0} hidden={activeModalTab !== 'details'} style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
                   <div style={{ maxWidth: 840, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
                     {/* Patient details block */}
                     <div style={{ background: T.surfaceMuted, padding: 18, borderRadius: T.radius.lg, border: `1px solid ${T.border}` }}>
@@ -987,12 +988,10 @@ export default function IncidentRecords() {
                       </p>
                     </div>
                   </div>
-                </div>
-              )}
+              </div>
             </div>
           </div>
-        </div>,
-        document.body
+        </Dialog>
       )}
     </div>
   );

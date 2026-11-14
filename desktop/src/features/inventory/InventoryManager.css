@@ -1,3 +1,11 @@
+.inventory-tab-panel:not([hidden]) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
 .inventory-workspace {
   container-type: inline-size;
   flex: 1;
@@ -183,7 +191,7 @@
   color: var(--text);
 }
 
-.inventory-nav-button[aria-current] {
+.inventory-nav-button[aria-selected='true'] {
   background: var(--primary);
   color: var(--text-on-primary);
   box-shadow: var(--shadow-primary);
