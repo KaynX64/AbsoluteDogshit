@@ -44,6 +44,7 @@ The incident-report listener stays in the shell across role switches. Doctor and
 
 - QR capture owns camera tracks, its decode loop, and uploaded image URLs in `useQrCapture.ts`. The decoder loads on demand. Document previews cancel pending reads and revoke blob URLs on replacement or unmount.
 - Admin audit and telemetry requests follow the active view and its current grants. Dispatch keeps its polling fallback and gives realtime refreshes priority.
+- Offline writes use `electron/offline/` through preload IPC. The SQLite database and the pending mutation mirror in renderer `localStorage` are unencrypted at the application level. Both can contain patient data. `offlineSync.ts` advances the paged bootstrap checkpoint after all pages are saved.
 
 ## Shared desktop interaction
 
