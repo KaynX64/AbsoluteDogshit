@@ -1,9 +1,11 @@
 // mobile/lib/screens/consultation_scheduler_screen.dart
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
+
 import '../config/api_config.dart';
 import '../utils/responsive.dart';
 import '../services/emergency_alert_service.dart';
@@ -12,10 +14,12 @@ class ConsultationSchedulerScreen extends StatefulWidget {
   const ConsultationSchedulerScreen({super.key});
 
   @override
-  State<ConsultationSchedulerScreen> createState() => _ConsultationSchedulerScreenState();
+  State<ConsultationSchedulerScreen> createState() =>
+      _ConsultationSchedulerScreenState();
 }
 
-class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScreen>
+class _ConsultationSchedulerScreenState
+    extends State<ConsultationSchedulerScreen>
     with WidgetsBindingObserver {
   final _storage = const FlutterSecureStorage();
 
@@ -28,13 +32,18 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   int? _selectedDoctorId;
 
   static const List<String> _months = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
-  ];
-
-  static const List<String> _monthsAbbr = [
-    'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
-    'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
   ];
 
   static DateTime _getNextValidWeekday([DateTime? fromDate]) {
@@ -43,7 +52,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     if (fromDate == null) {
       date = date.add(const Duration(days: 1));
     }
-    while (date.weekday == DateTime.saturday || date.weekday == DateTime.sunday) {
+    while (date.weekday == DateTime.saturday ||
+        date.weekday == DateTime.sunday) {
       date = date.add(const Duration(days: 1));
     }
     return date;
@@ -88,15 +98,14 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   static const _infoCardBg = Color(0xFFE2EBE1);
   static const _dividerSoft = Color(0xFFC7D6C6);
   static const _hintColor = Color(0xFF94A396);
-  static const _monthTagColor = Color(0xFF6B7A6E);
-
   final ScrollController _dateScrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _monthNotifier.value = "${_months[_selectedDate.month - 1]} ${_selectedDate.year}";
+    _monthNotifier.value =
+        "${_months[_selectedDate.month - 1]} ${_selectedDate.year}";
     _generateWeekdaysList();
     _dateScrollController.addListener(_onDateScroll);
     _fetchDoctors();
@@ -165,7 +174,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
         .clamp(0, _upcomingWeekdays.length - 1);
 
     final visibleDate = _upcomingWeekdays[index];
-    final newMonthYear = "${_months[visibleDate.month - 1]} ${visibleDate.year}";
+    final newMonthYear =
+        "${_months[visibleDate.month - 1]} ${visibleDate.year}";
 
     // No setState → no full-screen rebuild. Only the month label updates.
     if (_monthNotifier.value != newMonthYear) {
@@ -179,7 +189,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     curr = DateTime(curr.year, curr.month, curr.day);
 
     while (list.length < 60) {
-      if (curr.weekday != DateTime.saturday && curr.weekday != DateTime.sunday) {
+      if (curr.weekday != DateTime.saturday &&
+          curr.weekday != DateTime.sunday) {
         list.add(curr);
       }
       curr = curr.add(const Duration(days: 1));
@@ -190,7 +201,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
         _selectedDate.weekday == DateTime.sunday) {
       _selectedDate = list.first;
     }
-    _monthNotifier.value = "${_months[_selectedDate.month - 1]} ${_selectedDate.year}";
+    _monthNotifier.value =
+        "${_months[_selectedDate.month - 1]} ${_selectedDate.year}";
   }
 
   bool _isSameDay(DateTime a, DateTime b) {
@@ -225,7 +237,10 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     final lastPeriod = last.split(' ').last;
 
     if (firstPeriod == lastPeriod) {
-      final firstTime = first.substring(0, first.length - firstPeriod.length - 1);
+      final firstTime = first.substring(
+        0,
+        first.length - firstPeriod.length - 1,
+      );
       return '$firstTime – $last';
     }
     return '$first – $last';
@@ -265,9 +280,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
           ),
         ),
         SizedBox(width: rs.w(12)),
-        Expanded(
-          child: Container(height: 1, color: borderColor),
-        ),
+        Expanded(child: Container(height: 1, color: borderColor)),
         SizedBox(width: rs.w(12)),
         // On a compact screen the range pushes the label off — hide it
         // and let the AM/PM block carry the meaning.
@@ -330,7 +343,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     return LayoutBuilder(
       builder: (context, constraints) {
         final slotWidth =
-            (constraints.maxWidth - (crossAxisCount - 1) * gap) / crossAxisCount;
+            (constraints.maxWidth - (crossAxisCount - 1) * gap) /
+            crossAxisCount;
         final slotHeight = slotWidth / 2.25;
 
         return Wrap(
@@ -340,7 +354,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
             final rawTime = slot['time'];
             final displayTime = _formatSlotDisplay(rawTime);
             final availability = slot['availabilityByType'] as Map?;
-            final isAvail = availability?[_selectedPurpose]?['available'] == true;
+            final isAvail =
+                availability?[_selectedPurpose]?['available'] == true;
             final isSelected = _selectedSlotTime == rawTime;
             final isDisabled = !isAvail;
 
@@ -357,15 +372,15 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                     color: isSelected
                         ? primaryGreen
                         : isDisabled
-                            ? disabledSlotBg
-                            : Colors.white,
+                        ? disabledSlotBg
+                        : Colors.white,
                     borderRadius: BorderRadius.circular(rs.r(22)),
                     border: Border.all(
                       color: isSelected
                           ? primaryGreen
                           : isDisabled
-                              ? Colors.transparent
-                              : borderColor,
+                          ? Colors.transparent
+                          : borderColor,
                       width: 1.2,
                     ),
                   ),
@@ -380,8 +395,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                       color: isSelected
                           ? Colors.white
                           : isDisabled
-                              ? disabledSlotText
-                              : textMain,
+                          ? disabledSlotText
+                          : textMain,
                     ),
                   ),
                 ),
@@ -438,16 +453,25 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     try {
       final res = await ApiConfig.client.get(
         Uri.parse(
-            '${ApiConfig.baseUrl}/api/appointments/slots?doctorId=$doctorId&date=$formattedDate'),
+          '${ApiConfig.baseUrl}/api/appointments/slots?doctorId=$doctorId&date=$formattedDate',
+        ),
         headers: {'Authorization': 'Bearer $token'},
       );
       if (!mounted || request != _slotsRequest) return;
       final data = jsonDecode(res.body);
-      if (res.statusCode != 200) throw StateError(data['error'] ?? 'Availability is unavailable.');
+      if (res.statusCode != 200)
+        throw StateError(data['error'] ?? 'Availability is unavailable.');
       final types = data['rules']?['appointmentTypes'] as List? ?? [];
-      final purposes = types.map((entry) => entry is Map ? entry['name'] : entry).whereType<String>().toList();
+      final purposes = types
+          .map((entry) => entry is Map ? entry['name'] : entry)
+          .whereType<String>()
+          .toList();
+      const excludedLunchTimes = {'12:00', '12:15', '12:30', '12:45'};
+      final slots = data['slots'] as List? ?? [];
       setState(() {
-        _slots = data['slots'] ?? [];
+        _slots = slots
+            .where((slot) => !excludedLunchTimes.contains(slot['time']))
+            .toList();
         _currentPurposes = purposes;
         if (!purposes.contains(_selectedPurpose)) {
           _selectedPurpose = purposes.isEmpty ? '' : purposes.first;
@@ -459,7 +483,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
         _showToast('Failed to load slots: $e', isError: true);
       }
     } finally {
-      if (mounted && request == _slotsRequest) setState(() => _loadingSlots = false);
+      if (mounted && request == _slotsRequest)
+        setState(() => _loadingSlots = false);
     }
   }
 
@@ -487,7 +512,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
       _showToast('Please select a doctor or dentist.', isError: true);
       return;
     }
-    if (_selectedSlotTime == null || !_currentPurposes.contains(_selectedPurpose)) {
+    if (_selectedSlotTime == null ||
+        !_currentPurposes.contains(_selectedPurpose)) {
       _showToast('Please select an available time slot.', isError: true);
       return;
     }
@@ -536,8 +562,11 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(rs.r(20)),
               ),
-              icon: const Icon(Icons.check_circle_outline,
-                  color: primaryGreen, size: 48),
+              icon: const Icon(
+                Icons.check_circle_outline,
+                color: primaryGreen,
+                size: 48,
+              ),
               title: Text(
                 'Consultation Scheduled',
                 style: TextStyle(
@@ -666,7 +695,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     final token = await _storage.read(key: 'jwt_token');
     try {
       final res = await ApiConfig.client.patch(
-        Uri.parse('${ApiConfig.baseUrl}/api/appointments/$appointmentId/cancel'),
+        Uri.parse(
+          '${ApiConfig.baseUrl}/api/appointments/$appointmentId/cancel',
+        ),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
@@ -692,7 +723,11 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     final firstDate = DateTime(now.year, now.month, now.day);
     final lastDate = firstDate.add(const Duration(days: 90));
 
-    DateTime initial = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
+    DateTime initial = DateTime(
+      _selectedDate.year,
+      _selectedDate.month,
+      _selectedDate.day,
+    );
     if (initial.isBefore(firstDate) ||
         initial.isAfter(lastDate) ||
         initial.weekday == DateTime.saturday ||
@@ -729,7 +764,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
         _monthNotifier.value = "${_months[picked.month - 1]} ${picked.year}";
         _fetchAvailableSlots();
 
-        final targetIndex = _upcomingWeekdays.indexWhere((d) => _isSameDay(d, picked));
+        final targetIndex = _upcomingWeekdays.indexWhere(
+          (d) => _isSameDay(d, picked),
+        );
         if (targetIndex != -1 && _dateScrollController.hasClients) {
           _dateScrollController.animateTo(
             targetIndex * _dateItemExtent,
@@ -781,7 +818,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
             _buildHeader(rs),
             SizedBox(height: rs.h(4)),
             Expanded(
-              child: _activeSubTab == 0 ? _buildBookingTab(rs) : _buildHistoryTab(rs),
+              child: _activeSubTab == 0
+                  ? _buildBookingTab(rs)
+                  : _buildHistoryTab(rs),
             ),
           ],
         ),
@@ -791,10 +830,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
 
   Widget _buildHeader(Rs rs) {
     return Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: rs.w(20),
-        vertical: rs.h(8),
-      ),
+      padding: EdgeInsets.symmetric(horizontal: rs.w(20), vertical: rs.h(8)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -838,7 +874,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                     child: Container(
                       padding: EdgeInsets.symmetric(vertical: rs.h(9)),
                       decoration: BoxDecoration(
-                        color: _activeSubTab == 0 ? primaryGreen : Colors.transparent,
+                        color: _activeSubTab == 0
+                            ? primaryGreen
+                            : Colors.transparent,
                         borderRadius: BorderRadius.circular(rs.r(20)),
                       ),
                       alignment: Alignment.center,
@@ -847,7 +885,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                         style: TextStyle(
                           fontSize: rs.sp(13),
                           fontWeight: FontWeight.w700,
-                          color: _activeSubTab == 0 ? Colors.white : primaryGreen,
+                          color: _activeSubTab == 0
+                              ? Colors.white
+                              : primaryGreen,
                         ),
                       ),
                     ),
@@ -860,7 +900,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                     child: Container(
                       padding: EdgeInsets.symmetric(vertical: rs.h(9)),
                       decoration: BoxDecoration(
-                        color: _activeSubTab == 1 ? primaryGreen : Colors.transparent,
+                        color: _activeSubTab == 1
+                            ? primaryGreen
+                            : Colors.transparent,
                         borderRadius: BorderRadius.circular(rs.r(20)),
                       ),
                       alignment: Alignment.center,
@@ -869,7 +911,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                         style: TextStyle(
                           fontSize: rs.sp(13),
                           fontWeight: FontWeight.w700,
-                          color: _activeSubTab == 1 ? Colors.white : primaryGreen,
+                          color: _activeSubTab == 1
+                              ? Colors.white
+                              : primaryGreen,
                         ),
                       ),
                     ),
@@ -885,17 +929,16 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
 
   Widget _buildBookingTab(Rs rs) {
     if (_loadingDoctors) {
-      return const Center(child: CircularProgressIndicator(color: primaryGreen));
+      return const Center(
+        child: CircularProgressIndicator(color: primaryGreen),
+      );
     }
 
     return RefreshIndicator(
       color: primaryGreen,
       onRefresh: _fetchAvailableSlots,
       child: ListView(
-        padding: EdgeInsets.symmetric(
-          horizontal: rs.w(20),
-          vertical: rs.h(8),
-        ),
+        padding: EdgeInsets.symmetric(horizontal: rs.w(20), vertical: rs.h(8)),
         scrollCacheExtent: ScrollCacheExtent.pixels(300),
         addAutomaticKeepAlives: false,
         addRepaintBoundaries: true,
@@ -968,7 +1011,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                 elevation: 0,
                 shape: const StadiumBorder(),
               ),
-              onPressed: _isSubmitting || _selectedSlotTime == null ? null : _submitBooking,
+              onPressed: _isSubmitting || _selectedSlotTime == null
+                  ? null
+                  : _submitBooking,
               child: _isSubmitting
                   ? const SizedBox(
                       width: 20,
@@ -1077,7 +1122,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                     ],
                   ),
                 ),
-                if (isSelected) const Icon(Icons.check, size: 18, color: primaryGreen),
+                if (isSelected)
+                  const Icon(Icons.check, size: 18, color: primaryGreen),
               ],
             ),
           ),
@@ -1087,41 +1133,120 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     return Column(children: items);
   }
 
+  IconData _purposeIcon(String purpose) {
+    final normalized = purpose.toLowerCase();
+    if (normalized.contains('general')) return Icons.chat_bubble_outline;
+    if (normalized.contains('prescription')) return Icons.medication_outlined;
+    if (normalized.contains('clearance')) return Icons.verified_user_outlined;
+    if (normalized.contains('physical examination')) {
+      return Icons.monitor_heart_outlined;
+    }
+    if (normalized.contains('dental checkup')) {
+      return Icons.medical_services_outlined;
+    }
+    if (normalized.contains('tooth extraction')) return Icons.healing_outlined;
+    if (normalized.contains('oral prophylaxis')) {
+      return Icons.cleaning_services_outlined;
+    }
+    if (normalized.contains('toothache emergency')) {
+      return Icons.emergency_outlined;
+    }
+    return Icons.medical_information_outlined;
+  }
+
   Widget _buildPurposeChips(Rs rs) {
-    return Wrap(
-      spacing: rs.w(8),
-      runSpacing: rs.h(8),
-      children: _currentPurposes.map((purpose) {
-        final isSelected = _selectedPurpose == purpose;
-        return GestureDetector(
-          onTap: () => setState(() {
-            if (_selectedPurpose != purpose) _selectedSlotTime = null;
-            _selectedPurpose = purpose;
-          }),
-          behavior: HitTestBehavior.opaque,
-          child: Container(
-            padding: EdgeInsets.symmetric(
-              horizontal: rs.w(16),
-              vertical: rs.h(10),
-            ),
-            decoration: BoxDecoration(
-              color: isSelected ? primaryGreen : Colors.white,
-              borderRadius: BorderRadius.circular(rs.r(20)),
-              border: Border.all(
-                color: isSelected ? primaryGreen : borderColor,
+    final spacing = rs.w(10);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final cardWidth = (constraints.maxWidth - spacing) / 2;
+        return Wrap(
+          spacing: spacing,
+          runSpacing: rs.h(10),
+          children: _currentPurposes.map((purpose) {
+            final isSelected = _selectedPurpose == purpose;
+            final radius = BorderRadius.circular(rs.r(18));
+            return SizedBox(
+              width: cardWidth,
+              child: Material(
+                color: Colors.transparent,
+                borderRadius: radius,
+                child: InkWell(
+                  borderRadius: radius,
+                  onTap: () => setState(() {
+                    if (_selectedPurpose != purpose) _selectedSlotTime = null;
+                    _selectedPurpose = purpose;
+                  }),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    constraints: BoxConstraints(minHeight: rs.h(104)),
+                    padding: EdgeInsets.all(rs.w(13)),
+                    decoration: BoxDecoration(
+                      color: isSelected ? softSage : Colors.white,
+                      borderRadius: radius,
+                      border: Border.all(
+                        color: isSelected ? primaryGreen : borderColor,
+                        width: isSelected ? 1.5 : 1,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(
+                            alpha: isSelected ? 0.06 : 0.025,
+                          ),
+                          blurRadius: isSelected ? 12 : 8,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: rs.w(36),
+                              height: rs.w(36),
+                              decoration: BoxDecoration(
+                                color: isSelected ? Colors.white : softSage,
+                                shape: BoxShape.circle,
+                              ),
+                              alignment: Alignment.center,
+                              child: Icon(
+                                _purposeIcon(purpose),
+                                size: rs.w(19),
+                                color: primaryGreen,
+                              ),
+                            ),
+                            const Spacer(),
+                            Icon(
+                              isSelected
+                                  ? Icons.check_circle_rounded
+                                  : Icons.circle_outlined,
+                              size: rs.w(19),
+                              color: isSelected ? primaryGreen : borderColor,
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: rs.h(12)),
+                        Text(
+                          purpose,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: rs.sp(13),
+                            fontWeight: FontWeight.w700,
+                            color: textMain,
+                            height: 1.2,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-            ),
-            child: Text(
-              purpose,
-              style: TextStyle(
-                fontSize: rs.sp(12.5),
-                fontWeight: FontWeight.w600,
-                color: isSelected ? Colors.white : textMain,
-              ),
-            ),
-          ),
+            );
+          }).toList(),
         );
-      }).toList(),
+      },
     );
   }
 
@@ -1170,7 +1295,11 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                   ),
                 ),
                 SizedBox(width: rs.w(4)),
-                const Icon(Icons.arrow_drop_down, color: primaryGreen, size: 20),
+                const Icon(
+                  Icons.arrow_drop_down,
+                  color: primaryGreen,
+                  size: 20,
+                ),
               ],
             ),
           ),
@@ -1203,15 +1332,11 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
           final isSelected = _isSameDay(date, _selectedDate);
 
           final dayName = weekdayAbbr[date.weekday - 1];
-          final isMonthStart =
-              index == 0 || date.month != _upcomingWeekdays[index - 1].month;
-          final monthBadge = _monthsAbbr[date.month - 1];
 
           return GestureDetector(
             onTap: () {
               setState(() => _selectedDate = date);
-              _monthNotifier.value =
-                  "${_months[date.month - 1]} ${date.year}";
+              _monthNotifier.value = "${_months[date.month - 1]} ${date.year}";
               _fetchAvailableSlots();
             },
             behavior: HitTestBehavior.opaque,
@@ -1241,41 +1366,17 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    if (isMonthStart)
-                      Container(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: rs.w(5),
-                          vertical: rs.h(1),
-                        ),
-                        margin: EdgeInsets.only(bottom: rs.h(2)),
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? Colors.white.withValues(alpha: 0.25)
-                              : softSage,
-                          borderRadius: BorderRadius.circular(rs.r(6)),
-                        ),
-                        child: Text(
-                          monthBadge,
-                          style: TextStyle(
-                            fontSize: rs.sp(9),
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.6,
-                            color: isSelected ? Colors.white : primaryGreen,
-                          ),
-                        ),
-                      )
-                    else
-                      Text(
-                        dayName,
-                        style: TextStyle(
-                          fontSize: rs.sp(11),
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.5,
-                          color: isSelected
-                              ? Colors.white.withValues(alpha: 0.85)
-                              : _monthTagColor,
-                        ),
+                    Text(
+                      dayName,
+                      style: TextStyle(
+                        fontSize: rs.sp(11),
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.5,
+                        color: isSelected
+                            ? Colors.white.withValues(alpha: 0.85)
+                            : textSub,
                       ),
+                    ),
                     SizedBox(height: rs.h(4)),
                     Text(
                       '${date.day}',
@@ -1320,8 +1421,12 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
       );
     }
 
-    final amSlots = _slots.where((s) => _isMorning(s['time'] as String)).toList();
-    final pmSlots = _slots.where((s) => !_isMorning(s['time'] as String)).toList();
+    final amSlots = _slots
+        .where((s) => _isMorning(s['time'] as String))
+        .toList();
+    final pmSlots = _slots
+        .where((s) => !_isMorning(s['time'] as String))
+        .toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1381,7 +1486,10 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
           ),
           SizedBox(height: rs.h(12)),
           _CheckItem(rs: rs, text: 'Bring your university ID and health pass.'),
-          _CheckItem(rs: rs, text: 'Arrive 10 minutes before your appointment.'),
+          _CheckItem(
+            rs: rs,
+            text: 'Arrive 10 minutes before your appointment.',
+          ),
           _CheckItem(rs: rs, text: 'Keep a list of any medications you take.'),
           Divider(color: _dividerSoft, height: rs.h(24)),
           Row(
@@ -1416,7 +1524,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
 
   Widget _buildHistoryTab(Rs rs) {
     if (_loadingHistory) {
-      return const Center(child: CircularProgressIndicator(color: primaryGreen));
+      return const Center(
+        child: CircularProgressIndicator(color: primaryGreen),
+      );
     }
 
     if (_myAppointments.isEmpty) {
@@ -1452,17 +1562,16 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
       color: primaryGreen,
       onRefresh: _fetchMyAppointments,
       child: ListView.builder(
-        padding: EdgeInsets.symmetric(
-          horizontal: rs.w(20),
-          vertical: rs.h(8),
-        ),
+        padding: EdgeInsets.symmetric(horizontal: rs.w(20), vertical: rs.h(8)),
         itemCount: _myAppointments.length,
         addAutomaticKeepAlives: false,
         addRepaintBoundaries: true,
         addSemanticIndexes: false,
         itemBuilder: (context, index) {
           final item = _myAppointments[index];
-          final status = (item['status'] ?? 'scheduled').toString().toLowerCase();
+          final status = (item['status'] ?? 'scheduled')
+              .toString()
+              .toLowerCase();
 
           final isConfirmed = status == 'scheduled' || status == 'checked_in';
           final isCompleted = status == 'completed';
@@ -1517,20 +1626,22 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                           color: isConfirmed
                               ? const Color(0xFFE5EDE4)
                               : isCompleted
-                                  ? const Color(0xFFE2EBE1)
-                                  : const Color(0xFFFDE8E8),
+                              ? const Color(0xFFE2EBE1)
+                              : const Color(0xFFFDE8E8),
                           borderRadius: BorderRadius.circular(rs.r(12)),
                         ),
                         child: Text(
-                          status == 'scheduled' ? 'Confirmed' : status.toUpperCase(),
+                          status == 'scheduled'
+                              ? 'Confirmed'
+                              : status.toUpperCase(),
                           style: TextStyle(
                             fontSize: rs.sp(10.5),
                             fontWeight: FontWeight.w700,
                             color: isConfirmed
                                 ? primaryGreen
                                 : isCompleted
-                                    ? const Color(0xFF15803D)
-                                    : const Color(0xFF9B1C1C),
+                                ? const Color(0xFF15803D)
+                                : const Color(0xFF9B1C1C),
                           ),
                         ),
                       ),
@@ -1550,12 +1661,17 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                   SizedBox(height: rs.h(6)),
                   Row(
                     children: [
-                      Icon(Icons.event_outlined, size: rs.w(15), color: textSub),
+                      Icon(
+                        Icons.event_outlined,
+                        size: rs.w(15),
+                        color: textSub,
+                      ),
                       SizedBox(width: rs.w(6)),
                       Expanded(
                         child: Text(
                           _formatDateTime(
-                              item['formatted_date_time'] ?? item['date_time']),
+                            item['formatted_date_time'] ?? item['date_time'],
+                          ),
                           style: TextStyle(
                             fontSize: rs.sp(12.5),
                             fontWeight: FontWeight.w700,
@@ -1569,7 +1685,11 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                   SizedBox(height: rs.h(4)),
                   Row(
                     children: [
-                      Icon(Icons.location_on_outlined, size: rs.w(15), color: textSub),
+                      Icon(
+                        Icons.location_on_outlined,
+                        size: rs.w(15),
+                        color: textSub,
+                      ),
                       SizedBox(width: rs.w(6)),
                       Expanded(
                         child: Text(
@@ -1581,7 +1701,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                       ),
                     ],
                   ),
-                  if (item['notes'] != null && item['notes'].toString().isNotEmpty) ...[
+                  if (item['notes'] != null &&
+                      item['notes'].toString().isNotEmpty) ...[
                     SizedBox(height: rs.h(10)),
                     Container(
                       width: double.infinity,
