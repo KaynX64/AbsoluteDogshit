@@ -40,5 +40,8 @@ mobile/android/app/google-services.json
 audit.md
 draft_prompts.txt
 
+#ai_pdfs
+output
+
 #fails
 /desktop/release-refactor
