@@ -1,3 +1,5 @@
+// Validates password changes, updates the credential, and attempts to revoke the current session.
+
 import bcrypt from 'bcryptjs';
 import { pool } from '../db/pool.js';
 import { logAudit } from '../utils/auditLogger.js';

@@ -1,3 +1,5 @@
+// Schedules background jobs, skips overlapping runs, reports metrics, and drains active work.
+
 import { recordOperation } from '../bootstrap/operationEvents.js';
 import { performance } from 'node:perf_hooks';
 

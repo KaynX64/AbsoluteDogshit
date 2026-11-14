@@ -1,3 +1,5 @@
+// Adds the incident records permission to the admin catalog.
+
 export default {
   version: 6,
   name: 'incident records view permission',

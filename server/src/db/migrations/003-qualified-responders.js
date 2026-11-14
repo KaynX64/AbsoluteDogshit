@@ -1,3 +1,5 @@
+// Adds qualified responder eligibility and backfills legacy accounts when needed.
+
 import { ensureColumns, ensureIndex, readColumn } from './schema.js';
 
 export default {

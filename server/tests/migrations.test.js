@@ -1,3 +1,5 @@
+// Rehearses fresh, legacy, and interrupted database upgrades against disposable MySQL.
+
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';

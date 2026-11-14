@@ -1,3 +1,5 @@
+// Validates and saves health profile changes, encrypts clinical text, and records the audit entry.
+
 import { isCalendarDate } from '../../config/appointmentRules.js';
 import { fail } from '../../utils/httpError.js';
 import { encrypt } from '../../utils/cryptoVault.js';

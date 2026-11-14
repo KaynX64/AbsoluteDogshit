@@ -1,3 +1,5 @@
+// Removes payload and error text columns from the replay ledger while preserving recorded outcomes.
+
 import { readColumn } from './schema.js';
 
 export default {

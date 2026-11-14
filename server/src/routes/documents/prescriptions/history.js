@@ -1,3 +1,5 @@
+// Lists saved prescriptions and medication instructions for patients and issuing clinicians.
+
 import { pool } from '../../../db/pool.js';
 import { authenticateToken } from '../../../auth/middleware.js';
 import { requireRoles } from '../../../middleware/rbac.js';

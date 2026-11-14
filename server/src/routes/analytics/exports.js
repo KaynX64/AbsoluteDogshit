@@ -1,3 +1,5 @@
+// Loads authorized analytics data and returns CSV, Excel, or PDF reports.
+
 import { getDiagnosisCounts } from '../../analytics/analyticsStats.js';
 import { loadSurveillance } from '../../analytics/summary.js';
 import { getPharmacyAnalytics } from '../../inventory/pharmacyAnalytics.js';

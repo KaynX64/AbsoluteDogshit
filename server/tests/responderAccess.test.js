@@ -1,3 +1,4 @@
+// Checks responder eligibility, alert payload redaction, and flag validation.
 // server/tests/responderAccess.test.js
 // Run with: node --test server/tests/responderAccess.test.js
 // Pure functions only — no MySQL, no Redis (the existing tests inject

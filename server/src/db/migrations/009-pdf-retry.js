@@ -1,3 +1,5 @@
+// Adds retry timestamps and indexes for clinical PDFs waiting to be generated.
+
 import { ensureColumns, ensureIndex } from './schema.js';
 
 export default {

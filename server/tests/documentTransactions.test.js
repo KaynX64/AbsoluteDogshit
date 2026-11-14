@@ -1,3 +1,5 @@
+// Tests document transaction boundaries, history data, encounter input, and stock linkage.
+
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 

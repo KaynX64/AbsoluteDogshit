@@ -1,3 +1,4 @@
+// Resolves live responder eligibility and restricts each alert payload to the recipient's access tier.
 // server/src/emergency/responderAccess.js
 import { pool } from '../db/pool.js';
 

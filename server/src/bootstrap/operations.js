@@ -1,3 +1,5 @@
+// Defines the Admin Terminal's built-in diagnostics and exposes process status.
+
 import { collectSystemStatus } from './systemStatus.js';
 import { randomUUID } from 'node:crypto';
 import { pool } from '../db/pool.js';

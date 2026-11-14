@@ -1,3 +1,5 @@
+// Verifies live session grouping, account details, and filtering of expired sockets.
+
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 

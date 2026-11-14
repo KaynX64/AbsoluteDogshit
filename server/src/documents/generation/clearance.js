@@ -1,3 +1,5 @@
+// Loads saved clearance and signing details, then renders and stores the PDF.
+
 import { pool } from '../../db/pool.js';
 import { renderClearancePDF } from '../pdf/templates/clearance.js';
 import { loadSignature } from '../signing/signatureVault.js';

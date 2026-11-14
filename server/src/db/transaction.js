@@ -1,3 +1,5 @@
+// Runs database work with a pooled transaction and handles commit, rollback, and release.
+
 import { pool } from './pool.js';
 
 export async function inTransaction(work) {

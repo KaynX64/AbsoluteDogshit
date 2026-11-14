@@ -1,3 +1,5 @@
+// Tests supervised restart handoff and replacement failure reporting.
+
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';

@@ -1,3 +1,5 @@
+// Lists booking clinicians, available slots, and the caller's appointments.
+
 import { pool } from '../../../db/pool.js';
 import { authenticateToken } from '../../../auth/middleware.js';
 import { requirePrivacyConsent } from '../../../middleware/consent.js';

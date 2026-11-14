@@ -1,3 +1,5 @@
+// Returns replay ledger totals grouped by sync status.
+
 import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth/middleware.js';
 

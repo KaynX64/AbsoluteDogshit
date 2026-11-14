@@ -1,3 +1,5 @@
+// Adds the appointment status and date index used for clinic-day queries.
+
 import { ensureIndex } from './schema.js';
 
 export default {

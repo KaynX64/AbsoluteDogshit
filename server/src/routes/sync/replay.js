@@ -1,3 +1,5 @@
+// Validates replay batches and checks current ownership for legacy offline encounters.
+
 import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';
 import { assignedReplayAppointments } from '../../sync/legacyOwnership.js';

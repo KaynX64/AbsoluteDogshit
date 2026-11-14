@@ -1,3 +1,5 @@
+// Updates qualified responder eligibility and notifies the affected account.
+
 import { pool } from '../../db/pool.js';
 import { requirePermission } from '../../middleware/rbac.js';
 import { logAudit } from '../../utils/auditLogger.js';

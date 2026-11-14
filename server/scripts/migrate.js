@@ -1,3 +1,5 @@
+// Runs pending database migrations from the command line and closes the connection pool.
+
 import { pool } from '../src/db/pool.js';
 import { runMigrations } from '../src/db/migrate.js';
 

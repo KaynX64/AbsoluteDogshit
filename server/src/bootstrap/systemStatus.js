@@ -1,3 +1,5 @@
+// Collects host resources, server version and uptime, and MySQL, Redis, and MinIO health.
+
 import os from 'node:os';
 import { readFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';

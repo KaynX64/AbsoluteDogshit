@@ -1,3 +1,5 @@
+// Allocates eligible lots by earliest expiry and records prescription deductions and returns.
+
 import { logAudit } from '../utils/auditLogger.js';
 
 export async function planStock(connection, requestedByMedicine) {

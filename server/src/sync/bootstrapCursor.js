@@ -1,3 +1,5 @@
+// Signs and validates desktop bootstrap cursors bound to the authenticated account.
+
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { JWT_SECRET } from '../utils/secrets.js';
 

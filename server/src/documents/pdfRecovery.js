@@ -1,3 +1,5 @@
+// Retries missing clinical PDFs in bounded batches and defers failed attempts.
+
 import { pool } from '../db/pool.js';
 import {
   generateAndStorePrescriptionPDF,

@@ -1,3 +1,5 @@
+// Validates and creates appointments under the booking policy and sends confirmation after commit.
+
 import { pool } from '../../../db/pool.js';
 import { authenticateToken } from '../../../auth/middleware.js';
 import { requirePrivacyConsent } from '../../../middleware/consent.js';

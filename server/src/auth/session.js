@@ -1,3 +1,5 @@
+// Shares revocation key generation and active account checks between HTTP and Socket.IO.
+
 import { pool } from '../db/pool.js';
 
 export function sessionBlocklistKey(user, token) {

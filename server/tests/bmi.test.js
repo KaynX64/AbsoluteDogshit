@@ -1,3 +1,4 @@
+// Checks BMI category boundaries and handling of missing or invalid values.
 // server/tests/bmi.test.js
 import test from 'node:test';
 import assert from 'node:assert/strict';

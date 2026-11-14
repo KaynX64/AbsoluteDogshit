@@ -1,3 +1,5 @@
+// Mounts admin routes under the authentication and administrator role gates.
+
 import express from 'express';
 import operationsRoutes from './operations.js';
 import { registerPresenceRoutes } from './presence.js';

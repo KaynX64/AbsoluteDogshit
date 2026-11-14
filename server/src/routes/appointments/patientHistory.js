@@ -1,3 +1,5 @@
+// Serves paged encounter history, attachment metadata, and patient search to authorized staff.
+
 import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';

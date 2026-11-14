@@ -1,3 +1,5 @@
+// Adapts a Google service account to Firebase's scoped OAuth credential interface.
+
 import { createPrivateKey } from 'node:crypto';
 import { JWT } from 'google-auth-library';
 

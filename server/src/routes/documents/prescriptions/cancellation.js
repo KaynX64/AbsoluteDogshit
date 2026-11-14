@@ -1,3 +1,5 @@
+// Handles prescription cancellation requests, including stock restoration and realtime updates.
+
 import { cancelPrescription } from '../../../documents/prescriptions/cancelPrescription.js';
 import { authenticateToken } from '../../../auth/middleware.js';
 import { requireRoles } from '../../../middleware/rbac.js';

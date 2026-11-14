@@ -1,3 +1,5 @@
+// Drains the network listener and worker jobs before closing shared dependencies.
+
 export async function drainServer({ io, stopWorkers, closeDependencies }) {
   const results = await Promise.allSettled([
     Promise.resolve().then(stopWorkers),

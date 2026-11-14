@@ -1,3 +1,5 @@
+// Creates and archives medicine catalog entries with transactional auditing.
+
 import { inTransaction } from '../db/transaction.js';
 import { logAudit } from '../utils/auditLogger.js';
 import { fail } from '../utils/httpError.js';

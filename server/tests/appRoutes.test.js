@@ -1,3 +1,5 @@
+// Exercises mounted API routes with service doubles to verify permissions and response contracts.
+
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';

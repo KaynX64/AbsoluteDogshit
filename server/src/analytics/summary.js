@@ -1,3 +1,5 @@
+// Assembles the dashboard sections the caller can access and loads their aggregate metrics.
+
 import { pool } from '../db/pool.js';
 import { decrypt } from '../utils/cryptoVault.js';
 import { getPharmacyAnalytics } from '../inventory/pharmacyAnalytics.js';

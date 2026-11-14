@@ -1,3 +1,5 @@
+// Claims due reminders, sends email, and records delivery before later notifications.
+
 import { createHash } from 'node:crypto';
 import { pool } from '../db/pool.js';
 import { sendAppointmentEmail } from '../utils/mailer.js';

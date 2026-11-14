@@ -1,3 +1,5 @@
+// Initializes database migrations, policy, Redis, and object storage and closes shared clients at shutdown.
+
 import { pool } from '../db/pool.js';
 import { runMigrations } from '../db/migrate.js';
 import { loadServerPolicy } from '../utils/serverPolicyStore.js';

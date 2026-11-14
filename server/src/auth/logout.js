@@ -1,3 +1,5 @@
+// Revokes the current session when Redis is available, disconnects its sockets, and records logout.
+
 import { pool } from '../db/pool.js';
 import { disconnectSessionSockets } from '../realtime/presence.js';
 import { logAudit } from '../utils/auditLogger.js';

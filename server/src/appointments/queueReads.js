@@ -1,3 +1,5 @@
+// Queries the clinician roster, expected arrivals, no-show counts, and queue tickets.
+
 import { pool } from '../db/pool.js';
 import { decrypt } from '../utils/cryptoVault.js';
 import { getBmiCategory } from '../utils/bmi.js';

@@ -1,3 +1,5 @@
+// Serves Terminal status and diagnostic commands and authorizes audited supervisor restarts.
+
 import express from 'express';
 import { classifyAdminPermissions } from '../../middleware/rbac.js';
 import { pool } from '../../db/pool.js';

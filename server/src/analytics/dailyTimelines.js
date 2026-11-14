@@ -1,3 +1,5 @@
+// Builds aligned daily encounter and SOS timelines from the reporting calendar.
+
 import { pool } from '../db/pool.js';
 
 export async function getDailyTimelines() {

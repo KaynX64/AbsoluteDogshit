@@ -1,3 +1,5 @@
+// Recovers missing clinical PDFs and tracks the oldest pending document for telemetry.
+
 import { createHash } from 'node:crypto';
 import { pool } from '../db/pool.js';
 import { recoverMissingPdfs } from '../documents/pdfRecovery.js';

@@ -1,3 +1,5 @@
+// Serves roster, arrival, and ticket reads and handles clinical queue status changes.
+
 import { inTransaction } from '../../db/transaction.js';
 import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';

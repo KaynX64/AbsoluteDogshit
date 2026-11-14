@@ -1,3 +1,5 @@
+// Handles EMR file upload, patient attachment lists, and authenticated downloads.
+
 import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth/middleware.js';
 import { authenticateAttachmentDownload, issueAttachmentDownloadToken } from '../../auth/attachmentTokens.js';

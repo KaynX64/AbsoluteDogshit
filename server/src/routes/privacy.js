@@ -1,3 +1,4 @@
+// Records privacy consent changes and serves consent status and retention controls.
 // server/src/routes/privacy.js
 import express from 'express';
 import { pool } from '../db/pool.js';

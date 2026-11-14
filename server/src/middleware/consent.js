@@ -1,3 +1,4 @@
+// Checks the caller's current privacy consent before protected requests proceed.
 // server/src/middleware/consent.js
 import { pool } from '../db/pool.js';
 

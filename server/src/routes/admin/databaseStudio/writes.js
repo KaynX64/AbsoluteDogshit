@@ -1,3 +1,5 @@
+// Validates and audits Database Studio row creation, edits, and deletion.
+
 import { pool } from '../../../db/pool.js';
 import { logAudit } from '../../../utils/auditLogger.js';
 import { fail } from '../../../utils/httpError.js';

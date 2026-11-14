@@ -1,3 +1,5 @@
+// Applies the incident archive permission to admin requests and preserves patient access checks.
+
 import { requirePermission } from '../middleware/rbac.js';
 
 export const requireIncidentRecordsView = requirePermission('INCIDENT_RECORDS_VIEW');

@@ -1,3 +1,5 @@
+// Applies the active no-show rule and publishes updates for affected appointments.
+
 import { getServerPolicy } from '../config/serverPolicy.js';
 import { markDueAppointmentsNoShow } from '../appointments/noShow.js';
 

@@ -1,3 +1,5 @@
+// Locks accounts and applies role changes while preserving admin protections and role profile consistency.
+
 import { resolveAdminPermissions } from '../../middleware/rbac.js';
 import { fail } from '../../utils/httpError.js';
 import { getUserRoleCode } from './permissions.js';

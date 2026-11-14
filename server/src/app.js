@@ -1,3 +1,5 @@
+// Creates the Express app, configures request middleware, and mounts the API routes.
+
 import express from 'express';
 import cors from 'cors';
 import { loginUser, loginRateLimit } from './auth/login.js';

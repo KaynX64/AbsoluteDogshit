@@ -1,3 +1,5 @@
+// Authorizes and serves prescription, clearance, and incident report PDFs.
+
 import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth/middleware.js';
 import { requireIncidentRecordsViewForAdmin } from '../../emergency/incidentRecordAccess.js';

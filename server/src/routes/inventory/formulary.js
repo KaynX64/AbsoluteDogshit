@@ -1,3 +1,5 @@
+// Handles medicine catalog creation and archival and publishes inventory updates.
+
 import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';
 import { archiveMedicine, createMedicine } from '../../inventory/formularyMutations.js';

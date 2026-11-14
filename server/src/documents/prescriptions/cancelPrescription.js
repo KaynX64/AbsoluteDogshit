@@ -1,3 +1,5 @@
+// Cancels a prescription and restores associated stock in the same transaction.
+
 import { inTransaction } from '../../db/transaction.js';
 import { restorePrescriptionStock } from '../../inventory/prescriptionStock.js';
 import { logAudit } from '../../utils/auditLogger.js';

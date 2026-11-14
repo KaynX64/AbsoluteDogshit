@@ -1,3 +1,5 @@
+// Handles authorized booking cancellations and publishes the resulting updates.
+
 import { pool } from '../../../db/pool.js';
 import { authenticateToken } from '../../../auth/middleware.js';
 import { logAudit } from '../../../utils/auditLogger.js';

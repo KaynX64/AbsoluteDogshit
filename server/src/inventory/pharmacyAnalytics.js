@@ -1,3 +1,5 @@
+// Aggregates prescribing, dispensing, and returns and ranks replenishment by usable stock.
+
 import { pool } from '../db/pool.js';
 
 const windowDays = 14;

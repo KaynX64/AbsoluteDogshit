@@ -1,3 +1,5 @@
+// Validates prescription input and calls the signed prescribing and dispensing workflow.
+
 import { authenticateToken } from '../../../auth/middleware.js';
 import { requireRoles } from '../../../middleware/rbac.js';
 import { isCalendarDate } from '../../../config/appointmentRules.js';

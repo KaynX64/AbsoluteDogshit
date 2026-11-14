@@ -1,3 +1,5 @@
+// Applies Database Studio access and table policy before mounting reads and writes.
+
 import { requirePermission, resolveAdminPermissions } from '../../../middleware/rbac.js';
 import { isReadOnlyTable, isSecurityTable, readOnlyMessage, securityTableMessage } from './tablePolicy.js';
 import { registerDatabaseStudioReads } from './reads.js';

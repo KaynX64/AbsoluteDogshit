@@ -1,3 +1,5 @@
+// Handles authorized manual stock deductions and adjustments.
+
 import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';
 import { deductStock, adjustStock } from '../../inventory/stockMutations.js';

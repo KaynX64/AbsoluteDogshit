@@ -1,3 +1,5 @@
+// Adds the Terminal diagnostics permission to the admin catalog.
+
 export default {
   version: 10,
   name: 'Terminal access permission',

@@ -1,3 +1,5 @@
+// Serializes versioned database upgrades and records their progress in the migration ledger.
+
 import { createHash } from 'node:crypto';
 import foundation from './migrations/001-foundation.js';
 import clinicalDocuments from './migrations/002-clinical-documents.js';

@@ -1,3 +1,5 @@
+// Processes offline changes in transactions and stores outcomes for duplicate detection.
+
 import { pool } from '../db/pool.js';
 import { logAudit } from '../utils/auditLogger.js';
 import { updateAppointment } from './appointmentMutations.js';

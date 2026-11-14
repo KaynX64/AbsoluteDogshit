@@ -1,3 +1,5 @@
+// Marks overdue scheduled appointments as no-shows within a transaction.
+
 import { inTransaction } from '../db/transaction.js';
 
 export function markDueAppointmentsNoShow(graceMinutes) {

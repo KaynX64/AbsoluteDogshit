@@ -1,3 +1,5 @@
+// Serves the live connected-session list to admins with telemetry access.
+
 import { requirePermission } from '../../middleware/rbac.js';
 import { listConnectedSessions } from '../../realtime/presence.js';
 

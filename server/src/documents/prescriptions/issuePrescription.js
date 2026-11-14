@@ -1,3 +1,5 @@
+// Issues a signed prescription, deducts formulary stock, and generates its PDF after commit.
+
 import { planStock, applyStockDeductions } from '../../inventory/prescriptionStock.js';
 import crypto from 'crypto';
 import { pool } from '../../db/pool.js';

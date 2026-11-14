@@ -1,3 +1,5 @@
+// Serves formulary, lot, expiry, reorder, and stock movement views.
+
 import { pool } from '../../db/pool.js';
 import { listReorderSuggestions } from '../../inventory/pharmacyAnalytics.js';
 import { authenticateToken } from '../../auth/middleware.js';

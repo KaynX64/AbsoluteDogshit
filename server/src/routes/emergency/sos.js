@@ -1,3 +1,5 @@
+// Rate-limits and records SOS alerts, then notifies eligible responders with tiered data.
+
 import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth/middleware.js';
 import { decrypt } from '../../utils/cryptoVault.js';

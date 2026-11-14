@@ -1,3 +1,5 @@
+// Creates the shared MySQL connection pool from deployment settings.
+
 import mysql from 'mysql2/promise';
 import dotenv from 'dotenv';
 

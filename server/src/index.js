@@ -1,3 +1,5 @@
+// Starts the API and realtime server, handles supervisor messages, and coordinates graceful shutdown.
+
 import dotenv from 'dotenv';
 import { createApp, createOriginCheck, mountApiRoutes } from './app.js';
 import { createHttpServer } from './server.js';

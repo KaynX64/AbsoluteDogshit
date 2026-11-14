@@ -1,3 +1,5 @@
+// Changes due prescriptions to expired and audits each committed transition.
+
 import { inTransaction } from '../../db/transaction.js';
 import { logAudit } from '../../utils/auditLogger.js';
 

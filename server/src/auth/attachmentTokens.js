@@ -1,3 +1,5 @@
+// Issues and verifies short-lived, single-use browser download tokens bound to individual attachments.
+
 import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '../utils/secrets.js';
 import { redis, isRedisActive } from '../utils/redisClient.js';

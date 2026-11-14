@@ -1,3 +1,4 @@
+// Loads and validates the required session-signing and encryption secrets.
 // ── server/src/utils/secrets.js (NEW) ───────────────────────────────
 
 import 'dotenv/config';

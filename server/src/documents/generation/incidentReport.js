@@ -1,3 +1,5 @@
+// Loads incident and responder details, then renders and stores the report PDF.
+
 import { pool } from '../../db/pool.js';
 import { decrypt } from '../../utils/cryptoVault.js';
 import { renderIncidentReportPDF } from '../pdf/templates/incidentReport.js';

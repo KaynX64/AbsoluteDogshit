@@ -1,3 +1,5 @@
+// Replays encounter creation and author edits through clinical validation and encrypted writes.
+
 import { fail } from '../utils/httpError.js';
 import { encrypt } from '../utils/cryptoVault.js';
 import { completeEncounter, prepareEncounter } from '../appointments/completeEncounter.js';

@@ -1,3 +1,4 @@
+// Verifies v2 encryption, integrity checking, and startup key validation in isolated processes.
 // server/tests/cryptoVault.test.js
 //
 // Run from the server folder:  node --test tests/cryptoVault.test.js

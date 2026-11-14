@@ -1,3 +1,5 @@
+// Tests Firebase OAuth token retrieval, refresh, and invalid service-account handling.
+
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
 import { test } from 'node:test';

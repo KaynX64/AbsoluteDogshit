@@ -1,3 +1,5 @@
+// Discovers allowed tables and reads column and primary-key metadata for Database Studio.
+
 import { pool } from '../../../db/pool.js';
 import { fail } from '../../../utils/httpError.js';
 

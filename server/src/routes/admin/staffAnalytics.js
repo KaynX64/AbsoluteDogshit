@@ -1,3 +1,5 @@
+// Lets Super Admins read and save analytics scope overrides for staff accounts.
+
 import { classifyAdminPermissions } from '../../middleware/rbac.js';
 import { pool } from '../../db/pool.js';
 import { inTransaction } from '../../db/transaction.js';

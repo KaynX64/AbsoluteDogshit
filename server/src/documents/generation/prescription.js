@@ -1,3 +1,5 @@
+// Loads the signed prescription and its medicine lines, then renders and stores the PDF.
+
 import { pool } from '../../db/pool.js';
 import { decrypt } from '../../utils/cryptoVault.js';
 import { renderPrescriptionPDF } from '../pdf/templates/prescription.js';

@@ -1,3 +1,5 @@
+// Runs the API as a child process and replaces it after an approved restart.
+
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 

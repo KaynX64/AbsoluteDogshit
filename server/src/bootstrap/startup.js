@@ -1,3 +1,5 @@
+// Checks dependencies, opens the server listener, and starts the background scheduler.
+
 import { once } from 'node:events';
 import { logActiveLimits } from '../config/limits.js';
 import { getServerPolicy } from '../config/serverPolicy.js';

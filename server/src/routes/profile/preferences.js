@@ -1,3 +1,5 @@
+// Updates theme preferences and registers device tokens for push notifications.
+
 import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth/middleware.js';
 import { THEME_MODES, THEME_PRESETS } from '../../config/themePreferences.js';

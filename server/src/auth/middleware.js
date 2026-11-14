@@ -1,3 +1,5 @@
+// Authenticates HTTP requests and checks token revocation and active account status.
+
 import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '../utils/secrets.js';
 import { redis, isRedisActive } from '../utils/redisClient.js';

@@ -1,3 +1,5 @@
+// Indexes prescription issue dates and stock movement dates for pharmacy analytics.
+
 import { ensureIndex } from './schema.js';
 
 export default {

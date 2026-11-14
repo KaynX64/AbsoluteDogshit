@@ -1,3 +1,5 @@
+// Shares active queue lookup and the ticket counter identifier across intake handlers.
+
 export const intakeCounterId = 1;
 
 // Shared guard: active queue ticket check

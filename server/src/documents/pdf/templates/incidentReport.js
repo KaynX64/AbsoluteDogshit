@@ -1,3 +1,5 @@
+// Lays out incident details, response notes, and official report metadata in a PDF.
+
 import {
   BRAND_GREEN,
   BRAND_SOFT,

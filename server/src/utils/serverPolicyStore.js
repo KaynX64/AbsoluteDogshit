@@ -1,3 +1,5 @@
+// Loads runtime policy and commits version-checked updates with their audit entry.
+
 import { pool } from '../db/pool.js';
 import { activateServerPolicy, makeServerPolicy, validatePolicyOverrides } from '../config/serverPolicy.js';
 import { logAudit } from './auditLogger.js';

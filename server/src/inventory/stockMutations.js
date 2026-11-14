@@ -1,3 +1,5 @@
+// Receives, deducts, and adjusts medicine lots and writes their stock ledger entries.
+
 import { inTransaction } from '../db/transaction.js';
 import { logAudit } from '../utils/auditLogger.js';
 import { fail } from '../utils/httpError.js';

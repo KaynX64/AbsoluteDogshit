@@ -1,3 +1,5 @@
+// Issues and revokes medical clearances and coordinates post-commit PDF generation.
+
 import crypto from 'node:crypto';
 import { inTransaction } from '../db/transaction.js';
 import { logAudit } from '../utils/auditLogger.js';

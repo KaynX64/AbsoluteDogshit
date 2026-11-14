@@ -1,3 +1,5 @@
+// Serves the public QR verification page and a limited verification response.
+
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';

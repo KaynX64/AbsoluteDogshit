@@ -1,3 +1,4 @@
+// Tests Database Studio table restrictions, value masking, and safe writes.
 // server/tests/dbStudioGuard.test.js
 //
 // Run from the server folder:  node --test tests/dbStudioGuard.test.js

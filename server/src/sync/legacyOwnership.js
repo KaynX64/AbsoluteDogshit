@@ -1,3 +1,5 @@
+// Finds requested appointments assigned to the currently eligible clinician for legacy queue recovery.
+
 import { pool } from '../db/pool.js';
 
 export async function assignedReplayAppointments(userId, appointmentIds) {

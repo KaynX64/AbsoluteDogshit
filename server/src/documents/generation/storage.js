@@ -1,3 +1,5 @@
+// Uploads a generated PDF and publishes its object key on the document record.
+
 import crypto from 'node:crypto';
 import { deleteFromS3, uploadToS3 } from '../../utils/s3Vault.js';
 

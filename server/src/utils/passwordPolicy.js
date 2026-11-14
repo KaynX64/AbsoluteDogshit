@@ -1,3 +1,4 @@
+// Evaluates password strength and rejects common or account-derived values.
 // server/src/utils/passwordPolicy.js
 
 /**

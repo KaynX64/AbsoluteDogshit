@@ -1,3 +1,5 @@
+// Resolves live account grants and staff permissions for analytics and report exports.
+
 import { pool } from '../db/pool.js';
 import { classifyAdminPermissions } from '../middleware/rbac.js';
 import { defaultStaffAnalyticsScopes, validateStaffAnalyticsScopes } from './staffPermissions.js';

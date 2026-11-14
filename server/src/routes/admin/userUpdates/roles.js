@@ -1,3 +1,5 @@
+// Validates admin role changes and delegates the update to the shared role service.
+
 import { inTransaction } from '../../../db/transaction.js';
 import { changeAccountRole, lockAccount, readAccountRoleAccess } from '../../../admin/accounts/roleChanges.js';
 import { requirePermission } from '../../../middleware/rbac.js';

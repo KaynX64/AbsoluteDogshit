@@ -1,3 +1,5 @@
+// Tests startup jobs, overlap prevention, failure isolation, and shutdown draining.
+
 import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
 import { test } from 'node:test';

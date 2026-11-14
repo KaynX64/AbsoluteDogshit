@@ -1,3 +1,5 @@
+// Returns detailed QR verification data to authorized clinical staff.
+
 import { pool } from '../../../db/pool.js';
 import { authenticateToken } from '../../../auth/middleware.js';
 import { requireRoles } from '../../../middleware/rbac.js';

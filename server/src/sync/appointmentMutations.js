@@ -1,3 +1,5 @@
+// Applies replayed appointment status changes under the staff assignment and transition rules.
+
 import { updateAppointmentStatus } from '../appointments/transitions.js';
 import { fail } from '../utils/httpError.js';
 

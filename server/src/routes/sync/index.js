@@ -1,3 +1,5 @@
+// Mounts workstation cache bootstrap, queued mutation replay, and sync status routes.
+
 import express from 'express';
 import { registerSyncBootstrap } from './bootstrap.js';
 import { registerSyncReplay } from './replay.js';

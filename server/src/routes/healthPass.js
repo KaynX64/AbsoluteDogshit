@@ -1,3 +1,4 @@
+// Issues and verifies short-lived QR health passes with single-use nonce checks.
 // server/src/routes/healthPass.js
 import express from 'express';
 import crypto from 'crypto';

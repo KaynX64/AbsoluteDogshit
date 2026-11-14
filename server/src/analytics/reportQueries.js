@@ -1,3 +1,5 @@
+// Runs shared queries for department activity, active roles, and inventory reports.
+
 import { pool } from '../db/pool.js';
 
 export async function listConsultationsByDepartment({ fallback = 'General Walk-in', limit } = {}) {

@@ -1,3 +1,5 @@
+// Lists active and archived accounts, applies account archival rules, and serves health profiles.
+
 import { pool } from '../../db/pool.js';
 import { requirePermission, resolveAdminPermissions } from '../../middleware/rbac.js';
 import { logAudit } from '../../utils/auditLogger.js';

@@ -1,3 +1,5 @@
+// Serves paged audit and PHI access logs and authorized system telemetry.
+
 import { pool } from '../../db/pool.js';
 import { requirePermission } from '../../middleware/rbac.js';
 import { isRedisActive } from '../../utils/redisClient.js';

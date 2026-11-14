@@ -1,3 +1,5 @@
+// Runs prescription expiry and notifies clients of committed status changes.
+
 import { expireDuePrescriptions } from '../documents/prescriptions/expirePrescriptions.js';
 
 export async function processPrescriptionExpiry(io) {

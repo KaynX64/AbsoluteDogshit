@@ -1,3 +1,4 @@
+// Validates odontogram tooth IDs, conditions, and chart data for clinical encounters.
 // server/src/appointments/dentalValidator.js
 
 export const VALID_TOOTH_CONDITIONS = new Set([

@@ -1,3 +1,5 @@
+// Handles account creation and password resets under the admin user-management rules.
+
 import { saveHealthProfile } from '../../admin/accounts/healthProfile.js';
 import { pool } from '../../db/pool.js';
 import { requirePermission, resolveAdminPermissions } from '../../middleware/rbac.js';

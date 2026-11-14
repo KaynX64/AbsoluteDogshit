@@ -1,3 +1,5 @@
+// Files and audits one incident report per resolved alert within a transaction.
+
 import { inTransaction } from '../db/transaction.js';
 import { logAudit } from '../utils/auditLogger.js';
 

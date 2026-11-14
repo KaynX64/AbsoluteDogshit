@@ -1,3 +1,5 @@
+// Authenticates Socket.IO connections and registers user and desktop window rooms.
+
 import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '../utils/secrets.js';

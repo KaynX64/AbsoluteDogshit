@@ -1,3 +1,5 @@
+// Validates medicine deliveries and dispatches stock receipt and inventory updates.
+
 import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';
 import { receiveStock } from '../../inventory/stockMutations.js';
