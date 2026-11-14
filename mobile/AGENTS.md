@@ -1,6 +1,6 @@
 # mobile/AGENTS.md — Flutter patient & responder app
 
-Flutter (Dart SDK ^3.13). Key packages: `http`, `flutter_secure_storage` (token storage), `socket_io_client` (v2 — matches server Socket.IO v4), `qr_flutter`, `geolocator`, `flutter_local_notifications`, `flutter_background`, `firebase_core` + `firebase_messaging` (FCM push), `connectivity_plus`, `audioplayers`, `url_launcher`, `open_filex`, `path_provider`.
+Flutter (Dart SDK ^3.13.3). Key packages: `http`, `flutter_secure_storage` (token storage), `socket_io_client` (v2 — matches server Socket.IO v4), `qr_flutter`, `geolocator`, `flutter_local_notifications`, `flutter_background`, `firebase_core` + `firebase_messaging` (FCM push), `connectivity_plus`, `audioplayers`, `url_launcher`, `open_filex`, `path_provider`.
 
 ## API host — one hardcode point
 

@@ -4,7 +4,7 @@ Electron 44 (main process = CommonJS `.cjs`) + Vite 6 + React 19 + TypeScript 5.
 
 ## Process model — electron/main.cjs
 
-- **Dev** (`npm run dev`): the npm script runs Vite at `https://127.0.0.1:5173` (TLS reuses `../server/certs/*.pem`; falls back to HTTP if absent) and, once the port is up, launches Electron; main loads `VITE_URL`.
+- **Dev** (`npm run dev`): the npm script runs Vite at `https://127.0.0.1:5173` and launches Electron once the port is up. Vite reads TLS material from `../server/certs/`. Vite can serve HTTP without those files, but Electron's dev `VITE_URL` uses HTTPS.
 - **Packaged**: main loads `dist/index.html` over `file://`. This is why `vite.config.mts` sets `base: './'` — keep it or asset URLs break inside the exe.
 - `app-config.json` (`apiBaseUrl`) is read by main at runtime **and** imported by the renderer at build time — see the gotcha below.
 - `certificate-error` policy (security-critical, do not loosen): dev builds tolerate the self-signed cert for local-API and Vite URLs; packaged builds only when `apiBaseUrl` is a loopback host **and** the failing URL is same-origin with it (`isSameOrigin` also blocks userinfo tricks). Any other certificate error stands.
@@ -44,6 +44,7 @@ The incident-report listener stays in the shell across role switches. Doctor and
 
 - QR capture owns camera tracks, its decode loop, and uploaded image URLs in `useQrCapture.ts`. The decoder loads on demand. Document previews cancel pending reads and revoke blob URLs on replacement or unmount.
 - Admin audit and telemetry requests follow the active view and its current grants. Dispatch keeps its polling fallback and gives realtime refreshes priority.
+- Offline writes use `electron/offline/` through preload IPC. The SQLite database and the pending mutation mirror in renderer `localStorage` are unencrypted at the application level. Both can contain patient data. `offlineSync.ts` advances the paged bootstrap checkpoint after all pages are saved.
 
 ## Shared desktop interaction
 

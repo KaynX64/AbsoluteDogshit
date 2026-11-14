@@ -1,7 +1,7 @@
 <!-- split from AGENTS.md — part 01 of 02 -->
 # AGENTS.md — Valetudo HealthLink
 
-Campus clinic management system (Palawan State University): appointments & queueing, EMR, e-prescriptions, dental charts, medicine inventory, emergency SOS, health passes, QR document verification. Philippine RA 10173 (Data Privacy Act) is a design constraint — treat any row containing patient data as PHI.
+Campus clinic management system (Pangasinan State University): appointments & queueing, EMR, e-prescriptions, dental charts, medicine inventory, emergency SOS, health passes, QR document verification. Philippine RA 10173 (Data Privacy Act) is a design constraint — treat any row containing patient data as PHI.
 
 Monorepo with three deployables. No npm workspaces, no root scripts, no submodules — each module installs and runs from its own folder.
 
@@ -9,9 +9,9 @@ Monorepo with three deployables. No npm workspaces, no root scripts, no submodul
 |---|---|---|---|
 | `server/` | Node ESM, Express 5, mysql2, Socket.IO, Redis, MinIO | REST + WSS API; all business logic; sole DB owner | 5000 (HTTPS) |
 | `desktop/` | Electron 44, Vite 6, React 19, TypeScript | Clinic-staff console, Windows NSIS exe | 5173 (dev only) |
-| `mobile/` | Flutter / Dart ≥ 3.13 | Patient & responder app (Android primarily) | — |
+| `mobile/` | Flutter / Dart ^3.13.3 | Patient & responder app (Android primarily) | — |
 | `docker-compose.yml` | MySQL 8, Redis 7, MinIO | Local infra | 3307 / 6379 / 9000–9001 |
-| `server/schema.sql` | MySQL DDL | 32-table schema, source of truth | — |
+| `server/schema.sql` | MySQL DDL | 33 base tables. The migration runner adds its ledger. | — |
 
 Root `package.json` only pins shared tooling (concurrently, wait-on, electron). Read the module's own `AGENTS.md` before working in that module.
 
@@ -29,14 +29,15 @@ Root `package.json` only pins shared tooling (concurrently, wait-on, electron). 
 2. `cp server/.env.example server/.env`; fill `ENCRYPTION_KEY`, `JWT_SECRET`, `ENCRYPTION_SALT`, `DB_PASSWORD`; locally `REDIS_PASSWORD=valetudo_redis_secret_password_2026`, S3 keys `minioadmin` / `minioadminpassword`.
 3. Create the TLS cert (server refuses to boot without it; Vite dev reuses it):
    `openssl req -x509 -newkey rsa:2048 -nodes -days 365 -keyout server/certs/key.pem -out server/certs/cert.pem -subj "/CN=valetudo" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"` — append `,IP:<LAN-IP>` to the SAN list when other devices must reach the API.
-4. `cd server && npm install && npm run dev` — schema auto-migrates at boot.
-5. `cd desktop && npm install && npm run dev`.
-6. Mobile: set the API host in `mobile/lib/config/api_config.dart` first (see `mobile/AGENTS.md`).
+4. Provision a new, empty database with `server/schema.sql`. The script drops and recreates tables, so use `npm run migrate` from `server/` for an existing installation. See the [migration rollout guide](../server/MIGRATION-PLAN.md).
+5. `cd server && npm install && npm run dev` runs pending migrations before the API listens.
+6. `cd desktop && npm install && npm run dev`.
+7. Mobile: set the API host in `mobile/lib/config/api_config.dart` first (see `mobile/AGENTS.md`).
 
 ## Command cheat sheet
 
 | Module | Install | Run dev | Build | Test |
 |---|---|---|---|---|
 | server | `npm install` | `npm run dev` (nodemon) | — (`npm start` = run prod) | `node --test tests/<name>.test.js` |
-| desktop | `npm install` | `npm run dev` | `npm run build`; `npm run dist` → NSIS exe in `release/` | — |
+| desktop | `npm install` | `npm run dev` | `npm run build`; `npm run dist` creates the installer under `release/` | `npm test`, `npm run test:smoke` |
 | mobile | `flutter pub get` | `flutter run` | `flutter build apk --release` | `flutter test` |

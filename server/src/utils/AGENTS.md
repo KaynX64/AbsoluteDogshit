@@ -2,7 +2,7 @@
 | File | Use |
 |---|---|
 | secrets.js | `JWT_SECRET`, `ENCRYPTION_KEY` (validated at import) |
-| cryptoVault.js | `encrypt`, `decrypt`, `isEncryptedValue` (prefix-tagged; legacy mode if no `ENCRYPTION_SALT`) |
+| cryptoVault.js | `encrypt`, `decrypt`, `isEncryptedValue` (AES-256-GCM v2 envelopes with required `ENCRYPTION_SALT`) |
 | auditLogger.js | `logAudit(conn, {userId, action, table, recordId, oldValue, newValue, ipAddress})` |
 | phiLogger.js | `logPhiAccess({...})` → PHI_ACCESS_LOGS |
 | redisClient.js | `initRedis`, `isRedisActive`, `getCache`, `setCache`, `invalidateCache` |
@@ -22,7 +22,7 @@
 | httpError.js | shared status-bearing errors |
 | ../routes/admin/databaseStudio/tablePolicy.js | Database Studio table protections and audit masking |
 
-Changing `cryptoVault.js` → run `node --test tests/cryptoVault.test.js tests/reencrypt.test.js`. Never alter the ciphertext format without a re-encrypt migration.
+After changing `cryptoVault.js`, run `node --test tests/cryptoVault.test.js` from `server/`. Never alter the ciphertext format without a re-encrypt migration.
 
 ## Vital-sign entry
 

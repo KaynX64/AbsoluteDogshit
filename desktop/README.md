@@ -51,6 +51,10 @@ The packaged smoke suite exercises native keyboard input, review draft retention
 
 The consoles load eagerly. QR decoding loads on first use, and the updater module loads after the window is shown. Audit and system-health reads start when staff open the corresponding view. In paired local packaged runs, role-level lazy loading reduced initial JavaScript from 866 KB to 336 KB but increased login readiness from about 0.85 s to 0.96 s and first switches into Nurse, Admin, and Responder from 4–42 ms to roughly 330–350 ms. The smoke test can be rerun against future builds to compare that tradeoff.
 
+## Offline storage
+
+Electron stores cached patient and encounter data and queued changes in `userData/valetudo_data/valetudo_offline.db`. The renderer also mirrors pending changes in `localStorage`. Both stores are currently unencrypted at the application level. Replay sends queued changes when the API reconnects. The server uses the mutation ID to recognize retries.
+
 ## Offline icons and fonts
 
 The renderer bundles [Material Symbols Outlined](./src/img_icons/material-symbols-outlined.woff2), [Inter](https://fonts.google.com/specimen/Inter), and [JetBrains Mono](https://fonts.google.com/specimen/JetBrains+Mono) from `src/img_icons/`. The Material Symbols font contains the icon set as ligatures. Inline SVG icons and the favicon are already local.
