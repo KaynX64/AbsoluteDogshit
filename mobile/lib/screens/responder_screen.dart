@@ -203,7 +203,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
                     ValetudoLogo(size: rs.w(34).clamp(28.0, 42.0)),
                     SizedBox(width: rs.w(8)),
                     Text(
-                      'valetudo.',
+                      'LeoVital',
                       style: TextStyle(
                         fontSize: rs.sp(18),
                         fontWeight: FontWeight.w900,

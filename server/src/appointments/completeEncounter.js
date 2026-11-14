@@ -1,3 +1,5 @@
+// Validates encounter data and writes the EMR, vitals, dental chart, and completion state.
+
 import { encrypt } from '../utils/cryptoVault.js';
 import { validateDentalChart } from './dentalValidator.js';
 import { assertAppointmentInQueue } from './eligibility.js';

@@ -1,3 +1,5 @@
+// Reads and updates the signed-in user's profile under the privacy consent gate.
+
 import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth/middleware.js';
 import { logAudit } from '../../utils/auditLogger.js';

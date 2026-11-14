@@ -1,3 +1,4 @@
+// Tests batched diagnosis and risk aggregation, unreadable records, and output limits.
 // server/tests/analyticsStats.test.js  (Audit Issue #5)
 // Run with: node --test server/tests/analyticsStats.test.js   (a default test key is set if ENCRYPTION_KEY is unset)
 import test from 'node:test';

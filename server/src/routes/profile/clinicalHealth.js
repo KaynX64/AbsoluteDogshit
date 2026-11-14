@@ -1,3 +1,5 @@
+// Serves authorized staff reads and edits of patient health profiles.
+
 import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth/middleware.js';
 import { logAudit } from '../../utils/auditLogger.js';

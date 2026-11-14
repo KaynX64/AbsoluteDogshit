@@ -1,3 +1,4 @@
+import { useActionFeedback } from '../../shared/ui/feedback';
 // desktop/src/features/emergency/EmergencyAlertBanner.tsx
 import { useEffect, useState } from 'react';
 import { subscribeToDesktopEvents, useDesktopSocket } from '../../platform/realtime/desktopRealtime';
@@ -31,6 +32,7 @@ interface EmergencyAlert {
 }
 
 export default function EmergencyAlertBanner() {
+  const { notify, notice } = useActionFeedback();
   const [alerts, setAlerts] = useState<EmergencyAlert[]>([]);
   const [authorized, setAuthorized] = useState(false);
   const socket = useDesktopSocket();
@@ -175,7 +177,7 @@ export default function EmergencyAlertBanner() {
   const updateStatus = async (alertId: number, status: string) => {
     const token = localStorage.getItem('valetudo_token');
     try {
-      await fetch(`${API_BASE_URL}/api/emergency/${alertId}/status`, {
+      const response = await fetch(`${API_BASE_URL}/api/emergency/${alertId}/status`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -184,8 +186,12 @@ export default function EmergencyAlertBanner() {
         },
         body: JSON.stringify({ status }),
       });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || 'The server rejected the status update.');
+      }
     } catch (err: any) {
-      alert('Failed to update status: ' + err.message);
+      notify(`Could not update the SOS status. ${err.message}`, true);
     }
   };
 
@@ -194,6 +200,7 @@ export default function EmergencyAlertBanner() {
 
   return (
     <div style={{ marginBottom: 20 }}>
+      {notice}
       {/* ACTIVE EMERGENCY ALERTS BANNER */}
       {alerts.map((alert) => {
         const redacted = alert.medicalDetailsRedacted === true;

@@ -1,3 +1,5 @@
+// Rate-limits sign-in attempts, verifies credentials, and issues session tokens.
+
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { pool } from '../db/pool.js';

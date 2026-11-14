@@ -12,6 +12,7 @@
     "dist": "npm run build && electron-builder --win --x64"
   },
   "dependencies": {
+    "better-sqlite3-multiple-ciphers": "13.0.3",
     "electron-updater": "^6.8.9",
     "jsqr": "^1.4.0",
     "react": "^19.0.0",
@@ -45,7 +46,14 @@
     ],
     "win": {
       "target": "nsis",
-      "signAndEditExecutable": false
+      "icon": "src/assets/valetudo_icon.ico",
+      "extraResources": [
+        {
+          "from": "src/assets/valetudo_icon.ico",
+          "to": "valetudo_icon.ico"
+        }
+      ],
+      "signExecutable": false
     },
     "nsis": {
       "oneClick": true,

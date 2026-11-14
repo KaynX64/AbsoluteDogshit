@@ -1,3 +1,5 @@
+// Writes hash-chained audit entries using the caller's database connection.
+
 import crypto from 'crypto';
 
 export async function logAudit(connection, { userId, action, table, recordId, oldValue, newValue, ipAddress }) {

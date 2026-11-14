@@ -1,3 +1,5 @@
+// Tests document transaction boundaries, history data, encounter input, and stock linkage.
+
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
@@ -8,8 +10,8 @@ process.env.ENCRYPTION_SALT = 'fixture-encryption-salt';
 
 const { pool } = await import('../src/db/pool.js');
 const { default: documentRoutes } = await import('../src/routes/documents/index.js');
-const { issuePrescription } = await import('../src/services/prescriptions/issuePrescription.js');
-const { planStock, applyStockDeductions } = await import('../src/services/prescriptions/stock.js');
+const { issuePrescription } = await import('../src/documents/prescriptions/issuePrescription.js');
+const { planStock, applyStockDeductions } = await import('../src/inventory/prescriptionStock.js');
 const { encrypt } = await import('../src/utils/cryptoVault.js');
 const { readEncounterText } = await import('../src/appointments/encounterText.js');
 const expires_at = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);

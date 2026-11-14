@@ -1,3 +1,5 @@
+// Checks vital input ranges, formats, precision, and intake note output.
+
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { formatTriageNote, triageDraftError, validateTriageVitals, validateVitals, VITAL_RULES } from '../src/appointments/vitals.js';

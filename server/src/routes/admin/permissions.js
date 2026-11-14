@@ -1,3 +1,5 @@
+// Exposes the admin grant catalog and manages permission changes for administrator accounts.
+
 import { pool } from '../../db/pool.js';
 import { requirePermission, resolveAdminPermissions, getAdminPermissionCodes } from '../../middleware/rbac.js';
 import { logAudit } from '../../utils/auditLogger.js';

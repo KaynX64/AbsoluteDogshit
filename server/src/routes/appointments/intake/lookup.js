@@ -1,3 +1,5 @@
+// Looks up patients and their active queue tickets for clinical intake.
+
 import { pool } from '../../../db/pool.js';
 import { authenticateToken } from '../../../auth/middleware.js';
 import { requireRoles } from '../../../middleware/rbac.js';

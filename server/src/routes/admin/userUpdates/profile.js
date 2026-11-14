@@ -1,3 +1,5 @@
+// Routes authorized account profile edits through the shared account update service.
+
 import { updateAccount } from '../../../admin/accounts/updateAccount.js';
 import { requirePermission } from '../../../middleware/rbac.js';
 

@@ -1,3 +1,5 @@
+// Creates the baseline policy, queue counter, admin grant, and incident report structures for older databases.
+
 import { ensureColumns } from './schema.js';
 
 export default {

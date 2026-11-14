@@ -8,7 +8,7 @@ void main() {
 
     final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
     expect(app.title, 'LeoVital HealthLink');
-    expect(find.text('valetudo.'), findsOneWidget);
+    expect(find.text('LeoVital'), findsOneWidget);
     expect(find.text('H E A L T H L I N K'), findsOneWidget);
   });
 }

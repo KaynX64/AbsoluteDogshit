@@ -1,3 +1,5 @@
+// Coordinates account, role, permission, and health profile updates in one audited transaction.
+
 import { inTransaction } from '../../db/transaction.js';
 import { fail } from '../../utils/httpError.js';
 import { logAudit } from '../../utils/auditLogger.js';

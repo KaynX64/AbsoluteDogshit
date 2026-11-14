@@ -1,3 +1,5 @@
+// Lists pending incident reports, serves form prefill, and publishes updates after filing.
+
 import { pool } from '../../../db/pool.js';
 import { authenticateToken } from '../../../auth/middleware.js';
 import { fileIncidentReport, IncidentReportError } from '../../../emergency/fileIncidentReport.js';

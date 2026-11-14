@@ -1,3 +1,5 @@
+// Lays out the official clearance statement, patient details, signature, and verification code.
+
 import { formatSignatory } from '../../signing/signatory.js';
 import {
   BRAND_GREEN,

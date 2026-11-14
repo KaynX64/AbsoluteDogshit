@@ -447,6 +447,8 @@ CREATE TABLE `PRESCRIPTIONS` (
   `qr_token` VARCHAR(255) NOT NULL UNIQUE COMMENT 'Signed reference: UUID + HMAC',
   `signature_metadata` JSON NULL COMMENT 'Signer ID, role, timestamp, document SHA-256',
   `pdf_s3_key` VARCHAR(500) NULL COMMENT 'MinIO S3 key for signed PDF',
+  `pdf_retry_at` DATETIME NULL,
+  INDEX `idx_pending_pdf` (`pdf_s3_key`, `prescription_id`),
   `version` INT NOT NULL DEFAULT 1,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   INDEX `idx_rx_patient` (`patient_user_id`, `issued_at`),
@@ -494,6 +496,8 @@ CREATE TABLE `MEDICAL_CLEARANCES` (
   `qr_token` VARCHAR(255) NOT NULL UNIQUE,
   `signature_metadata` JSON NOT NULL COMMENT 'Stores signer ID, role, timestamp, document hash, revocation data',
   `pdf_s3_key` VARCHAR(500) NULL COMMENT 'MinIO S3 key for signed PDF',
+  `pdf_retry_at` DATETIME NULL,
+  INDEX `idx_pending_pdf` (`pdf_s3_key`, `clearance_id`),
   `version` INT NOT NULL DEFAULT 1,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   INDEX `idx_clearance_user` (`user_id`, `issued_at`),
@@ -540,6 +544,8 @@ CREATE TABLE `INCIDENT_REPORTS` (
   `documented_by` BIGINT NOT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `pdf_s3_key` VARCHAR(500) NULL COMMENT 'MinIO S3 key for incident report PDF',
+  `pdf_retry_at` DATETIME NULL,
+  INDEX `idx_pending_pdf` (`pdf_s3_key`, `report_id`),
   CONSTRAINT `fk_ir_alert` FOREIGN KEY (`alert_id`) REFERENCES `EMERGENCY_ALERTS` (`alert_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_ir_patient` FOREIGN KEY (`patient_user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_ir_author` FOREIGN KEY (`documented_by`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE
@@ -590,10 +596,8 @@ CREATE TABLE `LOCAL_SYNC_LOGS` (
   `record_id` BIGINT NULL DEFAULT NULL,
   `record_uuid` VARCHAR(36) NOT NULL,
   `action` ENUM('CREATE', 'UPDATE', 'DELETE') NOT NULL,
-  `payload` JSON NOT NULL,
   `local_version` INT NOT NULL,
   `sync_status` ENUM('pending', 'synced', 'conflict', 'error') NOT NULL DEFAULT 'pending',
-  `error_message` TEXT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `synced_at` TIMESTAMP NULL DEFAULT NULL,
   CONSTRAINT `fk_sync_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`)
@@ -648,6 +652,7 @@ INSERT INTO `ADMIN_PERMISSIONS` (`code`, `name`, `description`, `sort_order`) VA
 ('ANALYTICS_PHARMACY', 'View pharmacy analytics', 'Dispensing, stock priorities and batch expiry.', 53),
 ('ANALYTICS_HEADCOUNT', 'View campus headcount', 'Active account counts by role.', 54),
 ('INCIDENT_RECORDS_VIEW', 'View incident records', 'Open the emergency incident archive and view its report PDFs.', 55),
+('TERMINAL_VIEW', 'Use server Terminal', 'View server events and run built-in diagnostics.', 57),
 ('ANALYTICS_EXPORT', 'Export and print analytics', 'Download or print reports for granted analytics sections.', 56),
 ('DATABASE_MANAGE',   'Database Studio',           'Inspect and maintain raw system records',               60);
 

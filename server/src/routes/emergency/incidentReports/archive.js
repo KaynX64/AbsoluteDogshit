@@ -1,3 +1,5 @@
+// Lists archived incident reports and serves their PDFs to authorized callers.
+
 import { pool } from '../../../db/pool.js';
 import { authenticateToken } from '../../../auth/middleware.js';
 import { requireIncidentRecordsView } from '../../../emergency/incidentRecordAccess.js';

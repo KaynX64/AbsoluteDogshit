@@ -1,3 +1,5 @@
+// Lists and pages allowed database tables, masks protected values, and logs applicable PHI reads.
+
 import { pool } from '../../../db/pool.js';
 import { resolveAdminPermissions } from '../../../middleware/rbac.js';
 import { logPhiAccess } from '../../../utils/phiLogger.js';

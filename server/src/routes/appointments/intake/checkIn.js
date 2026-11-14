@@ -1,3 +1,5 @@
+// Validates scheduled arrivals and records their check-in, vital readings, and queue tickets.
+
 import { pool } from '../../../db/pool.js';
 import { authenticateToken } from '../../../auth/middleware.js';
 import { requireRoles } from '../../../middleware/rbac.js';

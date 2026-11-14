@@ -8,7 +8,7 @@ Window and permissions in `window.cjs` and `certificatePolicy.cjs`; storage and 
 
 | # | Lines | Anchor | Entry point |
 |---|---|---|---|
-| 1 | 1-9 | — | Imports and declarations |
-| 2 | 10-15 | registerOfflineHandlers(ipcMain | registerOfflineHandlers(ipcMain |
-| 3 | 16-20 | app.whenReady | app.whenReady |
-| 4 | 21-23 | window-all-closed | window-all-closed |
+| 1 | 1-12 | — | Imports and declarations |
+| 2 | 13-19 | requestSingleInstanceLock | Lock the profile, set the Windows app ID, and register shared handlers |
+| 3 | 20-25 | app.whenReady | Register offline IPC and open the window. The first signed-in account opens encrypted storage. |
+| 4 | 26-28 | window-all-closed | window-all-closed |

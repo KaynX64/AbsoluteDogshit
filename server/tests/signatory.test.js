@@ -1,3 +1,5 @@
+// Verifies that official document issuance requires an enrolled clinician signature.
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { assertSignatureEnrolled, SignerError } from '../src/documents/signing/signatory.js';

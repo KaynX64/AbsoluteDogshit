@@ -1,3 +1,5 @@
+// Parses stored signature metadata for document and verification responses.
+
 export function parseMetadata(raw) {
   if (!raw) return {};
   if (typeof raw === 'object') return raw;

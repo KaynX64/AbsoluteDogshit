@@ -1,3 +1,5 @@
+// Serves authenticated desktop cache bootstrap requests in legacy or paginated form.
+
 import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';
 import { logPhiAccess } from '../../utils/phiLogger.js';

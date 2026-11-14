@@ -1,3 +1,5 @@
+// Adds granular analytics grants and seeds Headcount access for eligible existing admins.
+
 export default {
   version: 7,
   name: 'scoped analytics permissions',

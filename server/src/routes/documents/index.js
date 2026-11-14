@@ -1,3 +1,5 @@
+// Mounts clinical document issuance, history, verification, attachment, and PDF routes.
+
 import express from 'express';
 import { registerPrescriptionIssuance } from './prescriptions/issuance.js';
 import { registerPrescriptionHistory } from './prescriptions/history.js';

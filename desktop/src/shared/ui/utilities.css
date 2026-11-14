@@ -263,16 +263,11 @@
    STAGE 5 — RESPONSIVE MODALS
    ═══════════════════════════════════════════════════════════════════ */
 @media (max-width: 768px) {
-  .modal-backdrop { padding: 8px; }
   .modal-card {
     padding: 20px 18px;
     border-radius: var(--r-lg);
     max-height: 94vh;
   }
-}
-
-.admin-profile-editor-backdrop {
-  overflow-y: auto;
 }
 
 .admin-profile-editor__layout {
@@ -284,27 +279,33 @@
   min-width: 0;
 }
 
+.admin-profile-editor__form-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.admin-profile-editor__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 32px;
+}
+
+.desktop-dialog .admin-profile-editor__actions {
+  flex: none;
+  padding-inline: 32px;
+  padding-bottom: 12px;
+}
+
 @media (max-width: 900px) {
-  .admin-profile-editor-backdrop {
-    place-items: start center;
-  }
-
-  .admin-profile-editor-backdrop > .admin-profile-editor {
-    width: calc(100vw - 16px) !important;
-    height: auto !important;
-    max-height: calc(100dvh - 16px);
-    overflow-y: auto;
-  }
-
   .admin-profile-editor__layout {
     grid-template-columns: minmax(0, 1fr) !important;
-    height: auto !important;
   }
 
-  .admin-profile-editor__form-pane {
-    min-height: auto !important;
-    overflow-y: visible !important;
-    padding: 22px !important;
+  .admin-profile-editor__scroll,
+  .desktop-dialog .admin-profile-editor__actions {
+    padding-inline: 16px;
   }
 
   .admin-profile-editor__info-pane {

@@ -1,3 +1,4 @@
+import Dialog from '../../shared/ui/Dialog';
 import { NURSE_CSS, ConsoleHeader, SkeletonRows, EmptyState, StatTile, isOverdue, card, mono, iconChip, smallButton, duration } from './nursePresentation';
 import type { SosAlert, ExpectedItem, ActiveTicket } from './nurseTypes';
 import SosBand from './SosBand';
@@ -22,7 +23,6 @@ import ExpectedArrivals from './ExpectedArrivals';
 //     responsive / keyframe state lives in the scoped <style> block below,
 //     because inline styles cannot express it.
 import { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 import QrIntakeScanner from '../appointments/QrIntakeScanner';
 import InventoryManager from '../inventory/InventoryManager';
 import AnalyticsDashboard from '../analytics/AnalyticsDashboard';
@@ -106,6 +106,7 @@ export default function NurseConsole({
   const [activeSosCount, setActiveSosCount] = useState<number>(0);
   const [sosAlerts, setSosAlerts] = useState<SosAlert[]>([]);
   const [sosBusyId, setSosBusyId] = useState<number | null>(null);
+  const [sosError, setSosError] = useState('');
   const [sosConfirm, setSosConfirm] = useState<{ alert: SosAlert; status: 'resolved' | 'false_alarm' } | null>(null);
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
   const [noShowCount, setNoShowCount] = useState<number>(0);
@@ -178,6 +179,9 @@ export default function NurseConsole({
     alertId: number,
     status: 'acknowledged' | 'dispatched' | 'resolved' | 'false_alarm'
   ) => {
+    if (sosBusyId !== null) return;
+    const closing = status === 'resolved' || status === 'false_alarm';
+    setSosError('');
     setSosBusyId(alertId);
     const token = localStorage.getItem('valetudo_token');
     try {
@@ -192,14 +196,18 @@ export default function NurseConsole({
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        setNotice({ text: err.error || 'Failed to update the SOS alert.', ok: false });
+        throw new Error(err.error || 'Failed to update the SOS alert.');
+      } else if (closing) {
+        setSosConfirm(null);
       } else if (status === 'acknowledged') {
         setNotice({ text: 'Alert acknowledged — responders notified.', ok: true });
       } else if (status === 'dispatched') {
         setNotice({ text: 'Marked as dispatched.', ok: true });
       }
-    } catch (_) {
-      setNotice({ text: 'Network error while updating the SOS alert.', ok: false });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not update the SOS alert. Try again.';
+      if (closing) setSosError(message);
+      else setNotice({ text: message, ok: false });
     } finally {
       setSosBusyId(null);
       fetchActiveSosCount();
@@ -350,6 +358,7 @@ export default function NurseConsole({
   };
 
   const openCheckInConfirm = async (item: ExpectedItem) => {
+    setExpectedFeedback(null);
     setConfirmCheckIn(item);
     setConfirmTicketCheck({ loading: true, hasTicket: false, ticket: null });
 
@@ -375,6 +384,7 @@ export default function NurseConsole({
   };
 
   const executeCheckInExpected = async (item: ExpectedItem) => {
+    if (checkingInId !== null) return;
     setCheckingInId(item.appointment_id);
     setExpectedFeedback(null);
     const token = localStorage.getItem('valetudo_token');
@@ -405,8 +415,7 @@ export default function NurseConsole({
       fetchExpected();
       fetchLiveQueue();
     } catch (err: any) {
-      setExpectedFeedback({ text: '' + err.message, ok: false });
-      setConfirmCheckIn(null);
+      setExpectedFeedback({ text: err.message, ok: false });
     } finally {
       setCheckingInId(null);
     }
@@ -514,9 +523,9 @@ export default function NurseConsole({
 
   /* Closing an SOS is destructive — confirm in-app, never with window.confirm. */
   const sosConfirmModal = sosConfirm
-    ? createPortal(
-        <div className="modal-backdrop" onClick={() => setSosConfirm(null)}>
-          <div className="modal-card" style={{ maxWidth: 430 }} onClick={(e) => e.stopPropagation()}>
+    ? (
+        <Dialog label="Confirm SOS closure" size="compact" urgent busy={sosBusyId !== null} onDismiss={() => { setSosError(''); setSosConfirm(null); }}>
+          <div className="modal-card" style={{ maxWidth: 430 }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 16 }}>
               <span style={iconChip(T.dangerSoft, T.danger, 40)}>
                 <Icon name={sosConfirm.status === 'resolved' ? 'task_alt' : 'report'} size={20} />
@@ -532,29 +541,26 @@ export default function NurseConsole({
               </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, paddingTop: 16, borderTop: `1px solid ${T.borderSoft}` }}>
-              <button type="button" onClick={() => setSosConfirm(null)} style={smallButton(false, T.textSub)}>
+            <div className="dialog-footer">
+              {sosError && <p role="alert" className="dialog-error">{sosError}</p>}
+              <button type="button" disabled={sosBusyId !== null} onClick={() => { setSosError(''); setSosConfirm(null); }} data-dialog-initial style={smallButton(false, T.textSub)}>
                 Keep open
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  const pending = sosConfirm;
-                  setSosConfirm(null);
-                  updateSosStatus(pending.alert.alert_id, pending.status);
-                }}
+                disabled={sosBusyId !== null}
+                onClick={() => void updateSosStatus(sosConfirm.alert.alert_id, sosConfirm.status)}
                 style={{
                   ...smallButton(true, sosConfirm.status === 'resolved' ? T.success : T.danger),
                   padding: '9px 20px',
                   fontSize: T.fs.body,
                 }}
               >
-                {sosConfirm.status === 'resolved' ? 'Mark resolved' : 'Confirm false alarm'}
+                {sosBusyId !== null ? 'Updating…' : sosConfirm.status === 'resolved' ? 'Mark resolved' : 'Confirm false alarm'}
               </button>
             </div>
           </div>
-        </div>,
-        document.body,
+        </Dialog>
       )
     : null;
 
@@ -672,6 +678,7 @@ export default function NurseConsole({
 
       {sosBand}
 
+      <div data-workspace-view style={{ display: 'flex', flexDirection: 'column', gap: T.sp[5] }}>
       {/* ── Vitals rail ─────────────────────────────────────── */}
       <div
         style={{
@@ -956,6 +963,8 @@ export default function NurseConsole({
             </p>
           </div>
         </section>
+      </div>
+
       </div>
 
       {/* ── SOS close confirmation ──────────────────────────── */}

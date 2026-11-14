@@ -1,3 +1,5 @@
+// Loads roster and encounter cache snapshots using bounded, paginated database reads.
+
 import { pool } from '../db/pool.js';
 import { decrypt } from '../utils/cryptoVault.js';
 

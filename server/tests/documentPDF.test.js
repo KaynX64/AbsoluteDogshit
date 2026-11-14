@@ -1,3 +1,5 @@
+// Checks prescription, clearance, and incident report PDF rendering with representative fixtures.
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderIncidentReportPDF } from '../src/documents/pdf/templates/incidentReport.js';

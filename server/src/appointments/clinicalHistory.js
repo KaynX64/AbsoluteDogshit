@@ -1,3 +1,5 @@
+// Decodes stored dental charts and removes legacy inline chart data from encounter text.
+
 import { decrypt } from '../utils/cryptoVault.js';
 
 // Odontogram helpers

@@ -1,6 +1,6 @@
 /* Import order preserves the desktop stylesheet cascade. */
 @import './theme/tokens.css';
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap');
+@import './img_icons/text-fonts.css';
 @import './shared/ui/base.css';
 @import './app/shell.css';
 @import './shared/ui/forms-and-tables.css';
@@ -11,3 +11,4 @@
 @import './features/admin/database-studio.css';
 @import './features/emergency/alert-banner.css';
 @import './shared/ui/utilities.css';
+@import './shared/ui/interactions.css';

@@ -1,3 +1,5 @@
+// Builds shared surveillance and pharmacy table sections for analytics exports.
+
 export function workflowSections({ surveillance, pharmacy }) {
   const sections = [];
   if (surveillance) {

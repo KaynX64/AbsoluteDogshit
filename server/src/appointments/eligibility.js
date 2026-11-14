@@ -1,3 +1,5 @@
+// Checks whether an appointment belongs to the patient and clinician and is ready for clinical work.
+
 import { AppointmentTransitionError } from './transitions.js';
 
 // Documents may only be issued for a patient who is IN THE QUEUE (triaged:

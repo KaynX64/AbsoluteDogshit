@@ -1,3 +1,4 @@
+import Dialog from '../../shared/ui/Dialog';
 // desktop/src/features/emergency/IncidentReportModal.tsx
 //
 // Post-resolution incident documentation popup.
@@ -201,14 +202,16 @@ export default function IncidentReportModal() {
 
   /* ── Submit the report ────────────────────────────────────────────── */
   const submitReport = async () => {
-    if (!data || openAlertId === null) return;
+    if (!data || openAlertId === null || submitting || reportedAlertIdsRef.current.has(openAlertId)) return;
     const details = incidentDetails.trim();
     if (details.length < 5) {
       setFeedback({ text: 'Describe the incident (at least 5 characters).', isError: true });
+      document.getElementById('ir-details')?.focus();
       return;
     }
     if (!resolvedAt) {
       setFeedback({ text: 'Confirm the date & time the incident was resolved.', isError: true });
+      document.getElementById('ir-resolved-at')?.focus();
       return;
     }
 
@@ -261,11 +264,11 @@ export default function IncidentReportModal() {
   const p = data?.patient;
 
   return (
-    <div className="modal-backdrop">
-      <div className="modal-card" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+    <Dialog label="Incident documentation" urgent busy={submitting} onDismiss={() => closePopup(true)}>
+      <div className="modal-card" style={{ maxWidth: 640 }}>
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
-          <h3
+        <div className="dialog-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
+          <h3 tabIndex={-1} data-dialog-initial
             style={{
               margin: 0,
               color: T.primary,
@@ -282,6 +285,7 @@ export default function IncidentReportModal() {
           </h3>
           <button
             type="button"
+            disabled={submitting}
             onClick={() => closePopup(true)}
             style={{
               background: 'none',
@@ -500,7 +504,7 @@ export default function IncidentReportModal() {
                 </div>
 
                 {feedback && (
-                  <div
+                  <div role={feedback.isError ? 'alert' : 'status'}
                     style={{
                       marginBottom: 14,
                       padding: '10px 14px',
@@ -516,7 +520,7 @@ export default function IncidentReportModal() {
                   </div>
                 )}
 
-                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <div className="dialog-footer">
                   <button type="button" onClick={() => closePopup(true)} style={btnGhost} disabled={submitting}>
                     Skip for now
                   </button>
@@ -524,7 +528,7 @@ export default function IncidentReportModal() {
                     type="button"
                     onClick={submitReport}
                     style={{ ...btnPrimary, padding: '11px 22px' }}
-                    disabled={submitting}
+                    disabled={submitting || reportedAlertIdsRef.current.has(openAlertId)}
                   >
                     <Icon name="task_alt" size={15} /> {submitting ? 'Filing…' : 'File incident report'}
                   </button>
@@ -534,6 +538,6 @@ export default function IncidentReportModal() {
           </>
         )}
       </div>
-    </div>
+    </Dialog>
   );
 }

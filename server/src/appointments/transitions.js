@@ -1,3 +1,5 @@
+// Defines appointment and queue status transitions and applies them with row locks.
+
 export class AppointmentTransitionError extends Error {
   constructor(message, status, code) {
     super(message);

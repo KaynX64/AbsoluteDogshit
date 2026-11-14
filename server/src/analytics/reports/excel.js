@@ -1,3 +1,5 @@
+// Builds an Excel workbook from the authorized analytics report sections.
+
 import ExcelJS from 'exceljs';
 import { workflowSections } from './sections.js';
 

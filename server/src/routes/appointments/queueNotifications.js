@@ -1,3 +1,5 @@
+// Publishes committed queue changes and optional patient notifications.
+
 import { pool } from '../../db/pool.js';
 import { sendPushToUser } from '../../utils/fcmNotifier.js';
 import { invalidateCache } from '../../utils/redisClient.js';

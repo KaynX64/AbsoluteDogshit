@@ -1,11 +1,11 @@
 <!-- split from mobile/lib/screens/AGENTS.md — part 01 of 02 -->
 # mobile/lib/screens/AGENTS.md — screen map & navigation anchors
 
-One screen per file: public `XxxScreen` (stateless) + private `_XxxScreenState` (stateful). Line anchors are for commit **b7556cb** — re-derive with `rg -n "methodName" file.dart` after edits.
+Stateful screens use a public `XxxScreen` widget and a private `_XxxScreenState`. The example line numbers below are historical. Re-locate symbols with `rg -n`.
 
-**Never open a file >1k lines whole** (`patient_portal_screen.dart` ~3k, `consultation_scheduler_screen.dart` ~1.7k, `documents_viewer_screen.dart` ~1.6k). Use the anchors: read a ±40-line window. For the full picture of any screen, start from `CODESLICE.md` (this directory) — a slim index routing to per-screen slice maps in `codeslice/` (plus the SOS service map). Where a sub-MD disagrees with the L-numbers below, the sub-MD is fresher.
+Start with the [code-slice index](../CODESLICE.md) when navigating the patient portal, scheduler, document viewer or SOS service. Use its verified ranges for targeted reads.
 
-## Universal patterns (copy these; don't invent variants)
+## Shared screen conventions
 
 - Token: `final _storage = const FlutterSecureStorage();` → `await _storage.read(key: 'jwt_token')`. Keys: `jwt_token`, `user_data` (written at login, login_screen L54-55).
 - HTTP: `ApiConfig.client` / `http.post` + `Uri.parse('${ApiConfig.baseUrl}/api/...')`, header `{'Authorization': 'Bearer $token'}`, `if (!mounted) return;` after every await. `ApiConfig.baseUrl` is the single host definition (`lib/config/api_config.dart`) — screens must not hardcode hosts.

@@ -1,4 +1,6 @@
-import { expireDuePrescriptions } from '../services/prescriptions/expirePrescriptions.js';
+// Runs prescription expiry and notifies clients of committed status changes.
+
+import { expireDuePrescriptions } from '../documents/prescriptions/expirePrescriptions.js';
 
 export async function processPrescriptionExpiry(io) {
   const ids = await expireDuePrescriptions();

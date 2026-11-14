@@ -1,3 +1,5 @@
+// Lays out the authorized analytics report sections in a PDF.
+
 import { once } from 'node:events';
 import PDFDocument from 'pdfkit';
 import { workflowSections } from './sections.js';

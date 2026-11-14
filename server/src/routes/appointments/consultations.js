@@ -1,3 +1,5 @@
+// Handles appointment status changes and clinician encounter completion.
+
 import { inTransaction } from '../../db/transaction.js';
 import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';

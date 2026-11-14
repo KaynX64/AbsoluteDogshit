@@ -1,3 +1,4 @@
+import Dialog from '../../shared/ui/Dialog';
 import { T, softBadge } from '../../theme';
 import Icon from '../../shared/ui/Icon';
 import { NURSE_CSS, ConsoleHeader, SkeletonRows, EmptyState, dayLabel, isOverdue, allergyIsReal, card, microLabel, mono, iconChip, smallButton } from './nursePresentation';
@@ -77,7 +78,7 @@ export default function ExpectedArrivals({
 
       {noticeBanner}
 
-      <section style={{ ...card, padding: T.sp[5], display: 'flex', flexDirection: 'column', gap: T.sp[4] }}>
+      <section data-workspace-view style={{ ...card, padding: T.sp[5], display: 'flex', flexDirection: 'column', gap: T.sp[4] }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: T.sp[3], flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: T.sp[3], flex: 1, minWidth: 200 }}>
             <span style={iconChip(T.primaryTint, T.primary, 40)}>
@@ -120,7 +121,7 @@ export default function ExpectedArrivals({
           </div>
         </div>
 
-        {expectedFeedback && (
+        {expectedFeedback && !confirmCheckIn && (
           <div
             role="status"
             style={{
@@ -273,13 +274,8 @@ export default function ExpectedArrivals({
 
       {/* ── Check-in modal ─────────────────────────────────── */}
       {confirmCheckIn && (
-        <div
-          className="modal-backdrop"
-          onClick={() => {
-            if (checkingInId === null && !confirmTicketCheck.loading) setConfirmCheckIn(null);
-          }}
-        >
-          <div className="modal-card" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+        <Dialog label="Confirm patient check-in" size="compact" busy={checkingInId !== null} onDismiss={() => setConfirmCheckIn(null)}>
+          <div className="modal-card" style={{ maxWidth: 480 }}>
             {confirmTicketCheck.loading ? (
               <div style={{ padding: '36px 20px', textAlign: 'center' }}>
                 <div
@@ -299,7 +295,7 @@ export default function ExpectedArrivals({
               </div>
             ) : confirmTicketCheck.hasTicket ? (
               <>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 18 }}>
+                <div className="dialog-header" style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 18 }}>
                   <span style={iconChip(T.warningSoft, T.warning, 40)}>
                     <Icon name="warning" size={20} />
                   </span>
@@ -350,7 +346,7 @@ export default function ExpectedArrivals({
               </>
             ) : (
               <>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 18 }}>
+                <div className="dialog-header" style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 18 }}>
                   <span style={iconChip(T.primaryTint, T.primary, 40)}>
                     <Icon name="check" size={20} />
                   </span>
@@ -392,9 +388,12 @@ export default function ExpectedArrivals({
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, paddingTop: 16, borderTop: `1px solid ${T.borderSoft}` }}>
+                <div className="dialog-footer">
+                  {expectedFeedback && !expectedFeedback.ok && <p role="alert" className="dialog-error">{expectedFeedback.text}</p>}
                   <button
                     type="button"
+                    data-dialog-initial
+                    disabled={checkingInId !== null}
                     onClick={() => setConfirmCheckIn(null)}
                     style={smallButton(false, T.textSub)}
                   >
@@ -402,6 +401,7 @@ export default function ExpectedArrivals({
                   </button>
                   <button
                     type="button"
+                    disabled={checkingInId !== null}
                     onClick={() => executeCheckInExpected(confirmCheckIn)}
                     style={{
                       ...smallButton(true, T.primary),
@@ -410,13 +410,13 @@ export default function ExpectedArrivals({
                       boxShadow: T.shadow.glowPrimary,
                     }}
                   >
-                    <Icon name="check" size={15} /> Confirm check-in
+                    <Icon name="check" size={15} /> {checkingInId !== null ? "Checking in…" : "Confirm check-in"}
                   </button>
                 </div>
               </>
             )}
           </div>
-        </div>
+        </Dialog>
       )}
 
       {sosConfirmModal}

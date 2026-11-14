@@ -1,3 +1,4 @@
+// Initializes Firebase messaging and sends push notifications to registered devices.
 // server/src/utils/fcmNotifier.js
 import fs from 'fs';
 import path from 'path';

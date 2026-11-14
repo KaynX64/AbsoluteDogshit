@@ -79,8 +79,8 @@ class Rs {
   /// Scale a radius / uniform padding / gap.
   double r(double v) => v * factor;
 
-  /// Scale a font size.
-  double sp(double v) => v * textFactor;
+  /// Scale a font size with a small readability increase across the app.
+  double sp(double v) => v * textFactor * 1.06;
 
   // ── Breakpoint picker ──────────────────────────────────────────
   /// Choose a value based on the current breakpoint.

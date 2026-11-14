@@ -1,3 +1,5 @@
+// Defines default staff analytics scopes and validates account-level overrides.
+
 import { fail } from '../utils/httpError.js';
 
 export const staffAnalyticsPermissions = [

@@ -1,3 +1,5 @@
+// Serves responder eligibility and active alerts and handles alert status transitions.
+
 import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth/middleware.js';
 import { decrypt } from '../../utils/cryptoVault.js';

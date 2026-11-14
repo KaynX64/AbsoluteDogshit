@@ -1,3 +1,5 @@
+// Provides schema inspection and conditional column, enum, and index helpers for migrations.
+
 export async function readColumn(connection, table, column) {
   const [[field]] = await connection.query(
     `SELECT COLUMN_TYPE, IS_NULLABLE, EXTRA FROM information_schema.COLUMNS

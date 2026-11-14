@@ -1,3 +1,5 @@
+// Defines editable server settings, validates overrides, and tracks the active policy revision.
+
 import { LOGIN_LIMIT, SOS_LIMIT, BOOKING_LIMIT, VERIFY_LIMIT, NOSHOW_LIMIT } from './limits.js';
 import { APPOINTMENT_RULES, CLINIC_HOURS, minutesOf } from './appointmentRules.js';
 

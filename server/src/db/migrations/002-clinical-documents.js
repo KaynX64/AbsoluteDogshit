@@ -1,3 +1,5 @@
+// Upgrades clinical document tables, prescription quantities, and their inventory links.
+
 import { ensureColumns, ensureEnum, ensureIndex, readColumn } from './schema.js';
 
 const columns = [

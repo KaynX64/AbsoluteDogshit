@@ -1,3 +1,5 @@
+// Serves formulary, lot, expiry, reorder, and stock movement views.
+
 import { pool } from '../../db/pool.js';
 import { listReorderSuggestions } from '../../inventory/pharmacyAnalytics.js';
 import { authenticateToken } from '../../auth/middleware.js';
@@ -63,7 +65,7 @@ export function registerInventoryOverview(router) {
          JOIN MEDICINES m ON b.medicine_id = m.medicine_id
          WHERE b.deleted_at IS NULL 
            AND b.quantity_on_hand > 0
-           AND DATEDIFF(b.expiry_date, CURDATE()) <= 90
+           AND DATEDIFF(b.expiry_date, CURDATE()) <= 30
          ORDER BY b.expiry_date ASC`
       );
       res.json(rows);
@@ -127,7 +129,7 @@ export function registerInventoryOverview(router) {
          WHERE b.deleted_at IS NULL 
            AND b.quantity_on_hand > 0 
            AND b.expiry_date > CURDATE()
-           AND DATEDIFF(b.expiry_date, CURDATE()) <= 90`
+           AND DATEDIFF(b.expiry_date, CURDATE()) <= 30`
       );
 
       const [expired] = await pool.query(

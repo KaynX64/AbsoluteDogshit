@@ -1,0 +1,129 @@
+:root {
+  --interaction-press: 90ms;
+  --interaction-feedback: 140ms;
+  --interaction-dialog: 180ms;
+}
+
+@keyframes desktop-dialog-in {
+  from { opacity: .85; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Use compositor motion so control feedback never changes layout. */
+:is(button, summary, [role="button"]):not(tr) {
+  --control-travel: 0px;
+  --control-timing: var(--interaction-feedback);
+}
+@media screen and (prefers-reduced-motion: no-preference) {
+  :is(button, summary, [role="button"], tr[data-clickable]):not(:disabled, [aria-disabled="true"], [aria-busy="true"], [aria-busy="true"] *) {
+    transition: translate var(--control-timing, var(--interaction-feedback)) var(--ease-out),
+      background-color var(--interaction-feedback) var(--ease-out),
+      color var(--interaction-feedback) var(--ease-out),
+      border-color var(--interaction-feedback) var(--ease-out),
+      box-shadow var(--interaction-feedback) var(--ease-out), filter var(--interaction-feedback) var(--ease-out) !important;
+    translate: 0 var(--control-travel, 0px);
+  }
+}
+
+@media screen and (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  :is(button, summary, [role="button"], tr[data-clickable]):not(:disabled, [aria-disabled="true"], [aria-busy="true"], [aria-busy="true"] *):hover:where(:not(:has(:hover:is(button, a, input)))) {
+    --control-travel: -1px;
+    filter: brightness(var(--control-hover-brightness, .97));
+  }
+}
+
+@media screen and (prefers-reduced-motion: no-preference) {
+  :is(button, summary, [role="button"], tr[data-clickable]):not(:disabled, [aria-disabled="true"], [aria-busy="true"], [aria-busy="true"] *):is(:active, [data-key-pressed]) {
+    --control-travel: 1px;
+    --control-timing: var(--interaction-press);
+  }
+}
+
+[data-theme-mode="dark"] { --control-hover-brightness: 1.12; }
+:is(button, summary, [role="button"]):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.desktop-dialog {
+  box-sizing: border-box;
+  width: min(640px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-modal);
+}
+.desktop-dialog--compact { width: min(460px, calc(100vw - 32px)); }
+.desktop-dialog--wide { width: min(1180px, calc(100vw - 32px)); }
+.desktop-dialog::backdrop { background: rgba(15, 30, 23, .56); }
+.desktop-dialog[open]:not([data-urgent]) { animation: desktop-dialog-in var(--interaction-dialog) var(--ease-out) both; }
+.desktop-dialog .modal-card {
+  animation: none;
+  max-inline-size: 100%;
+  max-height: calc(100dvh - 32px);
+  box-shadow: none;
+  overflow-wrap: anywhere;
+}
+.desktop-dialog .dialog-header,
+.desktop-dialog .dialog-footer {
+  position: sticky;
+  z-index: 2;
+  background: var(--surface);
+}
+.desktop-dialog .dialog-header { top: -1px; padding-block: 6px 10px; }
+.dialog-header h2, .dialog-header h3 { margin: 0; }
+.desktop-dialog .dialog-footer {
+  bottom: -1px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-block: 10px 4px;
+  border-top: 1px solid var(--border);
+}
+.dialog-body { min-width: 0; overflow-wrap: anywhere; }
+.dialog-error { color: var(--danger); margin: 8px 0; font-weight: 650; flex-basis: 100%; }
+.desktop-dialog :is(input, textarea, select, button, summary) { scroll-margin-block: 64px; }
+[role="tabpanel"][hidden] { display: none !important; }
+
+@media (max-width: 650px) {
+  .desktop-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .desktop-dialog .modal-card { max-height: calc(100dvh - 16px); }
+  .dialog-header { flex-wrap: wrap; }
+  .desktop-dialog .dialog-footer { gap: 6px; }
+}
+.desktop-feedback {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-block: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--success-border);
+  border-radius: var(--r-md);
+  color: var(--text);
+  background: var(--success-soft);
+  overflow-wrap: anywhere;
+}
+.desktop-feedback[data-error] { background: var(--danger-soft); border-color: var(--danger-border); }
+.desktop-feedback button { color: inherit; min-width: 28px; min-height: 28px; border: 0; background: transparent; }
+
+@media print {
+  .desktop-dialog { display: none !important; }
+  .desktop-dialog::backdrop { display: none !important; }
+}
+
+@media (prefers-reduced-motion: reduce), print {
+  *, *::before, *::after {
+    animation: none !important;
+    translate: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

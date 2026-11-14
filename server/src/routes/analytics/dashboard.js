@@ -1,3 +1,5 @@
+// Serves the scoped dashboard summary, department counts, and report access status.
+
 import { requireAnalyticsExport } from '../../analytics/access.js';
 import { analyticsSummary } from '../../analytics/summary.js';
 import { listConsultationsByDepartment } from '../../analytics/reportQueries.js';

@@ -9,7 +9,7 @@ export function useSessionTimeout(isActive: boolean, timeoutMinutes = 480) {
       timeoutId = setTimeout(() => {
         localStorage.removeItem('valetudo_token');
         localStorage.removeItem('token');
-        alert('Session expired due to 8 hours of inactivity (R.A. 10173 Compliance). Please log in again.');
+        sessionStorage.setItem('valetudo_session_expired', 'true');
         window.location.reload();
       }, timeoutMinutes * 60 * 1000);
     };

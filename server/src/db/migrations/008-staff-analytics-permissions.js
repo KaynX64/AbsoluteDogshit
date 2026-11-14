@@ -1,3 +1,5 @@
+// Creates the table for account-level analytics overrides for clinical staff.
+
 export default {
   version: 8,
   name: 'staff analytics permissions',

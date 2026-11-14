@@ -1,3 +1,5 @@
+// Mounts inventory reads, formulary changes, deliveries, and stock movement routes.
+
 import express from 'express';
 import { registerInventoryOverview } from './overview.js';
 import { registerInventoryReceiving } from './receiving.js';

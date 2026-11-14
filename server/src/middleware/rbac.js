@@ -1,3 +1,4 @@
+// Enforces role and permission checks and resolves admin grants.
 // server/src/middleware/rbac.js
 import { pool } from '../db/pool.js';
 

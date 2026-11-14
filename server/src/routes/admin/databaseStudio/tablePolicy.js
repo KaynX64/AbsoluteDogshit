@@ -14,7 +14,7 @@ export const DECRYPT_FAILED_MARKER = '[ENCRYPTED PHI - INTEGRITY VERIFICATION FA
 // table uses its dedicated validator, revision check and audit path.
 export const READ_ONLY_TABLES = [
   'AUDIT_LOGS', 'PHI_ACCESS_LOGS', 'INVENTORY_LOGS', 'SERVER_POLICY', 'QUEUE_TICKET_COUNTERS', 'SCHEMA_MIGRATIONS',
-  'STAFF_ANALYTICS_PERMISSIONS',
+  'STAFF_ANALYTICS_PERMISSIONS', 'LOCAL_SYNC_LOGS',
 ];
 
 // Account-security tables: writable from DB Studio ONLY by Super Admins.

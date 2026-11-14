@@ -1,6 +1,6 @@
+import Dialog from '../../shared/ui/Dialog';
 // desktop/src/features/admin/CreateUserModal.tsx
 import React, { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import { T, inputStyle, btnPrimary, btnGhost } from '../../theme';
 import { API_BASE_URL } from '../../config/api';
 import Icon from '../../shared/ui/Icon';
@@ -8,8 +8,15 @@ import Icon from '../../shared/ui/Icon';
 interface CreateUserModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreated: () => void;
+  onCreated: (message: string, error: boolean) => void;
 }
+
+const EMPTY_HEALTH_PROFILE = {
+  sex: '',
+  date_of_birth: '',
+  emergency_contact_name: '',
+  emergency_contact_phone: '',
+};
 
 const ROLE_OPTIONS = [
   { code: 'STUDENT',             label: 'Student' },
@@ -36,6 +43,7 @@ const ADMIN_PERMISSION_CATALOG: { code: string; name: string; description: strin
   { code: 'ANALYTICS_HEADCOUNT', name: 'View campus headcount', description: 'Active account counts by role.', sort_order: 54 },
   { code: 'INCIDENT_RECORDS_VIEW', name: 'View incident records',  description: 'Open the emergency incident archive and view its report PDFs.', sort_order: 55 },
   { code: 'ANALYTICS_EXPORT', name: 'Export and print analytics', description: 'Download or print reports for granted analytics sections.', sort_order: 56 },
+  { code: 'TERMINAL_VIEW', name: 'Use server Terminal', description: 'View server events and run built-in diagnostics.', sort_order: 57 },
   { code: 'DATABASE_MANAGE',   name: 'Database Studio',           description: 'Inspect and maintain raw system records',                 sort_order: 60 },
 ];
 
@@ -64,6 +72,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
   const [showPassword, setShowPassword] = useState(true);
   const [roleCode, setRoleCode] = useState('STUDENT');
   const [isActive, setIsActive] = useState(true);
+  const [healthProfile, setHealthProfile] = useState(EMPTY_HEALTH_PROFILE);
 
   // Role-specific
   const [studentNo, setStudentNo] = useState('');
@@ -104,6 +113,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
     setShowPassword(true);
     setRoleCode('STUDENT');
     setIsActive(true);
+    setHealthProfile(EMPTY_HEALTH_PROFILE);
     setStudentNo('');
     setCourse('');
     setYearLevel('1');
@@ -159,6 +169,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
   if (!isOpen) return null;
 
   const isAdminRole = roleCode === 'ADMIN';
+  const showCampusProfile = ['STUDENT', 'FACULTY', 'NON_TEACHING'].includes(roleCode);
   const grantableCodes = permCatalog.filter((p) => p.code !== 'SUPER_ADMIN');
   const allSelected = grantableCodes.length > 0 && grantableCodes.every((p) => adminPerms.includes(p.code));
 
@@ -170,6 +181,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
     setFeedback(null);
 
     if (password.length < 8) {
@@ -195,6 +207,11 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
       return;
     }
 
+    const profile = {
+      ...healthProfile,
+      emergency_contact_name: healthProfile.emergency_contact_name.trim(),
+      emergency_contact_phone: healthProfile.emergency_contact_phone.trim(),
+    };
     setIsSaving(true);
     const token = localStorage.getItem('valetudo_token');
     try {
@@ -219,6 +236,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
           specialty: specialty.trim() || null,
           department: department.trim() || null,
           position: position.trim() || null,
+          ...(showCampusProfile && Object.values(profile).some(Boolean) ? { health_profile: profile } : {}),
           ...(isAdminRole
             ? { admin_permissions: adminArchetype === 'super' ? ['SUPER_ADMIN'] : adminPerms }
             : {}),
@@ -226,7 +244,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create user account.');
-      setFeedback({ text: '' + data.message, isError: false });
+      let responderWarning = '';
 
       // Second step: label the new account a Qualified Responder. POST /users
       // returns the new id; the dedicated endpoint applies the flag. A failure
@@ -244,20 +262,14 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
           });
           if (!qrRes.ok) {
             const qrData = await qrRes.json().catch(() => ({}));
-            setFeedback({
-              text: `Account created, but the Qualified Responder label failed: ${qrData.error || qrRes.status}`,
-              isError: true,
-            });
+            responderWarning = `Account created, but the Qualified Responder label failed: ${qrData.error || qrRes.status}`;
           }
         } catch (qrErr: any) {
-          setFeedback({
-            text: `Account created, but the Qualified Responder label failed: ${qrErr.message}`,
-            isError: true,
-          });
+          responderWarning = `Account created, but the Qualified Responder label failed: ${qrErr.message}`;
         }
       }
-      onCreated();
-      setTimeout(() => { onClose(); }, 900);
+      onCreated(responderWarning || data.message || 'Account created.', Boolean(responderWarning));
+      onClose();
     } catch (err: any) {
       setFeedback({ text: '' + err.message, isError: true });
     } finally {
@@ -278,16 +290,15 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
 
   const showStaffFields = ['DOCTOR', 'DENTIST', 'NURSE', 'EMERGENCY_RESPONDER', 'ADMIN'].includes(roleCode);
 
-  return createPortal(
-    <div className="modal-backdrop" onClick={onClose}>
+  return (
+    <Dialog label="Create user account" busy={isSaving} onDismiss={onClose}>
       <div
         className="modal-card"
         style={{ maxWidth: 640, padding: '28px 32px', maxHeight: '90vh', overflowY: 'auto' }}
-        onClick={(e) => e.stopPropagation()}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+        <div className="dialog-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
           <div>
-            <h2 style={{ fontSize: 22, fontWeight: 800, color: T.text, margin: 0, letterSpacing: -0.4 }}>
+            <h2 tabIndex={-1} data-dialog-initial style={{ fontSize: 22, fontWeight: 800, color: T.text, margin: 0, letterSpacing: -0.4 }}>
               Create user account
             </h2>
             <p style={{ fontSize: 13, color: T.textSub, margin: '6px 0 0' }}>
@@ -296,6 +307,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
           </div>
           <button
             type="button"
+            disabled={isSaving}
             onClick={onClose}
             style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: T.textSub }}
             aria-label="Close"
@@ -486,6 +498,41 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
                        onChange={(e) => setPosition(e.target.value)} />
               </div>
             </div>
+          )}
+
+          {showCampusProfile && (
+            <>
+              <div style={sectionLabel}>Health profile (optional)</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 210px), 1fr))', gap: 14 }}>
+                <div>
+                  <label htmlFor="create-user-sex" style={fieldLabel}>Sex</label>
+                  <select id="create-user-sex" style={inputStyle} value={healthProfile.sex}
+                          onChange={(e) => setHealthProfile({ ...healthProfile, sex: e.target.value })}>
+                    <option value="">Select sex</option>
+                    <option value="FEMALE">Female</option>
+                    <option value="MALE">Male</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="create-user-dob" style={fieldLabel}>Date of birth</label>
+                  <input id="create-user-dob" type="date" style={inputStyle} min="1900-01-01"
+                         max={new Date().toISOString().slice(0, 10)} value={healthProfile.date_of_birth}
+                         onChange={(e) => setHealthProfile({ ...healthProfile, date_of_birth: e.target.value })} />
+                </div>
+                <div>
+                  <label htmlFor="create-user-emergency-name" style={fieldLabel}>Emergency contact name</label>
+                  <input id="create-user-emergency-name" style={inputStyle} maxLength={150}
+                         value={healthProfile.emergency_contact_name}
+                         onChange={(e) => setHealthProfile({ ...healthProfile, emergency_contact_name: e.target.value })} />
+                </div>
+                <div>
+                  <label htmlFor="create-user-emergency-phone" style={fieldLabel}>Emergency contact phone</label>
+                  <input id="create-user-emergency-phone" type="tel" style={inputStyle} maxLength={20}
+                         value={healthProfile.emergency_contact_phone}
+                         onChange={(e) => setHealthProfile({ ...healthProfile, emergency_contact_phone: e.target.value })} />
+                </div>
+              </div>
+            </>
           )}
 
           {showStaffFields && !isAdminRole && (
@@ -710,7 +757,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
           )}
 
           {feedback && (
-            <div style={{
+            <div role={feedback.isError ? 'alert' : 'status'} style={{
               marginTop: 18, padding: '12px 16px', borderRadius: T.radius.md,
               fontSize: 12.5, fontWeight: 600,
               background: feedback.isError ? T.dangerSoft : T.successSoft,
@@ -721,10 +768,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
             </div>
           )}
 
-          <div style={{
-            display: 'flex', gap: 10, justifyContent: 'flex-end',
-            marginTop: 24, paddingTop: 18, borderTop: `1px solid ${T.border}`,
-          }}>
+          <div className="dialog-footer" style={{ marginTop: 24 }}>
             <button type="button" onClick={onClose} style={btnGhost} disabled={isSaving}>
               Cancel
             </button>
@@ -742,7 +786,6 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
           </div>
         </form>
       </div>
-    </div>,
-    document.body,
+    </Dialog>
   );
 }

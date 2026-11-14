@@ -74,7 +74,7 @@ interface OdontogramProps {
 
 export default function Odontogram({ activeWorkspacePanel, dentalChartData, isArchivedMode, setDentalChartData, selectedTooth, setSelectedTooth, handleToothConditionChange }: OdontogramProps) {
   return (
-    <section id="doctor-dental-panel" aria-labelledby="doctor-dental-title"
+    <section data-workspace-view id="doctor-dental-panel" role="tabpanel" aria-labelledby="doctor-tab-dental" tabIndex={0}
       hidden={activeWorkspacePanel !== 'dental'}
       style={{
         background: T.surface,

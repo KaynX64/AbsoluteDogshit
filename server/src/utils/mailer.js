@@ -1,3 +1,4 @@
+// Builds and sends booking confirmations and reminders through SMTP or local simulation.
 // server/src/utils/mailer.js
 import 'dotenv/config';
 import nodemailer from 'nodemailer';

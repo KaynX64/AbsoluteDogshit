@@ -1,9 +1,9 @@
-import { pool } from '../db/pool.js';
+// Marks overdue scheduled appointments as no-shows within a transaction.
 
-export async function markDueAppointmentsNoShow(graceMinutes) {
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
+import { inTransaction } from '../db/transaction.js';
+
+export function markDueAppointmentsNoShow(graceMinutes) {
+  return inTransaction(async connection => {
     const [expired] = await connection.query(
       `SELECT appointment_id FROM APPOINTMENTS
        WHERE status = 'scheduled'
@@ -22,12 +22,6 @@ export async function markDueAppointmentsNoShow(graceMinutes) {
       );
       if (result.affectedRows !== ids.length) throw new Error('No-show update did not match the locked appointments.');
     }
-    await connection.commit();
     return ids;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+  });
 }

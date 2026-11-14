@@ -1,3 +1,5 @@
+// Normalizes encounter text and requires an entered chief complaint and diagnosis.
+
 export function readEncounterText(input) {
   const values = {};
   for (const field of ['chief_complaint', 'diagnosis', 'treatment_plan', 'notes']) {

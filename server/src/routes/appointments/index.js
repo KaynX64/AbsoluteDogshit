@@ -1,3 +1,5 @@
+// Mounts appointment booking, queue, intake, consultations, and patient history routes.
+
 import express from 'express';
 import { registerBookingReads } from './booking/reads.js';
 import { registerBookingCreation } from './booking/create.js';

@@ -1,3 +1,5 @@
+// Writes the profile fields associated with an account's assigned role.
+
 export async function saveRoleProfile(connection, targetUserId, {
   role_code, student_no, course, year_level, faculty_no, employee_no, license_no, admin_no,
   specialty, department, position,

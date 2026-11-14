@@ -1,3 +1,5 @@
+// Shares PDF document setup, branding, layout primitives, and QR rendering across templates.
+
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
 

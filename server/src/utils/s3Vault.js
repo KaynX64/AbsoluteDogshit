@@ -1,3 +1,4 @@
+// Provides S3-compatible bucket setup and object upload, retrieval, and deletion.
 // server/src/utils/s3Vault.js
 import 'dotenv/config';
 import {

@@ -86,6 +86,10 @@ export default function SettingsMenu({ onResetPassword }: SettingsMenuProps) {
     else setPanelStyle(null);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useLayoutEffect(() => {
+    if (panelStyle) panelRef.current?.querySelector<HTMLButtonElement>('.settings-close')?.focus();
+  }, [panelStyle !== null]);
+
   /* ── Dismiss: outside click, Escape, resize; keep anchored on scroll ── */
   useEffect(() => {
     if (!open) return;
@@ -101,7 +105,10 @@ export default function SettingsMenu({ onResetPassword }: SettingsMenuProps) {
       setOpen(false);
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape' && !e.defaultPrevented) {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     };
     const onResize = () => measure();
 
@@ -152,7 +159,7 @@ export default function SettingsMenu({ onResetPassword }: SettingsMenuProps) {
         <button
           type="button"
           className="settings-close"
-          onClick={() => setOpen(false)}
+          onClick={() => { setOpen(false); triggerRef.current?.focus(); }}
           aria-label="Close settings"
         >
           <Icon name="close" size={18} />
@@ -225,6 +232,7 @@ export default function SettingsMenu({ onResetPassword }: SettingsMenuProps) {
           type="button"
           className="settings-row"
           onClick={() => {
+            triggerRef.current?.focus();
             setOpen(false);
             onResetPassword();
           }}

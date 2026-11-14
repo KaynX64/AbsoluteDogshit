@@ -39,7 +39,7 @@ export default function EncounterEditor({
 }: EncounterEditorProps) {
   return (
     <form className="doctor-encounter-form" onSubmit={onSubmit}>
-      <div className="doctor-writing-grid">
+      <div className="doctor-writing-grid" data-workspace-view>
         <div className="doctor-writing-field">
           <label htmlFor="encounter-complaint"
             style={{

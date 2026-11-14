@@ -1,3 +1,5 @@
+// Mounts SOS, responder alert management, and incident report routes.
+
 import express from 'express';
 import { registerSosRoutes } from './sos.js';
 import { registerAlertRoutes } from './alerts.js';

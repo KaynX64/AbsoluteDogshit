@@ -1,3 +1,5 @@
+// Authenticates Socket.IO connections and registers user and desktop window rooms.
+
 import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '../utils/secrets.js';
@@ -61,6 +63,7 @@ export function attachRealtime(server, { isHttps, isOriginAllowed }) {
   });
 
   io.on('connection', (socket) => {
+    socket.data.connectedAt = Date.now();
     const userEmail = socket.user?.email || 'Authenticated User';
     const userId = socket.user?.user_id;
     const clientInstanceId = socket.handshake.auth?.clientInstanceId;

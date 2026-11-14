@@ -1,3 +1,5 @@
+// Tests history paging, role-sensitive dental data, and attachment-only requests.
+
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { mock, test } from 'node:test';

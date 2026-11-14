@@ -1,3 +1,5 @@
+// Lets Super Admins read, preview, and save versioned runtime policy.
+
 import express from 'express';
 import { pool } from '../../db/pool.js';
 import { resolveAdminPermissions } from '../../middleware/rbac.js';

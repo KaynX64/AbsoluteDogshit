@@ -1,3 +1,5 @@
+// Renders the authorized analytics sections as CSV and escapes spreadsheet formula inputs.
+
 import { workflowSections } from './sections.js';
 
 function cell(value) {

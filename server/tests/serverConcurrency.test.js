@@ -1,3 +1,5 @@
+// Exercises server lifecycle and concurrent transactions with disposable MySQL.
+
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -137,7 +139,7 @@ test('startup waits for dependency checks and closes the Socket.IO HTTP listener
 
 test('prescription expiry skips a row being cancelled and audits only its committed transition', { skip }, async t => {
   const db = await fixture(t);
-  const { expireDuePrescriptions } = await import('../src/services/prescriptions/expirePrescriptions.js');
+  const { expireDuePrescriptions } = await import('../src/documents/prescriptions/expirePrescriptions.js');
   await db.query("INSERT INTO EMR_RECORDS (emr_id, patient_user_id, doctor_user_id, chief_complaint, diagnosis) VALUES (1, 1, 2, 'fixture', 'fixture')");
   await db.query(`INSERT INTO PRESCRIPTIONS
     (prescription_id, emr_id, patient_user_id, doctor_user_id, issued_at, expires_at, qr_token)
@@ -180,6 +182,19 @@ test('concurrent reminder workers accept an appointment email once', { skip }, a
   assert.deepEqual(rows.map(row => row.reminder_sent), [1, 0]);
 });
 
+test('reminder runs cap each batch and drain the remaining appointments on the next run', { skip }, async t => {
+  const db = await fixture(t);
+  const { sendDueAppointmentReminders } = await withoutFirebaseCredentials(t, () => import('../src/workers/appointmentReminderWorker.js'));
+  const log = t.mock.method(console, 'log', () => {});
+  await db.query(`INSERT INTO APPOINTMENTS (patient_user_id, doctor_user_id, date_time, appointment_type)
+    VALUES ` + Array(51).fill("(1, 2, NOW() + INTERVAL 1 HOUR, 'Medical')").join(','));
+  const first = await sendDueAppointmentReminders();
+  assert.deepEqual(first.metrics, { attempted: 50, delivered: 50 });
+  const second = await sendDueAppointmentReminders();
+  assert.deepEqual(second.metrics, { attempted: 1, delivered: 1 });
+  assert.equal(log.mock.calls.filter(call => call.arguments[0] === '[Email Dispatch Simulation] reminder').length, 51);
+});
+
 test('replay commits a mixed batch and concurrent duplicates reuse the recorded outcome', { skip }, async t => {
   const db = await fixture(t);
   const { replayMutations } = await import('../src/sync/replayService.js');
@@ -201,6 +216,17 @@ test('replay commits a mixed batch and concurrent duplicates reuse the recorded 
   assert.deepEqual(await replayMutations([conflict, invalid], context), mixed.slice(1, 3));
   const [[row]] = await db.query('SELECT status, version FROM APPOINTMENTS WHERE appointment_id = 1');
   assert.deepEqual(row, { status: 'cancelled', version: 2 });
+  const [saved] = await db.query('SELECT sync_status FROM LOCAL_SYNC_LOGS ORDER BY sync_id');
+  assert.deepEqual(saved.map(entry => entry.sync_status).sort(), ['conflict', 'error', 'synced']);
+  const { request } = await mountedApi(t);
+  const owned = await request('/sync/legacy-ownership', { method: 'POST', json: { appointmentIds: [1, 2, 3] } });
+  assert.deepEqual(await owned.json(), { appointmentIds: [1, 2] });
+  const other = await request('/sync/legacy-ownership', { userId: 7, roles: ['DENTIST'], method: 'POST', json: { appointmentIds: [1, 2] } });
+  assert.deepEqual(await other.json(), { appointmentIds: [] });
+  const denied = await replayMutations([{
+    ...appointment, client_mutation_id: 'different-account', payload: { appointment_id: 2, status: 'completed' },
+  }], { user: { user_id: 7, roles: ['DENTIST'] }, deviceId: 'fixture' });
+  assert.equal(denied[0].status, 'error');
 });
 
 test('both status endpoints release a single-connection pool before concurrent queue notifications', { skip }, async t => {
@@ -260,6 +286,69 @@ test('online completion and offline replay racing for the same appointment write
     (SELECT COUNT(*) FROM EMR_RECORDS WHERE appointment_id = a.appointment_id) AS records
     FROM APPOINTMENTS a JOIN QUEUE q USING (appointment_id) WHERE a.appointment_id = 3`);
   assert.deepEqual(rolledBack, { status: 'checked_in', ticket_status: 'waiting', records: 0 });
+});
+
+test('campus account creation saves optional health details and rolls back invalid profiles', { skip }, async t => {
+  const db = await fixture(t);
+  const { request } = await mountedApi(t);
+  const create = (role, fields, health_profile) => request('/admin/users', {
+    roles: ['ADMIN'], userId: 1, method: 'POST', json: {
+      first_name: 'Campus', last_name: 'Fixture', password: 'Z7!aQ3#rT9%w',
+      role_code: role, email: role.toLowerCase() + '@creation.example.test', ...fields, health_profile,
+    },
+  });
+  const profile = {
+    sex: 'FEMALE', date_of_birth: '2004-02-29',
+    emergency_contact_name: 'Fixture Contact', emergency_contact_phone: '+639000000000',
+  };
+  const invalid = await create('STUDENT', { student_no: 'ST-CREATE' }, { ...profile, date_of_birth: '2003-02-29' });
+  assert.equal(invalid.status, 400);
+  assert.match((await invalid.json()).error, /valid date/);
+  const [[remaining]] = await db.query("SELECT COUNT(*) AS total FROM USERS WHERE email = 'student@creation.example.test'");
+  assert.equal(remaining.total, 0);
+
+  for (const [role, fields] of [
+    ['STUDENT', { student_no: 'ST-CREATE', course: 'Computing', year_level: 2 }],
+    ['FACULTY', { faculty_no: 'FAC-CREATE', department: 'Computing', position: 'Instructor' }],
+    ['NON_TEACHING', { employee_no: 'NT-CREATE', department: 'Facilities', position: 'Assistant' }],
+  ]) {
+    const response = await create(role, fields, profile);
+    const result = await response.json();
+    assert.equal(response.status, 201, result.error);
+    const [[stored]] = await db.query(
+      "SELECT sex, DATE_FORMAT(date_of_birth, '%Y-%m-%d') AS date_of_birth, emergency_contact_name, emergency_contact_phone FROM HEALTH_PROFILES WHERE user_id = ?",
+      [result.userId],
+    );
+    assert.deepEqual({ ...stored }, profile);
+  }
+  const emptyResponse = await create('NON_TEACHING', { email: 'empty@creation.example.test' }, { sex: '', date_of_birth: null });
+  const empty = await emptyResponse.json();
+  assert.equal(emptyResponse.status, 201, empty.error);
+  const [[emptyProfile]] = await db.query('SELECT COUNT(*) AS total FROM HEALTH_PROFILES WHERE user_id = ?', [empty.userId]);
+  assert.equal(emptyProfile.total, 0);
+});
+
+test('Terminal grants can be assigned at account creation and revoked during the same session', { skip }, async t => {
+  await fixture(t);
+  const { request } = await mountedApi(t);
+  const superAdmin = { roles: ['ADMIN'], userId: 1 };
+  const response = await request('/admin/users', {
+    ...superAdmin, method: 'POST', json: {
+      first_name: 'Terminal', last_name: 'Reviewer', email: 'terminal@creation.example.test',
+      password: 'Z7!aQ3#rT9%w', role_code: 'ADMIN', admin_permissions: ['TERMINAL_VIEW'],
+    },
+  });
+  const account = await response.json();
+  assert.equal(response.status, 201, account.error);
+  const reviewer = { token: jwt.sign({ user_id: account.userId, roles: ['ADMIN'] }, process.env.JWT_SECRET, { expiresIn: '5m' }) };
+  const path = '/admin/operations';
+  assert.equal((await request(path, reviewer)).status, 200);
+  assert.equal((await request(path + '/restart', { ...reviewer, method: 'POST' })).status, 403);
+  const revoke = await request(`/admin/users/${account.userId}/permissions`, {
+    ...superAdmin, method: 'PUT', json: { admin_permissions: ['TELEMETRY_VIEW'] },
+  });
+  assert.equal(revoke.status, 200);
+  assert.equal((await request(path, reviewer)).status, 403);
 });
 
 test('both account update routes recognize mixed-role admins and failed profile edits roll back grants', { skip }, async t => {
@@ -730,4 +819,71 @@ test('concurrent incident filing publishes a single report after commit', { skip
     if (!pdfKey) await setTimeout(25);
   }
   assert.ok(pdfKey);
+});
+
+
+test('PDF recovery skips another process holding the database lock and then resumes', { skip }, async t => {
+  const db = await fixture(t);
+  const { backfillDocumentPdfs } = await import('../src/workers/documentPdfBackfillWorker.js');
+  const connection = await db.getConnection();
+  try {
+    await connection.query("SELECT GET_LOCK(CONCAT('valetudo-pdfs:', SHA1(LOWER(DATABASE()))), 0)");
+    assert.deepEqual(await backfillDocumentPdfs(), { skipped: true });
+  } finally {
+    try {
+      await connection.query("SELECT RELEASE_LOCK(CONCAT('valetudo-pdfs:', SHA1(LOWER(DATABASE()))))");
+    } finally {
+      connection.release();
+    }
+  }
+  const result = await backfillDocumentPdfs();
+  assert.equal(result.degraded, false);
+  assert.equal(result.metrics.attempted, 0);
+});
+
+
+test('formulary preserves zero reorder level and rejects deductions from archived lots', { skip }, async t => {
+  const db = await fixture(t);
+  const { request } = await mountedApi(t);
+  const nurse = { userId: 3, roles: ['NURSE'] };
+  const created = await request('/inventory/medicines', {
+    ...nurse, method: 'POST',
+    json: { name: 'Fixture', generic_name: 'Fixture', form: 'Tablet', strength: '10mg', reorder_level: 0 },
+  });
+  assert.equal(created.status, 201);
+  const { medicineId } = await created.json();
+  const [[medicine]] = await db.query('SELECT reorder_level FROM MEDICINES WHERE medicine_id = ?', [medicineId]);
+  assert.equal(medicine.reorder_level, 0);
+  const [lot] = await db.query(
+    `INSERT INTO MEDICINE_BATCHES (medicine_id, batch_no, manufacture_date, expiry_date, quantity_on_hand, deleted_at)
+     VALUES (?, 'archived', CURDATE() - INTERVAL 1 DAY, CURDATE() + INTERVAL 1 DAY, 2, NOW())`,
+    [medicineId],
+  );
+  const rejected = await request('/inventory/deduct', {
+    ...nurse, method: 'POST', json: { batch_id: lot.insertId, quantity_deducted: 1 },
+  });
+  assert.equal(rejected.status, 400);
+  const [[stock]] = await db.query('SELECT quantity_on_hand FROM MEDICINE_BATCHES WHERE batch_id = ?', [lot.insertId]);
+  assert.equal(stock.quantity_on_hand, 2);
+});
+
+test('concurrent prescription cancellations return stock and write the return ledger once', { skip }, async t => {
+  const db = await fixture(t);
+  const { request, emit } = await mountedApi(t);
+  await db.query("INSERT INTO MEDICINES (medicine_id, name, generic_name, form, strength, unit) VALUES (1, 'Fixture', 'Fixture', 'Tablet', '10mg', 'pcs')");
+  await db.query(`INSERT INTO MEDICINE_BATCHES (batch_id, medicine_id, batch_no, manufacture_date, expiry_date, quantity_on_hand)
+    VALUES (1, 1, 'fixture', CURDATE() - INTERVAL 1 DAY, CURDATE() + INTERVAL 1 DAY, 3)`);
+  await db.query("INSERT INTO EMR_RECORDS (emr_id, patient_user_id, doctor_user_id, chief_complaint, diagnosis) VALUES (1, 1, 2, 'fixture', 'fixture')");
+  await db.query("INSERT INTO PRESCRIPTIONS (prescription_id, emr_id, patient_user_id, doctor_user_id, expires_at, qr_token) VALUES (1, 1, 1, 2, CURDATE(), 'fixture-cancel')");
+  await db.query("INSERT INTO PRESCRIPTION_ITEMS (item_id, prescription_id, medicine_id, dosage, frequency, duration_days) VALUES (1, 1, 1, '10mg', 'daily', 1)");
+  await db.query("INSERT INTO INVENTORY_LOGS (batch_id, prescription_item_id, quantity_change, transaction_type, performed_by) VALUES (1, 1, -2, 'dispense', 2)");
+  const cancel = () => request('/documents/prescriptions/1/cancel', { method: 'PATCH', json: { reason: 'Fixture' } });
+  const results = await Promise.all([cancel(), cancel()]);
+  assert.deepEqual(results.map(response => response.status).sort(), [200, 409]);
+  assert.equal((await results.find(response => response.status === 409).json()).code, 'INVALID_STATE');
+  const [returns] = await db.query("SELECT quantity_change FROM INVENTORY_LOGS WHERE transaction_type = 'return'");
+  assert.deepEqual(returns, [{ quantity_change: 2 }]);
+  const [[stock]] = await db.query('SELECT quantity_on_hand FROM MEDICINE_BATCHES WHERE batch_id = 1');
+  assert.equal(stock.quantity_on_hand, 5);
+  assert.equal(emit.mock.calls.filter(call => call.arguments[0] === 'inventory:updated').length, 1);
 });

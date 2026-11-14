@@ -8,8 +8,8 @@
 
 | # | Lines | Anchor | Entry point |
 |---|---|---|---|
-| 1 | 1-4 | — | Imports and declarations |
-| 2 | 5-92 | ClinicalReview | ClinicalReview |
-| 3 | 93-103 | export default function | export default function |
-| 4 | 104-387 | const [medicines | const [medicines |
-| 5 | 388-753 | <FormularySelect | <FormularySelect |
+| 1 | 2-5 | — | Imports and declarations |
+| 2 | 6-93 | ClinicalReview | ClinicalReview |
+| 3 | 94-104 | export default function | export default function |
+| 4 | 105-396 | const [medicines | const [medicines |
+| 5 | 397-763 | <FormularySelect | <FormularySelect |

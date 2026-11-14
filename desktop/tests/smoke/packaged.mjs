@@ -1,16 +1,19 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { access, mkdtemp, rm } from 'node:fs/promises';
+import { DatabaseSync } from 'node:sqlite';
+import { access, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { initLocalDatabase } from '../../electron/offline/database.cjs';
 import { installFixtures, verifyWorkflows } from './workflows.mjs';
 
 const executable = resolve(process.argv[2] ?? 'release/win-unpacked/Valetudo HealthLink.exe');
 await access(executable);
 const profile = await mkdtemp(join(tmpdir(), 'valetudo-packaged-smoke-'));
+const expectDeferredStorage = process.argv.includes('--deferred-storage');
 let app;
 let socket;
 
@@ -25,6 +28,20 @@ async function until(probe, description) {
 }
 
 try {
+  const storage = join(profile, 'valetudo_data');
+  await mkdir(storage);
+  const legacyPath = join(storage, 'valetudo_offline.db');
+  const legacy = new DatabaseSync(legacyPath);
+  initLocalDatabase(legacy);
+  legacy.prepare(`
+    INSERT INTO LOCAL_SYNC_LOGS
+      (client_mutation_id, user_id, device_id, table_name, record_uuid, action, payload)
+    VALUES ('fixture-disk-only', 0, 'CLINIC-DESKTOP', 'EMR_RECORDS', 'fixture-disk-record', 'CREATE', ?)
+  `).run(JSON.stringify({
+    appointment_id: 10, patient_user_id: 5,
+    chief_complaint: 'Synthetic complaint from old SQLite', diagnosis: 'Synthetic diagnosis',
+  }));
+  legacy.close();
   const started = performance.now();
   const reservation = createServer().listen(0, '127.0.0.1');
   await once(reservation, 'listening');
@@ -79,15 +96,57 @@ try {
   await send('Network.enable');
   await send('Network.setBlockedURLs', { urls: ['http://*', 'https://*', 'ws://*', 'wss://*'] });
   await wait("document.querySelector('form input') && window.electronAPI", 'login form and preload');
+  const loginReadyMs = Math.round(performance.now() - started);
+  if (expectDeferredStorage) {
+    await access(legacyPath);
+    await assert.rejects(access(join(storage, 'offline-storage.key')), { code: 'ENOENT' });
+  }
   assert.match(await run('window.electronAPI.getAppVersion()'), /^\d+\.\d+\.\d+/);
   await wait('[...document.images].some(img => img.complete && img.naturalWidth > 0)', 'local logo');
-  assert.equal(await run("document.fonts.load('18px Material Symbols Outlined').then(fonts => fonts.some(font => font.status === 'loaded'))"), true);
-  await access(join(profile, 'valetudo_data', 'valetudo_offline.db'));
-  const rendererMs = await run("performance.getEntriesByType('paint').find(entry => entry.name === 'first-contentful-paint')?.startTime ?? null");
-  console.log('Packaged login ready in ' + Math.round(performance.now() - started) + ' ms' +
+  for (const font of ['18px "Material Symbols Outlined"', '700 18px Inter', '600 18px "JetBrains Mono"']) {
+    assert.equal(await run(`document.fonts.load(${JSON.stringify(font)}, 'A').then(fonts => fonts.some(font => font.status === 'loaded'))`), true, font);
+  }
+  assert.equal(await run(`(() => {
+    const icon = document.createElement('span');
+    icon.className = 'material-symbols-outlined';
+    icon.textContent = 'monitor_heart';
+    document.body.append(icon);
+    const iconWidth = icon.getBoundingClientRect().width;
+    icon.style.fontFamily = 'sans-serif';
+    const textWidth = icon.getBoundingClientRect().width;
+    icon.remove();
+    return iconWidth > 0 && iconWidth < textWidth;
+  })()`), true, 'Material Symbols renders an icon ligature offline');
+  await wait("performance.getEntriesByName('first-contentful-paint').length", 'first contentful paint');
+  const rendererMs = await run("performance.getEntriesByName('first-contentful-paint')[0].startTime");
+  console.log('Packaged login ready in ' + loginReadyMs + ' ms' +
     (rendererMs === null ? '' : ' (renderer first contentful paint ' + Math.round(rendererMs) + ' ms)'));
   await run('(' + installFixtures.toString() + ')()');
-  await verifyWorkflows(run, wait);
+  async function press(key, modifiers = 0) {
+    const keyCodes = { Tab: 9, Escape: 27, Enter: 13, ArrowLeft: 37, ArrowRight: 39, Home: 36, End: 35 };
+    const event = { key, code: key, windowsVirtualKeyCode: keyCodes[key], modifiers };
+    await send('Input.dispatchKeyEvent', key === 'Enter'
+      ? { ...event, type: 'keyDown', text: '\r' }
+      : { ...event, type: 'rawKeyDown' });
+    await send('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+  }
+  const startupHeap = await send('Runtime.getHeapUsage');
+  await verifyWorkflows(run, wait, press, send, { offlineOnly: process.argv.includes('--offline-only') });
+  const encryptedPath = join(storage, 'valetudo_offline_encrypted.db');
+  await access(join(storage, 'offline-storage.key'));
+  await assert.rejects(access(legacyPath), { code: 'ENOENT' });
+  const bytes = await readFile(encryptedPath);
+  assert.notEqual(bytes.subarray(0, 16).toString(), 'SQLite format 3\0');
+  assert.equal(bytes.includes(Buffer.from('Synthetic complaint from old SQLite')), false);
+  const plain = new DatabaseSync(encryptedPath, { readOnly: true });
+  try {
+    assert.throws(() => plain.prepare('SELECT * FROM LOCAL_SYNC_LOGS').all());
+  } finally {
+    plain.close();
+  }
+  const workflowHeap = await send('Runtime.getHeapUsage');
+  console.log('Renderer JS heap used, login → after workflows: ' +
+    [startupHeap, workflowHeap].map(snapshot => (snapshot.usedSize / 1048576).toFixed(1) + ' MiB').join(' → '));
   console.log('Packaged Electron smoke checks passed.');
 } finally {
   socket?.close();

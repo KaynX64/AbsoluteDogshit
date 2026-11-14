@@ -1,3 +1,5 @@
+// Tests mixed-role admin authorization and booking notification and pool-release behavior.
+
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { test } from 'node:test';

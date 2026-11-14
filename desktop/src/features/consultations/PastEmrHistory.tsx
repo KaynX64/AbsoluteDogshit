@@ -1,3 +1,4 @@
+import Dialog from '../../shared/ui/Dialog';
 import { T } from '../../theme';
 import Icon from '../../shared/ui/Icon';
 import HistoryPageControls from './HistoryPageControls';
@@ -16,16 +17,12 @@ interface PastEmrHistoryProps {
 
 export default function PastEmrHistory({ setShowHistoryModal, selectedApp, loadingHistory, patientHistory, historyPage, handleOpenAttachment, openingAttachmentId }: PastEmrHistoryProps) {
   return (
-    <div className="modal-backdrop" onClick={() => setShowHistoryModal(false)}>
+    <Dialog label="Past EMR history" size="wide" backdropDismiss onDismiss={() => setShowHistoryModal(false)}>
       <div
         className="modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="past-emr-history-title"
         style={{ maxWidth: 780 }}
-        onClick={(e) => e.stopPropagation()}
       >
-        <div
+        <div className="dialog-header"
           style={{
             display: 'flex',
             justifyContent: 'space-between',
@@ -35,7 +32,7 @@ export default function PastEmrHistory({ setShowHistoryModal, selectedApp, loadi
             marginBottom: 18,
           }}
         >
-          <h3
+          <h3 tabIndex={-1} data-dialog-initial
             id="past-emr-history-title"
             style={{
               margin: 0,
@@ -208,6 +205,6 @@ export default function PastEmrHistory({ setShowHistoryModal, selectedApp, loadi
         )}
         <HistoryPageControls page={historyPage} />
       </div>
-    </div>
+    </Dialog>
   );
 }

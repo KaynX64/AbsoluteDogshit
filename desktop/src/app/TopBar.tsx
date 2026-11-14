@@ -3,6 +3,9 @@ interface TopBarProps {
   role: string;
   isOnline: boolean;
   offlineQueueCount: number;
+  offlineNeedsReview: number;
+  offlineUnassigned: number;
+  offlineStorageUnavailable: boolean;
   isReplaying: boolean;
   onManualReplay: () => void;
   roleView: string;
@@ -11,7 +14,7 @@ interface TopBarProps {
 }
 
 export default function TopBar({
-  user, role, isOnline, offlineQueueCount, isReplaying, onManualReplay,
+  user, role, isOnline, offlineQueueCount, offlineNeedsReview, offlineUnassigned, offlineStorageUnavailable, isReplaying, onManualReplay,
   roleView, roles, onChangeRoleView,
 }: TopBarProps) {
   const initials =
@@ -55,6 +58,18 @@ export default function TopBar({
           <span style={{ fontSize: 8 }}>●</span>
           {isOnline ? `Connected · ${timeStr}` : 'Offline'}
         </span>
+
+        {offlineStorageUnavailable && <span className="tb-online is-off" role="status">Offline storage unavailable</span>}
+        {offlineUnassigned > 0 && (
+          <span className="tb-online is-off" role="status" title="These changes are encrypted and need account verification before replay.">
+            {offlineUnassigned} unassigned offline changes
+          </span>
+        )}
+        {offlineNeedsReview > 0 && (
+          <span className="tb-online is-off" role="status" title="Unresolved changes are retained in encrypted storage.">
+            {offlineNeedsReview} offline changes need review
+          </span>
+        )}
 
         {offlineQueueCount > 0 && (
           <button

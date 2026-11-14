@@ -1,3 +1,5 @@
+// Exercises mounted API routes with service doubles to verify permissions and response contracts.
+
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -57,6 +59,41 @@ const request = (path, { roles, userId = 21, method = 'GET', headers = {}, json 
   if (body !== undefined) headers = { ...headers, 'content-type': 'application/json' };
   return fetch(baseUrl + path, { method, headers, body });
 };
+
+test('inventory expiry alerts and summary use a 30-day window', async t => {
+  const expiryQueries = [];
+  t.mock.method(pool, 'query', async sql => {
+    if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
+    if (sql.includes('CASE') && sql.includes('days_until_expiry')) {
+      expiryQueries.push(sql);
+      return [[{
+        batch_id: 1, name: 'Fixture medicine', generic_name: 'Fixture generic',
+        batch_no: 'Fixture batch', quantity_on_hand: 7, expiry_date: '2027-01-01',
+        days_until_expiry: 2, alert_level: 'CRITICAL (<30d)',
+      }]];
+    }
+    if (sql.includes('COALESCE(m.reorder_level')) return [[{ count: 0 }]];
+    if (sql.includes('DATEDIFF(b.expiry_date, CURDATE()) <= 30')) {
+      expiryQueries.push(sql);
+      return [[{ count: 1 }]];
+    }
+    if (sql.includes('b.expiry_date <= CURDATE()')) return [[{ count: 0 }]];
+    assert.fail(`Unexpected inventory query: ${sql}`);
+  });
+
+  const options = { roles: ['NURSE'] };
+  const expiryResponse = await request('/api/inventory/expiring-soon', options);
+  assert.equal(expiryResponse.status, 200);
+  assert.equal((await expiryResponse.json()).length, 1);
+  const summaryResponse = await request('/api/inventory/dashboard-summary', options);
+  assert.equal(summaryResponse.status, 200);
+  assert.equal((await summaryResponse.json()).expiringSoonCount, 1);
+  assert.equal(expiryQueries.length, 2);
+  for (const sql of expiryQueries) {
+    assert.match(sql, /DATEDIFF\(b\.expiry_date, CURDATE\(\)\) <= 30/);
+    assert.doesNotMatch(sql, /DATEDIFF\(b\.expiry_date, CURDATE\(\)\) <= 90/);
+  }
+});
 
 test('analytics headcount scope skips all other loaders and limits every report format', async t => {
   let codes = ['ANALYTICS_VIEW', 'ANALYTICS_HEADCOUNT', 'ANALYTICS_EXPORT'];
@@ -474,4 +511,92 @@ test('Database Studio rolls back and releases when an audit write fails', async 
   assert.equal(response.status, 400);
   assert.equal((await response.json()).error, 'Fixture audit failure');
   assert.deepEqual(calls, ['begin', 'insert', 'rollback', 'release']);
+});
+
+
+test('audit pagination keeps the array contract and applies the cursor under the live grant', async t => {
+  const queries = [];
+  t.mock.method(pool, 'query', async (sql, params) => {
+    if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
+    if (sql.includes('FROM USER_ROLES') && !sql.includes('FROM PHI_ACCESS_LOGS')) return [[{ code: 'ADMIN' }]];
+    if (sql.includes('FROM ADMIN_PERMISSIONS')) return [[{ code: 'AUDIT_VIEW' }]];
+    if (sql.includes('FROM PHI_ACCESS_LOGS') || sql.includes('FROM AUDIT_LOGS')) {
+      queries.push({ sql, params });
+      return [[{ id: 8 }]];
+    }
+    assert.fail('Unexpected audit query');
+  });
+  for (const path of ['/api/admin/audit-logs', '/api/admin/phi-access-logs']) {
+    const session = { roles: ['ADMIN'] };
+    assert.equal((await request(path + '?before=0', session)).status, 400);
+    const result = await request(path + '?before=9&limit=1', session);
+    assert.equal(result.status, 200);
+    assert.deepEqual(await result.json(), [{ id: 8 }]);
+  }
+  assert.deepEqual(queries.map(query => query.params), [['9', 1], ['9', 1]]);
+  assert.match(queries[0].sql, /WHERE a.audit_id < \?/);
+  assert.match(queries[1].sql, /WHERE p.access_id < \?/);
+  assert.match(queries[1].sql, /GROUP_CONCAT/);
+});
+
+
+test('connected users is restricted to admins with telemetry access', async t => {
+  t.mock.method(pool, 'query', async (sql, params) => {
+    if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
+    if (sql.includes('FROM ADMIN_PERMISSIONS')) return [[{ code: params[0] === 22 ? 'TELEMETRY_VIEW' : 'AUDIT_VIEW' }]];
+    assert.fail('Unexpected presence query');
+  });
+  const path = '/api/admin/connected-users';
+  assert.equal((await request(path)).status, 401);
+  assert.equal((await request(path, { roles: ['NURSE'] })).status, 403);
+  assert.equal((await request(path, { roles: ['ADMIN'] })).status, 403);
+  const response = await request(path, { roles: ['ADMIN'], userId: 22 });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.deepEqual((await response.json()).sessions, []);
+});
+
+
+test('server console grants diagnostics separately from Super Admin restart access', async t => {
+  const { s3 } = await import('../src/utils/s3Vault.js');
+  t.mock.method(s3, 'send', async () => ({ $response: { headers: { 'x-minio-version': 'fixture-release' } } }));
+  t.mock.method(pool, 'query', async (sql, params) => {
+    if (sql.sql === 'SELECT VERSION() AS version') return [[{ version: 'fixture-mysql' }]];
+    if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
+    if (sql.includes('FROM USER_ROLES')) {
+      if (params[0] === 23) return [[]];
+      if (params[0] === 24) return [[{ code: 'TERMINAL_VIEW' }]];
+      return [[{ code: params[0] === 22 ? 'SUPER_ADMIN' : 'TELEMETRY_VIEW' }]];
+    }
+    assert.fail('Unexpected operations query');
+  });
+  const path = '/api/admin/operations';
+  assert.equal((await request(path, { roles: ['ADMIN'] })).status, 403);
+  const formerAdmin = { roles: ['ADMIN'], userId: 23 };
+  assert.equal((await request(path, formerAdmin)).status, 403);
+  assert.equal((await request(path + '/restart', { ...formerAdmin, method: 'POST', json: {} })).status, 403);
+  const terminalViewer = { roles: ['ADMIN'], userId: 24 };
+  const limitedStatus = await request(path, terminalViewer);
+  assert.equal(limitedStatus.status, 200);
+  const { restartAuthorized, restartAvailable } = await limitedStatus.json();
+  assert.equal(restartAuthorized, false);
+  assert.equal(restartAvailable, false);
+  assert.equal((await request(path + '/command', { ...terminalViewer, method: 'POST', json: { command: 'memory' } })).status, 200);
+  assert.equal((await request(path + '/restart', { ...terminalViewer, method: 'POST' })).status, 403);
+  const admin = { roles: ['ADMIN'], userId: 22 };
+  const status = await request(path, admin);
+  assert.equal(status.status, 200);
+  assert.equal((await status.json()).restartAuthorized, true);
+  const result = await request(path + '/command', { ...admin, method: 'POST', json: { command: 'status' } });
+  assert.equal(result.status, 200);
+  const { output } = await result.json();
+  assert.ok(output.instanceId);
+  assert.match(output.serverVersion, /^\d+\./);
+  assert.equal(output.mysql.version, 'fixture-mysql');
+  assert.equal(output.minio.version, 'fixture-release');
+  assert.equal(output.redis.status, 'Fallback');
+  assert.equal(output.overall, 'Degraded');
+  assert.equal(output.ram.usedBytes + output.ram.availableBytes, output.ram.totalBytes);
+  assert.equal((await request(path + '/command', { ...admin, method: 'POST', json: { command: 'constructor' } })).status, 400);
+  assert.equal((await request(path + '/restart', { ...admin, method: 'POST', json: {} })).status, 409);
 });

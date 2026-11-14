@@ -1,3 +1,5 @@
+// Tests runtime policy validation, revision ordering, and appointment capacity rules.
+
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { availabilityForHour, groupBookingsByHour, isRecoveryBlocked, parseBookingTime, scheduleSlotIssue } from '../src/config/appointmentRules.js';

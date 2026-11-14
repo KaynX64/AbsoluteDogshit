@@ -1,3 +1,5 @@
+// Validates admin permission codes and updates account grants within the caller's transaction.
+
 import { resolveAdminPermissions } from '../../middleware/rbac.js';
 import { fail } from '../../utils/httpError.js';
 

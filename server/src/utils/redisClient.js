@@ -1,3 +1,4 @@
+// Connects to Redis and provides cache reads, writes, and invalidation.
 // server/src/utils/redisClient.js
 import 'dotenv/config';
 import Redis from 'ioredis';

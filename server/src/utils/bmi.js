@@ -1,3 +1,4 @@
+// Classifies a valid BMI value for display and handles missing or invalid values.
 // server/src/utils/bmi.js
 export function getBmiCategory(bmi) {
   const value = Number(bmi);

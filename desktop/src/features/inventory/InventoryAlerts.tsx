@@ -121,7 +121,7 @@ export default function InventoryAlerts({
                 padding: 24, textAlign: 'center',
                 color: T.textSub, fontSize: 12.5, fontWeight: 700,
               }}>
-                {emptyText('expiring-soon', 'No expired lots or lots expiring within 90 days.')}
+                {emptyText('expiring-soon', 'No expired lots or lots expiring within 30 days.')}
               </div>
             ) : (
               <table className="tbl" style={{ fontSize: 12 }}>

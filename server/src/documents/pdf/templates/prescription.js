@@ -1,3 +1,5 @@
+// Lays out medication directions, clinician signature, and verification details in a prescription PDF.
+
 import { formatSignatory } from '../../signing/signatory.js';
 import {
   BRAND_GREEN,

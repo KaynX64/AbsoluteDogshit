@@ -4,5 +4,7 @@
 
 Server guidance is split across the parts below to keep documentation files manageable. Read the part relevant to the task; these parts are authoritative.
 
-- [`AGENTS-parts/AGENTS-01.md`](AGENTS-parts/AGENTS-01.md) — “Boot pipeline (src/index.js)” · “Route map — src/routes/” · “Middleware — src/middleware/”
-- [`AGENTS-parts/AGENTS-02.md`](AGENTS-parts/AGENTS-02.md) — “Auth model — src/auth/” · “Domain modules and shared utilities” · “Database — src/db/ + schema.sql” · “Env — copy `.env.example` → `.env` (never commit it)” · …
+- [`AGENTS-parts/AGENTS-01.md`](AGENTS-parts/AGENTS-01.md) — Startup, route composition, authorization and Terminal operations.
+- [`AGENTS-parts/AGENTS-02.md`](AGENTS-parts/AGENTS-02.md) — Authentication, domain services, replay storage, migrations, configuration and tests.
+
+Quick references: [Feature routes](src/routes/AGENTS.md) · [Shared helpers](src/utils/AGENTS.md) · [Migration rollout](MIGRATION-PLAN.md).
