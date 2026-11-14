@@ -4,7 +4,7 @@ Electron 44 (main process = CommonJS `.cjs`) + Vite 6 + React 19 + TypeScript 5.
 
 ## Process model — electron/main.cjs
 
-- **Dev** (`npm run dev`): the npm script runs Vite at `https://127.0.0.1:5173` (TLS reuses `../server/certs/*.pem`; falls back to HTTP if absent) and, once the port is up, launches Electron; main loads `VITE_URL`.
+- **Dev** (`npm run dev`): the npm script runs Vite at `https://127.0.0.1:5173` (TLS reuses `../server/certs/*.pem`; falls back to HTTP if absent) and, once the port is up, launches Electron; main loads `VITE_URL`, showing the window on first paint or after the dev page finishes loading.
 - **Packaged**: main loads `dist/index.html` over `file://`. This is why `vite.config.mts` sets `base: './'` — keep it or asset URLs break inside the exe.
 - `app-config.json` (`apiBaseUrl`) is read by main at runtime **and** imported by the renderer at build time — see the gotcha below.
 - `certificate-error` policy (security-critical, do not loosen): dev builds tolerate the self-signed cert for local-API and Vite URLs; packaged builds only when `apiBaseUrl` is a loopback host **and** the failing URL is same-origin with it (`isSameOrigin` also blocks userinfo tricks). Any other certificate error stands.

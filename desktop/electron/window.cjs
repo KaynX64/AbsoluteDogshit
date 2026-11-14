@@ -85,6 +85,14 @@ function createWindow() {
     setupAutoUpdater(win);
   });
 
+  if (isDev) {
+    win.webContents.once('did-finish-load', () => {
+      if (win.isVisible()) return;
+      win.show();
+      win.focus();
+    });
+  }
+
   if (CUSTOM_TITLE_BAR) {
     // Keep the native caption buttons readable when Windows flips theme.
     const syncTitleBarOverlay = () => {
