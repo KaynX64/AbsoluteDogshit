@@ -23,14 +23,6 @@
   flex-direction: column;
 }
 
-.app-shell:has(.inventory-alerts-view, .inventory-formulary-view) {
-  height: 100vh;
-  height: 100dvh;
-  min-height: 0;
-  grid-template-rows: minmax(0, 1fr);
-  overflow: hidden;
-}
-
 .app-main:has(.inventory-alerts-view, .inventory-formulary-view) {
   min-height: 0;
   overflow: hidden;

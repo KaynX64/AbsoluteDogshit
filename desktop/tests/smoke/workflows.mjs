@@ -151,6 +151,43 @@ export async function verifyWorkflows(run, wait, press, send, { offlineOnly = fa
   ]);
   await wait("window.electronAPI.offlineGetPendingMutations().then(rows => rows.length === 0)", 'SQLite replay completion');
   assert.equal(await run("localStorage.getItem('valetudo_offline_mutations_queue')"), null);
+
+  assert.deepEqual(await run(`(() => {
+    const root = document.documentElement;
+    const simulated = root.dataset.titlebar !== 'overlay';
+    const title = simulated ? document.createElement('header') : document.querySelector('.app-titlebar');
+    if (simulated) {
+      title.className = 'app-titlebar';
+      root.dataset.titlebar = 'overlay';
+      document.getElementById('root').prepend(title);
+    }
+    const main = document.querySelector('.app-main');
+    const workspace = document.getElementById('desktop-workspace');
+    const filler = document.createElement('div');
+    filler.style.height = '150vh';
+    workspace.append(filler);
+    try {
+      workspace.scrollTop = 500;
+      window.scrollTo(0, 500);
+      const bounds = title.getBoundingClientRect();
+      return {
+        titlePinned: bounds.top === 0 && bounds.height > 0,
+        sidebarFits: document.querySelector('.sb').getBoundingClientRect().bottom <= innerHeight + 1,
+        mainFits: main.getBoundingClientRect().bottom <= innerHeight + 1,
+        documentFits: root.scrollHeight <= innerHeight + 1 && window.scrollY === 0,
+        workspaceScrolls: workspace.scrollTop > 0,
+      };
+    } finally {
+      filler.remove();
+      workspace.scrollTop = 0;
+      if (simulated) {
+        delete root.dataset.titlebar;
+        title.remove();
+      }
+    }
+  })()`), {
+    titlePinned: true, sidebarFits: true, mainFits: true, documentFits: true, workspaceScrolls: true,
+  }, 'Doctor content scrolls inside the workspace below the window controls');
   if (offlineOnly) return;
 
   const queue = await run(`(() => {
@@ -306,6 +343,19 @@ export async function verifyWorkflows(run, wait, press, send, { offlineOnly = fa
       await sidebarView('Expected', '8px 0', '.nc-root > section');
       await sidebarView('Inventory', '8px 0', '.inventory-workspace');
       await wait("document.getElementById('inventory-tab-catalog')", 'Inventory tabs');
+      assert.equal(await run(`(() => {
+        const root = document.documentElement;
+        const titlebar = root.dataset.titlebar;
+        const shell = document.querySelector('.app-shell');
+        root.dataset.titlebar = 'overlay';
+        try {
+          const titleHeight = parseFloat(getComputedStyle(root).getPropertyValue('--titlebar-h'));
+          return titleHeight > 0 && Math.abs(shell.getBoundingClientRect().height + titleHeight - innerHeight) <= 1;
+        } finally {
+          if (titlebar === undefined) delete root.dataset.titlebar;
+          else root.dataset.titlebar = titlebar;
+        }
+      })()`), true, 'Inventory leaves room for the window controls');
       await wait("document.querySelector('[aria-label=\"Dispensable batches\"]')?.scrollHeight > 420", 'scrollable inventory batches');
       await run(`document.querySelector('[aria-label="Dispensable batches"]').scrollTop = 120`);
       await run("document.getElementById('inventory-tab-catalog').focus()");

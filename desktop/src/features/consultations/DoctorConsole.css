@@ -154,11 +154,6 @@
 
 /* Keep the top bar above one scroll area shared by the entire patient workspace. */
 @media (min-height: 620px) {
-  .app-main:has(.doctor-clinic-layout) {
-    height: 100dvh;
-    min-height: 0;
-  }
-
   .app-main:has(.doctor-clinic-layout) > :is(.tb, .update-banner) {
     flex-shrink: 0;
   }

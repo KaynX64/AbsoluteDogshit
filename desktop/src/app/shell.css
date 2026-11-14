@@ -58,10 +58,15 @@ html[data-titlebar-fullscreen='true'] .app-titlebar { display: none; }
 .app-shell {
   display: grid;
   grid-template-columns: 240px 1fr;
+  grid-template-rows: minmax(0, 1fr);
   /* Fit exactly under the title strip; the workspace scrolls internally so
      the strip (and its translucent backdrop) never scrolls away. */
   height: calc(100vh - var(--titlebar-h));
   background: var(--sage-100);
+}
+
+@media screen {
+  .app-shell { overflow: clip; }
 }
 
 .app-main {
