@@ -43,6 +43,7 @@ DROP TABLE IF EXISTS `NON_TEACHING_PROFILES`;
 DROP TABLE IF EXISTS `STUDENT_PROFILES`;
 DROP TABLE IF EXISTS `SERVER_POLICY`;
 DROP TABLE IF EXISTS `USER_ADMIN_PERMISSIONS`;
+DROP TABLE IF EXISTS `STAFF_ANALYTICS_PERMISSIONS`;
 DROP TABLE IF EXISTS `ADMIN_PERMISSIONS`;
 DROP TABLE IF EXISTS `USER_ROLES`;
 DROP TABLE IF EXISTS `ROLES`;
@@ -132,6 +133,13 @@ CREATE TABLE `USER_ADMIN_PERMISSIONS` (
   CONSTRAINT `fk_uap_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_uap_perm` FOREIGN KEY (`permission_id`) REFERENCES `ADMIN_PERMISSIONS` (`permission_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_uap_grantor` FOREIGN KEY (`granted_by`) REFERENCES `USERS` (`user_id`) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- An absent row inherits role defaults. An empty JSON array disables analytics.
+CREATE TABLE `STAFF_ANALYTICS_PERMISSIONS` (
+  `user_id` BIGINT NOT NULL PRIMARY KEY,
+  `scopes` JSON NOT NULL,
+  CONSTRAINT `fk_staff_analytics_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- 4. STUDENT_PROFILES
@@ -635,7 +643,12 @@ INSERT INTO `ADMIN_PERMISSIONS` (`code`, `name`, `description`, `sort_order`) VA
 ('RETENTION_MANAGE',  'Data retention governance', 'Retention status and statutory R.A. 10173 sweeps',       40),
 ('RESPONDERS_MANAGE', 'Manage qualified responders', 'Label any account a Qualified Responder: SOS alarms on any role, tiered alert payloads (reduced medical detail for non-clinical responders). Grant together with USERS_MANAGE — the toggle lives in the Users tab.', 45),
 ('ANALYTICS_VIEW',    'View analytics',            'Epidemiological analytics and campus health reports',   50),
+('ANALYTICS_OPERATIONS', 'View clinic operations', 'Appointments, encounter volumes, department visits and SOS activity.', 51),
+('ANALYTICS_CLINICAL', 'View clinical analytics', 'Diagnosis counts, respiratory surveillance and health-risk aggregates.', 52),
+('ANALYTICS_PHARMACY', 'View pharmacy analytics', 'Dispensing, stock priorities and batch expiry.', 53),
+('ANALYTICS_HEADCOUNT', 'View campus headcount', 'Active account counts by role.', 54),
 ('INCIDENT_RECORDS_VIEW', 'View incident records', 'Open the emergency incident archive and view its report PDFs.', 55),
+('ANALYTICS_EXPORT', 'Export and print analytics', 'Download or print reports for granted analytics sections.', 56),
 ('DATABASE_MANAGE',   'Database Studio',           'Inspect and maintain raw system records',               60);
 
 -- Default password for all seeded accounts: 'Password123!'

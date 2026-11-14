@@ -65,8 +65,8 @@ async function mountedApi(t) {
   await once(server, 'listening');
   t.after(() => new Promise(resolve => server.close(resolve)));
 
-  const request = (path, { userId = 2, roles = ['DOCTOR'], method = 'GET', json } = {}) => {
-    const token = jwt.sign({ user_id: userId, roles }, process.env.JWT_SECRET, { expiresIn: '5m' });
+  const request = (path, { userId = 2, roles = ['DOCTOR'], method = 'GET', json, token } = {}) => {
+    token ??= jwt.sign({ user_id: userId, roles }, process.env.JWT_SECRET, { expiresIn: '5m' });
     return fetch('http://127.0.0.1:' + server.address().port + '/api' + path, {
       method,
       signal: AbortSignal.timeout(7_000),
@@ -377,9 +377,9 @@ test('analytics timelines share the database calendar and empty summaries report
   await db.query('SET timestamp = ?', [clock.epoch]);
   const { request } = await mountedApi(t);
   const empty = await (await request('/analytics/summary')).json();
-  assert.deepEqual(empty.deptBreakdown, []);
-  assert.deepEqual(empty.topDiagnoses, []);
-  assert.equal(empty.emergencyMetrics.timedClosures, 0);
+  assert.deepEqual(empty.operations.deptBreakdown, []);
+  assert.deepEqual(empty.clinical.topDiagnoses, []);
+  assert.equal(empty.operations.emergencyMetrics.timedClosures, 0);
   await db.query(`INSERT INTO EMR_RECORDS
     (patient_user_id, doctor_user_id, chief_complaint, diagnosis, encounter_date, deleted_at)
     VALUES (5, 2, '', '', '2026-11-12 23:59:59', NULL),
@@ -391,16 +391,16 @@ test('analytics timelines share the database calendar and empty summaries report
   const result = await request('/analytics/summary');
   assert.equal(result.status, 200);
   const data = await result.json();
-  assert.equal(data.emergencyMetrics.timedClosures, 0);
-  assert.equal(data.timeSeries.length, 14);
-  assert.deepEqual(data.timeSeries.map(day => day.date), data.emergencyTimeSeries.map(day => day.date));
-  assert.deepEqual(data.timeSeries.slice(-2).map(({ date, count, partial }) => [date, count, partial]),
+  assert.equal(data.operations.emergencyMetrics.timedClosures, 0);
+  assert.equal(data.operations.timeSeries.length, 14);
+  assert.deepEqual(data.operations.timeSeries.map(day => day.date), data.operations.emergencyTimeSeries.map(day => day.date));
+  assert.deepEqual(data.operations.timeSeries.slice(-2).map(({ date, count, partial }) => [date, count, partial]),
     [['2026-11-12', 1, false], ['2026-11-13', 1, true]]);
-  assert.deepEqual(data.emergencyTimeSeries.slice(-2).map(day => day.count), [0, 1]);
+  assert.deepEqual(data.operations.emergencyTimeSeries.slice(-2).map(day => day.count), [0, 1]);
   await db.query("UPDATE EMERGENCY_ALERTS SET status = 'resolved', response_time_seconds = 0");
   const updated = await (await request('/analytics/summary')).json();
-  assert.equal(updated.emergencyMetrics.timedClosures, 1);
-  assert.equal(Number(updated.emergencyMetrics.avgResponseSeconds), 0);
+  assert.equal(updated.operations.emergencyMetrics.timedClosures, 1);
+  assert.equal(Number(updated.operations.emergencyMetrics.avgResponseSeconds), 0);
 });
 
 test('analytics exports and dashboard use the shared department totals', { skip }, async t => {
@@ -411,8 +411,8 @@ test('analytics exports and dashboard use the shared department totals', { skip 
   const { request } = await mountedApi(t);
   const departments = await (await request('/analytics/by-department')).json();
   assert.deepEqual(departments, [
-    { department: 'BS Information Technology', consultation_count: 2 },
-    { department: 'College of Computing Studies', consultation_count: 1 },
+    { department: 'BS Information Technology', consultation_count: 2, consultations_count: 2 },
+    { department: 'College of Computing Studies', consultation_count: 1, consultations_count: 1 },
   ]);
   const csv = await request('/analytics/export/csv');
   assert.equal(csv.status, 200);
@@ -423,11 +423,109 @@ test('analytics exports and dashboard use the shared department totals', { skip 
   const { default: ExcelJS } = await import('exceljs');
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(await excel.arrayBuffer());
+  assert.deepEqual(workbook.worksheets.map(sheet => sheet.name), [
+    'Clinical Diagnoses', 'Department Volume', 'Respiratory Surveillance', 'Health-risk Groups', 'Formulary Dispensing',
+  ]);
   assert.deepEqual(workbook.getWorksheet('Department Volume').getRow(2).values.slice(1), ['BS Information Technology', 2]);
 
   const pdf = await request('/analytics/export/pdf');
   assert.equal(pdf.status, 200);
   assert.equal(Buffer.from(await pdf.arrayBuffer()).subarray(0, 4).toString(), '%PDF');
+});
+
+test('new scoped analytics grants are effective and revocable without a new session', { skip }, async t => {
+  await fixture(t);
+  const { request } = await mountedApi(t);
+  const superAdmin = { roles: ['ADMIN'], userId: 1 };
+  const response = await request('/admin/users', {
+    ...superAdmin, method: 'POST', json: {
+      first_name: 'Analytics', last_name: 'Reviewer', email: 'fixture-scoped-analytics@example.test',
+      password: 'Z7!aQ3#rT9%w', role_code: 'ADMIN', admin_permissions: ['ANALYTICS_VIEW', 'ANALYTICS_CLINICAL'],
+    },
+  });
+  const account = await response.json();
+  assert.equal(response.status, 201, account.error);
+  const reviewer = { token: jwt.sign({ user_id: account.userId, roles: ['ADMIN'] }, process.env.JWT_SECRET, { expiresIn: '5m' }) };
+  const summary = await (await request('/analytics/summary', reviewer)).json();
+  assert.deepEqual(summary.scopes, ['ANALYTICS_CLINICAL', 'ANALYTICS_SURVEILLANCE']);
+  assert.ok(summary.clinical);
+  assert.equal(summary.operations, null);
+  assert.equal(summary.pharmacy, null);
+  assert.equal(summary.headcount, null);
+  assert.equal((await request('/analytics/by-department', reviewer)).status, 403);
+  assert.equal((await request('/analytics/export/pdf', reviewer)).status, 403);
+
+  const update = await request(`/admin/users/${account.userId}/permissions`, {
+    ...superAdmin, method: 'PUT', json: { admin_permissions: ['ANALYTICS_VIEW', 'ANALYTICS_HEADCOUNT'] },
+  });
+  assert.equal(update.status, 200, await update.text());
+  const revised = await (await request('/analytics/summary', reviewer)).json();
+  assert.deepEqual(revised.scopes, ['ANALYTICS_HEADCOUNT']);
+  assert.equal(revised.clinical, null);
+  assert.ok(revised.headcount);
+
+  const nurse = { roles: ['NURSE'], userId: 3 };
+  const nurseSummary = await (await request('/analytics/summary', nurse)).json();
+  assert.ok(nurseSummary.operations && nurseSummary.pharmacy);
+  assert.equal(nurseSummary.clinical.topDiagnoses, null);
+  assert.ok(nurseSummary.clinical.surveillance);
+  assert.equal(nurseSummary.headcount, null);
+  const csv = await request('/analytics/export/csv', nurse);
+  assert.equal(csv.status, 200);
+  assert.doesNotMatch(await csv.text(), /DIAGNOSES|HEADCOUNT/);
+
+  const doctorToken = jwt.sign({ user_id: 2, roles: ['DOCTOR'] }, process.env.JWT_SECRET, { expiresIn: '5m' });
+  const roleUpdate = await request('/admin/users/2/role', { ...superAdmin, method: 'PATCH', json: { role_code: 'NURSE' } });
+  assert.equal(roleUpdate.status, 200, await roleUpdate.text());
+  const changed = await (await request('/analytics/summary', { token: doctorToken })).json();
+  assert.equal(changed.clinical.topDiagnoses, null);
+  assert.ok(changed.pharmacy.inventory);
+});
+
+test('Super Admins can customize, disable and reset staff analytics for existing sessions', { skip }, async t => {
+  const db = await fixture(t);
+  const { request } = await mountedApi(t);
+  const superAdmin = { userId: 1, roles: ['ADMIN'] };
+  const nurseToken = jwt.sign({ user_id: 3, roles: ['NURSE'] }, process.env.JWT_SECRET, { expiresIn: '5m' });
+  const nurse = { token: nurseToken };
+  const path = '/admin/users/3/analytics-permissions';
+  const write = (scopes, account = superAdmin) => request(path, { ...account, method: 'PUT', json: { scopes } });
+  const original = await (await request(path, superAdmin)).json();
+  assert.equal(original.override, null);
+  assert.ok(original.defaults.includes('ANALYTICS_PHARMACY'));
+  assert.ok(!original.defaults.includes('ANALYTICS_CLINICAL'));
+  assert.equal((await request(path, nurse)).status, 403);
+  await db.query(`INSERT INTO USER_ROLES (user_id, role_id) SELECT 4, role_id FROM ROLES WHERE code = 'ADMIN'`);
+  await db.query(`INSERT INTO USER_ADMIN_PERMISSIONS (user_id, permission_id)
+    SELECT 4, permission_id FROM ADMIN_PERMISSIONS WHERE code = 'USERS_MANAGE'`);
+  assert.equal((await write([], { userId: 4, roles: ['ADMIN'] })).status, 403);
+  assert.equal((await write(['SUPER_ADMIN'])).status, 400);
+  const save = await write(['ANALYTICS_PHARMACY', 'ANALYTICS_EXPORT', 'ANALYTICS_CLINICAL']);
+  assert.equal(save.status, 200, await save.text());
+  const custom = await (await request('/analytics/summary', nurse)).json();
+  assert.deepEqual(custom.clinical, { topDiagnoses: [], surveillance: null });
+  assert.equal(custom.pharmacy.dispensing, null);
+  assert.ok(custom.pharmacy.inventory);
+  assert.equal(custom.operations, null);
+  assert.equal((await request('/analytics/by-department', nurse)).status, 403);
+  const csv = await request('/analytics/export/csv', nurse);
+  assert.equal(csv.status, 200);
+  const content = await csv.text();
+  assert.match(content, /REORDER PRIORITIES/);
+  assert.match(content, /TOP CLINICAL DIAGNOSES/);
+  assert.doesNotMatch(content, /FORMULARY DISPENSING|RESPIRATORY SURVEILLANCE/);
+  assert.equal((await write([])).status, 200);
+  assert.deepEqual((await (await request(path, superAdmin)).json()).override, []);
+  for (const suffix of ['summary', 'report-access', 'export/pdf']) {
+    assert.equal((await request('/analytics/' + suffix, nurse)).status, 403);
+  }
+  assert.equal((await write(null)).status, 200);
+  const reset = await (await request('/analytics/summary', nurse)).json();
+  assert.deepEqual(reset.scopes, original.defaults);
+  assert.ok(reset.clinical.surveillance);
+  assert.equal(reset.clinical.topDiagnoses, null);
+  const [[audit]] = await db.query("SELECT COUNT(*) AS total FROM AUDIT_LOGS WHERE table_affected = 'STAFF_ANALYTICS_PERMISSIONS'");
+  assert.equal(audit.total, 3);
 });
 
 test('reorder suggestions put the lowest usable stock ahead of prescription demand', { skip }, async t => {
@@ -459,9 +557,13 @@ test('reorder suggestions put the lowest usable stock ahead of prescription dema
            (1, 4, 'fixture', 'fixture', 1, 5), (2, 3, 'fixture', 'fixture', 1, 500)`);
 
   const { request } = await mountedApi(t);
-  const summary = await request('/analytics/summary');
+  const summary = await request('/analytics/summary', { userId: 3, roles: ['NURSE'] });
   assert.equal(summary.status, 200);
-  assert.deepEqual((await summary.json()).topPrescribedMedicines.map(row => row.medicine_id), [1, 6, 4]);
+  const { pharmacy } = await summary.json();
+  assert.deepEqual(pharmacy.inventory.reorderPriorities.map(row => row.medicine_id), [2, 5, 4, 3]);
+  assert.equal(pharmacy.dispensing.find(row => row.medicine_id === 2).availability, 'OUT_OF_STOCK');
+  assert.equal(pharmacy.dispensing.find(row => row.medicine_id === 5).availability, 'OUT_OF_STOCK');
+  assert.equal(pharmacy.dispensing.find(row => row.medicine_id === 1).availability, 'IN_STOCK');
 
   const response = await request('/inventory/reorder-suggestions', { userId: 3, roles: ['NURSE'] });
   assert.equal(response.status, 200);
@@ -475,6 +577,7 @@ test('reorder suggestions put the lowest usable stock ahead of prescription dema
 test('pharmacy analytics separates recent dispensing, returns, intent and reorder priorities', { skip }, async t => {
   const db = await fixture(t);
   const { request } = await mountedApi(t);
+  const nurse = { userId: 3, roles: ['NURSE'] };
   await db.query(`INSERT INTO MEDICINES (medicine_id, name, generic_name, form, strength, unit, is_active)
     VALUES (1, 'Uncollected', 'Fixture 1', 'Tablet', '10 mg', 'pcs', TRUE),
            (2, 'Recently dispensed', 'Fixture 2', 'Tablet', '10 mg', 'pcs', TRUE),
@@ -483,12 +586,12 @@ test('pharmacy analytics separates recent dispensing, returns, intent and reorde
            (5, 'Never prescribed', 'Fixture 5', 'Tablet', '10 mg', 'pcs', TRUE),
            (6, 'Returned this window', 'Fixture 6', 'Tablet', '10 mg', 'pcs', TRUE),
            (7, 'Inactive', 'Fixture 7', 'Tablet', '10 mg', 'pcs', FALSE)`);
-  const initial = await request('/analytics/summary');
+  const initial = await request('/analytics/summary', nurse);
   assert.equal(initial.status, 200);
   const initialPharmacy = (await initial.json()).pharmacy;
   assert.equal(initialPharmacy.dispensing.length, 6);
   assert.ok(initialPharmacy.dispensing.every(row => Number(row.net_dispensed) === 0));
-  assert.equal(initialPharmacy.reorderPriorities.length, 6);
+  assert.equal(initialPharmacy.inventory.reorderPriorities.length, 6);
 
   await db.query(`INSERT INTO MEDICINE_BATCHES (batch_id, medicine_id, batch_no, manufacture_date, expiry_date, quantity_on_hand)
     VALUES (1, 1, 'a', CURDATE() - INTERVAL 1 YEAR, CURDATE() + INTERVAL 1 MONTH, 120),
@@ -519,11 +622,10 @@ test('pharmacy analytics separates recent dispensing, returns, intent and reorde
            (5, 4, -500, 'dispense', 2, NOW() - INTERVAL 15 DAY),
            (6, 5, -7, 'dispense', 2, NOW() - INTERVAL 15 DAY), (6, 5, 7, 'return', 2, NOW())`);
 
-  const response = await request('/analytics/summary');
+  const response = await request('/analytics/summary', nurse);
   assert.equal(response.status, 200);
-  const { pharmacy, topPrescribedMedicines } = await response.json();
+  const { pharmacy } = await response.json();
   assert.equal(pharmacy.windowDays, 14);
-  assert.deepEqual(topPrescribedMedicines.map(row => row.medicine_id), [1, 2]);
   assert.deepEqual(pharmacy.dispensing.map(row => [
     row.medicine_id, Number(row.quantity_prescribed), Number(row.quantity_dispensed),
     Number(row.quantity_returned), Number(row.net_dispensed),
@@ -534,9 +636,9 @@ test('pharmacy analytics separates recent dispensing, returns, intent and reorde
   const nurseResponse = await request('/inventory/reorder-suggestions', { userId: 3, roles: ['NURSE'] });
   assert.equal(nurseResponse.status, 200);
   const nursePriorities = (await nurseResponse.json()).filter(row => row.stock_status !== 'ADEQUATE');
-  assert.deepEqual(pharmacy.reorderPriorities.map(row => row.medicine_id), [5, 3]);
+  assert.deepEqual(pharmacy.inventory.reorderPriorities.map(row => row.medicine_id), [5, 3]);
   assert.deepEqual(
-    pharmacy.reorderPriorities.map(({ medicine_id, total_stock_on_hand, suggested_reorder_qty }) =>
+    pharmacy.inventory.reorderPriorities.map(({ medicine_id, total_stock_on_hand, suggested_reorder_qty }) =>
       [medicine_id, total_stock_on_hand, suggested_reorder_qty]),
     nursePriorities.map(({ medicine_id, total_stock_on_hand, suggested_reorder_qty }) =>
       [medicine_id, total_stock_on_hand, suggested_reorder_qty]),

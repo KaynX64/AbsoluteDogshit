@@ -41,32 +41,19 @@ AbsoluteDogshit/
 │   └── tests/                    # backend test suite (see §8)
 │
 ├── desktop/                      # valetudo-desktop
-│   ├── AGENTS.md                 # 3.68 KB
-│   ├── README.md                 # template stub
-│   ├── app-config.json           # build-time apiBaseUrl
-│   ├── electron/
-│   │   ├── main.cjs              # BrowserWindow, node:sqlite, IPC, auto-update
-│   │   └── preload.cjs           # contextBridge electronAPI
-│   ├── public/ src/ assets/
+│   ├── AGENTS.md / README.md     # architecture and build instructions
+│   ├── app-config.json           # build-time renderer API URL
+│   ├── docs/                     # code-slice index and source maps
+│   ├── electron/                 # main, preload, window, TLS, offline IPC and updates
+│   ├── public/                   # favicon and icon license
 │   ├── src/
-│   │   ├── App.tsx / main.tsx / theme.* / index.css / electron.d.ts
-│   │   ├── components/
-│   │   │   ├── AGENTS.md         # 14.7 KB
-│   │   │   ├── CODESLICE.md      # 6.41 KB
-│   │   │   ├── AdminConsole.tsx  DoctorConsole.tsx  NurseConsole.tsx
-│   │   │   ├── ResponderConsole.tsx  AnalyticsDashboard.tsx
-│   │   │   ├── IncidentReportModal.tsx  IncidentRecords.tsx
-│   │   │   ├── InventoryManager.tsx  QrIntakeScanner.tsx
-│   │   │   ├── PrescriptionGenerator.tsx  DentalChart.tsx
-│   │   │   ├── CreateUserModal.tsx  SignaturePad.tsx
-│   │   │   ├── SignatureEnrollment.tsx  InteractionWarning.tsx
-│   │   │   ├── EmergencyAlertBanner.tsx  ServerPingMonitor.tsx
-│   │   │   ├── PasswordStrengthIndicator.tsx  Icon.tsx
-│   │   │   ├── VaccinationInputter.tsx  .gitkeep
-│   │   │   └── codeslice/       # DT-01 … DT-13 (13 Markdown maps)
-│   │   ├── config/api.ts
-│   │   ├── hooks/                # booking badge, server ping
-│   │   └── services/             # offlineSync, interactionService
+│   │   ├── main.tsx / index.css / electron.d.ts
+│   │   ├── app/                  # session shell, login and navigation
+│   │   ├── features/             # admin, consultations, nurse, appointments,
+│   │   │                        # documents, inventory, analytics and emergency
+│   │   ├── platform/             # connectivity, realtime and offline sync
+│   │   ├── shared/ui/            # reusable components and styles
+│   │   └── config/ theme/ assets/
 │   ├── eslint.config.js
 │   ├── index.html
 │   ├── tsconfig*.json
@@ -100,7 +87,7 @@ AbsoluteDogshit/
 
 | Location | Maps |
 | --- | --- |
-| `desktop/src/components/codeslice/` | `DT-01-DoctorConsole-parts/`, `DT-02-AdminConsole-parts/`, `DT-03-NurseConsole.md`, `DT-04-InventoryManager.md`, `DT-05-QrIntakeScanner.md`, `DT-06-AnalyticsDashboard.md`, `DT-07-PrescriptionGenerator.md`, `DT-08-IncidentRecords.md`, `DT-09-App.md`, `DT-10-CreateUserModal.md`, `DT-11-IncidentReportModal.md`, `DT-12-ResponderConsole.md`, `DT-13-ElectronMain.md` |
+| `desktop/docs/codeslice/` | `DT-01-DoctorConsole.md`, `DT-02-AdminConsole.md`, `DT-03-NurseConsole.md`, `DT-04-InventoryManager.md`, `DT-05-QrIntakeScanner.md`, `DT-06-AnalyticsDashboard.md`, `DT-07-PrescriptionGenerator.md`, `DT-08-IncidentRecords.md`, `DT-09-App.md`, `DT-10-CreateUserModal.md`, `DT-11-IncidentReportModal.md`, `DT-12-ResponderConsole.md`, `DT-13-ElectronMain.md` |
 | `mobile/lib/screens/codeslice/` | `MB-01-PatientPortalScreen-parts/`, `MB-02-ConsultationSchedulerScreen.md`, `MB-03-DocumentsViewerScreen.md`, `MB-04-ResponderScreen.md`, `MB-05-ChangePasswordScreen.md`, `MB-06-LoginScreen.md`, `MB-07-EmergencyAlertService.md` |
 
 These exist because several files are genuine monoliths (`DoctorConsole.tsx` ≈ 164 KB, `AdminConsole.tsx` ≈ 157 KB, `patient_portal_screen.dart` ≈ 120 KB). Any source edit that shifts line numbers must be followed by a slice-map update and verification.

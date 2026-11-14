@@ -31,6 +31,10 @@ Each API area exports a router or a factory. Feature folders compose their route
 
 Analytics summary reports fourteen MySQL calendar days for both encounter and SOS timelines. The current day is partial. `emergencyMetrics.timedClosures` distinguishes a measured zero-second closure from an empty sample. Empty diagnosis and department datasets are returned as empty arrays.
 
+Analytics reads current roles and admin grants together on each request. Administrators with other roles use their admin grants. Clinical includes aggregate Surveillance, and Pharmacy includes Dispensing. Doctors and dentists receive Operations, Clinical, Dispensing with availability, and Export. Nurses receive Operations, Surveillance, Pharmacy, and Export. A diagnosis ranking is loaded only for Clinical. Batch alerts and reorder rankings require Pharmacy. Department detail requires Operations. Downloads and print authorization require Export and at least one authorized section.
+
+Super Admins manage per-account staff overrides through GET and PUT `/api/admin/users/:id/analytics-permissions`. A null override inherits the current staff role defaults. An explicit list replaces those defaults, with independent controls for diagnosis, surveillance, dispensing and inventory. An empty list denies analytics. The same settings apply to the summary, department detail, exports and print authorization.
+
 Use `rg -n '<route path>' server/src/routes/<area>` to locate a handler. Feature registrars attach to the same router in the order set by `index.js`. Admin applies authentication and the ADMIN role gate before registering its routes. The server-policy router applies its own Super Admin gate.
 
 The admin directory lists archived accounts with `GET /users?archived=true`. Its audited soft archive retains clinical and audit history and blocks self-archive and archiving the last active Super Admin. The advanced health-profile editor reads `GET /users/:id/health-profile` and saves through `PUT /users/:id`. The qualified responder endpoint requires `RESPONDERS_MANAGE`, requires a Super Admin for ADMIN targets, and emits `responder:status_changed`.

@@ -41,7 +41,7 @@ describe('read-only ledger tables', () => {
       assert.equal(isReadOnlyTable(t), true, t);
     }
     assert.deepEqual([...READ_ONLY_TABLES].sort(), [
-      'AUDIT_LOGS', 'INVENTORY_LOGS', 'PHI_ACCESS_LOGS', 'QUEUE_TICKET_COUNTERS', 'SCHEMA_MIGRATIONS', 'SERVER_POLICY',
+      'AUDIT_LOGS', 'INVENTORY_LOGS', 'PHI_ACCESS_LOGS', 'QUEUE_TICKET_COUNTERS', 'SCHEMA_MIGRATIONS', 'SERVER_POLICY', 'STAFF_ANALYTICS_PERMISSIONS',
     ]);
     assert.equal(isReadOnlyTable('schema_migrations'), true);
   });

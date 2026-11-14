@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { saveBootstrapPages } from '../src/services/offlineBootstrap.ts';
+import { saveBootstrapPages } from '../src/platform/offline/offlineBootstrap.ts';
 
 const serverTime = '2026-11-12T10:00:00.000Z';
 const page = (nextCursor, id = 1) => Response.json({

@@ -5,7 +5,9 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on tcp:127.0.0.1:5173 && electron .\"",
-    "build": "tsc && vite build",
+    "build": "tsc -b && vite build",
+    "test": "node --test tests/*.test.*",
+    "test:smoke": "node tests/smoke/packaged.mjs",
     "preview": "vite preview",
     "dist": "npm run build && electron-builder --win --x64"
   },

@@ -1,10 +1,10 @@
 # CODESLICE.md — mobile screens slice map (index)
 
-Sibling of this directory's `AGENTS.md`. Each mobile monolith has its own slice map in `codeslice/` — this index only routes you there. Base commit `93b4172` (2026-11-07, `Stage1`); 7 maps / 205 slices (6 screens + the SOS service the screens share). The desktop half lives at `desktop/src/components/CODESLICE.md`.
+Sibling of this directory's `AGENTS.md`. Each mobile monolith has its own slice map in `codeslice/` — this index only routes you there. Base commit `93b4172` (2026-11-07, `Stage1`); 7 maps / 205 slices (6 screens + the SOS service the screens share). The desktop half lives at `desktop/docs/CODESLICE.md`.
 
 **Use.** Find the file below → open its Map → read the header block (**Mounted by / API surface / Socket events / State** — often enough by itself) → `sed -n 'A,Bp' <file>` only the slice you need. **Anchors beat line numbers**: after edits re-locate with `rg -n '<anchor>' <file>`; each map records the commit it was last in sync with. Server endpoints → `server/AGENTS.md`.
 
-**Maintain.** Edited a mapped file → in its sub-MD fix the ranges, bump its Anchor commit (`git log -1 --format=%h -- <file>`), adjust descriptions → from repo root run `python3 scripts/verify_codeslice.py desktop/src/components/codeslice mobile/lib/screens/codeslice .` (every anchor must appear inside its claimed range; every `.md` in a `codeslice/` dir must be a valid slice map; a map over the 7 KB doc cap is split into `<name>-parts/`, which this script reassembles before checking). New monolith ≥ ~400 lines → add a sub-MD with the next free `MB-xx` and a row here.
+**Maintain.** Edited a mapped file → in its sub-MD fix the ranges, bump its Anchor commit (`git log -1 --format=%h -- <file>`), adjust descriptions → from repo root run `python3 scripts/verify_codeslice.py desktop/docs/codeslice mobile/lib/screens/codeslice .` (every anchor must appear inside its claimed range; every `.md` in a `codeslice/` dir must be a valid slice map; a map over the 7 KB doc cap is split into `<name>-parts/`, which this script reassembles before checking). New monolith ≥ ~400 lines → add a sub-MD with the next free `MB-xx` and a row here.
 
 ---
 

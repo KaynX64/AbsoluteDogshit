@@ -74,36 +74,55 @@ export async function listReorderSuggestions() {
   return rows;
 }
 
-export async function getPharmacyAnalytics(limit = 6) {
+export async function getPharmacyAnalytics({ includeDispensing = true, includeReorder = false, limit = 6 } = {}) {
+  if (!includeDispensing) {
+    const [rows] = await pool.query(`
+      ${formularyMetrics}
+      SELECT medicine_id, name, generic_name, form, strength, unit, total_stock_on_hand,
+             reorder_level, suggested_reorder_qty, stock_status
+      FROM metrics
+      WHERE stock_status <> 'ADEQUATE'
+      ORDER BY ${orderByStock}
+      LIMIT ?
+    `, [limit]);
+    return { windowDays, dispensing: null, reorderPriorities: rows };
+  }
+  const reorderRank = includeReorder
+    ? `, ROW_NUMBER() OVER (ORDER BY (stock_status = 'ADEQUATE'), ${orderByStock}) AS reorder_rank`
+    : '';
+  const reorderRows = includeReorder ? " OR (reorder_rank <= ? AND stock_status <> 'ADEQUATE')" : '';
+  const inventoryColumns = includeReorder
+    ? ', total_stock_on_hand, reorder_level, suggested_reorder_qty, stock_status, reorder_rank'
+    : '';
   const [rows] = await pool.query(`
     ${formularyMetrics},
     ranked AS (
       SELECT metrics.*,
              ROW_NUMBER() OVER (ORDER BY (quantity_dispensed > 0 OR quantity_returned > 0) DESC,
-                 net_dispensed DESC, quantity_dispensed DESC, quantity_prescribed DESC, name, medicine_id) AS usage_rank,
-             ROW_NUMBER() OVER (ORDER BY (stock_status = 'ADEQUATE'), ${orderByStock}) AS reorder_rank,
-             ROW_NUMBER() OVER (ORDER BY quantity_prescribed DESC, prescription_count DESC, name, medicine_id) AS prescribed_rank
+                 net_dispensed DESC, quantity_dispensed DESC, quantity_prescribed DESC, name, medicine_id) AS usage_rank
+             ${reorderRank}
       FROM metrics
     )
-    SELECT * FROM ranked
-    WHERE usage_rank <= ?
-       OR (reorder_rank <= ? AND stock_status <> 'ADEQUATE')
-       OR (prescribed_rank <= ? AND prescription_count > 0)
-  `, [limit, limit, limit]);
+    SELECT medicine_id, name, generic_name, form, strength, unit,
+           quantity_prescribed, quantity_dispensed, quantity_returned, net_dispensed,
+           IF(total_stock_on_hand > 0, 'IN_STOCK', 'OUT_OF_STOCK') AS availability,
+           usage_rank${inventoryColumns}
+    FROM ranked
+    WHERE usage_rank <= ?${reorderRows}
+  `, includeReorder ? [limit, limit] : [limit]);
 
-  function selectRanked(rank, include = () => true) {
-    return rows
-      .filter(row => Number(row[rank]) <= limit && include(row))
-      .sort((a, b) => Number(a[rank]) - Number(b[rank]))
-      .map(({ usage_rank, reorder_rank, prescribed_rank, ...medicine }) => medicine);
-  }
-
-  return {
-    pharmacy: {
-      windowDays,
-      dispensing: selectRanked('usage_rank'),
-      reorderPriorities: selectRanked('reorder_rank', row => row.stock_status !== 'ADEQUATE'),
-    },
-    topPrescribedMedicines: selectRanked('prescribed_rank', row => Number(row.prescription_count) > 0),
-  };
+  const identity = ({ medicine_id, name, generic_name, form, strength, unit }) =>
+    ({ medicine_id, name, generic_name, form, strength, unit });
+  const dispensing = rows.filter(row => Number(row.usage_rank) <= limit)
+    .sort((a, b) => Number(a.usage_rank) - Number(b.usage_rank))
+    .map(({ quantity_prescribed, quantity_dispensed, quantity_returned, net_dispensed, availability, ...medicine }) => ({
+      ...identity(medicine), quantity_prescribed, quantity_dispensed, quantity_returned, net_dispensed, availability,
+    }));
+  const reorderPriorities = includeReorder ? rows
+    .filter(row => Number(row.reorder_rank) <= limit && row.stock_status !== 'ADEQUATE')
+    .sort((a, b) => Number(a.reorder_rank) - Number(b.reorder_rank))
+    .map(({ total_stock_on_hand, reorder_level, suggested_reorder_qty, stock_status, ...medicine }) => ({
+      ...identity(medicine), total_stock_on_hand, reorder_level, suggested_reorder_qty, stock_status,
+    })) : null;
+  return { windowDays, dispensing, reorderPriorities };
 }
