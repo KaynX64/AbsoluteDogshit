@@ -1,8 +1,9 @@
+import { isCalendarDate } from '../../config/appointmentRules.js';
 import { fail } from '../../utils/httpError.js';
 import { encrypt } from '../../utils/cryptoVault.js';
 import { logAudit } from '../../utils/auditLogger.js';
 
-export async function saveHealthProfile(connection, targetUserId, health_profile, { actorId, ipAddress }) {
+export async function saveHealthProfile(connection, targetUserId, health_profile, { actorId, ipAddress, operation = 'ADMIN_ADVANCED_PROFILE_OVERRIDE' }) {
   if (health_profile !== undefined) {
     if (health_profile === null || typeof health_profile !== 'object' || Array.isArray(health_profile)) {
       throw fail('health_profile must be an object of health record fields.', 400);
@@ -42,14 +43,13 @@ export async function saveHealthProfile(connection, targetUserId, health_profile
     let nextDob = null;
     if (has('date_of_birth') && hpIn.date_of_birth) {
       const dob = String(hpIn.date_of_birth).trim();
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(dob) || Number.isNaN(Date.parse(dob))) {
+      if (!isCalendarDate(dob)) {
         throw fail('date_of_birth must be a valid date in YYYY-MM-DD format.', 400);
       }
       const dobTime = Date.parse(`${dob}T00:00:00Z`);
-      if (Number.isNaN(dobTime)) throw fail('date_of_birth must be a valid calendar date.', 400);
       if (dobTime > Date.now()) throw fail('date_of_birth cannot be in the future.', 400);
       if (dobTime < Date.parse('1900-01-01T00:00:00Z')) {
-        throw fail('date_of_birth must be after 1900-01-01.', 400);
+        throw fail('date_of_birth must be on or after 1900-01-01.', 400);
       }
       nextDob = dob;
     }
@@ -137,7 +137,7 @@ export async function saveHealthProfile(connection, targetUserId, health_profile
       recordId: oldHp?.profile_id || null,
       oldValue: null,
       newValue: {
-        operation: 'ADMIN_ADVANCED_PROFILE_OVERRIDE',
+        operation,
         patient_user_id: targetUserId,
         blood_type: values.blood_type,
         sex: values.sex,

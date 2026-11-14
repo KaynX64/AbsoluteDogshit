@@ -1,3 +1,4 @@
+import { recordOperation } from '../bootstrap/operationEvents.js';
 import { performance } from 'node:perf_hooks';
 
 const workerStats = new Map();
@@ -29,12 +30,16 @@ export function startScheduler(jobs) {
         .then(result => {
           state.metrics = result?.metrics ?? state.metrics;
           state.outcome = result?.skipped ? 'skipped' : result?.degraded ? 'degraded' : 'success';
-          if (result?.degraded) state.failures++;
+          if (result?.degraded) {
+            state.failures++;
+            recordOperation(name + ' completed with errors.');
+          }
           if (state.outcome === 'success') state.lastSuccessAt = new Date().toISOString();
         })
         .catch(error => {
           state.failures++;
           state.outcome = 'failed';
+          recordOperation(name + ' failed.');
           console.error(`[${name} Error]:`, error?.code ?? error?.name ?? 'Error');
         })
         .finally(() => {

@@ -33,6 +33,12 @@ The packaged smoke test launches the unpacked app with a temporary profile, uses
 
 ## Desktop interaction
 
+Super Admins can grant **Use server Terminal** when creating or editing a Limited Admin. The grant enables server events and built-in diagnostics. Restart Server is available to Super Admins.
+
+Student, Faculty and Non-Teaching account creation includes optional sex, date of birth and emergency contact details.
+
+The Admin Terminal focuses its command prompt as soon as the tab opens. Press Enter to run a command and keep typing in the prompt. New output stays in view while the terminal is following the latest line. Requests time out without locking the prompt.
+
 Hover over an analytics line graph to highlight the nearest reporting day and see its count. Use **View data** to read the same values with the keyboard.
 
 Use the sidebar to change workspaces. In tab groups, use Left and Right Arrow to move, and Home or End to jump to the first or last tab. Doctor/Dentist and Analytics activate local panels as focus moves. Account and Inventory views activate with Enter or Space.

@@ -11,10 +11,13 @@ interface SidebarProps {
   onItemClick?: (key: string) => void;
   badgeCounts?: Record<string, number>;
   showIncidentRecords: boolean;
+  showTerminal: boolean;
 }
 
-export default function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, badgeCounts, showIncidentRecords }: SidebarProps) {
-  const navItems = consoleNavigation(role).filter(item => item.key !== 'incidents' || showIncidentRecords);
+export default function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, badgeCounts, showIncidentRecords, showTerminal }: SidebarProps) {
+  const navItems = consoleNavigation(role).filter(item =>
+    (item.key !== 'incidents' || showIncidentRecords) && (item.key !== 'terminal' || showTerminal),
+  );
 
   return (
     <aside className="sb">

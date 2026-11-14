@@ -12,6 +12,7 @@ const navByRole: Record<string, { key: string; label: string; icon: string }[]> 
     { key: 'audit',     label: 'Privacy & audit',  icon: 'shield_lock' },
     { key: 'telemetry', label: 'System health',    icon: 'dns' },
     { key: 'serverPolicy', label: 'Server Policy', icon: 'tune' },
+    { key: 'terminal', label: 'Terminal', icon: 'terminal' },
     { key: 'analytics', label: 'Health analytics', icon: 'monitoring' },
     { key: 'incidents', label: 'Incident Records', icon: 'assignment' },
     { key: 'db',        label: 'Database Studio',  icon: 'database' },

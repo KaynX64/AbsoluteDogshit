@@ -1,3 +1,4 @@
+import { saveHealthProfile } from '../../admin/accounts/healthProfile.js';
 import { pool } from '../../db/pool.js';
 import { requirePermission, resolveAdminPermissions } from '../../middleware/rbac.js';
 import { logAudit } from '../../utils/auditLogger.js';
@@ -100,6 +101,7 @@ export function registerAccountCredentialRoutes(router) {
       department,
       position,
       admin_permissions,
+      health_profile,
     } = req.body;
 
     // ── Validation ────────────────────────────────────────────────
@@ -124,6 +126,24 @@ export function registerAccountCredentialRoutes(router) {
     });
     if (!strength.isValid) {
       return res.status(400).json({ error: strength.issues.join(' ') });
+    }
+
+    if (role_code === 'STUDENT' && year_level != null && year_level !== '' &&
+        (!['number', 'string'].includes(typeof year_level) || !Number.isInteger(Number(year_level)) ||
+         Number(year_level) < 1 || Number(year_level) > 6)) {
+      return res.status(400).json({ error: 'Year level must be a whole number from 1 to 6.' });
+    }
+
+    const isCampusRole = ['STUDENT', 'FACULTY', 'NON_TEACHING'].includes(role_code);
+    const creationProfileFields = ['sex', 'date_of_birth', 'emergency_contact_name', 'emergency_contact_phone'];
+    if (health_profile !== undefined && (
+      !isCampusRole || health_profile === null || typeof health_profile !== 'object' || Array.isArray(health_profile) ||
+      Object.entries(health_profile).some(([field, value]) =>
+        !creationProfileFields.includes(field) || (value !== null && typeof value !== 'string'))
+    )) {
+      return res.status(400).json({
+        error: 'Account creation accepts only sex, date of birth and emergency contact details for campus health profiles.',
+      });
     }
 
     // ── Admin-lifecycle guard (adjusted manage-user-account feature) ──
@@ -192,7 +212,7 @@ export function registerAccountCredentialRoutes(router) {
 
       // Role-specific sub-profile row
       if (role_code === 'STUDENT') {
-        if (!student_no) {
+        if (!student_no || !String(student_no).trim()) {
           throw new Error('Student number is required for STUDENT accounts.');
         }
         await connection.query(
@@ -249,6 +269,12 @@ export function registerAccountCredentialRoutes(router) {
             position ? String(position).trim() : 'Support Staff',
           ]
         );
+      }
+
+      if (health_profile !== undefined && Object.values(health_profile).some(value => value?.trim())) {
+        await saveHealthProfile(connection, newUserId, health_profile, {
+          actorId: req.user.user_id, ipAddress: req.ip, operation: 'ADMIN_CREATE_HEALTH_PROFILE',
+        });
       }
 
       // ── Admin archetype grants (only reachable for SUPER callers — the

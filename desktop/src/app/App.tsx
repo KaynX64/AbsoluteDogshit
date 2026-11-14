@@ -4,7 +4,7 @@ import { useConfirmAction } from '../shared/ui/ConfirmAction';
 import { useActionFeedback } from '../shared/ui/feedback';
 import Dialog from '../shared/ui/Dialog';
 // desktop/src/app/App.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import NurseConsole from '../features/nurse/NurseConsole';
 import DoctorConsole from '../features/consultations/DoctorConsole';
 import AdminConsole from '../features/admin/AdminConsole';
@@ -61,6 +61,11 @@ function AppShell() {
   /* ── Workspace state (driven by sidebar) ─────────────────────── */
   const [adminTab, setAdminTab] = useState<AdminTab>('users');
   const [showIncidentRecords, setShowIncidentRecords] = useState(false);
+  const [showTerminal, setShowTerminal] = useState(false);
+  const updateTerminalAccess = useCallback((allowed: boolean) => {
+    setShowTerminal(allowed);
+    if (!allowed) setAdminTab(current => current === 'terminal' ? 'users' : current);
+  }, []);
   const [doctorViewMode, setDoctorViewMode] = useState<
     'active' | 'scheduled' | 'history' | 'archive' | 'analytics'
   >('active');
@@ -111,6 +116,7 @@ function AppShell() {
     setUser(null);
     setAdminTab('users');
     setShowIncidentRecords(false);
+    setShowTerminal(false);
     if (token) {
       try {
         await fetch(`${API_BASE_URL}/api/auth/logout`, {
@@ -300,6 +306,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
       <Sidebar
         role={activeRoleView}
         showIncidentRecords={showIncidentRecords}
+        showTerminal={showTerminal}
         badgeCounts={badgeKey ? { [badgeKey]: bookingBadge } : undefined}
         onSignOut={handleSignOut}
         onChangePassword={() => { setShowPasswordModal(true); setPasswordMsg(null); }}
@@ -386,7 +393,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
             />
           )}
           {activeRoleView === 'ADMIN' && (
-            <AdminConsole activeTab={adminTab} onTabChange={setAdminTab} onIncidentAccessChange={setShowIncidentRecords} />
+            <AdminConsole activeTab={adminTab} onTabChange={setAdminTab} onIncidentAccessChange={setShowIncidentRecords} onTerminalAccessChange={updateTerminalAccess} />
           )}
           {activeRoleView === 'EMERGENCY_RESPONDER' && <ResponderConsole />}
         </main>

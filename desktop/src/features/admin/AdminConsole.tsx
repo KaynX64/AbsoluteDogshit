@@ -1,3 +1,5 @@
+import ServerConsole from './ServerConsole';
+import ConnectedUsers from './ConnectedUsers';
 import WorkerHealth from './WorkerHealth';
 import { useTabMotion } from '../../shared/ui/selectionMotion';
 import { navigateTabs } from '../../shared/ui/tabKeyboard';
@@ -79,7 +81,7 @@ function NoPermissionPanel({ required, description }: { required?: string; descr
   );
 }
 
-export type AdminTab = 'users' | 'archived' | 'audit' | 'telemetry' | 'analytics' | 'incidents' | 'db' | 'serverPolicy';
+export type AdminTab = 'users' | 'archived' | 'audit' | 'telemetry' | 'analytics' | 'incidents' | 'db' | 'serverPolicy' | 'terminal';
 
 interface AdminConsoleProps {
   /** Optional controlled active tab — if provided, the sidebar drives the tab. */
@@ -87,12 +89,14 @@ interface AdminConsoleProps {
   /** Called whenever the user clicks an inner pill or the sidebar item. */
   onTabChange?: (tab: AdminTab) => void;
   onIncidentAccessChange?: (allowed: boolean) => void;
+  onTerminalAccessChange?: (allowed: boolean) => void;
 }
 
 export default function AdminConsole({
   activeTab: controlledTab,
   onTabChange,
   onIncidentAccessChange,
+  onTerminalAccessChange,
 }: AdminConsoleProps = {}) {
   /* Controlled or uncontrolled: fall back to internal state when no parent props are passed. */
   const [internalTab, setInternalTab] = useState<AdminTab>('users');
@@ -234,12 +238,18 @@ export default function AdminConsole({
         if (signal.aborted) return;
         incidentAccess = data.is_super === true ||
           (Array.isArray(data.permissions) && data.permissions.includes('INCIDENT_RECORDS_VIEW'));
+        const isSuper = data.is_super === true;
+        const permissions = Array.isArray(data.permissions) ? data.permissions : [];
+        onTerminalAccessChange?.(isSuper || permissions.includes('TERMINAL_VIEW'));
         setMyPerms({
           userId: data.user_id ?? null,
-          archetype: data.archetype || 'super',
-          is_super: data.is_super !== false,
-          permissions: Array.isArray(data.permissions) ? data.permissions : ['SUPER_ADMIN'],
+          archetype: data.archetype || (isSuper ? 'super' : 'limited'),
+          is_super: isSuper,
+          permissions,
         });
+      } else if (!signal.aborted && (res.status === 401 || res.status === 403)) {
+        onTerminalAccessChange?.(false);
+        setMyPerms({ userId: null, archetype: 'limited', is_super: false, permissions: [] });
       }
     } catch (_) {}
     if (!signal.aborted) {
@@ -357,7 +367,7 @@ export default function AdminConsole({
       window.removeEventListener('focus', refresh);
       onIncidentAccessChange?.(false);
     };
-  }, [onIncidentAccessChange]);
+  }, [onIncidentAccessChange, onTerminalAccessChange]);
 
   // Refetch contextual data whenever the parent (sidebar) switches the active tab
   useEffect(() => {
@@ -964,7 +974,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       {confirmation}
       <div data-workspace-view>
       {/* ── Header ────────────────────────────────────────────── */}
-      {(activeTab !== 'analytics' || !can('ANALYTICS_VIEW')) && <div className="vd-page-head">
+      {activeTab !== 'terminal' && (activeTab !== 'analytics' || !can('ANALYTICS_VIEW')) && <div className="vd-page-head">
         <div className="vd-page-head-eyebrow">Administration</div>
         <h1 className="vd-page-head-title">
           {activeTab === 'users' && 'Users & roles'}
@@ -987,6 +997,12 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           {activeTab === 'serverPolicy' && 'Review and update rate limits, no-show grace, and appointment rules.'}
         </p>
       </div>}
+
+      {activeTab === 'terminal' && (
+        myPerms.userId === null ? <p role="status">Checking Terminal access…</p>
+          : can('TERMINAL_VIEW') ? <ServerConsole />
+          : <NoPermissionPanel required="TERMINAL_VIEW" />
+      )}
 
       {activeTab === 'serverPolicy' && (
         myPerms.is_super
@@ -1207,6 +1223,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           {/* Live server ping monitor */}
           <ServerPingMonitor />
           {can('TELEMETRY_VIEW') && <WorkerHealth workers={telemetry?.workers} onRefresh={fetchTelemetry} />}
+          {canViewTelemetry && <ConnectedUsers />}
 
           {/* Retention governance panel — RETENTION_MANAGE permission */}
           {can('RETENTION_MANAGE') ? (

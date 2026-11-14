@@ -22,6 +22,7 @@ export function installFixtures() {
     activeSos: [],
     holdSos: false,
     showIncidentRecords: true,
+    terminalGrant: false,
   };
   const permissions = [{ code: 'ANALYTICS_OPERATIONS', label: 'Clinic operations', description: 'Fixture grant' }];
   window.fetch = async (input, options = {}) => {
@@ -70,8 +71,14 @@ export function installFixtures() {
       tableName: 'USERS', columns: [], rows: [], totalRows: 0, totalPages: 1, page: 1,
     });
     if (path.endsWith('/admin/server-policy')) return Response.json({ version: 1, values: {}, defaults: {}, overrides: {}, fields: [] });
+    if (path.endsWith('/admin/operations')) return Response.json({
+      instanceId: 'fixture-server', restartAuthorized: state.showIncidentRecords, restartAvailable: false, events: [],
+    });
+    if (path.endsWith('/admin/operations/command')) return Response.json({
+      output: { rssMiB: 32 },
+    });
     if (path.endsWith('/admin/my-permissions')) return Response.json({
-      user_id: 1, is_super: state.showIncidentRecords, permissions: state.showIncidentRecords ? ['SUPER_ADMIN'] : ['USERS_MANAGE'],
+      user_id: 1, is_super: state.showIncidentRecords, permissions: state.showIncidentRecords ? ['SUPER_ADMIN'] : state.terminalGrant ? ['TERMINAL_VIEW'] : ['USERS_MANAGE'],
     });
     if (path.endsWith('/admin/users/3/health-profile')) return Response.json({ health_profile: { height: 160, weight: 55 } });
     if (path.endsWith('/admin/users/3') && method === 'PUT') return Response.json({ message: 'Saved' });
@@ -331,7 +338,33 @@ export async function verifyWorkflows(run, wait, press, send) {
   await run("smoke.state.showIncidentRecords = true; window.dispatchEvent(new Event('focus'))");
   await wait("[...document.querySelectorAll('.sb-item')].some(button => button.innerText.includes('Incident Records'))", 'restored incident access');
   await sidebarView('Users & roles', '-8px 0', '[data-workspace-view]:has(.vd-page-head)');
-  await wait("document.body.innerText.includes('Fixture Nurse')", 'Admin account list');
+  await sidebarView('Terminal', '8px 0', '[data-workspace-view]:has(.server-console)');
+  await wait("document.activeElement.getAttribute('aria-label') === 'Diagnostic command'", 'Terminal prompt is focused on entry');
+  await wait("document.querySelector('.server-console-toolbar [data-online=true]')", 'Terminal is connected');
+  await run("smoke.fill(document.activeElement, 'memory')");
+  await press('Enter');
+  await wait("document.querySelector('.server-console pre').textContent.includes('rssMiB')", 'Terminal command output');
+  assert.equal(await run("document.activeElement.getAttribute('aria-label')"), 'Diagnostic command');
+  await run("smoke.fill(document.activeElement, 'clear')");
+  await press('Enter');
+  await wait("!document.querySelector('.server-console pre').textContent.includes('rssMiB')", 'Terminal clears without leaving the prompt');
+  await run("smoke.state.showIncidentRecords = false; smoke.state.terminalGrant = true; window.dispatchEvent(new Event('focus'))");
+  await wait("document.querySelector('.server-console-toolbar [data-online=true]') && ![...document.querySelectorAll('.sb-item')].some(button => button.innerText.includes('Incident Records'))", 'Limited Admin retains Terminal access');
+  await run("smoke.state.terminalGrant = false; window.dispatchEvent(new Event('focus'))");
+  await wait("!document.querySelector('.server-console') && ![...document.querySelectorAll('.sb-item')].some(button => button.innerText.includes('Terminal'))", 'revoking Terminal clears its view and destination');
+  await run("smoke.state.showIncidentRecords = true; window.dispatchEvent(new Event('focus'))");
+  await wait("[...document.querySelectorAll('.sb-item')].some(button => button.innerText.includes('Terminal'))", 'Super Admin Terminal navigation is restored');
+  await wait("document.body.innerText.includes('Fixture Nurse') && document.querySelector('.sb-item[aria-current=page]')?.innerText.includes('Users & roles')", 'Terminal revocation returns to the account list');
+  await run("smoke.click('Add account')");
+  await wait("document.querySelector('dialog[open] #create-user-sex')", 'Student profile inputs');
+  for (const role of ['FACULTY', 'NON_TEACHING', 'ADMIN']) {
+    await run("(() => { const select = document.querySelector('dialog[open] select'); select.value = " + JSON.stringify(role) + "; select.dispatchEvent(new Event('change', { bubbles: true })); })()");
+    assert.equal(await run("Boolean(document.querySelector('dialog[open] #create-user-dob'))"), role !== 'ADMIN');
+  }
+  await run("smoke.click('Limited Admin', 'dialog[open] button')");
+  await wait("[...document.querySelectorAll('dialog[open] label')].some(label => label.innerText.includes('Use server Terminal') && !label.querySelector('input').checked)", 'Terminal grant is available and unselected');
+  await press('Escape');
+  await wait("!document.querySelector('dialog[open]')", 'close create account form');
   await run("smoke.click('Archive', 'button[title^=Archive]')");
   await wait("document.querySelector('dialog[open]')?.innerText.includes('Fixture Nurse (#3)')", 'archive confirmation identifies account');
   assert.equal(await run("document.activeElement.textContent"), 'Cancel');

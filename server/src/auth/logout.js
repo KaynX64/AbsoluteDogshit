@@ -1,4 +1,5 @@
 import { pool } from '../db/pool.js';
+import { disconnectSessionSockets } from '../realtime/presence.js';
 import { logAudit } from '../utils/auditLogger.js';
 import { redis, isRedisActive } from '../utils/redisClient.js';
 import { sessionBlocklistKey } from './session.js';
@@ -6,7 +7,7 @@ import { sessionBlocklistKey } from './session.js';
 // ─────────────────────────────────────────────────────────────────────────
 // LOGOUT & SESSION TERMINATION
 // ─────────────────────────────────────────────────────────────────────────
-export async function logoutUser(req, res) {
+export async function logoutUser(req, res, io) {
   try {
     const user = req.user;
     const token = req.token;
@@ -18,6 +19,8 @@ export async function logoutUser(req, res) {
       const blacklistKey = sessionBlocklistKey(user, token);
       await redis.set(blacklistKey, 'revoked_logout', 'EX', remainingSeconds);
     }
+
+    disconnectSessionSockets(io, user);
 
     // ── Logout must release the device's FCM token ─────────────────────
     // Optional fcm_token in the body (backward compatible when absent —

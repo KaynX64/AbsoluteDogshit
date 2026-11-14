@@ -275,6 +275,69 @@ test('online completion and offline replay racing for the same appointment write
   assert.deepEqual(rolledBack, { status: 'checked_in', ticket_status: 'waiting', records: 0 });
 });
 
+test('campus account creation saves optional health details and rolls back invalid profiles', { skip }, async t => {
+  const db = await fixture(t);
+  const { request } = await mountedApi(t);
+  const create = (role, fields, health_profile) => request('/admin/users', {
+    roles: ['ADMIN'], userId: 1, method: 'POST', json: {
+      first_name: 'Campus', last_name: 'Fixture', password: 'Z7!aQ3#rT9%w',
+      role_code: role, email: role.toLowerCase() + '@creation.example.test', ...fields, health_profile,
+    },
+  });
+  const profile = {
+    sex: 'FEMALE', date_of_birth: '2004-02-29',
+    emergency_contact_name: 'Fixture Contact', emergency_contact_phone: '+639000000000',
+  };
+  const invalid = await create('STUDENT', { student_no: 'ST-CREATE' }, { ...profile, date_of_birth: '2003-02-29' });
+  assert.equal(invalid.status, 400);
+  assert.match((await invalid.json()).error, /valid date/);
+  const [[remaining]] = await db.query("SELECT COUNT(*) AS total FROM USERS WHERE email = 'student@creation.example.test'");
+  assert.equal(remaining.total, 0);
+
+  for (const [role, fields] of [
+    ['STUDENT', { student_no: 'ST-CREATE', course: 'Computing', year_level: 2 }],
+    ['FACULTY', { faculty_no: 'FAC-CREATE', department: 'Computing', position: 'Instructor' }],
+    ['NON_TEACHING', { employee_no: 'NT-CREATE', department: 'Facilities', position: 'Assistant' }],
+  ]) {
+    const response = await create(role, fields, profile);
+    const result = await response.json();
+    assert.equal(response.status, 201, result.error);
+    const [[stored]] = await db.query(
+      "SELECT sex, DATE_FORMAT(date_of_birth, '%Y-%m-%d') AS date_of_birth, emergency_contact_name, emergency_contact_phone FROM HEALTH_PROFILES WHERE user_id = ?",
+      [result.userId],
+    );
+    assert.deepEqual({ ...stored }, profile);
+  }
+  const emptyResponse = await create('NON_TEACHING', { email: 'empty@creation.example.test' }, { sex: '', date_of_birth: null });
+  const empty = await emptyResponse.json();
+  assert.equal(emptyResponse.status, 201, empty.error);
+  const [[emptyProfile]] = await db.query('SELECT COUNT(*) AS total FROM HEALTH_PROFILES WHERE user_id = ?', [empty.userId]);
+  assert.equal(emptyProfile.total, 0);
+});
+
+test('Terminal grants can be assigned at account creation and revoked during the same session', { skip }, async t => {
+  await fixture(t);
+  const { request } = await mountedApi(t);
+  const superAdmin = { roles: ['ADMIN'], userId: 1 };
+  const response = await request('/admin/users', {
+    ...superAdmin, method: 'POST', json: {
+      first_name: 'Terminal', last_name: 'Reviewer', email: 'terminal@creation.example.test',
+      password: 'Z7!aQ3#rT9%w', role_code: 'ADMIN', admin_permissions: ['TERMINAL_VIEW'],
+    },
+  });
+  const account = await response.json();
+  assert.equal(response.status, 201, account.error);
+  const reviewer = { token: jwt.sign({ user_id: account.userId, roles: ['ADMIN'] }, process.env.JWT_SECRET, { expiresIn: '5m' }) };
+  const path = '/admin/operations';
+  assert.equal((await request(path, reviewer)).status, 200);
+  assert.equal((await request(path + '/restart', { ...reviewer, method: 'POST' })).status, 403);
+  const revoke = await request(`/admin/users/${account.userId}/permissions`, {
+    ...superAdmin, method: 'PUT', json: { admin_permissions: ['TELEMETRY_VIEW'] },
+  });
+  assert.equal(revoke.status, 200);
+  assert.equal((await request(path, reviewer)).status, 403);
+});
+
 test('both account update routes recognize mixed-role admins and failed profile edits roll back grants', { skip }, async t => {
   const db = await fixture(t);
   const { request } = await mountedApi(t);

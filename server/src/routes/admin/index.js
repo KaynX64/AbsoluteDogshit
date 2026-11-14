@@ -1,4 +1,6 @@
 import express from 'express';
+import operationsRoutes from './operations.js';
+import { registerPresenceRoutes } from './presence.js';
 import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';
 import serverPolicyRoutes from './serverPolicy.js';
@@ -12,9 +14,10 @@ import { registerResponderManagementRoutes } from './responders.js';
 import { registerDatabaseStudioRoutes } from './databaseStudio/index.js';
 import { registerStaffAnalyticsRoutes } from './staffAnalytics.js';
 
-export default function adminRouter(io) {
+export default function adminRouter(io, restart) {
   const router = express.Router();
   router.use(authenticateToken, requireRoles('ADMIN'));
+  router.use('/operations', operationsRoutes(restart));
   router.use('/server-policy', serverPolicyRoutes);
 
   // Registration order matches the public admin router.
@@ -29,6 +32,7 @@ export default function adminRouter(io) {
   registerPermissionUpdateRoute(router);
   registerStaffAnalyticsRoutes(router);
   registerAuditAndTelemetryRoutes(router);
+  registerPresenceRoutes(router, io);
   registerDatabaseStudioRoutes(router);
 
   return router;

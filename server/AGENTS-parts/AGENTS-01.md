@@ -1,7 +1,7 @@
 <!-- split from server/AGENTS.md — part 01 of 02 -->
 # server/AGENTS.md — Express API (Node, ESM)
 
-`"type":"module"` — use `import` everywhere, including scripts and tests. Entry: `src/index.js` (`npm run dev` = nodemon, `npm start` = plain node). One HTTPS server carries both REST and Socket.IO.
+`"type":"module"` — use `import` everywhere, including scripts and tests. Entry: `src/index.js` (`npm run dev` = nodemon, `npm start` = Node supervisor). One HTTPS server carries both REST and Socket.IO.
 
 ## Boot pipeline (src/index.js)
 
@@ -39,3 +39,5 @@ The [feature route map](../src/routes/AGENTS.md) lists the feature modules and t
 
 - `rbac.js` — `requireRoles(...codes)`, `requirePermission(code)` (granular grants for every ADMIN, including mixed-role accounts), `resolveAdminPermissions(userId)`. Shared analytics explicitly allows DOCTOR and DENTIST accounts without ADMIN.
 - `consent.js` — `requirePrivacyConsent`: RA 10173 gate in front of PHI reads.
+
+The Terminal checks the live Admin role and grants on every request. Super Admins and Limited Admins with `TERMINAL_VIEW` can read bounded operational events and run built-in diagnostics. Restart requires Super Admin access. Restart requests are audited before the supervisor drains and replaces the API process. Run with `npm start` to enable restart.

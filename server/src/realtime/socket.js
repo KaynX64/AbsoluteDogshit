@@ -61,6 +61,7 @@ export function attachRealtime(server, { isHttps, isOriginAllowed }) {
   });
 
   io.on('connection', (socket) => {
+    socket.data.connectedAt = Date.now();
     const userEmail = socket.user?.email || 'Authenticated User';
     const userId = socket.user?.user_id;
     const clientInstanceId = socket.handshake.auth?.clientInstanceId;

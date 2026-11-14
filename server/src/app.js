@@ -104,9 +104,9 @@ export function createApp({ isOriginAllowed = createOriginCheck() } = {}) {
   return app;
 }
 
-export function mountApiRoutes(app, io) {
+export function mountApiRoutes(app, io, { restart } = {}) {
   app.post('/api/auth/login', loginRateLimit, loginUser);
-  app.post('/api/auth/logout', authenticateToken, logoutUser);
+  app.post('/api/auth/logout', authenticateToken, (req, res) => logoutUser(req, res, io));
   app.put('/api/auth/change-password', authenticateToken, changePassword);
 
   app.use('/api/privacy', privacyRouter);
@@ -116,7 +116,7 @@ export function mountApiRoutes(app, io) {
   app.use('/api/emergency', emergencyRouter(io));
   app.use('/api/inventory', inventoryRoutes(io));
   app.use('/api/documents', documentRoutes(io));
-  app.use('/api/admin', adminRoutes(io));
+  app.use('/api/admin', adminRoutes(io, restart));
   app.use('/api/analytics', analyticsRoutes);
   app.use('/api/sync', syncRoutes);
   app.use('/api/interactions', interactionsRoutes);

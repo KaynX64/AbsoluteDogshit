@@ -68,3 +68,5 @@ Super Admins can grant `INCIDENT_RECORDS_VIEW` during Limited Admin creation or 
 - Issuer history reads saved prescription items and clearance remarks independently of PDF availability. Prescription items are loaded in one batch for the signed-in clinician's records.
 
 - Admin audit endpoints accept optional `before` and `limit` parameters. Results remain descending arrays ordered by ID. Pass the last ID as `before` for the next page. The default limit is 100. PHI rows include the viewer’s current role list and one row per access event. Worker metrics are included in `/api/admin/telemetry` under the existing telemetry grant.
+
+- Admin System Health reads live Socket.IO presence from `GET /api/admin/connected-users` with `TELEMETRY_VIEW`. The response covers this server process, groups windows by sign-in session, and exposes token issue time and earliest currently connected socket time.

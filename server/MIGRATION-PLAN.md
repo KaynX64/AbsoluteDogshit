@@ -17,6 +17,8 @@
 - Migration 008 creates the staff analytics settings table. It leaves the table empty so nurses, doctors and dentists inherit their existing defaults. Apply migration 008 before serving analytics with the updated server.
 - Migration 009 adds nullable PDF retry timestamps and pending-PDF indexes to prescriptions, clearances and incident reports. It leaves stored PDF keys intact. Allow the startup migration to finish before serving traffic with the updated server.
 
+- Migration 010 adds the Terminal permission to the admin catalog. Existing grants carry forward. A Super Admin can opt Limited Admin accounts into diagnostics.
+
 ## Rehearsal and recovery
 
 1. Run `node --test` from `server/`. Set `VALETUDO_MIGRATION_TEST_PORT` to the loopback port of an isolated MySQL 8 instance to include the migration rehearsals. The tests create randomly named databases and remove them on teardown. Set `VALETUDO_MIGRATION_TEST_PASSWORD` if that instance requires a root password.

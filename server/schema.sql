@@ -654,6 +654,7 @@ INSERT INTO `ADMIN_PERMISSIONS` (`code`, `name`, `description`, `sort_order`) VA
 ('ANALYTICS_PHARMACY', 'View pharmacy analytics', 'Dispensing, stock priorities and batch expiry.', 53),
 ('ANALYTICS_HEADCOUNT', 'View campus headcount', 'Active account counts by role.', 54),
 ('INCIDENT_RECORDS_VIEW', 'View incident records', 'Open the emergency incident archive and view its report PDFs.', 55),
+('TERMINAL_VIEW', 'Use server Terminal', 'View server events and run built-in diagnostics.', 57),
 ('ANALYTICS_EXPORT', 'Export and print analytics', 'Download or print reports for granted analytics sections.', 56),
 ('DATABASE_MANAGE',   'Database Studio',           'Inspect and maintain raw system records',               60);
 

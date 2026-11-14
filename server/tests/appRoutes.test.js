@@ -501,3 +501,65 @@ test('audit pagination keeps the array contract and applies the cursor under the
   assert.match(queries[1].sql, /WHERE p.access_id < \?/);
   assert.match(queries[1].sql, /GROUP_CONCAT/);
 });
+
+
+test('connected users is restricted to admins with telemetry access', async t => {
+  t.mock.method(pool, 'query', async (sql, params) => {
+    if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
+    if (sql.includes('FROM ADMIN_PERMISSIONS')) return [[{ code: params[0] === 22 ? 'TELEMETRY_VIEW' : 'AUDIT_VIEW' }]];
+    assert.fail('Unexpected presence query');
+  });
+  const path = '/api/admin/connected-users';
+  assert.equal((await request(path)).status, 401);
+  assert.equal((await request(path, { roles: ['NURSE'] })).status, 403);
+  assert.equal((await request(path, { roles: ['ADMIN'] })).status, 403);
+  const response = await request(path, { roles: ['ADMIN'], userId: 22 });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.deepEqual((await response.json()).sessions, []);
+});
+
+
+test('server console grants diagnostics separately from Super Admin restart access', async t => {
+  const { s3 } = await import('../src/utils/s3Vault.js');
+  t.mock.method(s3, 'send', async () => ({ $response: { headers: { 'x-minio-version': 'fixture-release' } } }));
+  t.mock.method(pool, 'query', async (sql, params) => {
+    if (sql.sql === 'SELECT VERSION() AS version') return [[{ version: 'fixture-mysql' }]];
+    if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
+    if (sql.includes('FROM USER_ROLES')) {
+      if (params[0] === 23) return [[]];
+      if (params[0] === 24) return [[{ code: 'TERMINAL_VIEW' }]];
+      return [[{ code: params[0] === 22 ? 'SUPER_ADMIN' : 'TELEMETRY_VIEW' }]];
+    }
+    assert.fail('Unexpected operations query');
+  });
+  const path = '/api/admin/operations';
+  assert.equal((await request(path, { roles: ['ADMIN'] })).status, 403);
+  const formerAdmin = { roles: ['ADMIN'], userId: 23 };
+  assert.equal((await request(path, formerAdmin)).status, 403);
+  assert.equal((await request(path + '/restart', { ...formerAdmin, method: 'POST', json: {} })).status, 403);
+  const terminalViewer = { roles: ['ADMIN'], userId: 24 };
+  const limitedStatus = await request(path, terminalViewer);
+  assert.equal(limitedStatus.status, 200);
+  const { restartAuthorized, restartAvailable } = await limitedStatus.json();
+  assert.equal(restartAuthorized, false);
+  assert.equal(restartAvailable, false);
+  assert.equal((await request(path + '/command', { ...terminalViewer, method: 'POST', json: { command: 'memory' } })).status, 200);
+  assert.equal((await request(path + '/restart', { ...terminalViewer, method: 'POST' })).status, 403);
+  const admin = { roles: ['ADMIN'], userId: 22 };
+  const status = await request(path, admin);
+  assert.equal(status.status, 200);
+  assert.equal((await status.json()).restartAuthorized, true);
+  const result = await request(path + '/command', { ...admin, method: 'POST', json: { command: 'status' } });
+  assert.equal(result.status, 200);
+  const { output } = await result.json();
+  assert.ok(output.instanceId);
+  assert.match(output.serverVersion, /^\d+\./);
+  assert.equal(output.mysql.version, 'fixture-mysql');
+  assert.equal(output.minio.version, 'fixture-release');
+  assert.equal(output.redis.status, 'Fallback');
+  assert.equal(output.overall, 'Degraded');
+  assert.equal(output.ram.usedBytes + output.ram.availableBytes, output.ram.totalBytes);
+  assert.equal((await request(path + '/command', { ...admin, method: 'POST', json: { command: 'constructor' } })).status, 400);
+  assert.equal((await request(path + '/restart', { ...admin, method: 'POST', json: {} })).status, 409);
+});
