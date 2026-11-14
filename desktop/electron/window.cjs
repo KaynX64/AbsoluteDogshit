@@ -44,6 +44,11 @@ function createWindow() {
 
   const win = new BrowserWindow({
     title: WINDOW_TITLE,
+    ...(process.platform === 'win32' && {
+      icon: isDev
+        ? path.join(__dirname, '../src/assets/valetudo_icon.ico')
+        : path.join(process.resourcesPath, 'valetudo_icon.ico'),
+    }),
     width: 1300,
     height: 880,
     minWidth: 1024,

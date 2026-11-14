@@ -1,7 +1,10 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const Module = require('node:module');
+const path = require('node:path');
 const { test } = require('node:test');
+const { WINDOWS_APP_ID } = require('../electron/config.cjs');
+const { build } = require('../package.json');
 
 const windowModulePath = require.resolve('../electron/window.cjs');
 
@@ -44,6 +47,8 @@ function createWindowFixture(isPackaged = false) {
     ipcMain: { on() {} },
   };
   const originalLoad = Module._load;
+  const originalResourcesPath = process.resourcesPath;
+  process.resourcesPath = path.join(__dirname, 'packaged-resources');
   Module._load = function (request, parent, isMain) {
     if (request === 'electron') return electron;
     if (request === './updates.cjs' && parent.filename === windowModulePath) {
@@ -58,12 +63,15 @@ function createWindowFixture(isPackaged = false) {
     createWindow();
   } finally {
     Module._load = originalLoad;
+    if (originalResourcesPath === undefined) delete process.resourcesPath;
+    else process.resourcesPath = originalResourcesPath;
   }
   return createdWindow;
 }
 
 test('dev window appears after the page loads without ready-to-show', () => {
   const win = createWindowFixture();
+  if (process.platform === 'win32') assert.equal(win.options.icon, path.resolve(__dirname, '../src/assets/valetudo_icon.ico'));
   assert.equal(win.visible, false);
 
   win.webContents.emit('did-finish-load');
@@ -72,7 +80,9 @@ test('dev window appears after the page loads without ready-to-show', () => {
 });
 
 test('packaged window still appears on ready-to-show', () => {
+  assert.equal(WINDOWS_APP_ID, build.appId);
   const win = createWindowFixture(true);
+  if (process.platform === 'win32') assert.equal(win.options.icon, path.join(__dirname, 'packaged-resources', 'valetudo_icon.ico'));
   assert.equal(win.visible, false);
 
   win.emit('ready-to-show');

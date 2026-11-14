@@ -3,6 +3,7 @@ const appConfig = require('../app-config.json');
 
 const API_BASE_URL = (appConfig.apiBaseUrl || 'https://localhost:5000').replace(/\/+$/, '');
 const VITE_URL = 'https://127.0.0.1:5173';
+const WINDOWS_APP_ID = 'com.psu.valetudo.desktop';
 
 /** Native window title — also rendered by the app-drawn title strip. */
 const WINDOW_TITLE = 'LeoVital HealthLink - PSU Lingayen Infirmary';
@@ -26,6 +27,7 @@ function supportsSystemBackdrop() {
 module.exports = {
   API_BASE_URL,
   VITE_URL,
+  WINDOWS_APP_ID,
   WINDOW_TITLE,
   TITLEBAR_HEIGHT,
   CUSTOM_TITLE_BAR: supportsSystemBackdrop(),

@@ -46,7 +46,14 @@
     ],
     "win": {
       "target": "nsis",
-      "signAndEditExecutable": false
+      "icon": "src/assets/valetudo_icon.ico",
+      "extraResources": [
+        {
+          "from": "src/assets/valetudo_icon.ico",
+          "to": "valetudo_icon.ico"
+        }
+      ],
+      "signExecutable": false
     },
     "nsis": {
       "oneClick": true,
