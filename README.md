@@ -1,8 +1,10 @@
-<!-- README.md is over the 7 KB documentation-file cap — its content lives on, split into byte-preserved parts; this stub is the entry point. -->
+<!-- The long-form README is maintained in README-parts/; this file is its entry point. -->
 
 # LeoVital HealthLink — split index
 
-`README.md` (32,758 bytes) exceeds the 7 KB cap for documentation files, so it was split in half — recursively, at clean line boundaries — into the 8 parts below. Bytes are preserved: concatenating the parts in order and dropping each part's one-line `<!-- split from … -->` comment (and the `../` prefix the split added to relative links) reproduces the original file exactly.
+For a current explanation of the application, its workflows, architecture and maintenance concerns, start with [the codebase overview](CODEBASE-OVERVIEW.md). For development work, use [AGENTS.md](AGENTS.md) and its module guides. The parts below include a historical Stage1 snapshot; verify deployment and implementation details against the current guides and source.
+
+The long-form README is split into the 8 parts below to keep individual documentation files manageable. Maintain the relevant part when its content changes.
 
 - [`README-parts/README-01.md`](README-parts/README-01.md) — “What changed on Stage1”
 - [`README-parts/README-02.md`](README-parts/README-02.md) — “1. Tech Stack” · “2. Features” · “Clinical and administrative workflows”

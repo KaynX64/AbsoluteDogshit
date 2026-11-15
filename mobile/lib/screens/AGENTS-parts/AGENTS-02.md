@@ -4,6 +4,7 @@
 - **Slice map:** `codeslice/MB-02-ConsultationSchedulerScreen.md` (see the code-slice index for verified ranges).
 - Data: `_fetchDoctors` L427 (`GET /api/appointments/doctors`), `_fetchAvailableSlots` L453 (`GET /api/appointments/slots?doctorId=&date=`), `_fetchMyAppointments` L482, `_submitBooking` L500 (POST), `_cancelAppointment` L616 (`PATCH /api/appointments/:id/cancel`).
 - Slots refresh live: `_initSlotSocket` L149 — socket `appointment:booked` L161 / `appointment:cancelled` L166 → refetch slots for the selected doctor/date.
+- All choice states use theme surfaces and paired foregrounds, including available/unavailable slots and unselected cards. Keep `onPrimary` on selected dates, slots and tabs. The date picker inherits the account theme. `mobile_appearance_test.dart` supplies an optional HTTP client and tests the rendered choices in all modes/presets.
 - Lifecycle: app-lifecycle listener L143 (reconnect socket). UI: booking tab L897 · doctor list L1016 · purpose chips L1098 · date carousel L1187 · slot grid L1303 · history tab L1422.
 
 ### documents_viewer_screen.dart — 1,576 lines / 62 KB. Prescriptions / clearances / diagnostics (3 sub-tabs)
@@ -28,9 +29,11 @@
 ### login_screen.dart — 426 lines / 16 KB
 - **Slice map:** `codeslice/MB-06-LoginScreen.md` (14 slices, verified @ 93b4172).
 - `_handleLogin` L35 (`POST /api/auth/login` L43) → stores `jwt_token` + `user_data`, syncs FCM token (`EmergencyAlertService().syncFcmTokenWithBackend()`), routes by role.
+- After storing the session, bind its account theme through `AccountThemeScope` before navigation. Never carry the previous account's theme into a new sign-in.
 
 ### splash_screen.dart — 309 lines / 13 KB
 - `_checkSavedSession` L36 (`GET /api/profile/me` L64) → `_routeUser` L83 by roles → `_goToLogin` L100.
+- Restore the theme with `fromCache: true`, then refresh the dedicated theme endpoint. Cached login profile theme fields may be older than the device's last successful preference save. Reset theme state on authentication rejection.
 
 ## Rules
 

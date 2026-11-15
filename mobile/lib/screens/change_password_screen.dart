@@ -1,6 +1,7 @@
 // mobile/lib/screens/change_password_screen.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../theme/app_palette.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
@@ -27,10 +28,10 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   int _strengthScore = 0;
   String _strengthLabel = '';
 
-  static const primaryGreen = Color(0xFF284E3A);
-  static const textMain = Color(0xFF191C1A);
-  static const textSub = Color(0xFF5A635B);
-  static const borderColor = Color(0xFFD6DFD5);
+  Color get primaryGreen => AppPalette.of(context).color(0xFF284E3A);
+  Color get textMain => AppPalette.of(context).color(0xFF191C1A);
+  Color get textSub => AppPalette.of(context).color(0xFF5A635B);
+  Color get borderColor => AppPalette.of(context).color(0xFFD6DFD5);
 
   @override
   void initState() {
@@ -87,15 +88,15 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   Color _getStrengthColor() {
     switch (_strengthScore) {
       case 1:
-        return const Color(0xFFDC2626);
+        return AppPalette.of(context).color(0xFFDC2626);
       case 2:
-        return const Color(0xFFD97706);
+        return AppPalette.of(context).color(0xFFD97706);
       case 3:
-        return const Color(0xFF2563EB);
+        return AppPalette.of(context).color(0xFF2563EB);
       case 4:
-        return const Color(0xFF15803D);
+        return AppPalette.of(context).color(0xFF15803D);
       default:
-        return const Color(0xFF94A396);
+        return AppPalette.of(context).color(0xFF94A396);
     }
   }
 
@@ -130,8 +131,8 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
       if (res.statusCode == 200) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Password updated successfully!'),
+          SnackBar(
+            content: const Text('Password updated successfully!'),
             backgroundColor: primaryGreen,
           ),
         );
@@ -155,7 +156,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: const Color(0xFF7A2E26),
+        backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
       ),
     );
   }
@@ -164,24 +165,24 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     final radius = BorderRadius.circular(rs.r(22));
     return InputDecoration(
       hintText: hint,
-      hintStyle: TextStyle(color: const Color(0xFF94A396), fontSize: rs.sp(13)),
+      hintStyle: TextStyle(color: AppPalette.of(context).color(0xFF94A396), fontSize: rs.sp(13)),
       filled: true,
-      fillColor: Colors.white,
+      fillColor: AppPalette.of(context).surface,
       contentPadding: EdgeInsets.symmetric(
         horizontal: rs.w(20),
         vertical: rs.h(16),
       ),
       border: OutlineInputBorder(
         borderRadius: radius,
-        borderSide: const BorderSide(color: borderColor),
+        borderSide: BorderSide(color: borderColor),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: radius,
-        borderSide: const BorderSide(color: borderColor),
+        borderSide: BorderSide(color: borderColor),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: radius,
-        borderSide: const BorderSide(color: primaryGreen, width: 1.5),
+        borderSide: BorderSide(color: primaryGreen, width: 1.5),
       ),
     );
   }
@@ -192,12 +193,12 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     final maxContentWidth = rs.isTablet ? 560.0 : double.infinity;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F9F6),
+      backgroundColor: AppPalette.of(context).background(0xFFF7F9F6),
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: textMain),
+          icon: Icon(Icons.arrow_back_rounded, color: textMain),
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
@@ -317,7 +318,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                             decoration: BoxDecoration(
                               color: segmentActive
                                   ? _getStrengthColor()
-                                  : const Color(0xFFE2EBE1),
+                                  : AppPalette.of(context).color(0xFFE2EBE1),
                               borderRadius: BorderRadius.circular(2),
                             ),
                           ),
@@ -351,8 +352,8 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                               fontSize: rs.sp(11),
                               fontWeight: FontWeight.w700,
                               color: _strengthScore >= 2
-                                  ? const Color(0xFF15803D)
-                                  : const Color(0xFFDC2626),
+                                  ? AppPalette.of(context).color(0xFF15803D)
+                                  : AppPalette.of(context).color(0xFFDC2626),
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -436,18 +437,18 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: primaryGreen,
-                        foregroundColor: Colors.white,
+                        foregroundColor: AppPalette.of(context).onPrimary,
                         elevation: 0,
                         shape: const StadiumBorder(),
                       ),
                       onPressed:
                           (_isSaving || _strengthScore < 2) ? null : _updatePassword,
                       icon: _isSaving
-                          ? const SizedBox(
+                          ? SizedBox(
                               width: 20,
                               height: 20,
                               child: CircularProgressIndicator(
-                                color: Colors.white,
+                                color: AppPalette.of(context).onPrimary,
                                 strokeWidth: 2,
                               ),
                             )
@@ -488,12 +489,12 @@ class _PasswordRequirement extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const okGreen = Color(0xFF15803D);
-    const okBg = Color(0xFFDCFCE7);
-    const okBorder = Color(0xFFBBF7D0);
-    const pendingGrey = Color(0xFF94A396);
-    const pendingBg = Color(0xFFEEF3EC);
-    const pendingBorder = Color(0xFFDCE4DA);
+    final okGreen = AppPalette.of(context).color(0xFF15803D);
+    final okBg = AppPalette.of(context).color(0xFFDCFCE7);
+    final okBorder = AppPalette.of(context).color(0xFFBBF7D0);
+    final pendingGrey = AppPalette.of(context).color(0xFF94A396);
+    final pendingBg = AppPalette.of(context).color(0xFFEEF3EC);
+    final pendingBorder = AppPalette.of(context).color(0xFFDCE4DA);
 
     final checkSize = rs.w(14).clamp(12.0, 16.0);
 
@@ -558,9 +559,9 @@ class _PasswordRequirementsPanel extends StatelessWidget {
         vertical: rs.h(12),
       ),
       decoration: BoxDecoration(
-        color: const Color(0xFFF7F9F6),
+        color: AppPalette.of(context).color(0xFFF7F9F6),
         borderRadius: BorderRadius.circular(rs.r(14)),
-        border: Border.all(color: const Color(0xFFE8EDE6)),
+        border: Border.all(color: AppPalette.of(context).color(0xFFE8EDE6)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -571,7 +572,7 @@ class _PasswordRequirementsPanel extends StatelessWidget {
               fontSize: rs.sp(10.5),
               fontWeight: FontWeight.w800,
               letterSpacing: 1.2,
-              color: const Color(0xFF94A396),
+              color: AppPalette.of(context).color(0xFF94A396),
             ),
           ),
           SizedBox(height: rs.h(6)),

@@ -5,10 +5,28 @@ import { authenticateToken } from '../../auth/middleware.js';
 import { THEME_MODES, THEME_PRESETS } from '../../config/themePreferences.js';
 
 export function registerProfilePreferences(router) {
+  // Appearance is independent of clinical consent and contains no health data.
+  router.get('/theme', authenticateToken, async (req, res) => {
+    try {
+      const [[user]] = await pool.query(
+        'SELECT theme_mode, theme_preset FROM USERS WHERE user_id = ? AND deleted_at IS NULL',
+        [req.user.user_id],
+      );
+      if (!user) return res.status(404).json({ error: 'Account not found.' });
+      res.json({
+        theme_mode: THEME_MODES.has(user.theme_mode) ? user.theme_mode : 'light',
+        theme_preset: THEME_PRESETS.has(user.theme_preset) ? user.theme_preset : 'brand',
+      });
+    } catch (error) {
+      console.error('[Theme Preference Read Error]:', error?.code || error?.name);
+      res.status(500).json({ error: 'Failed to read theme preference.' });
+    }
+  });
+
   // ─────────────────────────────────────────────────────────────────────────
   // PUT /api/profile/theme — persist the account's UI theme selection.
   //
-  // Per-account persistence for the desktop settings menu (Stage 7).
+  // Per-account persistence shared by desktop and mobile settings.
   // The desktop client applies changes locally first (offline-first) and
   // pushes the selection here; the stored values are returned with the
   // login response so the theme follows the account to any machine.

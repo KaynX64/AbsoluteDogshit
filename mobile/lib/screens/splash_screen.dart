@@ -10,6 +10,7 @@ import 'login_screen.dart';
 import 'patient_portal_screen.dart';
 import 'responder_screen.dart';
 import '../services/emergency_alert_service.dart';
+import '../theme/account_theme_controller.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -56,6 +57,11 @@ class _SplashScreenState extends State<SplashScreen> {
       return;
     }
 
+    if (!mounted) return;
+    final themes = AccountThemeScope.of(context);
+    await themes.bindAccount(cachedUser, token, fromCache: true);
+    if (!mounted) return;
+
     // Optimistically route the user with the cached session. The API
     // round-trip below only exists to detect a *revoked* token; any
     // other outcome (offline, 500, timeout) keeps the user logged in.
@@ -67,6 +73,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
       // Only a genuine auth rejection should log the user out.
       if (res.statusCode == 401 || res.statusCode == 403) {
+        themes.reset();
         await _storage.deleteAll();
         if (mounted) setState(() => _isChecking = false);
         return;
@@ -90,6 +97,7 @@ class _SplashScreenState extends State<SplashScreen> {
     }
 
     EmergencyAlertService().syncFcmTokenWithBackend();
+    themes.refresh();
     _routeUser(cachedUser);
   }
 
