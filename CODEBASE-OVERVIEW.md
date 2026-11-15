@@ -38,7 +38,7 @@ flowchart LR
 |---|---|
 | [server/](server/AGENTS.md) | Node ESM, Express 5, mysql2 and Socket.IO. Owns business rules, authorization, transactions, migrations, documents and background jobs. REST and realtime share port 5000 by default. |
 | [desktop/](desktop/AGENTS.md) | Electron 44, React 19, TypeScript and Vite 6. Windows staff console with role workspaces, printing, QR intake and encrypted local SQLite storage. A limited preload bridge connects the renderer to native features. |
-| [mobile/](mobile/AGENTS.md) | Flutter/Dart patient and responder app, primarily Android. Uses secure storage, geolocation, QR display, realtime events and Firebase push. Its initials menu provides account themes shared with desktop and Change Password. |
+| [mobile/](mobile/AGENTS.md) | Flutter/Dart patient and responder app, primarily Android. Uses secure storage, geolocation, QR display, realtime events and Firebase push. The Account settings gear opens appearance preferences shared with desktop and the password-change form. |
 | [Local infrastructure](docker-compose.yml) | MySQL 8 for records; Redis 7 for cache, session revocation and other guards; MinIO for generated PDFs, signatures and attachments. Compose binds service ports to loopback. |
 
 ## What happens during a clinic visit

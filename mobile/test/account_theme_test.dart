@@ -8,6 +8,8 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mobile/main.dart';
 import 'package:mobile/screens/change_password_screen.dart';
+import 'package:mobile/screens/patient_portal_screen.dart';
+import 'package:mobile/screens/responder_screen.dart';
 import 'package:mobile/theme/account_theme_controller.dart';
 import 'package:mobile/theme/app_palette.dart';
 import 'package:mobile/widgets/account_settings_button.dart';
@@ -223,45 +225,64 @@ void main() {
     },
   );
 
-  testWidgets(
-    'initials open appearance settings, update the app, and open password settings',
-    (tester) async {
-      tester.view.physicalSize = const Size(360, 640);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final controller = AccountThemeController(
-        client: MockClient((_) async => http.Response('{}', 200)),
-      );
-      addTearDown(controller.dispose);
-      await controller.bindAccount(account(21), 'student');
-      await tester.pumpWidget(
-        ValetudoMobileApp(
-          themeController: controller,
-          home: const Scaffold(
-            body: Align(
-              alignment: Alignment.topRight,
-              child: AccountSettingsButton(initials: 'DM'),
-            ),
+  for (final responder in [false, true]) {
+    testWidgets(
+      '${responder ? 'Responder' : 'Patient'} gear opens shared settings and both tasks return there',
+      (tester) async {
+        tester.view.physicalSize = responder
+            ? const Size(390, 844)
+            : const Size(800, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final controller = AccountThemeController(
+          client: MockClient((_) async => http.Response('{}', 200)),
+        );
+        addTearDown(controller.dispose);
+        await controller.bindAccount(account(21), 'student');
+        final user = {
+          ...account(21),
+          'first_name': 'Test',
+          'roles': [responder ? 'EMERGENCY_RESPONDER' : 'STUDENT'],
+        };
+        await tester.pumpWidget(
+          ValetudoMobileApp(
+            themeController: controller,
+            home: responder
+                ? ResponderScreen(user: user)
+                : PatientPortalScreen(user: user),
           ),
-        ),
-      );
-      await tester.tap(find.byTooltip('Account settings'));
-      await tester.pumpAndSettle();
-      expect(find.text('Appearance'), findsOneWidget);
-      await tester.tap(find.text('Blossom'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Dark'));
-      await tester.pumpAndSettle();
-      expect(controller.selection.preset, ThemePreset.blossom);
-      expect(controller.selection.dark, isTrue);
-      final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
-      expect(app.theme!.brightness, Brightness.dark);
-      expect(find.text('Saved to your account'), findsOneWidget);
-      await tester.ensureVisible(find.text('Change password'));
-      await tester.tap(find.text('Change password'));
-      await tester.pumpAndSettle();
-      expect(find.byType(ChangePasswordScreen), findsOneWidget);
-    },
-  );
+        );
+        final gear = find.byTooltip('Account settings');
+        expect(tester.getSize(gear).shortestSide, greaterThanOrEqualTo(48));
+        await tester.tap(gear);
+        await tester.pumpAndSettle();
+        expect(find.text('Appearance'), findsOneWidget);
+        expect(find.text('Change password').hitTestable(), findsOneWidget);
+        expect(find.text('Light · LeoVital'), findsOneWidget);
+        await tester.tap(find.text('Appearance'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Blossom'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Dark'));
+        await tester.pumpAndSettle();
+        expect(controller.selection.preset, ThemePreset.blossom);
+        expect(controller.selection.dark, isTrue);
+        final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
+        expect(app.theme!.brightness, Brightness.dark);
+        expect(find.text('Saved to your account'), findsOneWidget);
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+        expect(find.text('Dark · Blossom'), findsOneWidget);
+        await tester.tap(find.text('Change password'));
+        await tester.pumpAndSettle();
+        expect(find.byType(ChangePasswordScreen), findsOneWidget);
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+        expect(find.byType(AccountSettingsScreen), findsOneWidget);
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump();
+      },
+    );
+  }
 }

@@ -19,9 +19,9 @@
 - `_fetchActiveAlerts` L56 (`GET /api/emergency/active`), `_updateAlertStatus` L103 (delegates to shared `updateSosAlertStatus()` — `lib/widgets/sos_alert_actions.dart`; surfaces the server's 409 message, treats "already closed elsewhere" as success), Google Maps deep-link L138 (stops the alarm first), SOS dialog broadcast L82 (passes `onStatusChanged` so list actions made in the dialog refresh the screen), sign out ~L248 (logout body sends `fcm_token`), alert card L429, stat pills L754.
 - `lib/services/emergency_alert_service.dart` handles both FCM and Socket.IO events. The screen polls and refreshes its active list. The screen owns the listener lifecycle for EMERGENCY_RESPONDER-route accounts (start L41 / stop L52; the service's flag-change handler deliberately skips those accounts).
 
-### change_password_screen.dart — 607 lines / 20 KB
-- **Slice map:** `codeslice/MB-05-ChangePasswordScreen.md` (17 slices, verified @ 93b4172).
-- Client-side strength mirror `_evaluateStrength` L50 (keep in sync with server `passwordPolicy`); submit L117 (`PUT /api/auth/change-password`); requirements panel `_PasswordRequirementsPanel` L537.
+### change_password_screen.dart
+- **Slice map:** `codeslice/MB-05-ChangePasswordScreen.md`.
+- `_validateNewPassword` mirrors the server's length and character-group requirements. `_submit` calls `PUT /api/auth/change-password` and directs field errors to the relevant control. `_returnToSignIn` clears session state after success.
 
 ### edit_profile_screen.dart — 398 lines / 14 KB
 - `_saveProfile` L64 → `PUT /api/profile/me` L80. Loads profile in `initState` L41.

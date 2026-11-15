@@ -7,6 +7,7 @@ import { once } from 'node:events';
 import { after, before, mock, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import { inflateSync } from 'node:zlib';
 import ExcelJS from 'exceljs';
 
@@ -80,6 +81,77 @@ test('account appearance reads only the authenticated user and shares desktop pr
   assert.equal(invalid.status, 400);
   const save = await request('/api/profile/theme', { roles: ['STUDENT'], method: 'PUT', json: { theme_mode: 'light', theme_preset: 'sunrise', user_id: 42 } });
   assert.equal(save.status, 200);
+});
+
+test('password change releases only the submitted device when the change commits', async t => {
+  const priorPassword = 'Original21!';
+  let passwordHash = await bcrypt.hash(priorPassword, 4);
+  const devices = new Map([['this-device', 21], ['other-device', 21], ['another-account', 42]]);
+  let failAudit = false;
+  let loseRace = false;
+  t.mock.method(pool, 'query', async sql => {
+    if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
+    assert.match(sql, /SELECT u\.password_hash/);
+    return [[{ password_hash: passwordHash }]];
+  });
+  t.mock.method(pool, 'getConnection', async () => {
+    let nextHash;
+    let nextDevice;
+    return {
+      async beginTransaction() {},
+      async query(sql, params) {
+        if (sql.startsWith('UPDATE USERS SET password_hash')) {
+          assert.match(sql, /CAST\(password_hash AS BINARY\) = \?/);
+          assert.deepEqual(params.slice(1), [21, passwordHash]);
+          if (loseRace) return [{ affectedRows: 0 }];
+          nextHash = params[0];
+          return [{ affectedRows: 1 }];
+        }
+        if (sql.startsWith('DELETE FROM DEVICE_TOKENS')) {
+          assert.match(sql, /WHERE user_id = \? AND fcm_token = CAST\(\? AS BINARY\)/);
+          const [owner, token] = params;
+          assert.equal(owner, 21);
+          if (devices.get(token) === owner) nextDevice = token;
+          return [{ affectedRows: nextDevice ? 1 : 0 }];
+        }
+        if (sql.startsWith('SELECT entry_hash')) return [[]];
+        assert.match(sql, /INSERT INTO AUDIT_LOGS/);
+        if (failAudit) throw new Error('fixture audit failure');
+        return [{ affectedRows: 1 }];
+      },
+      async commit() {
+        if (nextHash) passwordHash = nextHash;
+        if (nextDevice) devices.delete(nextDevice);
+      },
+      async rollback() {},
+      release() {},
+    };
+  });
+  const change = (currentPassword, newPassword, fcm_token) => request('/api/auth/change-password', {
+    roles: ['STUDENT'],
+    method: 'PUT',
+    json: { currentPassword, newPassword, fcm_token },
+  });
+
+  assert.equal((await change(priorPassword, 'short', 'this-device')).status, 400);
+  assert.equal((await change('wrong', 'Replacement1', 'this-device')).status, 400);
+  loseRace = true;
+  assert.equal((await change(priorPassword, 'Replacement1', 'this-device')).status, 409);
+  loseRace = false;
+  failAudit = true;
+  assert.equal((await change(priorPassword, 'Replacement1', 'this-device')).status, 500);
+  failAudit = false;
+  assert.equal(devices.size, 3);
+  assert.ok(await bcrypt.compare(priorPassword, passwordHash));
+
+  const changed = await change(priorPassword, 'Replacement1', 'this-device');
+  assert.equal(changed.status, 200);
+  assert.ok(await bcrypt.compare('Replacement1', passwordHash));
+  assert.deepEqual([...devices], [['other-device', 21], ['another-account', 42]]);
+
+  assert.equal((await change('Replacement1', 'secondpassphrase', 'another-account')).status, 200);
+  assert.equal((await change('secondpassphrase', 'thirdpassphrase')).status, 200);
+  assert.equal(devices.size, 2);
 });
 
 test('inventory expiry alerts and summary use a 30-day window', async t => {

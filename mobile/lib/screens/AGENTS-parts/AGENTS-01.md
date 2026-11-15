@@ -14,7 +14,7 @@ Start with the [code-slice index](../CODESLICE.md) when navigating the patient p
 - Role routing: login sends `EMERGENCY_RESPONDER` → `ResponderScreen`, everyone else → `PatientPortalScreen` (login L64-70); splash re-validates the saved session and routes the same way (`_routeUser` L83).
 - After any await before `setState`/`Navigator`: keep the `mounted` guard — silent background failures in Flutter throw otherwise.
 - Server enforces RBAC/consent; any role gating in screens is UX only.
-- Appearance comes from `AccountThemeScope` above the navigator and the context-derived `AppPalette`. Screen color getters must stay reactive; preserve semantic emergency actions and QR contrast. The portal initials use the shared `AccountSettingsButton` for appearance and Change Password. See [account appearance guidance](../../../AGENTS.md#account-appearance-and-settings).
+- Appearance comes from `AccountThemeScope` above the navigator and the context-derived `AppPalette`. Screen color getters must stay reactive. Preserve semantic emergency actions and QR contrast. Both role headers use the shared `AccountSettingsButton` gear. See [account appearance guidance](../../../AGENTS.md#account-appearance-and-settings).
 
 ## Screens
 

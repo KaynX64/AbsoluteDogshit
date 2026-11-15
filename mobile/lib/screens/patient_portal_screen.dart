@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_palette.dart';
 import '../theme/account_theme_controller.dart';
 import '../widgets/account_settings_button.dart';
+import '../widgets/sign_out_confirmation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:geolocator/geolocator.dart';
@@ -746,7 +747,20 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
     );
   }
 
+  bool _signOutInProgress = false;
+
   Future<void> _handleSignOut() async {
+    if (_signOutInProgress) return;
+    _signOutInProgress = true;
+    try {
+      if (!await confirmSignOut(context) || !mounted) return;
+      await _signOut();
+    } finally {
+      _signOutInProgress = false;
+    }
+  }
+
+  Future<void> _signOut() async {
     final token = await _storage.read(key: 'jwt_token');
     if (token != null) {
       try {
@@ -824,7 +838,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
       child: Scaffold(
         backgroundColor: AppPalette.of(context).background(0xFFF7F9F6),
         appBar: PreferredSize(
-          preferredSize: Size.fromHeight(rs.h(64).clamp(56.0, 72.0)),
+          preferredSize: Size.fromHeight(rs.h(64).clamp(64.0, 72.0)),
           child: SafeArea(
             child: Padding(
               padding: EdgeInsets.symmetric(
@@ -834,20 +848,25 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      ValetudoLogo(size: rs.w(34).clamp(28.0, 42.0)),
-                      SizedBox(width: rs.w(8)),
-                      Text(
-                        'LeoVital',
-                        style: TextStyle(
-                          fontSize: rs.sp(18),
-                          fontWeight: FontWeight.w900,
-                          color: AppPalette.of(context).color(0xFF191C1A),
-                          letterSpacing: -0.5,
+                  Flexible(
+                    child: Row(
+                      children: [
+                        ValetudoLogo(size: rs.w(34).clamp(28.0, 42.0)),
+                        SizedBox(width: rs.w(8)),
+                        Flexible(
+                          child: Text(
+                            'LeoVital',
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: rs.sp(18),
+                              fontWeight: FontWeight.w900,
+                              color: AppPalette.of(context).color(0xFF191C1A),
+                              letterSpacing: -0.5,
+                            ),
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                   Row(
                     children: [
@@ -865,7 +884,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                         ),
                       ),
                       SizedBox(width: rs.w(8)),
-                      AccountSettingsButton(initials: initials),
+                      const AccountSettingsButton(),
                     ],
                   ),
                 ],
@@ -1374,12 +1393,16 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                               ),
                             ],
                           )
-                        : Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        : OverflowBar(
+                            alignment: MainAxisAlignment.spaceBetween,
+                            overflowAlignment: OverflowBarAlignment.center,
+                            spacing: rs.w(8),
+                            overflowSpacing: rs.h(8),
                             children: [
                               TextButton(
                                 onPressed: () => _fetchQRPass(),
                                 child: Row(
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Text(
                                       'Refresh pass',
@@ -1411,6 +1434,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                 ),
                                 onPressed: () => setState(() => _currentIndex = 1),
                                 child: Row(
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Text(
                                       'Book consultation',
@@ -2078,7 +2102,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                           borderRadius: BorderRadius.circular(rs.r(20)),
                         ),
                         child: Text(
-                          'DEMO ONLY • NOT AN EMERGENCY SERVICE',
+                          'IN CASE OF EMERGENCY ONLY',
                           style: TextStyle(
                             fontSize: rs.sp(10),
                             fontWeight: FontWeight.w800,

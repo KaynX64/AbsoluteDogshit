@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' show CheckedState;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -103,9 +106,55 @@ void expectReadable(WidgetTester tester, Finder label, {required bool dark}) {
 void main() {
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
 
+  testWidgets('appearance shows saving, pending and successful retry', (
+    tester,
+  ) async {
+    final firstSave = Completer<http.Response>();
+    var attempts = 0;
+    final controller = AccountThemeController(
+      client: MockClient((_) async {
+        attempts++;
+        return attempts == 1 ? firstSave.future : http.Response('{}', 200);
+      }),
+    );
+    addTearDown(controller.dispose);
+    await controller.bindAccount({'user_id': 1}, 'fixture');
+    await tester.pumpWidget(
+      ValetudoMobileApp(
+        themeController: controller,
+        home: const AppearanceScreen(),
+      ),
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pumpAndSettle();
+    final focused = tester.widget<ListTile>(
+      find.widgetWithText(ListTile, 'Light'),
+    );
+    final outline = (focused.shape! as RoundedRectangleBorder).side;
+    expect(outline.width, 2);
+    expect(
+      contrastRatio(outline.color, focused.selectedTileColor!),
+      greaterThanOrEqualTo(3),
+    );
+    await tester.tap(find.text('Dark'));
+    await tester.pumpAndSettle();
+    expect(find.text('Saving to your account…'), findsOneWidget);
+    expect(controller.selection.dark, isTrue);
+    firstSave.complete(http.Response('{}', 503));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Applied here. Waiting to sync with your account.'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Retry saving'));
+    await tester.pumpAndSettle();
+    expect(find.text('Saved to your account'), findsOneWidget);
+    expect(attempts, 2);
+  });
+
   for (final initiallyDark in [false, true]) {
     testWidgets(
-      'open settings surface follows mode and palette changes from ${initiallyDark ? 'dark' : 'light'}',
+      'appearance page and preview follow changes from ${initiallyDark ? 'dark' : 'light'}',
       (tester) async {
         tester.view.physicalSize = const Size(390, 844);
         tester.view.devicePixelRatio = 1;
@@ -122,32 +171,37 @@ void main() {
         await tester.pumpWidget(
           ValetudoMobileApp(
             themeController: controller,
-            home: const Scaffold(body: AccountSettingsButton(initials: 'DM')),
+            home: const Scaffold(body: AccountSettingsButton()),
           ),
         );
         await tester.tap(find.byTooltip('Account settings'));
         await tester.pumpAndSettle();
-        final sheet = tester.element(find.byType(AccountSettingsSheet));
+        await tester.tap(find.text('Appearance'));
+        await tester.pumpAndSettle();
+        final page = tester.element(find.byType(AppearanceScreen));
 
         void expectCurrentSurface() {
-          expect(
-            tester.element(find.byType(AccountSettingsSheet)),
-            same(sheet),
-          );
-          final title = find.text('Account settings');
+          expect(tester.element(find.byType(AppearanceScreen)), same(page));
+          final title = find.text('Appearance');
           final scheme = Theme.of(tester.element(title)).colorScheme;
           expect(
-            paintedBackground(tester, title),
-            scheme.surface,
-            reason: 'The open sheet must not retain the surface captured when it opened.',
+            tester
+                .widget<DecoratedBox>(
+                  find.byKey(const ValueKey('appearance-preview')),
+                )
+                .decoration,
+            isA<BoxDecoration>().having(
+              (decoration) => decoration.color,
+              'surface',
+              scheme.surface,
+            ),
           );
           for (final label in [
-            'Account settings',
             'Appearance',
-            'Appearance and security',
-            'Choose how your app looks.',
+            'Preview',
+            'Display mode',
             'Color palette',
-            'Security',
+            'Saved to your account',
           ]) {
             expectReadable(
               tester,
@@ -182,10 +236,9 @@ void main() {
             expectCurrentSurface();
           }
         }
-        await tester.ensureVisible(find.byTooltip('Close settings'));
-        await tester.tap(find.byTooltip('Close settings'));
+        await tester.pageBack();
         await tester.pumpAndSettle();
-        expect(find.byType(AccountSettingsSheet), findsNothing);
+        expect(find.byType(AccountSettingsScreen), findsOneWidget);
       },
     );
   }
@@ -267,9 +320,9 @@ void main() {
   }
 
   testWidgets(
-    'settings previews fit a small phone with larger text and remain interactive',
+    'appearance choices remain accessible at 320dp and 200 percent text',
     (tester) async {
-      tester.view.physicalSize = const Size(360, 640);
+      tester.view.physicalSize = const Size(320, 640);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -290,27 +343,42 @@ void main() {
               theme: buildAccountTheme(controller.selection),
               builder: (context, child) => MediaQuery(
                 data: MediaQuery.of(context)
-                    .copyWith(textScaler: TextScaler.linear(1.4)),
+                    .copyWith(textScaler: TextScaler.linear(2)),
                 child: child!,
               ),
-              home: const Scaffold(body: AccountSettingsButton(initials: 'DM')),
+              home: const Scaffold(body: AccountSettingsButton()),
             ),
           ),
         ),
       );
       await tester.tap(find.byTooltip('Account settings'));
       await tester.pumpAndSettle();
-      for (final preset in ThemePreset.values) {
-        await tester.ensureVisible(
-          find.byKey(ValueKey('theme-preset-${preset.name}')),
-        );
-        await tester.tap(find.byKey(ValueKey('theme-preset-${preset.name}')));
-        await tester.pumpAndSettle();
-        expect(controller.selection.preset, preset);
-        expect(tester.takeException(), isNull);
+      expect(find.text('Change password').hitTestable(), findsOneWidget);
+      await tester.tap(find.text('Appearance'));
+      await tester.pumpAndSettle();
+      final semantics = tester.ensureSemantics();
+      try {
+        for (final preset in ThemePreset.values) {
+          final choice = find.byKey(ValueKey('theme-preset-${preset.name}'));
+          await tester.scrollUntilVisible(choice, 120);
+          await tester.pumpAndSettle();
+          expect(tester.getSize(choice).shortestSide, greaterThanOrEqualTo(48));
+          await tester.tap(choice);
+          await tester.pumpAndSettle();
+          expect(controller.selection.preset, preset);
+          expect(
+            tester
+                .getSemantics(choice)
+                .getSemanticsData()
+                .flagsCollection
+                .isChecked,
+            CheckedState.isTrue,
+          );
+          expect(tester.takeException(), isNull);
+        }
+      } finally {
+        semantics.dispose();
       }
-      await tester.ensureVisible(find.text('Change password'));
-      expect(find.text('Change password'), findsOneWidget);
     },
   );
 }

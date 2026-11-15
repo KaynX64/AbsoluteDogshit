@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_palette.dart';
 import '../theme/account_theme_controller.dart';
 import '../widgets/account_settings_button.dart';
+import '../widgets/sign_out_confirmation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/api_config.dart';
@@ -182,6 +183,47 @@ class _ResponderScreenState extends State<ResponderScreen> {
     }
   }
 
+  bool _signOutInProgress = false;
+
+  Future<void> _handleSignOut() async {
+    if (_signOutInProgress) return;
+    _signOutInProgress = true;
+    try {
+      if (!await confirmSignOut(context) || !mounted) return;
+      await _signOut();
+    } finally {
+      _signOutInProgress = false;
+    }
+  }
+
+  Future<void> _signOut() async {
+    EmergencyAlertService().stopResponderListener();
+    final token = await _storage.read(key: 'jwt_token');
+    if (token != null) {
+      try {
+        // Release this device's FCM token so the signed-out
+        // phone stops receiving SOS pushes.
+        final fcmToken = await EmergencyAlertService().currentFcmToken();
+        await ApiConfig.client.post(
+          Uri.parse('${ApiConfig.baseUrl}/api/auth/logout'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+          body: jsonEncode({'fcm_token': fcmToken}),
+        );
+      } catch (_) {}
+    }
+    if (mounted) AccountThemeScope.of(context).reset();
+    await _storage.deleteAll();
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final rs = Rs.of(context);
@@ -190,7 +232,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
     return Scaffold(
       backgroundColor: AppPalette.of(context).background(0xFFF7F9F6),
       appBar: PreferredSize(
-        preferredSize: Size.fromHeight(rs.h(64).clamp(56.0, 74.0)),
+        preferredSize: Size.fromHeight(rs.h(64).clamp(64.0, 74.0)),
         child: SafeArea(
           child: Padding(
             padding: EdgeInsets.symmetric(
@@ -200,29 +242,29 @@ class _ResponderScreenState extends State<ResponderScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  children: [
-                    ValetudoLogo(size: rs.w(34).clamp(28.0, 42.0)),
-                    SizedBox(width: rs.w(8)),
-                    Text(
-                      'LeoVital',
-                      style: TextStyle(
-                        fontSize: rs.sp(18),
-                        fontWeight: FontWeight.w900,
-                        color: textMain,
-                        letterSpacing: -0.5,
+                Flexible(
+                  child: Row(
+                    children: [
+                      ValetudoLogo(size: rs.w(34).clamp(28.0, 42.0)),
+                      SizedBox(width: rs.w(8)),
+                      Flexible(
+                        child: Text(
+                          'LeoVital',
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: rs.sp(18),
+                            fontWeight: FontWeight.w900,
+                            color: textMain,
+                            letterSpacing: -0.5,
+                          ),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
                 Row(
                   children: [
-                    AccountSettingsButton(
-                      initials: [widget.user['first_name'], widget.user['last_name']]
-                          .whereType<String>()
-                          .where((name) => name.isNotEmpty)
-                          .map((name) => name[0].toUpperCase()).join(),
-                    ),
+                    const AccountSettingsButton(),
                     IconButton(
                       icon: Icon(
                         Icons.refresh,
@@ -237,36 +279,8 @@ class _ResponderScreenState extends State<ResponderScreen> {
                         size: rs.w(20).clamp(18.0, 22.0),
                         color: primaryCrimson,
                       ),
-                      onPressed: () async {
-                        EmergencyAlertService().stopResponderListener();
-                        final token = await _storage.read(key: 'jwt_token');
-                        if (token != null) {
-                          try {
-                            // Release this device's FCM token so the signed-out
-                            // phone stops receiving SOS pushes.
-                            final fcmToken =
-                                await EmergencyAlertService().currentFcmToken();
-                            await ApiConfig.client.post(
-                              Uri.parse('${ApiConfig.baseUrl}/api/auth/logout'),
-                              headers: {
-                                'Content-Type': 'application/json',
-                                'Authorization': 'Bearer $token',
-                              },
-                              body: jsonEncode({'fcm_token': fcmToken}),
-                            );
-                          } catch (_) {}
-                        }
-                        if (context.mounted) AccountThemeScope.of(context).reset();
-                        await _storage.deleteAll();
-                        if (!context.mounted) return;
-                        Navigator.pushAndRemoveUntil(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const LoginScreen(),
-                          ),
-                          (route) => false,
-                        );
-                      },
+                      tooltip: 'Sign out',
+                      onPressed: _handleSignOut,
                     ),
                   ],
                 ),

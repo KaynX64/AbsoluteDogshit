@@ -12,7 +12,9 @@ import '../services/emergency_alert_service.dart';
 import '../theme/account_theme_controller.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({super.key, this.sessionNotice});
+
+  final String? sessionNotice;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -184,6 +186,16 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ],
                   ),
+                  if (widget.sessionNotice case final notice?) ...[
+                    const SizedBox(height: 16),
+                    Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        notice,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ),
+                  ],
                   SizedBox(height: rs.h(32)),
 
                   // ── Headline ─────────────────────────────────────
@@ -277,10 +289,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   SizedBox(height: rs.h(14)),
 
                   // ── Remember me / forgot password ───────────────
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  OverflowBar(
+                    alignment: MainAxisAlignment.spaceBetween,
+                    spacing: 8,
+                    overflowAlignment: OverflowBarAlignment.start,
                     children: [
                       Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           SizedBox(
                             height: rs.h(24),
@@ -296,12 +311,14 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                           SizedBox(width: rs.w(8)),
-                          Text(
-                            'Remember me',
-                            style: TextStyle(
-                              fontSize: rs.sp(13),
-                              color: textSub,
-                              fontWeight: FontWeight.w500,
+                          Flexible(
+                            child: Text(
+                              'Remember me',
+                              style: TextStyle(
+                                fontSize: rs.sp(13),
+                                color: textSub,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
                           ),
                         ],
@@ -360,13 +377,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   // ── Sign in button ──────────────────────────────
                   SizedBox(
                     width: double.infinity,
-                    height: rs.h(52).clamp(46.0, 58.0),
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: primaryGreen,
                         foregroundColor: Colors.white,
                         elevation: 0,
                         shape: const StadiumBorder(),
+                        minimumSize: Size(48, rs.h(52).clamp(48.0, 58.0)),
                       ),
                       onPressed: _isLoading ? null : _handleLogin,
                       child: _isLoading
@@ -381,11 +398,17 @@ class _LoginScreenState extends State<LoginScreen> {
                           : Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Text(
-                                  'Sign in to portal',
-                                  style: TextStyle(
-                                    fontSize: rs.sp(15),
-                                    fontWeight: FontWeight.w700,
+                                Flexible(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 10),
+                                    child: Text(
+                                      'Sign in to portal',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: rs.sp(15),
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
                                   ),
                                 ),
                                 SizedBox(width: rs.w(8)),
@@ -408,12 +431,14 @@ class _LoginScreenState extends State<LoginScreen> {
                           color: textSub,
                         ),
                         SizedBox(width: rs.w(6)),
-                        Text(
-                          'A little care goes a long way.',
-                          style: TextStyle(
-                            fontSize: rs.sp(12),
-                            color: textSub,
-                            fontWeight: FontWeight.w500,
+                        Flexible(
+                          child: Text(
+                            'A little care goes a long way.',
+                            style: TextStyle(
+                              fontSize: rs.sp(12),
+                              color: textSub,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ),
                       ],

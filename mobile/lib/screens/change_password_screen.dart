@@ -1,468 +1,389 @@
-// mobile/lib/screens/change_password_screen.dart
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
-import '../theme/app_palette.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+
 import '../config/api_config.dart';
-import '../utils/responsive.dart';
+import '../services/emergency_alert_service.dart';
+import '../theme/account_theme_controller.dart';
+import 'login_screen.dart';
 
 class ChangePasswordScreen extends StatefulWidget {
-  const ChangePasswordScreen({super.key});
+  const ChangePasswordScreen({super.key, this.client, this.deviceToken});
+
+  final http.Client? client;
+  final Future<String?> Function()? deviceToken;
 
   @override
   State<ChangePasswordScreen> createState() => _ChangePasswordScreenState();
 }
 
 class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
+  static const _storage = FlutterSecureStorage();
+  static const _shortPasswordRule =
+      'Use at least 3 types: uppercase letters, lowercase letters, numbers, or symbols.';
+
   final _formKey = GlobalKey<FormState>();
-  final _storage = const FlutterSecureStorage();
+  final _currentField = GlobalKey<FormFieldState<String>>();
+  final _newField = GlobalKey<FormFieldState<String>>();
+  final _confirmField = GlobalKey<FormFieldState<String>>();
+  final _currentFocus = FocusNode();
+  final _newFocus = FocusNode();
+  final _confirmFocus = FocusNode();
+  final _currentPassword = TextEditingController();
+  final _newPassword = TextEditingController();
+  final _confirmPassword = TextEditingController();
 
-  final _currentPasswordController = TextEditingController();
-  final _newPasswordController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
-
-  bool _obscureAll = true;
-  bool _isSaving = false;
-
-  int _strengthScore = 0;
-  String _strengthLabel = '';
-
-  Color get primaryGreen => AppPalette.of(context).color(0xFF284E3A);
-  Color get textMain => AppPalette.of(context).color(0xFF191C1A);
-  Color get textSub => AppPalette.of(context).color(0xFF5A635B);
-  Color get borderColor => AppPalette.of(context).color(0xFFD6DFD5);
-
-  @override
-  void initState() {
-    super.initState();
-    _newPasswordController.addListener(_evaluateStrength);
-  }
+  bool _submitted = false;
+  bool _saving = false;
+  String? _currentError;
+  String? _newError;
+  String? _message;
+  String? _signInNotice;
 
   @override
   void dispose() {
-    _newPasswordController.removeListener(_evaluateStrength);
-    _currentPasswordController.dispose();
-    _newPasswordController.dispose();
-    _confirmPasswordController.dispose();
+    _currentFocus.dispose();
+    _newFocus.dispose();
+    _confirmFocus.dispose();
+    _currentPassword.dispose();
+    _newPassword.dispose();
+    _confirmPassword.dispose();
     super.dispose();
   }
 
-  void _evaluateStrength() {
-    final pwd = _newPasswordController.text;
-    if (pwd.isEmpty) {
-      setState(() {
-        _strengthScore = 0;
-        _strengthLabel = '';
-      });
-      return;
+  String? _validateNewPassword(String? value) {
+    final password = value ?? '';
+    if (password.isEmpty) return 'Enter your new password.';
+    if (password != password.trim()) {
+      return 'Remove spaces at the beginning or end of your password.';
     }
+    if (password.length < 8) return 'Use at least 8 characters.';
+    if (password.length >= 12) return null;
+    final groups = [
+      RegExp(r'[A-Z]'),
+      RegExp(r'[a-z]'),
+      RegExp(r'[0-9]'),
+      RegExp(r'[^A-Za-z0-9]'),
+    ].where((group) => group.hasMatch(password)).length;
+    return groups < 3 ? _shortPasswordRule : null;
+  }
 
-    final hasMinLength = pwd.length >= 8;
-    final hasUpper = RegExp(r'[A-Z]').hasMatch(pwd);
-    final hasLower = RegExp(r'[a-z]').hasMatch(pwd);
-    final hasDigit = RegExp(r'[0-9]').hasMatch(pwd);
-    final hasSpecial = RegExp(r'[^A-Za-z0-9]').hasMatch(pwd);
-    final variety =
-        [hasUpper, hasLower, hasDigit, hasSpecial].where((v) => v).length;
-
-    int score = 0;
-    if (hasMinLength) score++;
-    if (pwd.length >= 12) score++;
-    if (variety >= 3) score++;
-    if (pwd.length >= 14 && variety == 4) score++;
-
-    if (!hasMinLength || variety < 3) {
-      if (score > 1) score = 1;
-    }
-    score = score.clamp(0, 4);
-
-    const labels = ['Very Weak', 'Weak', 'Medium', 'Strong', 'Very Strong'];
-
-    setState(() {
-      _strengthScore = score;
-      _strengthLabel = labels[score];
+  void _focusField(GlobalKey<FormFieldState<String>> field, FocusNode focus) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final fieldContext = field.currentContext;
+      if (!mounted || fieldContext == null) return;
+      focus.requestFocus();
+      Scrollable.ensureVisible(fieldContext, alignment: 0.15);
     });
   }
 
-  Color _getStrengthColor() {
-    switch (_strengthScore) {
-      case 1:
-        return AppPalette.of(context).color(0xFFDC2626);
-      case 2:
-        return AppPalette.of(context).color(0xFFD97706);
-      case 3:
-        return AppPalette.of(context).color(0xFF2563EB);
-      case 4:
-        return AppPalette.of(context).color(0xFF15803D);
-      default:
-        return AppPalette.of(context).color(0xFF94A396);
-    }
-  }
-
-  Future<void> _updatePassword() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    if (_strengthScore < 2) {
-      _showError(
-        'Password is too weak. It must be at least Medium strength — check the requirements list.',
-      );
+  Future<void> _submit() async {
+    if (_saving || _signInNotice != null) return;
+    setState(() {
+      _submitted = true;
+      _message = null;
+    });
+    if (!_formKey.currentState!.validate()) {
+      for (final (field, focus) in [
+        (_currentField, _currentFocus),
+        (_newField, _newFocus),
+        (_confirmField, _confirmFocus),
+      ]) {
+        if (field.currentState!.hasError) {
+          _focusField(field, focus);
+          break;
+        }
+      }
       return;
     }
 
-    setState(() => _isSaving = true);
-    final token = await _storage.read(key: 'jwt_token');
-
+    FocusScope.of(context).unfocus();
+    final currentPassword = _currentPassword.text.trim();
+    final newPassword = _newPassword.text;
+    setState(() => _saving = true);
     try {
-      final res = await http.put(
-        Uri.parse('${ApiConfig.baseUrl}/api/auth/change-password'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({
-          'currentPassword': _currentPasswordController.text.trim(),
-          'newPassword': _newPasswordController.text.trim(),
-        }),
-      );
-
-      final data = jsonDecode(res.body);
-
-      if (res.statusCode == 200) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Password updated successfully!'),
-            backgroundColor: primaryGreen,
-          ),
+      final token = await _storage.read(key: 'jwt_token');
+      if (!mounted) return;
+      if (token == null || token.isEmpty) {
+        await _returnToSignIn(
+          'Your session ended. Sign in to change your password.',
         );
-        Navigator.pop(context);
-      } else {
-        final detailed =
-            (data['issues'] is List && (data['issues'] as List).isNotEmpty)
-                ? (data['issues'] as List).join(' ')
-                : data['error'] ?? 'Failed to update password.';
-        _showError(detailed);
+        return;
       }
-    } catch (e) {
-      _showError('Network error: $e');
+
+      String? deviceToken;
+      try {
+        deviceToken =
+            await (widget.deviceToken ??
+                    EmergencyAlertService().currentFcmToken)()
+                .timeout(const Duration(seconds: 2));
+      } catch (_) {
+        // Push registration may be unavailable on this device.
+      }
+      if (!mounted) return;
+      final response = await (widget.client ?? ApiConfig.client)
+          .put(
+            Uri.parse('${ApiConfig.baseUrl}/api/auth/change-password'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode({
+              'currentPassword': currentPassword,
+              'newPassword': newPassword,
+              if (deviceToken != null && deviceToken.isNotEmpty)
+                'fcm_token': deviceToken,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (!mounted) return;
+      switch (response.statusCode) {
+        case 200:
+          TextInput.finishAutofillContext();
+          await _returnToSignIn(
+            'Password changed. Sign in with your new password.',
+          );
+        case 401 || 403:
+          await _returnToSignIn(
+            'Your session ended. Sign in to change your password.',
+          );
+        case 400:
+          _showValidationError(response.body);
+        case 409:
+          setState(
+            () => _message = 'Your account changed elsewhere. Check your current password and try again.',
+          );
+        case 429:
+          setState(
+            () => _message = 'Too many attempts. Wait a moment and try again.',
+          );
+        default:
+          _showUnconfirmed();
+      }
+    } catch (_) {
+      if (mounted) _showUnconfirmed();
     } finally {
-      if (mounted) setState(() => _isSaving = false);
+      if (mounted) setState(() => _saving = false);
     }
   }
 
-  void _showError(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
-      ),
-    );
+  void _showValidationError(String body) {
+    final data = jsonDecode(body);
+    if (data is! Map<String, dynamic>) {
+      _showUnconfirmed();
+      return;
+    }
+    final error = data['error'];
+    if (error == 'Incorrect current password.') {
+      setState(() => _currentError = 'Current password is incorrect.');
+      _focusField(_currentField, _currentFocus);
+    } else if (data['code'] == 'WEAK_PASSWORD' ||
+        error == 'New password must be different from your current password.') {
+      final issues = data['issues'];
+      final feedback = issues is List
+          ? issues.whereType<String>().join(' ')
+          : '';
+      setState(() {
+        _newError = feedback.isNotEmpty
+            ? feedback
+            : data['code'] == 'WEAK_PASSWORD'
+            ? 'Choose a password that meets the requirements.'
+            : 'Choose a password different from your current password.';
+      });
+      _focusField(_newField, _newFocus);
+    } else {
+      setState(
+        () => _message =
+            'Could not update your password. Check your entries and try again.',
+      );
+    }
   }
 
-  InputDecoration _pillInputDecoration(Rs rs, String hint) {
-    final radius = BorderRadius.circular(rs.r(22));
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: TextStyle(color: AppPalette.of(context).color(0xFF94A396), fontSize: rs.sp(13)),
-      filled: true,
-      fillColor: AppPalette.of(context).surface,
-      contentPadding: EdgeInsets.symmetric(
-        horizontal: rs.w(20),
-        vertical: rs.h(16),
-      ),
-      border: OutlineInputBorder(
-        borderRadius: radius,
-        borderSide: BorderSide(color: borderColor),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: radius,
-        borderSide: BorderSide(color: borderColor),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: radius,
-        borderSide: BorderSide(color: primaryGreen, width: 1.5),
-      ),
-    );
+  void _showUnconfirmed() {
+    setState(() {
+      _message =
+          'We couldn’t confirm the change. If your current password no '
+          'longer works, try signing in with the new one.';
+    });
+  }
+
+  Future<void> _returnToSignIn(String notice) async {
+    setState(() {
+      _signInNotice = notice;
+      _message = null;
+      _saving = true;
+    });
+    _currentPassword.clear();
+    _newPassword.clear();
+    _confirmPassword.clear();
+    final themes = AccountThemeScope.of(context);
+    final alerts = EmergencyAlertService();
+    if (alerts.isResponderActive) alerts.stopResponderListener();
+    themes.reset();
+
+    try {
+      await _storage.delete(key: 'jwt_token');
+      await _storage.delete(key: 'user_data');
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute<void>(
+          builder: (_) => LoginScreen(sessionNotice: notice),
+        ),
+        (route) => false,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _message = 'Could not clear this device’s session. Retry to continue to sign-in.';
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final rs = Rs.of(context);
-    final maxContentWidth = rs.isTablet ? 560.0 : double.infinity;
-
-    return Scaffold(
-      backgroundColor: AppPalette.of(context).background(0xFFF7F9F6),
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back_rounded, color: textMain),
-          onPressed: () => Navigator.pop(context),
+    final scheme = Theme.of(context).colorScheme;
+    final notice = _signInNotice;
+    final message = _message;
+    final actionLabel = switch ((notice != null, _saving)) {
+      (true, true) => 'Signing out…',
+      (true, false) => 'Retry sign-in',
+      (false, true) => 'Updating password…',
+      (false, false) => 'Update password',
+    };
+    return PopScope(
+      canPop: !_saving && notice == null,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Change password'),
+          toolbarHeight: MediaQuery.textScalerOf(context)
+              .scale(kToolbarHeight)
+              .clamp(kToolbarHeight, 112.0),
+          automaticallyImplyLeading: !_saving && notice == null,
         ),
-        title: Text(
-          'Back to my profile',
-          style: TextStyle(
-            fontSize: rs.sp(14),
-            color: textMain,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        titleSpacing: -6,
-      ),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: maxContentWidth),
-            child: Form(
-              key: _formKey,
-              child: ListView(
-                padding: EdgeInsets.symmetric(
-                  horizontal: rs.w(24),
-                  vertical: rs.h(12),
-                ),
-                children: [
-                  Text(
-                    'A LITTLE EXTRA PEACE OF MIND',
-                    style: TextStyle(
-                      fontSize: rs.sp(10.5),
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.8,
-                      color: textSub,
-                    ),
-                  ),
-                  SizedBox(height: rs.h(6)),
-                  Text(
-                    'Keep your account safe.',
-                    style: TextStyle(
-                      fontSize: rs.sp(30),
-                      fontWeight: FontWeight.w800,
-                      color: textMain,
-                      letterSpacing: -0.5,
-                    ),
-                  ),
-                  SizedBox(height: rs.h(4)),
-                  Text(
-                    'A strong password protects your health records.',
-                    style: TextStyle(fontSize: rs.sp(14), color: textSub),
-                  ),
-                  SizedBox(height: rs.h(32)),
-
-                  // Current Password
-                  Text(
-                    'Current password',
-                    style: TextStyle(
-                      fontSize: rs.sp(13),
-                      fontWeight: FontWeight.w700,
-                      color: textMain,
-                    ),
-                  ),
-                  SizedBox(height: rs.h(8)),
-                  TextFormField(
-                    controller: _currentPasswordController,
-                    obscureText: _obscureAll,
-                    style: TextStyle(fontSize: rs.sp(14)),
-                    decoration: _pillInputDecoration(
-                      rs,
-                      'Enter your current password',
-                    ),
-                    validator: (val) => (val == null || val.isEmpty)
-                        ? 'Please enter current password'
-                        : null,
-                  ),
-                  SizedBox(height: rs.h(20)),
-
-                  // New Password
-                  Text(
-                    'New password',
-                    style: TextStyle(
-                      fontSize: rs.sp(13),
-                      fontWeight: FontWeight.w700,
-                      color: textMain,
-                    ),
-                  ),
-                  SizedBox(height: rs.h(8)),
-                  TextFormField(
-                    controller: _newPasswordController,
-                    obscureText: _obscureAll,
-                    style: TextStyle(fontSize: rs.sp(14)),
-                    decoration: _pillInputDecoration(
-                      rs,
-                      'At least 8 characters (letters, numbers, symbols)',
-                    ),
-                    validator: (val) {
-                      if (val == null || val.isEmpty) {
-                        return 'Please enter new password';
-                      }
-                      if (val.length < 8) {
-                        return 'Password must be at least 8 characters';
-                      }
-                      return null;
-                    },
-                  ),
-
-                  // Strength meter
-                  if (_newPasswordController.text.isNotEmpty) ...[
-                    SizedBox(height: rs.h(10)),
-
-                    Row(
-                      children: List.generate(4, (index) {
-                        final segmentActive = index < _strengthScore;
-                        return Expanded(
-                          child: Container(
-                            height: 4,
-                            margin: EdgeInsets.only(
-                              right: index < 3 ? rs.w(6) : 0,
-                            ),
-                            decoration: BoxDecoration(
-                              color: segmentActive
-                                  ? _getStrengthColor()
-                                  : AppPalette.of(context).color(0xFFE2EBE1),
-                              borderRadius: BorderRadius.circular(2),
-                            ),
-                          ),
-                        );
-                      }),
-                    ),
-                    SizedBox(height: rs.h(6)),
-
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        body: SafeArea(
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 560),
+              child: AutofillGroup(
+                onDisposeAction: AutofillContextAction.cancel,
+                child: Form(
+                  key: _formKey,
+                  autovalidateMode: _submitted
+                      ? AutovalidateMode.onUserInteraction
+                      : AutovalidateMode.disabled,
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Flexible(
-                          child: Text(
-                            'Strength: $_strengthLabel',
-                            style: TextStyle(
-                              fontSize: rs.sp(12),
-                              fontWeight: FontWeight.w700,
-                              color: _getStrengthColor(),
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                        if (notice == null) ...[
+                          const Text(
+                            'You’ll sign in again after changing your password.',
                           ),
-                        ),
-                        SizedBox(width: rs.w(6)),
-                        Flexible(
-                          child: Text(
-                            _strengthScore >= 2
-                                ? '✓ Meets requirements'
-                                : '✕ Must be Medium or better',
-                            style: TextStyle(
-                              fontSize: rs.sp(11),
-                              fontWeight: FontWeight.w700,
-                              color: _strengthScore >= 2
-                                  ? AppPalette.of(context).color(0xFF15803D)
-                                  : AppPalette.of(context).color(0xFFDC2626),
+                          const SizedBox(height: 20),
+                          _PasswordInput(
+                            fieldKey: _currentField,
+                            controller: _currentPassword,
+                            focus: _currentFocus,
+                            nextFocus: _newFocus,
+                            label: 'Current password',
+                            autofillHint: AutofillHints.password,
+                            readOnly: _saving,
+                            error: _currentError,
+                            validator: (value) =>
+                                value == null || value.trim().isEmpty
+                                ? 'Enter your current password.'
+                                : null,
+                            onChanged: (_) {
+                              if (_currentError != null) {
+                                setState(() => _currentError = null);
+                              }
+                            },
+                          ),
+                          const SizedBox(height: 20),
+                          _PasswordInput(
+                            fieldKey: _newField,
+                            controller: _newPassword,
+                            focus: _newFocus,
+                            nextFocus: _confirmFocus,
+                            label: 'New password',
+                            autofillHint: AutofillHints.newPassword,
+                            readOnly: _saving,
+                            error: _newError,
+                            validator: _validateNewPassword,
+                            onChanged: (_) {
+                              if (_newError != null) {
+                                setState(() => _newError = null);
+                              }
+                            },
+                          ),
+                          const Padding(
+                            padding: EdgeInsets.fromLTRB(4, 8, 4, 20),
+                            child: Text(
+                              'Use at least 8 characters. For 8–11 characters, mix at '
+                              'least 3 types: uppercase letters, lowercase letters, '
+                              'numbers, or symbols.',
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.end,
+                          ),
+                          _PasswordInput(
+                            fieldKey: _confirmField,
+                            controller: _confirmPassword,
+                            focus: _confirmFocus,
+                            label: 'Confirm new password',
+                            autofillHint: AutofillHints.newPassword,
+                            readOnly: _saving,
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Confirm your new password.';
+                              }
+                              return value == _newPassword.text
+                                  ? null
+                                  : 'The new passwords do not match.';
+                            },
+                            onSubmitted: _submit,
+                          ),
+                        ] else
+                          Semantics(liveRegion: true, child: Text(notice)),
+                        const SizedBox(height: 16),
+                        if (message != null) ...[
+                          Semantics(
+                            liveRegion: true,
+                            child: Text(
+                              message,
+                              style: TextStyle(color: scheme.error),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+                        FilledButton(
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(48, 48),
+                          ),
+                          onPressed: _saving
+                              ? null
+                              : notice == null
+                              ? _submit
+                              : () => _returnToSignIn(notice),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            child: Semantics(
+                              liveRegion: true,
+                              child: Text(
+                                actionLabel,
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
                           ),
                         ),
                       ],
                     ),
-
-                    _PasswordRequirementsPanel(
-                      rs: rs,
-                      password: _newPasswordController.text,
-                    ),
-                  ],
-                  SizedBox(height: rs.h(20)),
-
-                  // Confirm New Password
-                  Text(
-                    'Confirm new password',
-                    style: TextStyle(
-                      fontSize: rs.sp(13),
-                      fontWeight: FontWeight.w700,
-                      color: textMain,
-                    ),
                   ),
-                  SizedBox(height: rs.h(8)),
-                  TextFormField(
-                    controller: _confirmPasswordController,
-                    obscureText: _obscureAll,
-                    style: TextStyle(fontSize: rs.sp(14)),
-                    decoration: _pillInputDecoration(
-                      rs,
-                      'Re-enter new password',
-                    ),
-                    validator: (val) {
-                      if (val != _newPasswordController.text) {
-                        return 'Passwords do not match';
-                      }
-                      return null;
-                    },
-                  ),
-                  SizedBox(height: rs.h(14)),
-
-                  // Toggle visibility
-                  Row(
-                    children: [
-                      IconButton(
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        icon: Icon(
-                          _obscureAll
-                              ? Icons.visibility_outlined
-                              : Icons.visibility_off_outlined,
-                          size: rs.w(20),
-                          color: textSub,
-                        ),
-                        onPressed: () =>
-                            setState(() => _obscureAll = !_obscureAll),
-                      ),
-                      SizedBox(width: rs.w(8)),
-                      Flexible(
-                        child: Text(
-                          _obscureAll ? 'Show passwords' : 'Hide passwords',
-                          style: TextStyle(
-                            fontSize: rs.sp(13),
-                            color: textSub,
-                            fontWeight: FontWeight.w500,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: rs.h(28)),
-
-                  // Update button
-                  SizedBox(
-                    width: double.infinity,
-                    height: rs.h(52).clamp(46.0, 58.0),
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: primaryGreen,
-                        foregroundColor: AppPalette.of(context).onPrimary,
-                        elevation: 0,
-                        shape: const StadiumBorder(),
-                      ),
-                      onPressed:
-                          (_isSaving || _strengthScore < 2) ? null : _updatePassword,
-                      icon: _isSaving
-                          ? SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                color: AppPalette.of(context).onPrimary,
-                                strokeWidth: 2,
-                              ),
-                            )
-                          : const Icon(Icons.lock_outline, size: 18),
-                      label: Text(
-                        'Update password',
-                        style: TextStyle(
-                          fontSize: rs.sp(15),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
           ),
@@ -472,136 +393,88 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────
-// PASSWORD STRENGTH UI HELPERS
-// ─────────────────────────────────────────────────────────────────
-
-class _PasswordRequirement extends StatelessWidget {
-  final Rs rs;
-  final bool met;
-  final String label;
-
-  const _PasswordRequirement({
-    required this.rs,
-    required this.met,
+class _PasswordInput extends StatefulWidget {
+  const _PasswordInput({
+    required this.fieldKey,
+    required this.controller,
+    required this.focus,
     required this.label,
+    required this.autofillHint,
+    required this.readOnly,
+    required this.validator,
+    this.nextFocus,
+    this.error,
+    this.onChanged,
+    this.onSubmitted,
   });
 
+  final GlobalKey<FormFieldState<String>> fieldKey;
+  final TextEditingController controller;
+  final FocusNode focus;
+  final FocusNode? nextFocus;
+  final String label;
+  final String autofillHint;
+  final bool readOnly;
+  final FormFieldValidator<String> validator;
+  final String? error;
+  final ValueChanged<String>? onChanged;
+  final VoidCallback? onSubmitted;
+
   @override
-  Widget build(BuildContext context) {
-    final okGreen = AppPalette.of(context).color(0xFF15803D);
-    final okBg = AppPalette.of(context).color(0xFFDCFCE7);
-    final okBorder = AppPalette.of(context).color(0xFFBBF7D0);
-    final pendingGrey = AppPalette.of(context).color(0xFF94A396);
-    final pendingBg = AppPalette.of(context).color(0xFFEEF3EC);
-    final pendingBorder = AppPalette.of(context).color(0xFFDCE4DA);
-
-    final checkSize = rs.w(14).clamp(12.0, 16.0);
-
-    return Padding(
-      padding: EdgeInsets.symmetric(vertical: rs.h(3)),
-      child: Row(
-        children: [
-          Container(
-            width: checkSize,
-            height: checkSize,
-            decoration: BoxDecoration(
-              color: met ? okBg : pendingBg,
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: met ? okBorder : pendingBorder,
-                width: 1,
-              ),
-            ),
-            alignment: Alignment.center,
-            child: met
-                ? Icon(Icons.check, size: checkSize * 0.65, color: okGreen)
-                : null,
-          ),
-          SizedBox(width: rs.w(8)),
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: rs.sp(11.5),
-                fontWeight: FontWeight.w600,
-                color: met ? okGreen : pendingGrey,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  State<_PasswordInput> createState() => _PasswordInputState();
 }
 
-class _PasswordRequirementsPanel extends StatelessWidget {
-  final Rs rs;
-  final String password;
-
-  const _PasswordRequirementsPanel({
-    required this.rs,
-    required this.password,
-  });
+class _PasswordInputState extends State<_PasswordInput> {
+  bool _obscured = true;
 
   @override
   Widget build(BuildContext context) {
-    final hasMinLength = password.length >= 8;
-    final hasUpper = RegExp(r'[A-Z]').hasMatch(password);
-    final hasLower = RegExp(r'[a-z]').hasMatch(password);
-    final hasDigit = RegExp(r'[0-9]').hasMatch(password);
-    final hasSpecial = RegExp(r'[^A-Za-z0-9]').hasMatch(password);
-
-    return Container(
-      margin: EdgeInsets.only(top: rs.h(10)),
-      padding: EdgeInsets.symmetric(
-        horizontal: rs.w(14),
-        vertical: rs.h(12),
+    final label = widget.label.toLowerCase();
+    return TextFormField(
+      key: widget.fieldKey,
+      controller: widget.controller,
+      focusNode: widget.focus,
+      obscureText: _obscured,
+      readOnly: widget.readOnly,
+      autocorrect: false,
+      enableSuggestions: false,
+      autofillHints: [widget.autofillHint],
+      textInputAction: widget.nextFocus != null
+          ? TextInputAction.next
+          : TextInputAction.done,
+      onEditingComplete: widget.nextFocus?.requestFocus,
+      validator: widget.validator,
+      forceErrorText: widget.error,
+      errorBuilder: (context, error) => Semantics(
+        liveRegion: true,
+        child: Text(
+          error,
+          style: Theme.of(context).textTheme.bodySmall
+              ?.copyWith(color: Theme.of(context).colorScheme.error),
+        ),
       ),
-      decoration: BoxDecoration(
-        color: AppPalette.of(context).color(0xFFF7F9F6),
-        borderRadius: BorderRadius.circular(rs.r(14)),
-        border: Border.all(color: AppPalette.of(context).color(0xFFE8EDE6)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Password requirements',
-            style: TextStyle(
-              fontSize: rs.sp(10.5),
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.2,
-              color: AppPalette.of(context).color(0xFF94A396),
-            ),
+      onChanged: widget.onChanged,
+      onFieldSubmitted: widget.onSubmitted == null
+          ? null
+          : (_) => widget.onSubmitted!(),
+      decoration: InputDecoration(
+        labelText: widget.label,
+        floatingLabelBehavior: FloatingLabelBehavior.always,
+        suffixIconConstraints: const BoxConstraints(
+          minHeight: 48,
+          minWidth: 48,
+        ),
+        suffixIcon: IconButton(
+          tooltip: '${_obscured ? 'Show' : 'Hide'} $label',
+          icon: Icon(
+            _obscured
+                ? Icons.visibility_outlined
+                : Icons.visibility_off_outlined,
           ),
-          SizedBox(height: rs.h(6)),
-          _PasswordRequirement(
-            rs: rs,
-            met: hasMinLength,
-            label: 'At least 8 characters',
-          ),
-          _PasswordRequirement(
-            rs: rs,
-            met: hasUpper,
-            label: 'One uppercase letter (A–Z)',
-          ),
-          _PasswordRequirement(
-            rs: rs,
-            met: hasLower,
-            label: 'One lowercase letter (a–z)',
-          ),
-          _PasswordRequirement(
-            rs: rs,
-            met: hasDigit,
-            label: 'One number (0–9)',
-          ),
-          _PasswordRequirement(
-            rs: rs,
-            met: hasSpecial,
-            label: 'One symbol (!@#\$%^&*…)',
-          ),
-        ],
+          onPressed: widget.readOnly
+              ? null
+              : () => setState(() => _obscured = !_obscured),
+        ),
       ),
     );
   }

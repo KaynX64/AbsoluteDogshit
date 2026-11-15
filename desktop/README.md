@@ -37,6 +37,8 @@ The packaged smoke test launches the unpacked app with a temporary profile, uses
 
 ## Desktop interaction
 
+Choose **Sign out** in the sidebar and confirm to end your session.
+
 Super Admins can grant **Use server Terminal** when creating or editing a Limited Admin. The grant enables server events and built-in diagnostics. Restart Server is available to Super Admins.
 
 Student, Faculty and Non-Teaching account creation includes optional sex, date of birth and emergency contact details.

@@ -1,6 +1,6 @@
 # CODESLICE.md — mobile screens slice map (index)
 
-Sibling of this directory's `AGENTS.md`. Each mobile monolith has its own slice map in `codeslice/` — this index only routes you there. Base commit `93b4172` (2026-11-07, `Stage1`); 7 maps / 205 slices (6 screens + the SOS service the screens share). The desktop half lives at `desktop/docs/CODESLICE.md`.
+Sibling of this directory's `AGENTS.md`. Each mobile monolith has its own slice map in `codeslice/` — this index only routes you there. Base commit `93b4172` (2026-11-07, `Stage1`); 7 maps / 192 slices (6 screens + the SOS service the screens share). The desktop half lives at `desktop/docs/CODESLICE.md`.
 
 **Use.** Find the file below → open its Map → read the header block (**Mounted by / API surface / Socket events / State** — often enough by itself) → `sed -n 'A,Bp' <file>` only the slice you need. **Anchors beat line numbers**: after edits re-locate with `rg -n '<anchor>' <file>`; each map records the commit it was last in sync with. Server endpoints → `server/AGENTS.md`.
 
@@ -12,12 +12,12 @@ Sibling of this directory's `AGENTS.md`. Each mobile monolith has its own slice 
 
 | ID | File | LOC | Commit | Map | Role |
 |---|------|-----|--------|-----|------|
-| MB-01 | `mobile/lib/screens/patient_portal_screen.dart` | 3103 | 4a14140 | `codeslice/MB-01-PatientPortalScreen-parts/` | Patient 5-tab shell: overview/QR pass, appointments, SOS, documents, profile; queue socket, offline SOS |
+| MB-01 | `mobile/lib/screens/patient_portal_screen.dart` | 3186 | 4a14140 | `codeslice/MB-01-PatientPortalScreen-parts/` | Patient 5-tab shell: overview/QR pass, appointments, SOS, documents, profile; queue socket, offline SOS |
 | MB-02 | `mobile/lib/screens/consultation_scheduler_screen.dart` | 1695 | 7cf9f16 | `codeslice/MB-02-ConsultationSchedulerScreen.md` | Appointment booking and cancellation screen (Book a consultation + My appointments tabs) with live slot sync. |
 | MB-03 | `mobile/lib/screens/documents_viewer_screen.dart` | 1576 | 7cf9f16 | `codeslice/MB-03-DocumentsViewerScreen.md` | Documents viewer: prescriptions, medical clearances, lab/imaging attachments with QR seals and PDF download. |
-| MB-04 | `mobile/lib/screens/responder_screen.dart` | 795 | fb9688d | `codeslice/MB-04-ResponderScreen.md` | SOS responder dispatch console: active-emergency roster polled every 15s, acknowledge/dispatch/resolve/false-alarm, maps handoff |
-| MB-05 | `mobile/lib/screens/change_password_screen.dart` | 607 | 8fcbdc7 | `codeslice/MB-05-ChangePasswordScreen.md` | Change-password form: client strength meter (0-4) + live policy checklist gating PUT /api/auth/change-password |
-| MB-06 | `mobile/lib/screens/login_screen.dart` | 426 | 8fcbdc7 | `codeslice/MB-06-LoginScreen.md` | Login form: POST /api/auth/login, persists jwt_token + user_data, routes EMERGENCY_RESPONDER to ResponderScreen else PatientPortalScreen |
+| MB-04 | `mobile/lib/screens/responder_screen.dart` | 805 | fb9688d | `codeslice/MB-04-ResponderScreen.md` | SOS responder dispatch console: active-emergency roster polled every 15s, acknowledge/dispatch/resolve/false-alarm, maps handoff |
+| MB-05 | `mobile/lib/screens/change_password_screen.dart` | 481 | 8fcbdc7 | `codeslice/MB-05-ChangePasswordScreen.md` | Change-password form with accessible field errors and a return to sign-in after success |
+| MB-06 | `mobile/lib/screens/login_screen.dart` | 456 | 8fcbdc7 | `codeslice/MB-06-LoginScreen.md` | Login form: POST /api/auth/login, persists jwt_token + user_data, routes EMERGENCY_RESPONDER to ResponderScreen else PatientPortalScreen |
 | MB-07 | `mobile/lib/services/emergency_alert_service.dart` | 901 | fb9688d | `codeslice/MB-07-EmergencyAlertService.md` | SERVICE (not a screen): singleton SOS backbone — emergency socket wiring, FCM push, alarm audio/vibration, SOS dialog, QR-flag audience |
 
 ---

@@ -2,6 +2,8 @@
 
 import bcrypt from 'bcryptjs';
 import { pool } from '../db/pool.js';
+import { inTransaction } from '../db/transaction.js';
+import { disconnectSessionSockets } from '../realtime/presence.js';
 import { logAudit } from '../utils/auditLogger.js';
 import { redis, isRedisActive } from '../utils/redisClient.js';
 import { evaluatePasswordStrength } from '../utils/passwordPolicy.js';
@@ -10,9 +12,9 @@ import { sessionBlocklistKey } from './session.js';
 // ─────────────────────────────────────────────────────────────────────────
 // CHANGE PASSWORD
 // ─────────────────────────────────────────────────────────────────────────
-export async function changePassword(req, res) {
+export async function changePassword(req, res, io) {
   const userId = req.user.user_id;
-  const { currentPassword, newPassword } = req.body;
+  const { currentPassword, newPassword, fcm_token: deviceToken } = req.body;
 
   if (!currentPassword || !newPassword) {
     return res.status(400).json({ error: 'Current password and new password are required.' });
@@ -76,20 +78,22 @@ export async function changePassword(req, res) {
     }
 
     const newHash = await bcrypt.hash(newPassword, 10);
-    await pool.query('UPDATE USERS SET password_hash = ? WHERE user_id = ?', [newHash, userId]);
+    const changed = await inTransaction(async connection => {
+      const [update] = await connection.query(
+        `UPDATE USERS SET password_hash = ?
+         WHERE user_id = ? AND is_active = 1 AND deleted_at IS NULL
+           AND CAST(password_hash AS BINARY) = ?`,
+        [newHash, userId, user.password_hash],
+      );
+      if (update.affectedRows === 0) return false;
 
-    // Invalidate current JWT in Redis so caller is forced to re-authenticate with new credentials
-    if (req.user && isRedisActive()) {
-      const now = Math.floor(Date.now() / 1000);
-      const remainingSeconds = req.user.exp ? Math.max(req.user.exp - now, 60) : 86400;
-      const blacklistKey = sessionBlocklistKey(req.user, req.token);
-      await redis
-        .set(blacklistKey, 'revoked_password_change', 'EX', remainingSeconds)
-        .catch(() => {});
-    }
+      if (typeof deviceToken === 'string' && deviceToken.trim()) {
+        await connection.query(
+          'DELETE FROM DEVICE_TOKENS WHERE user_id = ? AND fcm_token = CAST(? AS BINARY)',
+          [userId, deviceToken.trim()],
+        );
+      }
 
-    const connection = await pool.getConnection();
-    try {
       await logAudit(connection, {
         userId,
         action: 'UPDATE',
@@ -103,13 +107,26 @@ export async function changePassword(req, res) {
         },
         ipAddress: req.ip,
       });
-    } finally {
-      connection.release();
+      return true;
+    });
+    if (!changed) {
+      return res.status(409).json({ error: 'The account changed. Check your current password and try again.' });
     }
+
+    // Invalidate current JWT in Redis so caller is forced to re-authenticate with new credentials
+    if (req.user && isRedisActive()) {
+      const now = Math.floor(Date.now() / 1000);
+      const remainingSeconds = req.user.exp ? Math.max(req.user.exp - now, 60) : 86400;
+      const blacklistKey = sessionBlocklistKey(req.user, req.token);
+      await redis
+        .set(blacklistKey, 'revoked_password_change', 'EX', remainingSeconds)
+        .catch(() => {});
+    }
+    disconnectSessionSockets(io, req.user);
 
     res.json({ message: 'Password updated successfully.' });
   } catch (error) {
-    console.error('[Change Password Error]:', error);
+    console.error('[Change Password Error]:', error?.code || error?.name);
     res.status(500).json({ error: 'Failed to update password.' });
   }
 }

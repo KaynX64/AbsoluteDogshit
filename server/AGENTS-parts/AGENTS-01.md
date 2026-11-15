@@ -29,6 +29,8 @@
 
 Not in `routes/`: auth endpoints are wired directly in `app.js` — `POST /api/auth/login` (rate-limited), `POST /api/auth/logout`, `PUT /api/auth/change-password`; plus `GET /api/ping` (unauthenticated, DB-free liveness probe used by the desktop ping monitor). `public/verify.html` is the QR-landing page (same-origin fetch, needs no CORS entry).
 
+`PUT /api/auth/change-password` accepts optional `fcm_token`. The password update, removal of that account's matching device registration, and audit entry commit together. On success the server disconnects the calling session's sockets.
+
 Routers that emit realtime events receive `io` as a factory argument: `appointmentRoutes(io)` pattern — keep it.
 
 The [feature route map](../src/routes/AGENTS.md) lists the feature modules and their entry points.

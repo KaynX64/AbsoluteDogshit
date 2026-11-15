@@ -22,10 +22,12 @@ Do not commit Firebase service-account or `google-services.json` credentials. Pl
 
 ## Account settings
 
-Tap the initials at the top right of the patient portal or responder screen to choose **Light** or **Dark** appearance and a **LeoVital**, **Blossom**, or **Sunrise** palette. The same menu opens **Change password**.
+Tap the **Account settings** gear in the patient portal or responder header. Choose **Appearance** or **Change password**. The patient Profile tab also has a direct password shortcut.
 
-The settings sheet previews each mode and palette before selection, shows account-save status, and groups password changes under Security. Booking cards, dates, available/unavailable time slots and the calendar picker follow the selected appearance.
+To end your session, choose **Sign out of portal** in the patient Profile tab or **Sign out** in the responder header, then confirm.
 
-The open settings sheet updates its background, text and controls together when switching modes or palettes; it does not need to be closed and reopened.
+In **Appearance**, choose **Light** or **Dark** and a **LeoVital**, **Blossom**, or **Sunrise** palette. The preview and the app update immediately. The page shows account-save status and offers **Retry saving** when needed.
 
-Appearance applies immediately and saves to the signed-in account using the same preferences as desktop. Pending saves remain cached for that account and retry when connectivity returns or the app resumes. The menu displays save status and a retry action. Saved selections survive app restarts; signing out resets the sign-in screen's appearance. Mobile checks for changes made on desktop when it resumes or reconnects.
+**Change password** uses your current password and confirmation of the new one. After a successful change, sign in again with the new password.
+
+Appearance saves to the signed-in account using the same preferences as desktop. Pending saves remain cached for that account and retry when connectivity returns or the app resumes. Saved selections survive restarts. Sign-in uses the default appearance, and the app checks for desktop changes on resume or reconnect.

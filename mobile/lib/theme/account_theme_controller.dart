@@ -149,7 +149,18 @@ class AccountThemeController extends ChangeNotifier {
   Future<void> retry() {
     final session = _session;
     _requests = _requests.catchError((Object _) {}).then((_) async {
-      if (session != _session || !isBound || !_pending) return;
+      if (session != _session || !isBound) return;
+      if (!_pending) {
+        if (!_storageFailed) return;
+        final revision = _revision;
+        _state = ThemeSaveState.saving;
+        notifyListeners();
+        await _persist(session);
+        if (session != _session || revision != _revision || _storageFailed) return;
+        _state = ThemeSaveState.saved;
+        notifyListeners();
+        return;
+      }
       final token = _token;
       final revision = _revision;
       final target = _selection;
