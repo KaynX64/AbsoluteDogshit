@@ -1,38 +1,38 @@
 <!-- split from mobile/lib/screens/codeslice/MB-01-PatientPortalScreen.md — part 02 of 02 -->
-| 24 | 702-742 | _showEmergencyConfirmationDialog | SOS Alert Active confirmation dialog after successful dispatch |
-| 25 | 743-772 | _handleSignOut | POST /api/auth/logout with fcm_token; clears jwt/user_data, back to LoginScreen |
-| 26 | 773-794 | _formatRelativeDate | helpers: _getInitials for avatars; _formatRelativeDate (Today, 3d ago, 2mo ago) |
-| 27 | 795-815 | ConsultationSchedulerScreen | build() head; tab list: overview, scheduler, SOS, DocumentsViewer, profile |
-| 28 | 816-885 | SessionTimeoutListener | SessionTimeoutListener + Scaffold + AppBar: LeoVital brand and initials avatar |
-| 29 | 886-895 | bottomNavigationBar | body Column: offline banner + active tab; bottomNavigationBar mounts custom nav |
-| 30 | 896-924 | _buildOfflineBanner | red offline banner: last-synced notice, SOS still works via call |
-| 31 | 925-999 | _buildCustomBottomNav | custom bottom nav row: Overview, Appointments, SOS, Documents, Profile slots |
-| 32 | 1000-1056 | _buildNavItem | reusable nav item: sage pill when selected, icon + label |
-| 33 | 1057-1108 | _buildSosNavItem | center SOS nav pill: crimson active state, siren icon |
-| 34 | 1109-1171 | _buildOverviewTab | overview tab head: greeting, RefreshIndicator refetch, active queue card slot |
-| 35 | 1172-1323 | QrImageView | campus health pass card: dynamic QR, name, role-aware identity lines, optional Qualified Responder badge |
-| 36 | 1324-1440 | Book consultation | pass actions: Refresh pass (_fetchQRPass), Book consultation to tab 1; compact/wide |
-| 37 | 1441-1555 | Prescriptions | shortcut cards: Prescriptions and Medical clearances, both jump to documents tab |
-| 38 | 1556-1641 | YOUR HEALTH AT A GLANCE | dark at-a-glance card head: initials avatar, name, role line, link to profile |
-| 39 | 1642-1732 | Blood type | at-a-glance stats: blood type and known allergy; View full profile to tab 4 |
-| 40 | 1733-1791 | Your campus infirmary | campus infirmary card: PSU Lingayen address, Mon-Fri 8AM-5PM hours |
-| 41 | 1792-1840 | A gentle reminder | wellness reminder card; closes overview tab build |
-| 42 | 1841-1937 | _buildActiveQueueCard | queue ticket card: NOW SERVING or WAITING badge, ticket_no, ahead count, room, wait |
-| 43 | 1938-1997 | _buildSOSTab | SOS tab head: Emergency SOS title, offline flag, responsive circle sizes |
-| 44 | 1998-2066 | You are currently offline | offline panel: Call 911 + cached emergency contact call and SMS buttons |
-| 45 | 2067-2145 | DEMO ONLY | demo SOS card: DEMO ONLY badge, Your campus SOS title, explainer text |
-| 46 | 2146-2184 | _sosConsent | consent checkbox: share location + medical details, gates panic button |
-| 47 | 2185-2282 | _holdProgressNotifier | hold-to-SOS button: GestureDetector, progress ring, 2.5s countdown text |
-| 48 | 2283-2305 | _sosStatusMessage | SOS status message line (dispatched, failed, offline); closes demo card |
-| 49 | 2306-2366 | Call 911 | out-of-campus card with Call 911 dialer button; closes SOS tab |
-| 50 | 2367-2386 | _buildOfflineCallButton | full-width offline call button; dials via OfflineSosService.dialNumber |
-| 51 | 2387-2405 | _buildOfflineSmsButton | outlined SMS button; composeEmergencySms with prefilled emergency body |
-| 52 | 2406-2442 | _buildProfileTab | profile tab setup: loading guard, hp/u/identity, BMI parse, immunization decode |
-| 53 | 2443-2482 | Your health. Your profile. | profile header texts; RefreshIndicator refetches profile and consent status |
-| 54 | 2483-2637 | View health pass | user card: initials avatar, role lines, optional Qualified Responder badge, View health pass back to tab 0 |
-| 55 | 2638-2736 | Clinical details | clinical details card head: DOB/age, sex, BMI + category note |
-| 56 | 2737-2848 | Known allergy | clinical stats: blood type, known allergy, condition, height, weight |
-| 57 | 2849-2897 | Last verified | last-verified-by-staff stamp + clinic-only update notice |
-| 58 | 2898-2961 | Immunizations | immunizations list card from healthProfile.immunization_history |
-| 59 | 2962-3054 | Contact details | contact card: Edit opens EditProfileScreen, phone, emergency contact |
-| 60 | 3055-3170 | Change password | settings ListTiles: ChangePasswordScreen, privacy terms + Revoke, Sign out |
+| 23 | 699-739 | _showEmergencyConfirmationDialog | SOS Alert Active confirmation dialog after successful dispatch |
+| 24 | 740-766 | _handleSignOut | Confirms sign-out, ends the shared alert session, clears JWT and user data, and returns to LoginScreen |
+| 25 | 767-792 | _formatRelativeDate | helpers: _getInitials for avatars; _formatRelativeDate (Today, 3d ago, 2mo ago) |
+| 26 | 793-806 | ConsultationSchedulerScreen | build() head; tab list: overview, scheduler, SOS, DocumentsViewer, profile |
+| 27 | 807-865 | AccountSettingsButton | SessionTimeoutListener and app header with the Account settings gear |
+| 28 | 866-877 | bottomNavigationBar | body Column: active incident banner, offline banner and active tab; bottomNavigationBar mounts custom nav |
+| 29 | 878-910 | _buildOfflineBanner | red offline banner: last-synced notice, SOS still works via call |
+| 30 | 911-981 | _buildCustomBottomNav | custom bottom nav row: Overview, Appointments, SOS, Documents, Profile slots |
+| 31 | 982-1038 | _buildNavItem | reusable nav item: sage pill when selected, icon + label |
+| 32 | 1039-1094 | _buildSosNavItem | center SOS nav pill: crimson active state, siren icon |
+| 33 | 1095-1163 | _buildOverviewTab | responder badge helper and overview heading, refresh gesture and active queue card |
+| 34 | 1164-1318 | QrImageView | campus health pass card: dynamic QR, name, role-aware identity lines, optional Qualified Responder badge and Responder Hub button |
+| 35 | 1319-1440 | Book consultation | pass actions: Refresh pass (_fetchQRPass), Book consultation to tab 1; actions wrap when needed |
+| 36 | 1441-1555 | Prescriptions | shortcut cards: Prescriptions and Medical clearances, both jump to documents tab |
+| 37 | 1556-1636 | YOUR HEALTH AT A GLANCE | dark card head: white heading, heart and menu icons; initials avatar, name, role line, profile link |
+| 38 | 1637-1732 | Blood type | at-a-glance stats: blood type and known allergy; View full profile to tab 4 |
+| 39 | 1733-1791 | Your campus infirmary | campus infirmary card: PSU Lingayen address, Mon-Fri 8AM-5PM hours |
+| 40 | 1792-1839 | A gentle reminder | wellness reminder card; closes overview tab build |
+| 41 | 1840-1940 | _buildActiveQueueCard | queue ticket card: NOW SERVING or WAITING badge, ticket_no, ahead count, room, wait |
+| 42 | 1941-1998 | _buildSOSTab | SOS tab head: Emergency SOS title, offline flag, responsive circle sizes |
+| 43 | 1999-2069 | You are currently offline | offline panel: Call 911 + cached emergency contact call and SMS buttons |
+| 44 | 2070-2136 | demoBadgeBg | SOS card badge, title, and explainer text |
+| 45 | 2137-2184 | _sosConsent | consent checkbox: share location + medical details, gates panic button |
+| 46 | 2185-2289 | _holdProgressNotifier | hold-to-SOS button: GestureDetector, progress ring, 2.5s countdown text |
+| 47 | 2290-2311 | _sosStatusMessage | SOS status message line (dispatched, failed, offline); closes SOS card |
+| 48 | 2312-2372 | Call 911 | out-of-campus card with Call 911 dialer button; closes SOS tab |
+| 49 | 2373-2392 | _buildOfflineCallButton | full-width offline call button; dials via OfflineSosService.dialNumber |
+| 50 | 2393-2415 | _buildOfflineSmsButton | outlined SMS button; composeEmergencySms with prefilled emergency body |
+| 51 | 2416-2459 | _buildProfileTab | profile tab setup: loading guard, hp/u/identity, BMI parse, immunization decode |
+| 52 | 2460-2488 | Your health. Your profile. | profile header texts; RefreshIndicator refetches profile and consent status |
+| 53 | 2489-2644 | View health pass | user card: initials avatar, role lines, optional Qualified Responder badge and Responder Hub button, View health pass back to tab 0 |
+| 54 | 2645-2743 | Clinical details | clinical details card head: DOB/age, sex, BMI + category note |
+| 55 | 2744-2855 | Known allergy | clinical stats: blood type, known allergy, condition, height, weight |
+| 56 | 2856-2905 | Last verified | last-verified-by-staff stamp + clinic-only update notice |
+| 57 | 2906-2968 | Immunizations | immunizations list card from healthProfile.immunization_history |
+| 58 | 2969-3061 | Contact details | contact card: Edit opens EditProfileScreen, phone, emergency contact |
+| 59 | 3062-3177 | Change password | settings ListTiles: ChangePasswordScreen, privacy terms + Revoke, Sign out |

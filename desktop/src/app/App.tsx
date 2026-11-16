@@ -118,6 +118,8 @@ function AppShell() {
   // ── Session Logout & Token Invalidation ───────────────────────
   const handleSignOut = async () => {
     const token = localStorage.getItem('valetudo_token');
+    if (!await confirmAction('Sign out', 'You’ll need to sign in again to access the console.')) return;
+    if (localStorage.getItem('valetudo_token') !== token) return;
     setOfflineAccount(null);
     localStorage.removeItem('valetudo_token');
     localStorage.removeItem('token');

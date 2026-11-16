@@ -5,10 +5,10 @@
 | Layer | Technologies |
 | --- | --- |
 | **Backend** | Node.js ESM, **Express 5**, **Socket.IO 4**, `mysql2` promise pool, `ioredis`/`redis`, AWS SDK S3 client for MinIO, `jsonwebtoken`, `bcryptjs`, `multer`, `pdfkit`, `exceljs`, `qrcode`, `nodemailer`, `firebase-admin`, `cors`, `dotenv`, `nodemon` |
-| **Desktop** | **Electron 44**, **React 19**, **TypeScript**, **Vite 6**, `electron-builder` (Windows NSIS x64), `electron-updater`, `socket.io-client`, `jsqr`, `signature_pad`, built-in `node:sqlite`, ESLint. `vite.config.mts` is present on `Stage1`. |
-| **Mobile** | **Flutter** stable channel, **Dart ≥ 3.13**; `http`, `flutter_secure_storage`, `qr_flutter`, `geolocator`, `socket_io_client`, `url_launcher`, `firebase_core`, `firebase_messaging`. Android is the primary target; other platform targets are recorded in `mobile/.metadata`. |
+| **Desktop** | **Electron 44**, **React 19**, **TypeScript**, **Vite 6**, `electron-builder` (Windows NSIS x64), `electron-updater`, `socket.io-client`, `jsqr`, `signature_pad`, SQLCipher via `better-sqlite3-multiple-ciphers`, ESLint. |
+| **Mobile** | **Flutter** stable channel, **Dart ^3.13.3**; `http`, `flutter_secure_storage`, `qr_flutter`, `geolocator`, `socket_io_client`, `url_launcher`, `firebase_core`, `firebase_messaging`. Android is the primary target; other platform targets are recorded in `mobile/.metadata`. |
 | **Infrastructure** | **Docker Compose**: MySQL 8 on `127.0.0.1:3307`, Redis 7 on `127.0.0.1:6379`, MinIO API/console on `127.0.0.1:9000`/`9001`; named volumes `mysql_data` and `minio_data`. All three are loopback-bound. |
-| **Docs / QA tooling** | `AGENTS.md` instruction pack, `CODESLICE.md` line-range maps, **Python 3** `scripts/verify_codeslice.py`, Postman collections, Node test files under `server/tests/` |
+| **Docs / QA tooling** | `AGENTS.md` instruction pack, `CODESLICE.md` line-range maps, **Python 3** `scripts/verify_codeslice.py`, Postman workspace metadata, Node test files under `server/tests/` |
 
 | Path | Role | Port |
 | --- | --- | --- |
@@ -24,11 +24,11 @@
 
 ### Clinical and administrative workflows
 
-- Scheduling with clinic-hour rules, 15-minute slots, lunch exclusion, capacity-limited shared-hour doctor bookings, exclusive-hour dentist bookings and recovery buffers.
+- Scheduling with clinic-hour rules, 15-minute slots, lunch exclusion, capacity-limited shared-hour doctor bookings, exclusive-hour dentist bookings and recovery buffers. Mobile patients [review their appointment](../mobile/README.md#booking-an-appointment) before confirming it.
 - EMR records, vital signs, dental charts, EMR attachments, medical clearances, queueing, analytics and Excel export.
 - E-prescriptions with FEFO batch deduction, outside-formulary free-text items, drug-interaction warnings, prescription expiry, prescribed-quantity validation, signature enrollment, PDF generation and versioned/soft-deleted documents.
-- Medicine batches and inventory logs, with **expired / low stock / expiring soon** states and a dashboard summary consumed by `NurseConsole.tsx`.
+- Medicine batches and inventory logs, with **expired / low stock / expiring within 30 days** states and a dashboard summary consumed by `NurseConsole.tsx`.
 - Admin user/role management with safety checks and granular permissions; admin health-profile editor encrypts/decrypts sensitive fields.
-- Dynamic QR Health Pass with a dedicated HMAC secret, short validity, Redis single-use nonce claiming, and a public QR verification page.
-- Offline-first desktop operation: embedded SQLite mutation queue, replay on reconnect, local EMR/patient cache and a `localStorage` fallback.
+- Dynamic QR Health Pass with a dedicated HMAC secret, short validity, Redis single-use nonce claiming. Staff verify these passes through authenticated intake. Generated clinical documents have separate public QR verification links.
+- Desktop offline workflows use an encrypted SQLite cache and mutation queue for supported clinical work. Changes replay on reconnect. [Desktop offline storage](../desktop/README.md#offline-storage)
 - Background reminders over SMTP, FCM and Socket.IO.

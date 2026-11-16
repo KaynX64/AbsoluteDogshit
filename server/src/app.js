@@ -109,7 +109,7 @@ export function createApp({ isOriginAllowed = createOriginCheck() } = {}) {
 export function mountApiRoutes(app, io, { restart } = {}) {
   app.post('/api/auth/login', loginRateLimit, loginUser);
   app.post('/api/auth/logout', authenticateToken, (req, res) => logoutUser(req, res, io));
-  app.put('/api/auth/change-password', authenticateToken, changePassword);
+  app.put('/api/auth/change-password', authenticateToken, (req, res) => changePassword(req, res, io));
 
   app.use('/api/privacy', privacyRouter);
   app.use('/api/profile', profileRoutes);

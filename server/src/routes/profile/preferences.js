@@ -2,13 +2,32 @@
 
 import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth/middleware.js';
+import { isInstallationId, registerPushDevice, sosModes } from '../../emergency/deviceDelivery.js';
 import { THEME_MODES, THEME_PRESETS } from '../../config/themePreferences.js';
 
 export function registerProfilePreferences(router) {
+  // Appearance is independent of clinical consent and contains no health data.
+  router.get('/theme', authenticateToken, async (req, res) => {
+    try {
+      const [[user]] = await pool.query(
+        'SELECT theme_mode, theme_preset FROM USERS WHERE user_id = ? AND deleted_at IS NULL',
+        [req.user.user_id],
+      );
+      if (!user) return res.status(404).json({ error: 'Account not found.' });
+      res.json({
+        theme_mode: THEME_MODES.has(user.theme_mode) ? user.theme_mode : 'light',
+        theme_preset: THEME_PRESETS.has(user.theme_preset) ? user.theme_preset : 'brand',
+      });
+    } catch (error) {
+      console.error('[Theme Preference Read Error]:', error?.code || error?.name);
+      res.status(500).json({ error: 'Failed to read theme preference.' });
+    }
+  });
+
   // ─────────────────────────────────────────────────────────────────────────
   // PUT /api/profile/theme — persist the account's UI theme selection.
   //
-  // Per-account persistence for the desktop settings menu (Stage 7).
+  // Per-account persistence shared by desktop and mobile settings.
   // The desktop client applies changes locally first (offline-first) and
   // pushes the selection here; the stored values are returned with the
   // login response so the theme follows the account to any machine.
@@ -64,21 +83,22 @@ export function registerProfilePreferences(router) {
   // POST /api/profile/fcm-token - Register device token for background push
   router.post('/fcm-token', authenticateToken, async (req, res) => {
     const userId = req.user.user_id;
-    const { fcm_token, device_type = 'android' } = req.body;
-
-    if (!fcm_token) return res.status(400).json({ error: 'fcm_token is required.' });
+    const { fcm_token, device_type = 'android', installation_id, sos_mode } = req.body ?? {};
+    const token = typeof fcm_token === 'string' ? fcm_token.trim() : '';
+    if (!token || token.length > 512 || typeof device_type !== 'string' ||
+        !device_type || device_type.length > 50) {
+      return res.status(400).json({ error: 'Invalid push device registration.' });
+    }
+    if ((installation_id !== undefined || sos_mode !== undefined) &&
+        (device_type !== 'android' || !isInstallationId(installation_id) || !sosModes.includes(sos_mode))) {
+      return res.status(400).json({ error: 'Invalid SOS device settings.' });
+    }
 
     try {
-      await pool.query(
-        `INSERT INTO DEVICE_TOKENS (user_id, fcm_token, device_type)
-       VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), device_type = VALUES(device_type)`,
-        [userId, fcm_token.trim(), device_type]
-      );
-      console.log(`📱 [FCM] Successfully registered device token for user #${userId} (${device_type})`);
-      res.json({ message: 'Device token registered for push notifications.' });
+      await registerPushDevice(userId, { fcm_token: token, device_type, installation_id, sos_mode });
+      res.json({ message: 'Device token registered for push notifications.', ...(installation_id && { sos_mode }) });
     } catch (err) {
-      console.error('[FCM Token Registration Error]:', err);
+      console.error('[FCM Token Registration Error]:', err.code ?? err.name);
       res.status(500).json({ error: 'Failed to save device token.' });
     }
   });

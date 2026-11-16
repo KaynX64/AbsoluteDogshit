@@ -1,9 +1,9 @@
 // mobile/lib/widgets/session_timeout_listener.dart
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../theme/app_palette.dart';
+import '../theme/account_theme_controller.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import '../config/api_config.dart';
 import '../screens/login_screen.dart';
 import '../utils/responsive.dart';
 import '../services/emergency_alert_service.dart';
@@ -26,9 +26,9 @@ class _SessionTimeoutListenerState extends State<SessionTimeoutListener> {
   Timer? _inactivityTimer;
   final _storage = const FlutterSecureStorage();
 
-  static const primaryGreen = Color(0xFF284E3A);
-  static const textMain = Color(0xFF191C1A);
-  static const textSub = Color(0xFF5A635B);
+  Color get primaryGreen => AppPalette.of(context).color(0xFF284E3A);
+  Color get textMain => AppPalette.of(context).color(0xFF191C1A);
+  Color get textSub => AppPalette.of(context).color(0xFF5A635B);
 
   @override
   void initState() {
@@ -49,27 +49,8 @@ class _SessionTimeoutListenerState extends State<SessionTimeoutListener> {
   }
 
   Future<void> _handleTimeout() async {
-    // Stop the SOS listener first: a timed-out session must not keep the
-    // alarm/foreground service alive.
-    if (EmergencyAlertService().isResponderActive) {
-      EmergencyAlertService().stopResponderListener();
-    }
-    final token = await _storage.read(key: 'jwt_token');
-    if (token != null) {
-      try {
-        // Release this device's FCM token so the timed-out phone stops
-        // receiving SOS pushes.
-        final fcmToken = await EmergencyAlertService().currentFcmToken();
-        await ApiConfig.client.post(
-          Uri.parse('${ApiConfig.baseUrl}/api/auth/logout'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $token',
-          },
-          body: jsonEncode({'fcm_token': fcmToken}),
-        );
-      } catch (_) {}
-    }
+    await EmergencyAlertService().signOut(await _storage.read(key: 'jwt_token'));
+    if (mounted) AccountThemeScope.of(context).reset();
     await _storage.deleteAll();
     if (!mounted) return;
 
@@ -83,7 +64,7 @@ class _SessionTimeoutListenerState extends State<SessionTimeoutListener> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: AppPalette.of(context).surface,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(rs.r(24)),
         ),
@@ -114,7 +95,7 @@ class _SessionTimeoutListenerState extends State<SessionTimeoutListener> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: primaryGreen,
-              foregroundColor: Colors.white,
+              foregroundColor: AppPalette.of(context).onPrimary,
               elevation: 0,
               shape: const StadiumBorder(),
             ),

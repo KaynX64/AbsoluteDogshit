@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { initializeApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { pool } from '../db/pool.js';
+import { groupSosDevices, sosPushForMode } from '../emergency/deviceDelivery.js';
 import { createFcmAppOptions } from './fcmCredential.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -81,29 +82,28 @@ export async function sendPushToRoles(roleCodes = [], { title, body, data = {} }
  * FCM sendEachForMulticast ceiling, and unchunked lists would silently drop
  * every token past the 500th.
  */
-export async function sendPushToUsers(userIds = [], { title, body, data = {} }) {
+export async function sendSosPush(userIds = [], { alertId, latitude, longitude }) {
   try {
     if (!Array.isArray(userIds) || userIds.length === 0) return;
     const [rows] = await pool.query(
-      'SELECT fcm_token FROM DEVICE_TOKENS WHERE user_id IN (?)',
+      'SELECT fcm_token, installation_id, sos_mode, device_type FROM DEVICE_TOKENS WHERE user_id IN (?)',
       [userIds]
     );
 
-    if (rows.length === 0) return;
-    const tokens = rows.map((r) => r.fcm_token);
-
-    const FCM_MULTICAST_LIMIT = 500;
-    for (let i = 0; i < tokens.length; i += FCM_MULTICAST_LIMIT) {
-      await sendMulticastNotification(tokens.slice(i, i + FCM_MULTICAST_LIMIT), { title, body, data });
-    }
+    await Promise.all(Object.entries(groupSosDevices(rows)).map(async ([mode, tokens]) => {
+      const payload = sosPushForMode(mode, { alertId, latitude, longitude });
+      for (let offset = 0; offset < tokens.length; offset += 500) {
+        await sendMulticastNotification(tokens.slice(offset, offset + 500), payload);
+      }
+    }));
   } catch (err) {
-    console.error('[FCM] Error sending push to users:', err.message);
+    console.error('[FCM] Error sending SOS push:', err.code ?? err.name);
   }
 }
 
-async function sendMulticastNotification(tokens, { title, body, data }) {
+async function sendMulticastNotification(tokens, { title, body, data, androidNotification }) {
   if (!isFcmInitialized || !firebaseApp) {
-    console.log(`📡 [FCM Simulation] To ${tokens.length} devices | Title: "${title}" | Body: "${body}"`);
+    console.log(`[FCM Simulation] To ${tokens.length} devices`);
     return;
   }
 
@@ -113,9 +113,9 @@ async function sendMulticastNotification(tokens, { title, body, data }) {
     tokens,
     android: {
       priority: 'high',
-      notification: {
+      notification: androidNotification ?? {
         sound: 'default',
-        channelId: 'emergency_sos_channel_v4',
+        channelId: data.type === 'QUEUE_TURN' ? 'clinic_queue_channel' : 'appointment_channel',
       },
     },
   };
@@ -126,14 +126,15 @@ async function sendMulticastNotification(tokens, { title, body, data }) {
     
     // Clean up invalid or uninstalled tokens automatically
     if (response.failureCount > 0) {
-      response.responses.forEach(async (resp, idx) => {
-        if (!resp.success) {
+      await Promise.all(response.responses.map(async (resp, idx) => {
+        if (resp.error?.code === 'messaging/registration-token-not-registered' ||
+            resp.error?.code === 'messaging/invalid-registration-token') {
           const badToken = tokens[idx];
           await pool.query('DELETE FROM DEVICE_TOKENS WHERE fcm_token = ?', [badToken]).catch(() => {});
         }
-      });
+      }));
     }
   } catch (err) {
-    console.error('[FCM Multicast Error]:', err.message);
+    console.error('[FCM Multicast Error]:', err.code ?? err.name);
   }
 }

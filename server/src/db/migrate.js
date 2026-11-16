@@ -15,8 +15,9 @@ import pdfRetry from './migrations/009-pdf-retry.js';
 import terminalPermission from './migrations/010-terminal-permission.js';
 
 import replayOutcomes from './migrations/011-replay-outcomes.js';
+import responderDelivery from './migrations/012-responder-delivery.js';
 
-const migrations = [foundation, clinicalDocuments, responders, appointmentDayIndex, pharmacyActivityIndexes, incidentRecordsPermission, analyticsScopes, staffAnalyticsPermissions, pdfRetry, terminalPermission, replayOutcomes];
+const migrations = [foundation, clinicalDocuments, responders, appointmentDayIndex, pharmacyActivityIndexes, incidentRecordsPermission, analyticsScopes, staffAnalyticsPermissions, pdfRetry, terminalPermission, replayOutcomes, responderDelivery];
 const requiredTables = [
   'USERS', 'ROLES', 'USER_ROLES', 'STAFF_PROFILES', 'HEALTH_PROFILES', 'EMERGENCY_ALERTS',
   'PRESCRIPTIONS', 'PRESCRIPTION_ITEMS', 'INVENTORY_LOGS', 'MEDICAL_CLEARANCES', 'AUDIT_LOGS', 'APPOINTMENTS',

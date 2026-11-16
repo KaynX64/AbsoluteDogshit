@@ -2,6 +2,8 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import '../theme/app_palette.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
@@ -9,9 +11,11 @@ import 'package:socket_io_client/socket_io_client.dart' as io;
 import '../config/api_config.dart';
 import '../utils/responsive.dart';
 import '../services/emergency_alert_service.dart';
+import '../widgets/appointment_booking_review.dart';
 
 class ConsultationSchedulerScreen extends StatefulWidget {
-  const ConsultationSchedulerScreen({super.key});
+  const ConsultationSchedulerScreen({super.key, this.client});
+  final http.Client? client;
 
   @override
   State<ConsultationSchedulerScreen> createState() =>
@@ -22,6 +26,7 @@ class _ConsultationSchedulerScreenState
     extends State<ConsultationSchedulerScreen>
     with WidgetsBindingObserver {
   final _storage = const FlutterSecureStorage();
+  http.Client get _client => widget.client ?? ApiConfig.client;
 
   int _activeSubTab = 0;
 
@@ -81,24 +86,25 @@ class _ConsultationSchedulerScreenState
 
   final _notesController = TextEditingController();
   bool _isSubmitting = false;
+  bool _isReviewing = false;
 
   List<dynamic> _myAppointments = [];
   bool _loadingHistory = false;
   bool _isAppointmentGridView = false;
 
-  static const primaryGreen = Color(0xFF284E3A);
-  static const softSage = Color(0xFFE5EDE4);
-  static const textMain = Color(0xFF191C1A);
-  static const textSub = Color(0xFF5A635B);
-  static const borderColor = Color(0xFFD6DFD5);
-  static const disabledSlotBg = Color(0xFFEDF2EC);
-  static const disabledSlotText = Color(0xFFA3B0A4);
+  Color get primaryGreen => AppPalette.of(context).color(0xFF284E3A);
+  Color get softSage => AppPalette.of(context).color(0xFFE5EDE4);
+  Color get textMain => AppPalette.of(context).color(0xFF191C1A);
+  Color get textSub => AppPalette.of(context).color(0xFF5A635B);
+  Color get borderColor => AppPalette.of(context).color(0xFFD6DFD5);
+  Color get disabledSlotBg => Theme.of(context).colorScheme.surfaceContainerHigh;
+  Color get disabledSlotText => Theme.of(context).colorScheme.onSurfaceVariant;
 
-  static const _selectedDoctorBg = Color(0xFFE2EBE1);
-  static const _selectedAvatarBg = Color(0x26284E3A);
-  static const _infoCardBg = Color(0xFFE2EBE1);
-  static const _dividerSoft = Color(0xFFC7D6C6);
-  static const _hintColor = Color(0xFF94A396);
+  Color get _selectedDoctorBg => AppPalette.of(context).color(0xFFE2EBE1);
+  Color get _selectedAvatarBg => primaryGreen.withValues(alpha: 0.12);
+  Color get _infoCardBg => AppPalette.of(context).color(0xFFE2EBE1);
+  Color get _dividerSoft => AppPalette.of(context).color(0xFFC7D6C6);
+  Color get _hintColor => AppPalette.of(context).color(0xFF94A396);
   final ScrollController _dateScrollController = ScrollController();
 
   @override
@@ -145,6 +151,7 @@ class _ConsultationSchedulerScreenState
 
   Future<void> _initSlotSocket() async {
     final token = await _storage.read(key: 'jwt_token');
+    if (!mounted || token == null) return;
     try {
       _socket = io.io(
         ApiConfig.socketUrl,
@@ -318,7 +325,7 @@ class _ConsultationSchedulerScreenState
           child: Container(
             width: 5,
             height: 5,
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               color: _dividerSoft,
               shape: BoxShape.circle,
             ),
@@ -374,7 +381,7 @@ class _ConsultationSchedulerScreenState
                         ? primaryGreen
                         : isDisabled
                         ? disabledSlotBg
-                        : Colors.white,
+                        : AppPalette.of(context).surface,
                     borderRadius: BorderRadius.circular(rs.r(22)),
                     border: Border.all(
                       color: isSelected
@@ -394,7 +401,7 @@ class _ConsultationSchedulerScreenState
                           ? FontWeight.w700
                           : FontWeight.w600,
                       color: isSelected
-                          ? Colors.white
+                          ? AppPalette.of(context).onPrimary
                           : isDisabled
                           ? disabledSlotText
                           : textMain,
@@ -413,7 +420,7 @@ class _ConsultationSchedulerScreenState
     setState(() => _loadingDoctors = true);
     final token = await _storage.read(key: 'jwt_token');
     try {
-      final res = await ApiConfig.client.get(
+      final res = await _client.get(
         Uri.parse('${ApiConfig.baseUrl}/api/appointments/doctors'),
         headers: {'Authorization': 'Bearer $token'},
       );
@@ -452,7 +459,7 @@ class _ConsultationSchedulerScreenState
         "${selectedDate.year}-${selectedDate.month.toString().padLeft(2, '0')}-${selectedDate.day.toString().padLeft(2, '0')}";
 
     try {
-      final res = await ApiConfig.client.get(
+      final res = await _client.get(
         Uri.parse(
           '${ApiConfig.baseUrl}/api/appointments/slots?doctorId=$doctorId&date=$formattedDate',
         ),
@@ -460,8 +467,9 @@ class _ConsultationSchedulerScreenState
       );
       if (!mounted || request != _slotsRequest) return;
       final data = jsonDecode(res.body);
-      if (res.statusCode != 200)
+      if (res.statusCode != 200) {
         throw StateError(data['error'] ?? 'Availability is unavailable.');
+      }
       final types = data['rules']?['appointmentTypes'] as List? ?? [];
       final purposes = types
           .map((entry) => entry is Map ? entry['name'] : entry)
@@ -484,8 +492,9 @@ class _ConsultationSchedulerScreenState
         _showToast('Failed to load slots: $e', isError: true);
       }
     } finally {
-      if (mounted && request == _slotsRequest)
+      if (mounted && request == _slotsRequest) {
         setState(() => _loadingSlots = false);
+      }
     }
   }
 
@@ -493,7 +502,7 @@ class _ConsultationSchedulerScreenState
     setState(() => _loadingHistory = true);
     final token = await _storage.read(key: 'jwt_token');
     try {
-      final res = await ApiConfig.client.get(
+      final res = await _client.get(
         Uri.parse('${ApiConfig.baseUrl}/api/appointments/my'),
         headers: {'Authorization': 'Bearer $token'},
       );
@@ -508,7 +517,7 @@ class _ConsultationSchedulerScreenState
   }
 
   Future<void> _submitBooking() async {
-    if (_isSubmitting) return;
+    if (_isSubmitting || _isReviewing || _loadingSlots) return;
     if (_selectedDoctorId == null) {
       _showToast('Please select a doctor or dentist.', isError: true);
       return;
@@ -521,15 +530,54 @@ class _ConsultationSchedulerScreenState
 
     final doctorId = _selectedDoctorId;
     final purpose = _selectedPurpose;
+    final date = _selectedDate;
+    final slotTime = _selectedSlotTime!;
+    final notes = _notesController.text.trim();
+    final slotsRequest = _slotsRequest;
+    final doctor = _doctors.firstWhere((doc) => doc['user_id'] == doctorId);
     final formattedDate =
-        "${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}";
-    final scheduledDateTime = "$formattedDate $_selectedSlotTime:00";
+        "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
+    final scheduledDateTime = "$formattedDate $slotTime:00";
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => _isReviewing = true);
+    bool? confirmed;
+    try {
+      confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AppointmentBookingReview(
+          clinician: 'Dr. ${doctor['first_name']} ${doctor['last_name']}',
+          specialty: doctor['specialty']?.toString() ?? '',
+          purpose: purpose,
+          date: date,
+          time: _formatSlotDisplay(slotTime),
+          notes: notes,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isReviewing = false);
+    }
+    if (!mounted || confirmed != true) return;
+    // A live refresh clears the selected slot. Require a fresh review rather
+    // than submitting a slot whose availability changed behind the dialog.
+    if (_loadingSlots ||
+        slotsRequest != _slotsRequest ||
+        _selectedDoctorId != doctorId ||
+        _selectedPurpose != purpose ||
+        _selectedDate != date ||
+        _selectedSlotTime != slotTime) {
+      _showToast(
+        'Availability has updated. Please select a time and review your appointment again.',
+        isError: true,
+      );
+      return;
+    }
 
     setState(() => _isSubmitting = true);
     try {
       final token = await _storage.read(key: 'jwt_token');
       if (!mounted) return;
-      final res = await ApiConfig.client.post(
+      final res = await _client.post(
         Uri.parse('${ApiConfig.baseUrl}/api/appointments'),
         headers: {
           'Content-Type': 'application/json',
@@ -539,15 +587,18 @@ class _ConsultationSchedulerScreenState
           'doctor_user_id': doctorId,
           'date_time': scheduledDateTime,
           'appointment_type': purpose,
-          'notes': _notesController.text.trim(),
+          'notes': notes,
         }),
       );
 
+      if (!mounted) return;
       final data = jsonDecode(res.body);
       if (res.statusCode == 201) {
         _notesController.clear();
         await _fetchAvailableSlots();
+        if (!mounted) return;
         await _fetchMyAppointments();
+        if (!mounted) return;
 
         EmergencyAlertService().showAppointmentConfirmedNotification(
           '📅 Consultation Confirmed',
@@ -559,11 +610,11 @@ class _ConsultationSchedulerScreenState
           showDialog(
             context: context,
             builder: (ctx) => AlertDialog(
-              backgroundColor: Colors.white,
+              backgroundColor: AppPalette.of(context).surface,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(rs.r(20)),
               ),
-              icon: const Icon(
+              icon: Icon(
                 Icons.check_circle_outline,
                 color: primaryGreen,
                 size: 48,
@@ -607,7 +658,7 @@ class _ConsultationSchedulerScreenState
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: primaryGreen,
-                    foregroundColor: Colors.white,
+                    foregroundColor: AppPalette.of(context).onPrimary,
                     shape: const StadiumBorder(),
                   ),
                   onPressed: () {
@@ -638,7 +689,7 @@ class _ConsultationSchedulerScreenState
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: AppPalette.of(context).surface,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(rs.r(20)),
         ),
@@ -646,7 +697,7 @@ class _ConsultationSchedulerScreenState
           'Cancel Consultation',
           style: TextStyle(
             fontWeight: FontWeight.w800,
-            color: const Color(0xFF7A2E26),
+            color: AppPalette.of(context).color(0xFF7A2E26),
             fontSize: rs.sp(16),
           ),
         ),
@@ -664,10 +715,10 @@ class _ConsultationSchedulerScreenState
               decoration: InputDecoration(
                 hintText: 'Reason for cancellation',
                 filled: true,
-                fillColor: const Color(0xFFF7F9F6),
+                fillColor: AppPalette.of(context).color(0xFFF7F9F6),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(rs.r(14)),
-                  borderSide: const BorderSide(color: borderColor),
+                  borderSide: BorderSide(color: borderColor),
                 ),
               ),
             ),
@@ -676,11 +727,11 @@ class _ConsultationSchedulerScreenState
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Keep', style: TextStyle(color: textSub)),
+            child: Text('Keep', style: TextStyle(color: textSub)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF7A2E26),
+              backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
               foregroundColor: Colors.white,
               shape: const StadiumBorder(),
             ),
@@ -695,7 +746,7 @@ class _ConsultationSchedulerScreenState
 
     final token = await _storage.read(key: 'jwt_token');
     try {
-      final res = await ApiConfig.client.patch(
+      final res = await _client.patch(
         Uri.parse(
           '${ApiConfig.baseUrl}/api/appointments/$appointmentId/cancel',
         ),
@@ -744,18 +795,6 @@ class _ConsultationSchedulerScreenState
         lastDate: lastDate,
         selectableDayPredicate: (day) =>
             day.weekday != DateTime.saturday && day.weekday != DateTime.sunday,
-        builder: (context, child) {
-          return Theme(
-            data: Theme.of(context).copyWith(
-              colorScheme: const ColorScheme.light(
-                primary: primaryGreen,
-                onPrimary: Colors.white,
-                onSurface: textMain,
-              ),
-            ),
-            child: child!,
-          );
-        },
       );
 
       if (picked != null && !_isSameDay(picked, _selectedDate)) {
@@ -800,7 +839,7 @@ class _ConsultationSchedulerScreenState
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: isError ? const Color(0xFF7A2E26) : primaryGreen,
+        backgroundColor: isError ? AppPalette.of(context).color(0xFF7A2E26) : primaryGreen,
       ),
     );
   }
@@ -887,7 +926,7 @@ class _ConsultationSchedulerScreenState
                           fontSize: rs.sp(13),
                           fontWeight: FontWeight.w700,
                           color: _activeSubTab == 0
-                              ? Colors.white
+                              ? AppPalette.of(context).onPrimary
                               : primaryGreen,
                         ),
                       ),
@@ -913,7 +952,7 @@ class _ConsultationSchedulerScreenState
                           fontSize: rs.sp(13),
                           fontWeight: FontWeight.w700,
                           color: _activeSubTab == 1
-                              ? Colors.white
+                              ? AppPalette.of(context).onPrimary
                               : primaryGreen,
                         ),
                       ),
@@ -939,7 +978,7 @@ class _ConsultationSchedulerScreenState
     return Container(
       padding: EdgeInsets.all(rs.w(3)),
       decoration: BoxDecoration(
-        color: const Color(0xFFF4F6F3),
+        color: AppPalette.of(context).color(0xFFF4F6F3),
         border: Border.all(color: borderColor),
         borderRadius: BorderRadius.circular(rs.r(14)),
       ),
@@ -969,14 +1008,14 @@ class _ConsultationSchedulerScreenState
             vertical: rs.h(7),
           ),
           decoration: BoxDecoration(
-            color: selected ? Colors.white : Colors.transparent,
+            color: selected ? AppPalette.of(context).surface : Colors.transparent,
             borderRadius: BorderRadius.circular(rs.r(11)),
             boxShadow: selected
-                ? const [
+                ? [
                     BoxShadow(
-                      color: Color(0x12000000),
+                      color: AppPalette.of(context).color(0x12000000),
                       blurRadius: 4,
-                      offset: Offset(0, 1),
+                      offset: const Offset(0, 1),
                     ),
                   ]
                 : null,
@@ -1007,9 +1046,7 @@ class _ConsultationSchedulerScreenState
 
   Widget _buildBookingTab(Rs rs) {
     if (_loadingDoctors) {
-      return const Center(
-        child: CircularProgressIndicator(color: primaryGreen),
-      );
+      return Center(child: CircularProgressIndicator(color: primaryGreen));
     }
 
     return RefreshIndicator(
@@ -1017,7 +1054,7 @@ class _ConsultationSchedulerScreenState
       onRefresh: _fetchAvailableSlots,
       child: ListView(
         padding: EdgeInsets.symmetric(horizontal: rs.w(20), vertical: rs.h(8)),
-        scrollCacheExtent: ScrollCacheExtent.pixels(300),
+        scrollCacheExtent: const ScrollCacheExtent.pixels(300),
         addAutomaticKeepAlives: false,
         addRepaintBoundaries: true,
         addSemanticIndexes: false,
@@ -1062,19 +1099,19 @@ class _ConsultationSchedulerScreenState
               hintText: 'Tell your care team a little about your visit…',
               hintStyle: TextStyle(color: _hintColor, fontSize: rs.sp(13)),
               filled: true,
-              fillColor: Colors.white,
+              fillColor: AppPalette.of(context).surface,
               contentPadding: EdgeInsets.all(rs.w(14)),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(rs.r(18)),
-                borderSide: const BorderSide(color: borderColor),
+                borderSide: BorderSide(color: borderColor),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(rs.r(18)),
-                borderSide: const BorderSide(color: borderColor),
+                borderSide: BorderSide(color: borderColor),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(rs.r(18)),
-                borderSide: const BorderSide(color: primaryGreen),
+                borderSide: BorderSide(color: primaryGreen),
               ),
             ),
           ),
@@ -1085,30 +1122,38 @@ class _ConsultationSchedulerScreenState
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: primaryGreen,
-                foregroundColor: Colors.white,
+                foregroundColor: AppPalette.of(context).onPrimary,
                 elevation: 0,
                 shape: const StadiumBorder(),
               ),
-              onPressed: _isSubmitting || _selectedSlotTime == null
+              onPressed:
+                  _isSubmitting ||
+                      _isReviewing ||
+                      _loadingSlots ||
+                      _selectedSlotTime == null
                   ? null
                   : _submitBooking,
               child: _isSubmitting
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 20,
                       height: 20,
                       child: CircularProgressIndicator(
-                        color: Colors.white,
+                        color: AppPalette.of(context).onPrimary,
                         strokeWidth: 2,
                       ),
                     )
                   : Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Text(
-                          'Confirm appointment',
-                          style: TextStyle(
-                            fontSize: rs.sp(15),
-                            fontWeight: FontWeight.w700,
+                        Flexible(
+                          child: Text(
+                            'Review appointment',
+                            maxLines: 2,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: rs.sp(15),
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
                         SizedBox(width: rs.w(8)),
@@ -1150,7 +1195,7 @@ class _ConsultationSchedulerScreenState
               vertical: rs.h(12),
             ),
             decoration: BoxDecoration(
-              color: isSelected ? _selectedDoctorBg : Colors.white,
+              color: isSelected ? _selectedDoctorBg : AppPalette.of(context).surface,
               borderRadius: BorderRadius.circular(rs.r(18)),
               border: Border.all(
                 color: isSelected ? primaryGreen : borderColor,
@@ -1201,7 +1246,7 @@ class _ConsultationSchedulerScreenState
                   ),
                 ),
                 if (isSelected)
-                  const Icon(Icons.check, size: 18, color: primaryGreen),
+                  Icon(Icons.check, size: 18, color: primaryGreen),
               ],
             ),
           ),
@@ -1259,7 +1304,7 @@ class _ConsultationSchedulerScreenState
                     constraints: BoxConstraints(minHeight: rs.h(104)),
                     padding: EdgeInsets.all(rs.w(13)),
                     decoration: BoxDecoration(
-                      color: isSelected ? softSage : Colors.white,
+                      color: isSelected ? softSage : AppPalette.of(context).surface,
                       borderRadius: radius,
                       border: Border.all(
                         color: isSelected ? primaryGreen : borderColor,
@@ -1284,7 +1329,9 @@ class _ConsultationSchedulerScreenState
                               width: rs.w(36),
                               height: rs.w(36),
                               decoration: BoxDecoration(
-                                color: isSelected ? Colors.white : softSage,
+                                color: isSelected
+                                    ? Theme.of(context).colorScheme.surfaceContainerHigh
+                                    : softSage,
                                 shape: BoxShape.circle,
                               ),
                               alignment: Alignment.center,
@@ -1373,11 +1420,7 @@ class _ConsultationSchedulerScreenState
                   ),
                 ),
                 SizedBox(width: rs.w(4)),
-                const Icon(
-                  Icons.arrow_drop_down,
-                  color: primaryGreen,
-                  size: 20,
-                ),
+                Icon(Icons.arrow_drop_down, color: primaryGreen, size: 20),
               ],
             ),
           ),
@@ -1402,7 +1445,7 @@ class _ConsultationSchedulerScreenState
         scrollDirection: Axis.horizontal,
         itemExtent: extent,
         itemCount: _upcomingWeekdays.length,
-        scrollCacheExtent: ScrollCacheExtent.pixels(200),
+        scrollCacheExtent: const ScrollCacheExtent.pixels(200),
         addAutomaticKeepAlives: false,
         addRepaintBoundaries: true,
         itemBuilder: (context, index) {
@@ -1425,7 +1468,7 @@ class _ConsultationSchedulerScreenState
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
                 decoration: BoxDecoration(
-                  color: isSelected ? primaryGreen : Colors.white,
+                  color: isSelected ? primaryGreen : AppPalette.of(context).surface,
                   borderRadius: BorderRadius.circular(rs.r(22)),
                   border: Border.all(
                     color: isSelected ? primaryGreen : borderColor,
@@ -1451,7 +1494,7 @@ class _ConsultationSchedulerScreenState
                         fontWeight: FontWeight.w700,
                         letterSpacing: 0.5,
                         color: isSelected
-                            ? Colors.white.withValues(alpha: 0.85)
+                            ? AppPalette.of(context).onPrimary
                             : textSub,
                       ),
                     ),
@@ -1461,7 +1504,7 @@ class _ConsultationSchedulerScreenState
                       style: TextStyle(
                         fontSize: rs.sp(22),
                         fontWeight: FontWeight.w800,
-                        color: isSelected ? Colors.white : textMain,
+                        color: isSelected ? AppPalette.of(context).onPrimary : textMain,
                       ),
                     ),
                   ],
@@ -1476,9 +1519,9 @@ class _ConsultationSchedulerScreenState
 
   Widget _buildSlotGrid(Rs rs) {
     if (_loadingSlots) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(20),
+          padding: const EdgeInsets.all(20),
           child: CircularProgressIndicator(color: primaryGreen, strokeWidth: 2),
         ),
       );
@@ -1488,7 +1531,7 @@ class _ConsultationSchedulerScreenState
         padding: EdgeInsets.all(rs.w(16)),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppPalette.of(context).surface,
           borderRadius: BorderRadius.circular(rs.r(16)),
           border: Border.all(color: borderColor),
         ),
@@ -1557,7 +1600,7 @@ class _ConsultationSchedulerScreenState
                 style: TextStyle(
                   fontSize: rs.sp(15),
                   fontWeight: FontWeight.w800,
-                  color: const Color(0xFF191C1A),
+                  color: AppPalette.of(context).color(0xFF191C1A),
                 ),
               ),
             ],
@@ -1602,9 +1645,7 @@ class _ConsultationSchedulerScreenState
 
   Widget _buildHistoryTab(Rs rs) {
     if (_loadingHistory) {
-      return const Center(
-        child: CircularProgressIndicator(color: primaryGreen),
-      );
+      return Center(child: CircularProgressIndicator(color: primaryGreen));
     }
 
     if (_myAppointments.isEmpty) {
@@ -1618,7 +1659,7 @@ class _ConsultationSchedulerScreenState
             Icon(
               Icons.calendar_month_outlined,
               size: rs.w(54).clamp(44.0, 60.0),
-              color: const Color(0xFFA4B0A6),
+              color: AppPalette.of(context).color(0xFFA4B0A6),
             ),
             SizedBox(height: rs.h(12)),
             Center(
@@ -1720,7 +1761,7 @@ class _ConsultationSchedulerScreenState
               margin: EdgeInsets.only(bottom: rs.h(14)),
               padding: EdgeInsets.all(rs.w(18)),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppPalette.of(context).surface,
                 borderRadius: BorderRadius.circular(rs.r(22)),
                 border: Border.all(color: borderColor),
               ),
@@ -1763,10 +1804,10 @@ class _ConsultationSchedulerScreenState
                         ),
                         decoration: BoxDecoration(
                           color: isConfirmed
-                              ? const Color(0xFFE5EDE4)
+                              ? AppPalette.of(context).color(0xFFE5EDE4)
                               : isCompleted
-                              ? const Color(0xFFE2EBE1)
-                              : const Color(0xFFFDE8E8),
+                              ? AppPalette.of(context).color(0xFFE2EBE1)
+                              : AppPalette.of(context).color(0xFFFDE8E8),
                           borderRadius: BorderRadius.circular(rs.r(12)),
                         ),
                         child: Text(
@@ -1779,8 +1820,8 @@ class _ConsultationSchedulerScreenState
                             color: isConfirmed
                                 ? primaryGreen
                                 : isCompleted
-                                ? const Color(0xFF15803D)
-                                : const Color(0xFF9B1C1C),
+                                ? AppPalette.of(context).color(0xFF15803D)
+                                : AppPalette.of(context).color(0xFF9B1C1C),
                           ),
                         ),
                       ),
@@ -1847,7 +1888,7 @@ class _ConsultationSchedulerScreenState
                       width: double.infinity,
                       padding: EdgeInsets.all(rs.w(10)),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF7F9F6),
+                        color: AppPalette.of(context).color(0xFFF7F9F6),
                         borderRadius: BorderRadius.circular(rs.r(12)),
                       ),
                       child: Text(
@@ -1864,7 +1905,7 @@ class _ConsultationSchedulerScreenState
                       child: Text(
                         'Cancel appointment',
                         style: TextStyle(
-                          color: const Color(0xFF7A2E26),
+                          color: AppPalette.of(context).color(0xFF7A2E26),
                           fontSize: rs.sp(13),
                           fontWeight: FontWeight.w700,
                         ),
@@ -1887,19 +1928,19 @@ class _ConsultationSchedulerScreenState
     final statusColor = isConfirmed
         ? primaryGreen
         : isCompleted
-        ? const Color(0xFF15803D)
-        : const Color(0xFF9B1C1C);
+        ? AppPalette.of(context).color(0xFF15803D)
+        : AppPalette.of(context).color(0xFF9B1C1C);
     final statusBackground = isConfirmed
         ? softSage
         : isCompleted
-        ? const Color(0xFFE2EBE1)
-        : const Color(0xFFFDE8E8);
+        ? AppPalette.of(context).color(0xFFE2EBE1)
+        : AppPalette.of(context).color(0xFFFDE8E8);
 
     return RepaintBoundary(
       child: Container(
         padding: EdgeInsets.all(rs.w(14)),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppPalette.of(context).surface,
           borderRadius: BorderRadius.circular(rs.r(18)),
           border: Border.all(color: borderColor),
         ),
@@ -1976,7 +2017,7 @@ class _ConsultationSchedulerScreenState
                 child: TextButton.icon(
                   onPressed: () => _cancelAppointment(item['appointment_id']),
                   style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF7A2E26),
+                    foregroundColor: AppPalette.of(context).color(0xFF7A2E26),
                     padding: EdgeInsets.symmetric(vertical: rs.h(4)),
                     visualDensity: VisualDensity.compact,
                   ),
@@ -2001,7 +2042,7 @@ class _ConsultationSchedulerScreenState
     Rs rs,
     IconData icon,
     String text, {
-    Color color = textSub,
+    Color? color,
   }) {
     return Row(
       children: [
@@ -2014,7 +2055,7 @@ class _ConsultationSchedulerScreenState
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: rs.sp(12),
-              color: color,
+              color: color ?? textSub,
               fontWeight: color == textMain
                   ? FontWeight.w700
                   : FontWeight.normal,
@@ -2032,10 +2073,7 @@ class _ConsultationSchedulerScreenState
         Container(
           width: badgeSize,
           height: badgeSize,
-          decoration: const BoxDecoration(
-            color: softSage,
-            shape: BoxShape.circle,
-          ),
+          decoration: BoxDecoration(color: softSage, shape: BoxShape.circle),
           alignment: Alignment.center,
           child: Text(
             number,
@@ -2076,14 +2114,18 @@ class _CheckItem extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.check, size: 16, color: Color(0xFF284E3A)),
+          Icon(
+            Icons.check,
+            size: 16,
+            color: AppPalette.of(context).color(0xFF284E3A),
+          ),
           SizedBox(width: rs.w(8)),
           Expanded(
             child: Text(
               text,
               style: TextStyle(
                 fontSize: rs.sp(12.5),
-                color: const Color(0xFF424943),
+                color: AppPalette.of(context).color(0xFF424943),
               ),
             ),
           ),

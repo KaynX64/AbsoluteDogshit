@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import '../theme/app_palette.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -36,11 +37,11 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
   bool _loadingDiagnostics = false;
   int? _downloadingId;
 
-  static const primaryGreen = Color(0xFF284E3A);
-  static const softSage = Color(0xFFE5EDE4);
-  static const textMain = Color(0xFF191C1A);
-  static const textSub = Color(0xFF5A635B);
-  static const borderColor = Color(0xFFE2EBE2);
+  Color get primaryGreen => AppPalette.of(context).color(0xFF284E3A);
+  Color get softSage => AppPalette.of(context).color(0xFFE5EDE4);
+  Color get textMain => AppPalette.of(context).color(0xFF191C1A);
+  Color get textSub => AppPalette.of(context).color(0xFF5A635B);
+  Color get borderColor => AppPalette.of(context).color(0xFFE2EBE2);
 
   @override
   void initState() {
@@ -147,8 +148,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
         String msg = 'Server returned ${res.statusCode}';
         try {
           final decoded = jsonDecode(res.body);
-          if (decoded is Map && decoded['error'] != null)
+          if (decoded is Map && decoded['error'] != null) {
             msg = decoded['error'];
+          }
         } catch (_) {}
         throw Exception(msg);
       }
@@ -175,8 +177,8 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
         );
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ PDF downloaded and opened.'),
+          SnackBar(
+            content: const Text('✅ PDF downloaded and opened.'),
             backgroundColor: primaryGreen,
           ),
         );
@@ -186,7 +188,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Download failed: $e'),
-            backgroundColor: const Color(0xFF7A2E26),
+            backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
           ),
         );
       }
@@ -217,7 +219,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
           minChildSize: 0.5,
           builder: (_, scrollController) => Container(
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppPalette.of(context).surface,
               borderRadius: BorderRadius.vertical(
                 top: Radius.circular(rs.r(28)),
               ),
@@ -251,7 +253,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                           fontSize: rs.sp(11),
                           fontWeight: FontWeight.w800,
                           letterSpacing: 2.0,
-                          color: const Color(0xFF4D6053),
+                          color: AppPalette.of(context).color(0xFF4D6053),
                         ),
                         textAlign: TextAlign.center,
                       ),
@@ -331,7 +333,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                       margin: EdgeInsets.only(bottom: rs.h(8)),
                       padding: EdgeInsets.all(rs.w(12)),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF7F9F6),
+                        color: AppPalette.of(context).color(0xFFF7F9F6),
                         borderRadius: BorderRadius.circular(rs.r(14)),
                         border: Border.all(color: borderColor),
                       ),
@@ -387,7 +389,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                                 style: TextStyle(
                                   fontSize: rs.sp(11),
                                   fontWeight: FontWeight.w700,
-                                  color: const Color(0xFF8C6826),
+                                  color: AppPalette.of(context).color(0xFF8C6826),
                                 ),
                               ),
                             ),
@@ -415,7 +417,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                 Container(
                   padding: EdgeInsets.all(rs.w(14)),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE2EBE1),
+                    color: AppPalette.of(context).color(0xFFE2EBE1),
                     borderRadius: BorderRadius.circular(rs.r(18)),
                   ),
                   child: Row(
@@ -423,13 +425,14 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                       Container(
                         padding: EdgeInsets.all(rs.w(8)),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: AppPalette.of(context).surface,
                           borderRadius: BorderRadius.circular(rs.r(12)),
                         ),
                         child: QrImageView(
                           data: verificationUrl,
                           version: QrVersions.auto,
                           size: qrSealSize,
+                          backgroundColor: Colors.white,
                         ),
                       ),
                       SizedBox(width: rs.w(14)),
@@ -498,7 +501,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: primaryGreen,
-                        foregroundColor: Colors.white,
+                        foregroundColor: AppPalette.of(context).onPrimary,
                         elevation: 0,
                         shape: const StadiumBorder(),
                       ),
@@ -509,11 +512,11 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                               kind: 'prescriptions',
                             ),
                       icon: _downloadingId == prescriptionId
-                          ? const SizedBox(
+                          ? SizedBox(
                               width: 16,
                               height: 16,
                               child: CircularProgressIndicator(
-                                color: Colors.white,
+                                color: AppPalette.of(context).onPrimary,
                                 strokeWidth: 2,
                               ),
                             )
@@ -587,7 +590,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
           minChildSize: 0.5,
           builder: (_, scrollController) => Container(
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppPalette.of(context).surface,
               borderRadius: BorderRadius.vertical(
                 top: Radius.circular(rs.r(28)),
               ),
@@ -620,7 +623,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                           fontSize: rs.sp(11),
                           fontWeight: FontWeight.w800,
                           letterSpacing: 2.0,
-                          color: const Color(0xFF4D6053),
+                          color: AppPalette.of(context).color(0xFF4D6053),
                         ),
                         textAlign: TextAlign.center,
                       ),
@@ -661,7 +664,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                 Container(
                   padding: EdgeInsets.all(rs.w(16)),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF7F9F6),
+                    color: AppPalette.of(context).color(0xFFF7F9F6),
                     borderRadius: BorderRadius.circular(rs.r(18)),
                     border: Border.all(color: borderColor),
                   ),
@@ -690,7 +693,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                         width: double.infinity,
                         padding: EdgeInsets.all(rs.w(12)),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFE2EBE1),
+                          color: AppPalette.of(context).color(0xFFE2EBE1),
                           borderRadius: BorderRadius.circular(rs.r(12)),
                         ),
                         child: Text(
@@ -720,7 +723,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                 Container(
                   padding: EdgeInsets.all(rs.w(14)),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE2EBE1),
+                    color: AppPalette.of(context).color(0xFFE2EBE1),
                     borderRadius: BorderRadius.circular(rs.r(18)),
                   ),
                   child: Row(
@@ -728,13 +731,14 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                       Container(
                         padding: EdgeInsets.all(rs.w(8)),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: AppPalette.of(context).surface,
                           borderRadius: BorderRadius.circular(rs.r(12)),
                         ),
                         child: QrImageView(
                           data: verificationUrl,
                           version: QrVersions.auto,
                           size: qrSealSize,
+                          backgroundColor: Colors.white,
                         ),
                       ),
                       SizedBox(width: rs.w(14)),
@@ -794,7 +798,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: primaryGreen,
-                        foregroundColor: Colors.white,
+                        foregroundColor: AppPalette.of(context).onPrimary,
                         elevation: 0,
                         shape: const StadiumBorder(),
                       ),
@@ -805,11 +809,11 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                               kind: 'clearances',
                             ),
                       icon: _downloadingId == clearanceId
-                          ? const SizedBox(
+                          ? SizedBox(
                               width: 16,
                               height: 16,
                               child: CircularProgressIndicator(
-                                color: Colors.white,
+                                color: AppPalette.of(context).onPrimary,
                                 strokeWidth: 2,
                               ),
                             )
@@ -974,7 +978,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
             style: TextStyle(
               fontSize: rs.sp(12),
               fontWeight: FontWeight.w700,
-              color: isSelected ? Colors.white : primaryGreen,
+              color: isSelected ? AppPalette.of(context).onPrimary : primaryGreen,
             ),
           ),
         ),
@@ -986,7 +990,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     return Container(
       padding: EdgeInsets.all(rs.w(3)),
       decoration: BoxDecoration(
-        color: const Color(0xFFF4F6F3),
+        color: AppPalette.of(context).color(0xFFF4F6F3),
         border: Border.all(color: borderColor),
         borderRadius: BorderRadius.circular(rs.r(14)),
       ),
@@ -1016,14 +1020,14 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
             vertical: rs.h(7),
           ),
           decoration: BoxDecoration(
-            color: selected ? Colors.white : Colors.transparent,
+            color: selected ? AppPalette.of(context).surface : Colors.transparent,
             borderRadius: BorderRadius.circular(rs.r(11)),
             boxShadow: selected
-                ? const [
+                ? [
                     BoxShadow(
-                      color: Color(0x12000000),
+                      color: AppPalette.of(context).color(0x12000000),
                       blurRadius: 4,
-                      offset: Offset(0, 1),
+                      offset: const Offset(0, 1),
                     ),
                   ]
                 : null,
@@ -1128,8 +1132,8 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     return _buildDocumentGridCard(
       rs: rs,
       icon: Icons.medication_liquid_outlined,
-      iconColor: const Color(0xFF5B4EA1),
-      iconBackground: const Color(0xFFEDEBF7),
+      iconColor: AppPalette.of(context).color(0xFF5B4EA1),
+      iconBackground: AppPalette.of(context).color(0xFFEDEBF7),
       status: status.toUpperCase(),
       statusColor: primaryGreen,
       title: medName,
@@ -1157,10 +1161,10 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     return _buildDocumentGridCard(
       rs: rs,
       icon: Icons.description_outlined,
-      iconColor: const Color(0xFF8C6826),
-      iconBackground: const Color(0xFFF7F1E6),
+      iconColor: AppPalette.of(context).color(0xFF8C6826),
+      iconBackground: AppPalette.of(context).color(0xFFF7F1E6),
       status: isExpired ? 'EXPIRED' : 'APPROVED',
-      statusColor: isExpired ? const Color(0xFF9B1C1C) : primaryGreen,
+      statusColor: isExpired ? AppPalette.of(context).color(0xFF9B1C1C) : primaryGreen,
       title: (clearance['purpose'] ?? 'Medical clearance').toString(),
       subtitle: 'Valid until ${_formatDate(clearance['expires_at'])}',
       details: [
@@ -1188,7 +1192,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     return Container(
       padding: EdgeInsets.all(rs.w(13)),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppPalette.of(context).surface,
         borderRadius: BorderRadius.circular(rs.r(18)),
         border: Border.all(color: borderColor),
       ),
@@ -1294,7 +1298,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
 
   Widget _buildPrescriptionsList(Rs rs) {
     if (_loadingPrescriptions) {
-      return const Center(
+      return Center(
         child: CircularProgressIndicator(color: primaryGreen),
       );
     }
@@ -1310,7 +1314,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
             Icon(
               Icons.medication_outlined,
               size: rs.w(54).clamp(44.0, 60.0),
-              color: const Color(0xFFA4B0A6),
+              color: AppPalette.of(context).color(0xFFA4B0A6),
             ),
             SizedBox(height: rs.h(12)),
             Center(
@@ -1363,7 +1367,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
               margin: EdgeInsets.only(bottom: rs.h(14)),
               padding: EdgeInsets.all(rs.w(18)),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppPalette.of(context).surface,
                 borderRadius: BorderRadius.circular(rs.r(22)),
                 border: Border.all(color: borderColor),
               ),
@@ -1376,13 +1380,13 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                       Container(
                         padding: EdgeInsets.all(rs.w(8)),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFEDEBF7),
+                          color: AppPalette.of(context).color(0xFFEDEBF7),
                           borderRadius: BorderRadius.circular(rs.r(10)),
                         ),
                         child: Icon(
                           Icons.medication_liquid_outlined,
                           size: rs.w(20),
-                          color: const Color(0xFF5B4EA1),
+                          color: AppPalette.of(context).color(0xFF5B4EA1),
                         ),
                       ),
                       Container(
@@ -1392,8 +1396,8 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                         ),
                         decoration: BoxDecoration(
                           color: status == 'active'
-                              ? const Color(0xFFE5EDE4)
-                              : const Color(0xFFE2EBE1),
+                              ? AppPalette.of(context).color(0xFFE5EDE4)
+                              : AppPalette.of(context).color(0xFFE2EBE1),
                           borderRadius: BorderRadius.circular(rs.r(12)),
                         ),
                         child: Text(
@@ -1403,7 +1407,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                             fontWeight: FontWeight.w700,
                             color: status == 'active'
                                 ? primaryGreen
-                                : const Color(0xFF15803D),
+                                : AppPalette.of(context).color(0xFF15803D),
                           ),
                         ),
                       ),
@@ -1470,7 +1474,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                     ],
                   ),
                   SizedBox(height: rs.h(14)),
-                  const Divider(color: borderColor, height: 1),
+                  Divider(color: borderColor, height: 1),
                   SizedBox(height: rs.h(12)),
 
                   Row(
@@ -1489,7 +1493,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                               ),
                             ),
                             SizedBox(width: rs.w(4)),
-                            const Icon(
+                            Icon(
                               Icons.arrow_forward_rounded,
                               size: 15,
                               color: primaryGreen,
@@ -1521,7 +1525,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
 
   Widget _buildClearancesList(Rs rs) {
     if (_loadingClearances) {
-      return const Center(
+      return Center(
         child: CircularProgressIndicator(color: primaryGreen),
       );
     }
@@ -1537,7 +1541,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
             Icon(
               Icons.verified_user_outlined,
               size: rs.w(54).clamp(44.0, 60.0),
-              color: const Color(0xFFA4B0A6),
+              color: AppPalette.of(context).color(0xFFA4B0A6),
             ),
             SizedBox(height: rs.h(12)),
             Center(
@@ -1585,7 +1589,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
               margin: EdgeInsets.only(bottom: rs.h(14)),
               padding: EdgeInsets.all(rs.w(18)),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppPalette.of(context).surface,
                 borderRadius: BorderRadius.circular(rs.r(22)),
                 border: Border.all(color: borderColor),
               ),
@@ -1598,13 +1602,13 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                       Container(
                         padding: EdgeInsets.all(rs.w(8)),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF7F1E6),
+                          color: AppPalette.of(context).color(0xFFF7F1E6),
                           borderRadius: BorderRadius.circular(rs.r(10)),
                         ),
                         child: Icon(
                           Icons.description_outlined,
                           size: rs.w(20),
-                          color: const Color(0xFF8C6826),
+                          color: AppPalette.of(context).color(0xFF8C6826),
                         ),
                       ),
                       Container(
@@ -1614,8 +1618,8 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                         ),
                         decoration: BoxDecoration(
                           color: isExpired
-                              ? const Color(0xFFFDE8E8)
-                              : const Color(0xFFE2EBE1),
+                              ? AppPalette.of(context).color(0xFFFDE8E8)
+                              : AppPalette.of(context).color(0xFFE2EBE1),
                           borderRadius: BorderRadius.circular(rs.r(12)),
                         ),
                         child: Text(
@@ -1624,8 +1628,8 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                             fontSize: rs.sp(10.5),
                             fontWeight: FontWeight.w700,
                             color: isExpired
-                                ? const Color(0xFF9B1C1C)
-                                : const Color(0xFF15803D),
+                                ? AppPalette.of(context).color(0xFF9B1C1C)
+                                : AppPalette.of(context).color(0xFF15803D),
                           ),
                         ),
                       ),
@@ -1689,7 +1693,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                     ],
                   ),
                   SizedBox(height: rs.h(14)),
-                  const Divider(color: borderColor, height: 1),
+                  Divider(color: borderColor, height: 1),
                   SizedBox(height: rs.h(12)),
 
                   Row(
@@ -1708,7 +1712,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                               ),
                             ),
                             SizedBox(width: rs.w(4)),
-                            const Icon(
+                            Icon(
                               Icons.arrow_forward_rounded,
                               size: 15,
                               color: primaryGreen,
@@ -1740,7 +1744,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
 
   Widget _buildDiagnosticsList(Rs rs) {
     if (_loadingDiagnostics) {
-      return const Center(
+      return Center(
         child: CircularProgressIndicator(color: primaryGreen),
       );
     }
@@ -1756,7 +1760,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
             Icon(
               Icons.biotech_outlined,
               size: rs.w(54).clamp(44.0, 60.0),
-              color: const Color(0xFFA4B0A6),
+              color: AppPalette.of(context).color(0xFFA4B0A6),
             ),
             SizedBox(height: rs.h(12)),
             Center(
@@ -1805,7 +1809,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
             margin: EdgeInsets.only(bottom: rs.h(14)),
             padding: EdgeInsets.all(rs.w(18)),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppPalette.of(context).surface,
               borderRadius: BorderRadius.circular(rs.r(22)),
               border: Border.all(color: borderColor),
             ),
@@ -1819,8 +1823,8 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                       padding: EdgeInsets.all(rs.w(8)),
                       decoration: BoxDecoration(
                         color: isPdf
-                            ? const Color(0xFFFDE8E8)
-                            : const Color(0xFFE0F2FE),
+                            ? AppPalette.of(context).color(0xFFFDE8E8)
+                            : AppPalette.of(context).color(0xFFE0F2FE),
                         borderRadius: BorderRadius.circular(rs.r(10)),
                       ),
                       child: Icon(
@@ -1831,8 +1835,8 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                             : Icons.description_outlined,
                         size: rs.w(20),
                         color: isPdf
-                            ? const Color(0xFF9B1C1C)
-                            : const Color(0xFF0284C7),
+                            ? AppPalette.of(context).color(0xFF9B1C1C)
+                            : AppPalette.of(context).color(0xFF0284C7),
                       ),
                     ),
                     Flexible(
@@ -1865,7 +1869,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                   style: TextStyle(fontSize: rs.sp(12), color: textSub),
                 ),
                 SizedBox(height: rs.h(14)),
-                const Divider(color: borderColor, height: 1),
+                Divider(color: borderColor, height: 1),
                 SizedBox(height: rs.h(12)),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1873,7 +1877,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                     OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
                         foregroundColor: primaryGreen,
-                        side: const BorderSide(color: primaryGreen),
+                        side: BorderSide(color: primaryGreen),
                         shape: const StadiumBorder(),
                         padding: EdgeInsets.symmetric(
                           horizontal: rs.w(16),
@@ -1914,14 +1918,14 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     final isPdf =
         mime.contains('pdf') || fileName.toLowerCase().endsWith('.pdf');
     final isImage = mime.contains('image');
-    final iconColor = isPdf ? const Color(0xFF9B1C1C) : const Color(0xFF0284C7);
+    final iconColor = isPdf ? AppPalette.of(context).color(0xFF9B1C1C) : AppPalette.of(context).color(0xFF0284C7);
     final downloadUrl =
         '${ApiConfig.baseUrl}/api/documents/attachments/${doc['attachment_id']}/download';
 
     return Container(
       padding: EdgeInsets.all(rs.w(13)),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppPalette.of(context).surface,
         borderRadius: BorderRadius.circular(rs.r(18)),
         border: Border.all(color: borderColor),
       ),
@@ -1934,8 +1938,8 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                 padding: EdgeInsets.all(rs.w(7)),
                 decoration: BoxDecoration(
                   color: isPdf
-                      ? const Color(0xFFFDE8E8)
-                      : const Color(0xFFE0F2FE),
+                      ? AppPalette.of(context).color(0xFFFDE8E8)
+                      : AppPalette.of(context).color(0xFFE0F2FE),
                   borderRadius: BorderRadius.circular(rs.r(9)),
                 ),
                 child: Icon(
@@ -1998,7 +2002,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
               onPressed: () => _openDiagnosticDocument(downloadUrl),
               style: OutlinedButton.styleFrom(
                 foregroundColor: primaryGreen,
-                side: const BorderSide(color: primaryGreen),
+                side: BorderSide(color: primaryGreen),
                 shape: const StadiumBorder(),
                 visualDensity: VisualDensity.compact,
                 padding: EdgeInsets.symmetric(vertical: rs.h(5)),
@@ -2033,9 +2037,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       if (res.statusCode != 200) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Could not open file. Please try again.'),
-              backgroundColor: Color(0xFF7A2E26),
+            SnackBar(
+              content: const Text('Could not open file. Please try again.'),
+              backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
             ),
           );
         }
@@ -2047,9 +2051,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       if (dlToken == null || dlToken.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Could not open file. Please try again.'),
-              backgroundColor: Color(0xFF7A2E26),
+            SnackBar(
+              content: const Text('Could not open file. Please try again.'),
+              backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
             ),
           );
         }
@@ -2065,7 +2069,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Network error: $e'),
-            backgroundColor: const Color(0xFF7A2E26),
+            backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
           ),
         );
       }
@@ -2076,7 +2080,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     return Container(
       padding: EdgeInsets.all(rs.w(16)),
       decoration: BoxDecoration(
-        color: const Color(0xFFE2EBE1),
+        color: AppPalette.of(context).color(0xFFE2EBE1),
         borderRadius: BorderRadius.circular(rs.r(20)),
       ),
       child: Row(
@@ -2089,7 +2093,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
               'These are official medical records protected under R.A. 10173. For official credentials or changes to your clinical records, visit the campus infirmary.',
               style: TextStyle(
                 fontSize: rs.sp(12),
-                color: const Color(0xFF424943),
+                color: AppPalette.of(context).color(0xFF424943),
                 height: 1.4,
               ),
             ),

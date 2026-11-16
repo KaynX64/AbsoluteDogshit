@@ -8,3 +8,5 @@ The project guidance is split across the parts below to keep documentation files
 - [`AGENTS-parts/AGENTS-02.md`](AGENTS-parts/AGENTS-02.md) — Cross-module configuration, security and source navigation.
 
 Module guides: [Server](server/AGENTS.md) · [Desktop](desktop/AGENTS.md) · [Mobile](mobile/AGENTS.md).
+
+[Documentation index](DOCUMENTATION.md) · [Codebase overview](CODEBASE-OVERVIEW.md).

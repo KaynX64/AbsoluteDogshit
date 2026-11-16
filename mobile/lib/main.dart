@@ -1,20 +1,18 @@
 // mobile/lib/main.dart
+import 'dart:async';
 import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
+
 import 'screens/splash_screen.dart';
 import 'services/emergency_alert_service.dart';
 import 'services/connectivity_service.dart';
+import 'theme/account_theme_controller.dart';
+import 'theme/app_palette.dart';
+import 'widgets/responder_hub.dart';
 
-@pragma('vm:entry-point')
-Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp();
-  debugPrint("📩 [FCM Background Message]: ${message.notification?.title}");
-}
-
-/// Allows self-signed SSL/TLS certificates even in release mode APK builds.
+/// Allows self-signed TLS certificates in debug builds.
 class DevHttpOverrides extends HttpOverrides {
   @override
   HttpClient createHttpClient(SecurityContext? context) {
@@ -27,93 +25,125 @@ class DevHttpOverrides extends HttpOverrides {
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+void main() {
+  final binding = WidgetsFlutterBinding.ensureInitialized();
 
-// Security Enforcement: Restrict self-signed TLS override strictly to debug mode
+  // Security Enforcement: Restrict self-signed TLS override strictly to debug mode
   if (kDebugMode) {
     HttpOverrides.global = DevHttpOverrides();
   }
-  
-  // Only initialize native Firebase on Android / iOS
-  if (!kIsWeb) {
-    try {
-      await Firebase.initializeApp();
-      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-      debugPrint("🔥 [Firebase] Initialized successfully.");
-    } catch (e) {
-      debugPrint("⚠️ [Firebase] Could not initialize: $e");
-    }
-  } else {
-    debugPrint("🌐 [Firebase] Running on Web - skipping native Firebase setup.");
-  }
-
-  await EmergencyAlertService().initialize();
-  await ConnectivityService().initialize();
 
   runApp(const ValetudoMobileApp());
+  unawaited(
+    binding.waitUntilFirstFrameRasterized.then((_) async {
+      final alerts = EmergencyAlertService();
+      await Future.wait([
+        alerts.initializeFirebase(),
+        alerts.requestNotificationPermission(),
+        ConnectivityService().initialize(),
+      ]);
+    }),
+  );
 }
 
-class ValetudoMobileApp extends StatelessWidget {
-  const ValetudoMobileApp({super.key});
+class ValetudoMobileApp extends StatefulWidget {
+  const ValetudoMobileApp({super.key, this.themeController, this.home});
+  final AccountThemeController? themeController;
+  final Widget? home;
 
-  static const Color primaryGreen = Color(0xFF284E3A);
-  static const Color scaffoldBg = Color(0xFFF7F9F6);
-  static const Color softSage = Color(0xFFE5EDE4);
-  static const Color textMain = Color(0xFF191C1A);
+  @override
+  State<ValetudoMobileApp> createState() => _ValetudoMobileAppState();
+}
+
+class _ValetudoMobileAppState extends State<ValetudoMobileApp>
+    with WidgetsBindingObserver {
+  late final controller =
+      widget.themeController ?? AccountThemeController.instance;
+  late bool _isOnline;
+  final _alerts = EmergencyAlertService();
+  bool _showingNotification = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _alerts.setForeground(
+      WidgetsBinding.instance.lifecycleState == null ||
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed,
+    );
+    _alerts.notificationOpen.addListener(_scheduleIncidentOpen);
+    _isOnline = ConnectivityService().isOnline;
+    ConnectivityService().addListener(_onConnectivityChanged);
+  }
+
+  void _onConnectivityChanged() {
+    final online = ConnectivityService().isOnline;
+    if (online && !_isOnline) {
+      unawaited(controller.refresh());
+      unawaited(_alerts.recover());
+    }
+    _isOnline = online;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _alerts.setForeground(state == AppLifecycleState.resumed);
+    if (state == AppLifecycleState.resumed) {
+      controller.refresh();
+      if (_alerts.notificationOpen.value != null) _scheduleIncidentOpen();
+    }
+  }
+
+  void _scheduleIncidentOpen() {
+    final binding = WidgetsBinding.instance;
+    binding.addPostFrameCallback((_) async {
+      final context = navigatorKey.currentContext;
+      final id = _alerts.notificationOpen.value;
+      if (!mounted ||
+          context == null ||
+          !context.mounted ||
+          id == null ||
+          _showingNotification ||
+          (binding.lifecycleState != null &&
+              binding.lifecycleState != AppLifecycleState.resumed)) {
+        return;
+      }
+      _showingNotification = true;
+      _alerts.notificationOpen.value = null;
+      try {
+        await showResponderIncident(context, id);
+      } finally {
+        _showingNotification = false;
+        if (mounted && _alerts.notificationOpen.value != null) {
+          _scheduleIncidentOpen();
+        }
+      }
+    });
+    binding.ensureVisualUpdate();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _alerts.notificationOpen.removeListener(_scheduleIncidentOpen);
+    ConnectivityService().removeListener(_onConnectivityChanged);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      navigatorKey: navigatorKey,
-      title: 'LeoVital HealthLink',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        scaffoldBackgroundColor: scaffoldBg,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: primaryGreen,
-          primary: primaryGreen,
-          surface: scaffoldBg,
-          onSurface: textMain,
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: scaffoldBg,
-          elevation: 0,
-          scrolledUnderElevation: 0,
-          iconTheme: IconThemeData(color: textMain),
-          titleTextStyle: TextStyle(
-            color: textMain,
-            fontSize: 19,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        navigationBarTheme: NavigationBarThemeData(
-          backgroundColor: scaffoldBg,
-          indicatorColor: softSage,
-          labelTextStyle: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.selected)) {
-              return const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: primaryGreen,
-              );
-            }
-            return const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: Color(0xFF5A635B),
-            );
-          }),
-          iconTheme: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.selected)) {
-              return const IconThemeData(color: primaryGreen);
-            }
-            return const IconThemeData(color: Color(0xFF5A635B));
-          }),
+    return AccountThemeScope(
+      controller: controller,
+      child: ListenableBuilder(
+        listenable: controller,
+        builder: (context, _) => MaterialApp(
+          navigatorKey: navigatorKey,
+          title: 'LeoVital HealthLink',
+          debugShowCheckedModeBanner: false,
+          theme: buildAccountTheme(controller.selection),
+          home: widget.home ?? const SplashScreen(),
         ),
       ),
-      home: const SplashScreen(),
     );
   }
 }
