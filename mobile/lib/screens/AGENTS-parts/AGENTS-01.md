@@ -1,32 +1,29 @@
 <!-- split from mobile/lib/screens/AGENTS.md — part 01 of 02 -->
 # mobile/lib/screens/AGENTS.md — screen map & navigation anchors
 
-Stateful screens use a public `XxxScreen` widget and a private `_XxxScreenState`. The example line numbers below are historical. Re-locate symbols with `rg -n`.
+Stateful screens use a public `XxxScreen` widget and a private `_XxxScreenState`. Re-locate symbols with `rg -n`.
 
 Start with the [code-slice index](../CODESLICE.md) when navigating the patient portal, scheduler, document viewer or SOS service. Use its verified ranges for targeted reads.
 
 ## Shared screen conventions
 
-- Token: `final _storage = const FlutterSecureStorage();` → `await _storage.read(key: 'jwt_token')`. Keys: `jwt_token`, `user_data` (written at login, login_screen L54-55).
+- Token: `final _storage = const FlutterSecureStorage();` → `await _storage.read(key: 'jwt_token')`. Keys: `jwt_token`, `user_data` (written by `_handleLogin`).
 - HTTP: `ApiConfig.client` / `http.post` + `Uri.parse('${ApiConfig.baseUrl}/api/...')`, header `{'Authorization': 'Bearer $token'}`, `if (!mounted) return;` after every await. `ApiConfig.baseUrl` is the single host definition (`lib/config/api_config.dart`) — screens must not hardcode hosts.
-- Sockets: `IO.io(ApiConfig.socketUrl, ...)` in `_initXxxSocket` with the JWT in `auth`; always `disconnect()` in `dispose()`.
+- Screen-owned sockets use `ApiConfig.socketUrl` with the JWT in `auth` and disconnect in `dispose()`. The authenticated alert service owns its own socket.
 - UI style: `_pillInputDecoration()` — each screen defines its own copy (dedupe candidate, but keep visual parity when touching one). Toasts via `SnackBar`.
-- Role routing: login sends `EMERGENCY_RESPONDER` → `ResponderScreen`, everyone else → `PatientPortalScreen` (login L64-70); splash re-validates the saved session and routes the same way (`_routeUser` L83).
+- Role routing: login sends `EMERGENCY_RESPONDER` → `ResponderScreen`, everyone else → `PatientPortalScreen`; splash re-validates the saved session and routes the same way through `_routeUser`.
 - After any await before `setState`/`Navigator`: keep the `mounted` guard — silent background failures in Flutter throw otherwise.
 - Server enforces RBAC/consent; any role gating in screens is UX only.
 - Appearance comes from `AccountThemeScope` above the navigator and the context-derived `AppPalette`. Screen color getters must stay reactive. Preserve semantic emergency actions and QR contrast. Both role headers use the shared `AccountSettingsButton` gear. See [account appearance guidance](../../../AGENTS.md#account-appearance-and-settings).
 
 ## Screens
 
-### patient_portal_screen.dart — 3,103 lines / 123 KB. The main patient hub (3 tabs)
-- **Slice map:** `codeslice/MB-01-PatientPortalScreen-parts/` (60 slices, 2 parts, verified @ 93b4172).
-- `_PatientIdentity` model L32; screen state L144.
-- **Consent (RA 10173 gate)**: `_checkPrivacyConsent` L252 (`GET /api/privacy/status`), `_recordConsent` L270 (POST consent), `_revokeConsent` L301, consent modal `_showConsentModal` L324, revoke dialog L405. The portal blocks on this at startup.
-- **Queue**: `_initQueueSocket` L447 (socket `queue:updated` L458 → refetch), `_fetchActiveQueueTicket` L464 (`GET /api/appointments/queue/my`), active-queue card L1759.
-- **QR health pass**: `_fetchQRPass` L495 (`GET /api/health-pass/token`).
-- **Profile**: `_fetchProfile` L510 (`GET /api/profile/me`), profile tab L2328.
-- The Overview's dark `YOUR HEALTH AT A GLANCE` card keeps its heading, heart and menu icons white in both modes. Do not use the global surface text color on this dark card.
-- **SOS**: hold-to-trigger button `_startHold` L591 (progress `ValueNotifier` L163, `_sosConsent` gate), `_triggerEmergencySOS` L631 (`POST /api/emergency/sos` L673), confirmation dialog L703; offline SOS queueing `_replayQueuedSosEvents` L208 (replayed on reconnect).
-- **Responder Hub**: The health pass and profile cards show the live Qualified Responder badge with the hub button below it. `ActiveIncidentBanner` stays below the header and opens the shared incident detail.
-- **Offline**: `_onConnectivityChanged` L203, banner L853, call-button L2285, SMS-button L2305.
-- Sign out goes through the shared alert session to release the installation or legacy FCM token. Tabs: overview L1070 · SOS L1860 · profile L2328; bottom nav L886, SOS nav item L1014.
+### patient_portal_screen.dart — patient hub
+
+- [Slice map](../CODESLICE.md#quick-index) (MB-01). The five destinations are Overview, Appointments, SOS, Documents and Profile.
+- Consent uses `_checkPrivacyConsent`, `_recordConsent` and `_revokeConsent`. The portal raises the required consent modal on startup when consent is missing.
+- `_initQueueSocket` calls `_fetchActiveQueueTicket` on `queue:updated`. The same fetch runs on a 30-second poll. `_fetchQRPass` loads the dynamic health pass and `_fetchProfile` loads profile data and caches emergency information.
+- The Overview's dark `YOUR HEALTH AT A GLANCE` card keeps its heading, heart and menu icons white in both modes. Use the card's own foreground colors.
+- `_startHold` checks `_sosConsent` before starting the hold timer. `_triggerEmergencySOS` submits the location online or queues the SOS and opens the dialer offline. `_onConnectivityChanged` triggers `_replayQueuedSosEvents` on reconnection.
+- The health pass and profile cards display the live Qualified Responder badge when applicable, with a Responder Hub entry for eligible accounts. `ActiveIncidentBanner` below the header opens the shared incident detail.
+- `_handleSignOut` confirms manual sign-out before the shared alert session releases the installation or legacy FCM token. `_signOut` clears the JWT and saved user data.

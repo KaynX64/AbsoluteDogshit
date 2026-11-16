@@ -31,3 +31,12 @@ Each API area exports a router or a factory. Feature folders compose their route
 | Analytics | `dashboard.js` and `exports.js` share `src/analytics/reportQueries.js`. The dashboard reads formulary activity and reorder priorities from `src/inventory/pharmacyAnalytics.js`. CSV, Excel, and PDF rendering lives in `src/analytics/reports/`. The entry point applies the shared analytics access gate. |
 | Inventory | `overview.js` for catalog, stock views and logs. Reorder suggestions sort by usable stock, lowest first, and use recent net dispensing and prescribing to break stock ties. `receiving.js` handles deliveries, `formulary.js` catalog writes, and `stock.js` deductions and adjustments. |
 
+## Admin operations and presence
+
+- Admin audit endpoints accept optional `before` and `limit` parameters. Results remain descending arrays ordered by ID. Pass the last ID as `before` for the next page. The default limit is 100. PHI rows include the viewer’s current role list and one row per access event. Worker metrics are included in `/api/admin/telemetry` under the existing telemetry grant.
+- Terminal routes are mounted under `/api/admin/operations`. `TERMINAL_VIEW` grants Limited Admin access to status and built-in diagnostics. Restart requires Super Admin access and `npm start`.
+- Admin System Health reads live Socket.IO presence from `GET /api/admin/connected-users` with `TELEMETRY_VIEW`. The response covers this server process, groups windows by sign-in session, and exposes token issue time and earliest currently connected socket time.
+
+## Responder delivery
+
+The consent-independent `GET /api/emergency/responder-access` reports live eligibility, qualification and tier. The open roster includes a persisted `formattedAddress` when available. Status changes use a conditional forward transition. Authenticated `POST /api/profile/fcm-token` accepts Android `installation_id` and `sos_mode` together. `src/emergency/deviceDelivery.js` maintains one token per upgraded installation, routes On duty and Quiet to separate Android notification channels, and omits Off duty installations from SOS push. Upgraded SOS pushes carry the incident ID for an authenticated refresh. Logout and password change remove the matching registration for the caller. See the [migration rollout](../../../MIGRATION-PLAN.md#fresh-and-existing-databases).

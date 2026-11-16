@@ -22,6 +22,6 @@ Use this index to find the current guide for a task. Confirm behavior against so
 
 - [Codebase review](CODEBASE-REVIEW.md) — dated assessment and checks performed.
 - [Server structure review](server/STRUCTURE-REVIEW.md) — past refactor and remaining follow-up.
-- [Security audit](audit.md) — historical report; findings require revalidation.
+- `audit.md`, when available locally, is an ignored historical report. Revalidate findings against the current implementation.
 
 Keep documentation near its owner. Update the authoritative split part when its index points to one; do not edit generated build output.

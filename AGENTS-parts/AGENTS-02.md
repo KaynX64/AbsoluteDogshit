@@ -9,7 +9,7 @@
 
 ## Security invariants
 
-Confirm current behavior from the implementation and tests. The [security audit](../audit.md) is a historical snapshot, not a current vulnerability assessment.
+Confirm current behavior from the implementation and tests. If the ignored `audit.md` is present locally, treat it as a historical snapshot.
 
 - TLS is required by default. Keep `ALLOW_INSECURE_HTTP=true` for isolated local testing.
 - Never widen CORS to `cors()` allow-all — that was the vulnerability.
@@ -25,7 +25,7 @@ Confirm current behavior from the implementation and tests. The [security audit]
 - Skip lockfiles, dependencies and generated output during source navigation. Inspect a specific file when it is needed to diagnose installation, packaging or platform configuration. Use Git commands for history. The [mobile guide](../mobile/AGENTS.md) lists platform files routinely maintained by hand.
 - Use the [desktop slice index](../desktop/docs/CODESLICE.md) and [mobile slice index](../mobile/lib/screens/CODESLICE.md) to locate sections of large files. Prefer symbol searches with `rg -n` when line numbers drift. After a mapped source edit, update its slice map and run `python scripts/verify_codeslice.py desktop/docs/codeslice mobile/lib/screens/codeslice .` from the repository root.
 - **Large files — search, don't read whole.** `rg` the symbol, then read a ±40-line window:
-  `DoctorConsole.tsx` · `AdminConsole.tsx` · `InventoryManager.tsx` · `NurseConsole.tsx` · `QrIntakeScanner.tsx` (paths in the desktop slice index) · `mobile/lib/screens/patient_portal_screen.dart` ~123 KB.
+  `DoctorConsole.tsx` · `AdminConsole.tsx` · `InventoryManager.tsx` · `NurseConsole.tsx` · `QrIntakeScanner.tsx` (paths in the desktop slice index) · `mobile/lib/screens/patient_portal_screen.dart`.
 - Task routing: auth/session ⇒ `server/src/auth/`; API endpoints ⇒ [server route map](../server/src/routes/AGENTS.md); desktop UI ⇒ `desktop/src/features/`; Electron window, TLS and updates ⇒ `desktop/electron/window.cjs`, `certificatePolicy.cjs` and `updates.cjs`; offline queue ⇒ [desktop storage guide](../desktop/AGENTS-parts/AGENTS-02.md#offline-storage) and [server route map](../server/src/routes/AGENTS.md); mobile screen ⇒ `mobile/lib/screens/`; infra/env ⇒ `server/.env.example` + `docker-compose.yml`.
 - Conventions: `server/` is ESM-only (`"type":"module"` — never `require`); Electron main is CJS (`.cjs`); renderer is TypeScript; mobile is Dart; MySQL table names are UPPERCASE.
 

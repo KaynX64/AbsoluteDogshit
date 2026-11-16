@@ -56,7 +56,7 @@ The server also schedules appointment reminders, no-show transitions and prescri
 
 [schema.sql](server/schema.sql) defines 33 base tables, plus a separate migration ledger created by the runner. The groups cover identity/roles, profiles/consent, appointments/queues, encounters/vitals/dental charts, prescriptions/inventory, emergencies/incidents, audit logs and operational policy. The schema script recreates tables; existing installations use migrations.
 
-SOS captures a location and notifies eligible recipients through realtime and push channels. Non-clinical community responders receive reduced payloads without medical details. Closing an alert leads into incident documentation and an official report PDF.
+SOS captures a location and notifies eligible recipients through realtime and push channels. Non-clinical community responders receive reduced payloads without medical details. On Android, an eligible responder can choose On duty, Quiet or Off duty for the installation. The shared mobile roster reconciles open incidents through the API, and responders can refresh it manually while off duty. Closing an alert leads into incident documentation and an official report PDF. [Responder Hub guide](mobile/README.md#responder-hub-on-android)
 
 Desktop offline support caches patient/encounter data and queues supported clinical changes in encrypted SQLite. Reconnection replays the signed-in account's changes through server transactions with duplicate detection and conflict handling. It does not make every feature available offline; attachment uploads require connectivity.
 

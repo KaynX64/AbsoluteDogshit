@@ -1,11 +1,11 @@
 # MB-03 · documents_viewer_screen.dart
 
-Mobile screens slice map · [index](../CODESLICE.md) · base commit `93b4172` · check from repo root: `python3 scripts/verify_codeslice.py mobile/lib/screens/codeslice .`
+Mobile screens slice map · [index](../CODESLICE.md) · check from repo root: `python3 scripts/verify_codeslice.py mobile/lib/screens/codeslice .`
 
 ## MB-03 · mobile/lib/screens/documents_viewer_screen.dart
-**LOC:** 2105 · **Anchor verification:** current account-theme working tree · **Role:** Documents viewer: prescriptions, medical clearances, lab/imaging attachments with QR seals, PDF download, and content-sized grid layouts.
+**LOC:** 2105 · **Anchor commit:** 89b8380 · **Role:** Documents viewer: prescriptions, medical clearances, lab/imaging attachments with QR seals, PDF download, and content-sized grid layouts.
 **Mounted by:** PatientPortalScreen, patient_portal_screen.dart (portal tab 4 of 5)
-**API surface:** GET /api/documents/prescriptions/my; GET /api/documents/clearances/my; GET /api/documents/attachments/my; GET /api/documents/{kind}/{id}/pdf; POST /api/documents/attachments/{id}/download-token; GET /api/documents/attachments/{id}/download?dlToken (L2059 via launchUrl); QR encodes /api/documents/verify/{qrToken} (L203,)
+**API surface:** GET /api/documents/prescriptions/my; GET /api/documents/clearances/my; GET /api/documents/attachments/my; GET /api/documents/{kind}/{id}/pdf; POST /api/documents/attachments/{id}/download-token; GET /api/documents/attachments/{id}/download?dlToken (L2059 via launchUrl); prescription and clearance QR seals encode /api/documents/verify/{qrToken}
 **Socket events:** none
 **State / key fields:** tabs/layout: _selectedSubTab (0 prescriptions, 1 clearances, 2 lab and imaging), _isGridView (list/grid)
 data: _prescriptions, _clearances, _diagnosticAttachments (+ _loadingPrescriptions/_loadingClearances/_loadingDiagnostics)

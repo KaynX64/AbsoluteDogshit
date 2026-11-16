@@ -4,23 +4,21 @@
 
 `server/src/index.js` composes Express, HTTPS and Socket.IO. Startup applies versioned migrations, loads server policy, and checks Redis and MinIO before listening. The listener then starts the appointment reminder, no-show, prescription expiry, and PDF backfill jobs. SIGINT and SIGTERM drain active requests and jobs before closing shared dependencies. Redis is cache-aside with in-memory rate-limit fallbacks, and MinIO provides path-style S3 storage.
 
-`emergency.js` on `Stage1` imports `generateAndStoreIncidentReportPDF`, `getBufferFromS3` and the responder-access helpers. Its SOS limiter increments `ratelimit:sos:<id>`, sets `X-RateLimit-Remaining` and `Retry-After`, and uses `SOS_LIMIT` from `src/config/limits.js`.
+`server/src/routes/emergency/sos.js` owns SOS creation and dispatch. The responder access service resolves the current audience, and device delivery selects the Android notification channel or retains the legacy path. [Server route map](../server/src/routes/AGENTS.md)
 
 ### Desktop
 
-`desktop/electron/main.cjs` is the main process: `BrowserWindow`, TLS/certificate policy, IPC handlers, native `node:sqlite`, printing/notifications and `electron-updater`. `desktop/electron/preload.cjs` exposes a narrow `electronAPI` through `contextBridge`. The renderer in `desktop/src/` switches between `NurseConsole`, `DoctorConsole`, `AdminConsole` and `ResponderConsole`; `IncidentReportModal.tsx` and `IncidentRecords.tsx` implement the new incident workflow; `services/offlineSync.ts` prefers Electron IPC/SQLite and falls back to `localStorage`.
-
-`desktop/AGENTS.md` flags the **build-time `app-config.json` `apiBaseUrl` gotcha**: set the API origin before building the installer, not after.
+`desktop/electron/main.cjs` composes the window, certificate policy, updater and IPC registration. The preload exposes `window.electronAPI` through `contextBridge`. The renderer starts loading the shared staff console bundle while sign-in is idle and waits for it before opening the staff workspace. `src/platform/offline/` coordinates the encrypted cache and mutation queue through Electron IPC. Rebuild the renderer after editing `app-config.json` to retarget packaged REST and Socket.IO requests. [Desktop architecture guide](../desktop/AGENTS.md)
 
 ### Mobile
 
-`mobile/lib/main.dart` initializes Flutter, Firebase/FCM (native platforms only), `EmergencyAlertService`, `ConnectivityService`, session timeout handling and the app. `mobile/AGENTS.md` flags the **hardcoded API host** in `lib/config/api_config.dart`; replace it for emulators, LAN devices and deployment. `lib/screens/` holds the large patient/responder screens that the `MB-*` slice maps describe.
+`mobile/lib/main.dart` renders the app before starting Firebase, Android notification setup and connectivity monitoring. An authenticated alert session handles responder eligibility, realtime delivery and incident refresh after sign-in or saved-session validation. Set the source-configured API host for the device or emulator. [Mobile setup](../mobile/README.md#configure-and-run)
 
 ### Core flows
 
 - **Offline write:** renderer queues an `OfflineMutation` → IPC → SQLite `LOCAL_SYNC_LOGS` → replay to `/api/sync/*` when online. Updated desktops page through `/api/sync/bootstrap?paging=1` and advance their checkpoint after SQLite saves every page.
 - **SOS → incident:** mobile sends coordinates → `EMERGENCY_ALERTS` → FCM + Socket.IO → responder action → `INCIDENT_REPORTS` → `documentService` PDF → MinIO → `IncidentRecords` review/save/print.
-- **Document verification:** PDF/signature stored in MinIO → QR points at `PUBLIC_API_BASE_URL` → public verification page → Redis nonce claimed atomically → single successful verification.
+- **Document verification:** PDF/signature stored in MinIO → QR points at `PUBLIC_API_BASE_URL` → rate-limited public document verification. The separate health pass uses a single-use nonce claimed in Redis when available.
 
 ---
 
@@ -28,26 +26,19 @@
 
 ### MySQL — `server/schema.sql`
 
-`schema.sql` is a **full drop-and-recreate script**: `CREATE DATABASE IF NOT EXISTS valetudo_healthlink`, `USE`, `SET FOREIGN_KEY_CHECKS = 0`, a list of `DROP TABLE IF EXISTS` statements, then `CREATE TABLE` statements. Character set is `utf8mb4` / `utf8mb4_unicode_ci`; the header cites R.A. 10173 compliance.
+`schema.sql` is a **full drop-and-recreate script**: `CREATE DATABASE IF NOT EXISTS valetudo_healthlink`, `USE`, `SET FOREIGN_KEY_CHECKS = 0`, a list of `DROP TABLE IF EXISTS` statements, then `CREATE TABLE` statements. The database uses `utf8mb4` / `utf8mb4_unicode_ci`.
 
-> **Count correction:** the `DROP TABLE` list on `Stage1` names **30 tables**, including the new `INCIDENT_REPORTS`. Root `AGENTS.md` still describes a **“29-table schema”** ; that line is stale and should be updated before merging.
+The baseline defines 33 tables. The migration runner creates `SCHEMA_MIGRATIONS` separately. Use the versioned migration command for existing databases. [Migration rollout](../server/MIGRATION-PLAN.md)
 
 | Domain | Tables |
 | --- | --- |
-| Identity & access | `USERS`, `ROLES`, `USER_ROLES`, `ADMIN_PERMISSIONS`, `USER_ADMIN_PERMISSIONS` |
+| Identity & access | `USERS`, `ROLES`, `USER_ROLES`, `ADMIN_PERMISSIONS`, `USER_ADMIN_PERMISSIONS`, `STAFF_ANALYTICS_PERMISSIONS` |
 | Population profiles | `STUDENT_PROFILES`, `FACULTY_PROFILES`, `NON_TEACHING_PROFILES`, `STAFF_PROFILES` |
 | Health, consent, devices | `HEALTH_PROFILES`, `CONSENT_RECORDS`, `DEVICE_TOKENS` |
-| Scheduling | `APPOINTMENTS`, `QUEUE` |
+| Scheduling | `APPOINTMENTS`, `QUEUE`, `QUEUE_TICKET_COUNTERS` |
 | EMR | `EMR_RECORDS`, `VITAL_SIGNS`, `DENTAL_CHARTS`, `EMR_ATTACHMENTS` |
 | Pharmacy & inventory | `MEDICINES`, `MEDICINE_BATCHES`, `INVENTORY_LOGS`, `DRUG_INTERACTIONS`, `PRESCRIPTIONS`, `PRESCRIPTION_ITEMS` |
 | Clearances | `MEDICAL_CLEARANCES` |
 | Emergency | `EMERGENCY_ALERTS`, `INCIDENT_REPORTS` |
 | Audit & sync | `AUDIT_LOGS`, `PHI_ACCESS_LOGS`, `LOCAL_SYNC_LOGS` |
-
-`Stage1` schema/migration additions visible in the commit history and route imports:
-
-- `HEALTH_PROFILES`: `sex`, `date_of_birth`, computed `bmi`; `getBmiCategory()` classifies BMI.
-- `PRESCRIPTIONS`: `expires_at`, plus PDF/version/soft-delete metadata columns.
-- `PRESCRIPTION_ITEMS`: `quantity_prescribed` replaces `quantity_dispensed`, with validation.
-- `INCIDENT_REPORTS`: new table plus `db.js` auto-migration.
-- Column drift such as `signature_metadata`, `pdf_s3_key`, `version`, `deleted_at` and `signature_s3_key` is handled by boot auto-migrations; backfills were added for the new health/prescription fields.
+| Operational policy | `SERVER_POLICY` |

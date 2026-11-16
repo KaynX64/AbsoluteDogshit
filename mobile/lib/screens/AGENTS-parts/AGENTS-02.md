@@ -1,32 +1,32 @@
 <!-- split from mobile/lib/screens/AGENTS.md — part 02 of 02 -->
 
-### consultation_scheduler_screen.dart — 1,695 lines / 58 KB. Booking + history (2 tabs)
-- **Slice map:** `codeslice/MB-02-ConsultationSchedulerScreen.md` (see the code-slice index for verified ranges).
-- Data: `_fetchDoctors` L427 (`GET /api/appointments/doctors`), `_fetchAvailableSlots` L453 (`GET /api/appointments/slots?doctorId=&date=`), `_fetchMyAppointments` L482, `_submitBooking` L500 (POST), `_cancelAppointment` L616 (`PATCH /api/appointments/:id/cancel`).
-- Slots refresh live: `_initSlotSocket` L149 — socket `appointment:booked` L161 / `appointment:cancelled` L166 → refetch slots for the selected doctor/date.
+### consultation_scheduler_screen.dart — booking and history
+- [Slice map](../codeslice/MB-02-ConsultationSchedulerScreen.md).
+- Data: `_fetchDoctors` (`GET /api/appointments/doctors`), `_fetchAvailableSlots` (`GET /api/appointments/slots?doctorId=&date=`), `_fetchMyAppointments`, `_submitBooking` (POST), `_cancelAppointment` (`PATCH /api/appointments/:id/cancel`).
+- `_initSlotSocket` refetches slots for the selected clinician and date on `appointment:booked` or `appointment:cancelled`.
 - Booking requires the themed, scrollable `widgets/appointment_booking_review.dart` dialog before POST. Snapshot the selected care team, purpose, date/time and trimmed notes; submit only after explicit confirmation. Edit/back/dismiss preserve the draft. `_isReviewing` prevents duplicate dialogs; `_isSubmitting` prevents duplicate requests. A slot refresh during review invalidates the snapshot and requires a new selection/review. `appointment_booking_review_test.dart` covers this flow and all palettes in light/dark at 320dp and 200% text.
 - All choice states use theme surfaces and paired foregrounds, including available/unavailable slots and unselected cards. Keep `onPrimary` on selected dates, slots and tabs. The date picker inherits the account theme. `mobile_appearance_test.dart` supplies an optional HTTP client and tests the rendered choices in all modes/presets.
-- Lifecycle: app-lifecycle listener L143 (reconnect socket). UI: booking tab L897 · doctor list L1016 · purpose chips L1098 · date carousel L1187 · slot grid L1303 · history tab L1422.
+- The app lifecycle listener reconnects the slot socket. History supports list and grid layouts.
 
-### documents_viewer_screen.dart — 1,576 lines / 62 KB. Prescriptions / clearances / diagnostics (3 sub-tabs)
-- **Slice map:** `codeslice/MB-03-DocumentsViewerScreen.md` (31 slices, verified @ 93b4172).
-- Fetches: prescriptions L55, clearances L70, diagnostics/attachments L85 (`GET /api/documents/{prescriptions,clearances,attachments}/my`).
-- PDF: `_downloadAndOpenPdf` L109 (`GET /api/documents/$kind/$id/pdf`, opens via `open_filex`); attachment download L1379.
-- Embedded QR verification view (for scanned docs): L177 and L532 (`GET /api/documents/verify/$qrToken`).
-- Lists: prescriptions L918 · clearances L1126 · diagnostics L1327; modals: prescription L174, clearance certificate L529.
+### documents_viewer_screen.dart — prescriptions, clearances and diagnostics
+
+- [Slice map](../codeslice/MB-03-DocumentsViewerScreen.md). Each tab supports list and grid layouts.
+- `_fetchPrescriptions`, `_fetchClearances` and `_fetchDiagnostics` read `GET /api/documents/{prescriptions,clearances,attachments}/my`.
+- `_downloadAndOpenPdf` retrieves a protected PDF and opens it through `open_filex`. `_openDiagnosticDocument` handles attachment downloads.
+- The prescription and clearance previews encode a public `/api/documents/verify/:qrToken` link in the QR seal.
 
 ### responder_screen.dart — dedicated responder route
 - [Slice map](../codeslice/MB-04-ResponderScreen.md). The screen hosts the shared `ResponderHub` and retains account settings and sign-out. The authenticated alert session serves both responder routes and reconciles incidents independently of screen lifetime.
 
 ### change_password_screen.dart
-- **Slice map:** `codeslice/MB-05-ChangePasswordScreen.md`.
+- [Slice map](../codeslice/MB-05-ChangePasswordScreen.md).
 - `_validateNewPassword` mirrors the server's length and character-group requirements. `_submit` calls `PUT /api/auth/change-password` and directs field errors to the relevant control. `_returnToSignIn` clears session state after success.
 
-### edit_profile_screen.dart — 398 lines / 14 KB
-- `_saveProfile` L64 → `PUT /api/profile/me` L80. Loads profile in `initState` L41.
+### edit_profile_screen.dart
+- `initState` initializes the form with the supplied profile. `_saveProfile` calls `PUT /api/profile/me`.
 
-### login_screen.dart — 426 lines / 16 KB
-- **Slice map:** `codeslice/MB-06-LoginScreen.md` (14 slices, verified @ 93b4172).
+### login_screen.dart
+- [Slice map](../codeslice/MB-06-LoginScreen.md).
 - `_handleLogin` persists the JWT and user, binds the account theme and starts the shared alert session. Device registration runs asynchronously.
 - After storing the session, bind its account theme through `AccountThemeScope` before navigation. Never carry the previous account's theme into a new sign-in.
 

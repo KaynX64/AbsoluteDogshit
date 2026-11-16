@@ -1,9 +1,9 @@
 # MB-02 · consultation_scheduler_screen.dart
 
-Mobile screens slice map · [index](../CODESLICE.md) · base commit `93b4172` · check from repo root: `python3 scripts/verify_codeslice.py mobile/lib/screens/codeslice .`
+Mobile screens slice map · [index](../CODESLICE.md) · check from repo root: `python3 scripts/verify_codeslice.py mobile/lib/screens/codeslice .`
 
 ## MB-02 · mobile/lib/screens/consultation_scheduler_screen.dart
-**LOC:** 2136 · **Anchor verification:** current booking-review UI working tree · **Role:** Appointment booking and cancellation screen (Book a consultation + My appointments tabs) with live slot sync and content-sized list/grid history layouts.
+**LOC:** 2136 · **Anchor commit:** f8d61a1 · **Role:** Appointment booking and cancellation screen (Book a consultation + My appointments tabs) with live slot sync and content-sized list/grid history layouts.
 **Mounted by:** PatientPortalScreen, patient_portal_screen.dart (portal tab 2 of 5)
 **API surface:** GET /api/appointments/doctors; GET /api/appointments/slots?doctorId&date; GET /api/appointments/my; POST /api/appointments; PATCH /api/appointments/{id}/cancel
 **Socket events:** on appointment:booked, on appointment:cancelled — both refetch slots; no emits
