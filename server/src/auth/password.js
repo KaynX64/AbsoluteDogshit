@@ -8,13 +8,14 @@ import { logAudit } from '../utils/auditLogger.js';
 import { redis, isRedisActive } from '../utils/redisClient.js';
 import { evaluatePasswordStrength } from '../utils/passwordPolicy.js';
 import { sessionBlocklistKey } from './session.js';
+import { removePushDevice } from '../emergency/deviceDelivery.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // CHANGE PASSWORD
 // ─────────────────────────────────────────────────────────────────────────
 export async function changePassword(req, res, io) {
   const userId = req.user.user_id;
-  const { currentPassword, newPassword, fcm_token: deviceToken } = req.body;
+  const { currentPassword, newPassword } = req.body;
 
   if (!currentPassword || !newPassword) {
     return res.status(400).json({ error: 'Current password and new password are required.' });
@@ -87,12 +88,7 @@ export async function changePassword(req, res, io) {
       );
       if (update.affectedRows === 0) return false;
 
-      if (typeof deviceToken === 'string' && deviceToken.trim()) {
-        await connection.query(
-          'DELETE FROM DEVICE_TOKENS WHERE user_id = ? AND fcm_token = CAST(? AS BINARY)',
-          [userId, deviceToken.trim()],
-        );
-      }
+      await removePushDevice(connection, userId, req.body);
 
       await logAudit(connection, {
         userId,

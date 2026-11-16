@@ -195,9 +195,12 @@ CREATE TABLE `DEVICE_TOKENS` (
   `user_id` BIGINT NOT NULL,
   `fcm_token` VARCHAR(512) NOT NULL UNIQUE,
   `device_type` VARCHAR(50) NOT NULL DEFAULT 'android',
+  `installation_id` CHAR(32) NULL,
+  `sos_mode` ENUM('on_duty','quiet','off_duty') NOT NULL DEFAULT 'on_duty',
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX `idx_device_user` (`user_id`),
+  UNIQUE KEY `uq_device_installation` (`installation_id`),
   CONSTRAINT `fk_device_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
@@ -523,6 +526,7 @@ CREATE TABLE `EMERGENCY_ALERTS` (
   `acknowledged_at` TIMESTAMP NULL DEFAULT NULL,
   `resolved_at` TIMESTAMP NULL DEFAULT NULL,
   `response_time_seconds` INT NULL DEFAULT NULL,
+  `location_label` VARCHAR(512) NULL,
   `notes` TEXT NULL,
   SPATIAL INDEX `sp_idx_alert_location` (`location`),
   CONSTRAINT `fk_ea_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`),

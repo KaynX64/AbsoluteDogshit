@@ -91,7 +91,7 @@ export async function getResponderAudience({ excludeUserId = null } = {}) {
 /**
  * Live access check for ONE user (flag OR legacy role), including the
  * is_active / deleted_at guards the JWT never carries.
- * Returns { authorized, tier }.
+ * Returns { authorized, tier, isQualifiedResponder }.
  */
 export async function resolveResponderAccess(userId) {
   const [rows] = await pool.query(
@@ -99,7 +99,7 @@ export async function resolveResponderAccess(userId) {
      FROM USERS u WHERE u.user_id = ?`,
     [userId]
   );
-  if (rows.length === 0) return { authorized: false, tier: null };
+  if (rows.length === 0) return { authorized: false, tier: null, isQualifiedResponder: false };
 
   const [roleRows] = await pool.query(
     `SELECT r.code FROM USER_ROLES ur INNER JOIN ROLES r ON ur.role_id = r.role_id
@@ -114,7 +114,7 @@ export async function resolveResponderAccess(userId) {
   const tier = authorized
     ? resolveResponderTier({ isQualifiedResponder: flagged, roles })
     : null;
-  return { authorized, tier };
+  return { authorized, tier, isQualifiedResponder: isActive && flagged };
 }
 
 /**

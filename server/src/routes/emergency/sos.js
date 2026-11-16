@@ -3,7 +3,7 @@
 import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth/middleware.js';
 import { decrypt } from '../../utils/cryptoVault.js';
-import { sendPushToUsers } from '../../utils/fcmNotifier.js';
+import { sendSosPush } from '../../utils/fcmNotifier.js';
 import { logAudit } from '../../utils/auditLogger.js';
 import { redis, isRedisActive, invalidateCache } from '../../utils/redisClient.js';
 import { getServerPolicy } from '../../config/serverPolicy.js';
@@ -54,10 +54,11 @@ async function resolveCampusAddress(lat, lng) {
   if (process.env.GOOGLE_MAPS_API_KEY) {
     try {
       const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: AbortSignal.timeout(1_500) });
       const data = await response.json();
       if (data.results && data.results.length > 0) {
-        return data.results[0].formatted_address;
+        const address = data.results[0].formatted_address;
+        if (typeof address === 'string' && address.trim()) return address.trim().slice(0, 512);
       }
     } catch (_) {}
   }
@@ -69,15 +70,15 @@ async function resolveCampusAddress(lat, lng) {
 
   if (dLat < 0.005 && dLng < 0.005) {
     if (lat >= 16.0298 && lng >= 120.2285) {
-      return 'PSU Lingayen - Science & Technology Complex / East Grounds';
+      return 'Near PSU Lingayen - Science & Technology Complex / East Grounds';
     } else if (lat < 16.0298 && lng < 120.2285) {
-      return 'PSU Lingayen - University Infirmary & Student Pavilion';
+      return 'Near PSU Lingayen - University Infirmary & Student Pavilion';
     } else {
-      return 'PSU Lingayen - Administration Building / Library Quadrangle';
+      return 'Near PSU Lingayen - Administration Building / Library Quadrangle';
     }
   }
 
-  return `Pangasinan State University - Lingayen (${lat.toFixed(5)}, ${lng.toFixed(5)})`;
+  return null;
 }
 
 export function registerSosRoutes(router, io) {
@@ -101,7 +102,7 @@ export function registerSosRoutes(router, io) {
       }
 
       const formattedAddress = await resolveCampusAddress(lat, lng);
-      const enrichedNotes = `${notes || 'Emergency SOS pressed'} · Loc: ${formattedAddress}`;
+      const enrichedNotes = `${notes || 'Emergency SOS pressed'} · Loc: ${formattedAddress ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`}`;
 
       const connection = await pool.getConnection();
       let alertId;
@@ -111,9 +112,9 @@ export function registerSosRoutes(router, io) {
 
         // 1. Insert Emergency Alert
         const [insertResult] = await connection.query(
-          `INSERT INTO EMERGENCY_ALERTS (user_id, location, status, notes)
-           VALUES (?, ST_SRID(POINT(?, ?), 4326), 'triggered', ?)`,
-          [userId, lng, lat, enrichedNotes]
+          `INSERT INTO EMERGENCY_ALERTS (user_id, location, status, notes, location_label)
+           VALUES (?, ST_SRID(POINT(?, ?), 4326), 'triggered', ?, ?)`,
+          [userId, lng, lat, enrichedNotes, formattedAddress]
         );
 
         alertId = insertResult.insertId;
@@ -201,22 +202,10 @@ export function registerSosRoutes(router, io) {
       //    served a payload tiered for their access level.
       const audience = await getResponderAudience({ excludeUserId: userId });
 
-      // 2. Dispatch Firebase Cloud Messaging (FCM) background push.
-      //    Lock-screen privacy: the push carries the ADDRESS only — no
-      //    medical details and no victim name for any recipient tier.
-      sendPushToUsers(
-        audience.map((r) => r.userId),
-        {
-          title: `🚨 EMERGENCY SOS at ${formattedAddress}`,
-          body: 'A campus member triggered an SOS. Open the app for details and dispatch.',
-          data: {
-            alertId: String(alertId),
-            type: 'EMERGENCY_SOS',
-            latitude: String(lat),
-            longitude: String(lng),
-          },
-        }
-      ).catch((err) => console.error('[FCM SOS Push Error]:', err.message));
+      // Upgraded device registrations receive an incident ID and generic text.
+      void sendSosPush(audience.map((recipient) => recipient.userId), {
+        alertId, latitude: lat, longitude: lng,
+      });
 
       // 3. Broadcast via WebSockets (Socket.IO) to each recipient's own
       //    per-user room (user:<id>), with the medical details redacted for

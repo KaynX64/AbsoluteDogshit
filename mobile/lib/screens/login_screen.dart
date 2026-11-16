@@ -62,13 +62,8 @@ class _LoginScreenState extends State<LoginScreen> {
           Map<String, dynamic>.from(data['user']), data['token'] as String,
         );
 
-        // Sync device token for FCM background alerts
-        try {
-          await EmergencyAlertService().syncFcmTokenWithBackend();
-        } catch (_) {}
-
         if (!mounted) return;
-
+        EmergencyAlertService().beginSession(data['token'], data['user']['user_id']);
         final List<dynamic> roles = data['user']['roles'] ?? [];
 
         if (roles.contains('EMERGENCY_RESPONDER')) {

@@ -13,14 +13,14 @@ class ValetudoLogo extends StatelessWidget {
   /// Use for the splash screen. Leave false for headers.
   final bool padded;
 
-  const ValetudoLogo({
-    super.key,
-    this.size = 36,
-    this.padded = false,
-  });
+  const ValetudoLogo({super.key, this.size = 36, this.padded = false});
 
   @override
   Widget build(BuildContext context) {
+    final imageSize = padded ? size * 0.9 : size;
+    final physicalWidth = imageSize * MediaQuery.devicePixelRatioOf(context);
+    // Round up to reuse decoded images across small layout changes.
+    final cacheWidth = (physicalWidth / 32).ceil() * 32;
     final image = ClipRRect(
       borderRadius: BorderRadius.circular(padded ? size * 0.17 : size * 0.22),
       child: Image.asset(
@@ -28,6 +28,7 @@ class ValetudoLogo extends StatelessWidget {
         width: size,
         height: size,
         fit: padded ? BoxFit.contain : BoxFit.cover,
+        cacheWidth: cacheWidth,
         filterQuality: FilterQuality.high,
       ),
     );

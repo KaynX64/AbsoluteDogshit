@@ -50,7 +50,7 @@ async function foundationSchema(pool) {
 test('fresh schema is adopted once even when two migration runners start together', { skip }, async t => {
   const pool = await fixture(t);
   const applied = await Promise.all([runMigrations(pool), runMigrations(pool)]);
-  assert.deepEqual(applied.sort(), [0, 11]);
+  assert.deepEqual(applied.sort(), [0, 12]);
   assert.equal(await responderFlag(pool), 1);
   const readOnlyPool = {
     async getConnection() {
@@ -78,7 +78,7 @@ test('replay migration removes legacy payloads and retains duplicate outcomes', 
     VALUES ('old-mutation', 2, 'desktop', 'EMR_RECORDS', 'old-record', 'CREATE',
             JSON_OBJECT('notes', 'fixture private text'), 1, 42, 'synced', 'legacy error')
   `);
-  assert.equal(await runMigrations(pool), 11);
+  assert.equal(await runMigrations(pool), 12);
   const [columns] = await pool.query('SHOW COLUMNS FROM LOCAL_SYNC_LOGS');
   assert.ok(columns.every(column => !['payload', 'error_message'].includes(column.Field)));
   const [[row]] = await pool.query(`
@@ -99,7 +99,7 @@ test('an existing schema keeps revoked responders, admin grants and saved policy
   await pool.query("DELETE FROM ADMIN_PERMISSIONS WHERE code IN ('INCIDENT_RECORDS_VIEW', 'TERMINAL_VIEW')");
   await pool.query('UPDATE SERVER_POLICY SET revision = 4 WHERE policy_id = 1');
   await pool.query('DROP TABLE STAFF_ANALYTICS_PERMISSIONS');
-  assert.equal(await runMigrations(pool), 11);
+  assert.equal(await runMigrations(pool), 12);
   const [[terminal]] = await pool.query("SELECT code FROM ADMIN_PERMISSIONS WHERE code = 'TERMINAL_VIEW'");
   assert.equal(terminal.code, 'TERMINAL_VIEW');
   const [[staffSettings]] = await pool.query('SELECT COUNT(*) AS total FROM STAFF_ANALYTICS_PERMISSIONS');
@@ -125,6 +125,8 @@ test('legacy tables and columns are rebuilt additively and the responder backfil
   const pool = await fixture(t);
   const freshFoundation = await foundationSchema(pool);
   for (const sql of [
+    'ALTER TABLE DEVICE_TOKENS DROP INDEX uq_device_installation, DROP COLUMN installation_id, DROP COLUMN sos_mode',
+    'ALTER TABLE EMERGENCY_ALERTS DROP COLUMN location_label',
     'ALTER TABLE APPOINTMENTS DROP INDEX idx_app_status_datetime',
     'ALTER TABLE INVENTORY_LOGS DROP INDEX idx_inv_activity_date',
     'ALTER TABLE PRESCRIPTIONS DROP INDEX idx_rx_issued_at',
@@ -139,12 +141,15 @@ test('legacy tables and columns are rebuilt additively and the responder backfil
     'ALTER TABLE PRESCRIPTIONS DROP COLUMN expires_at',
     'ALTER TABLE USERS DROP INDEX idx_users_qualified_responder, DROP COLUMN is_qualified_responder, DROP COLUMN qualified_responder_since, DROP COLUMN qualified_responder_note',
   ]) await pool.query(sql);
+  await pool.query("INSERT INTO DEVICE_TOKENS (user_id, fcm_token) VALUES (4, 'legacy-token')");
   await pool.query("INSERT INTO EMR_RECORDS (patient_user_id, doctor_user_id, chief_complaint, diagnosis) VALUES (5, 2, 'fixture', 'fixture')");
   await pool.query("INSERT INTO PRESCRIPTIONS (emr_id, patient_user_id, doctor_user_id, qr_token) VALUES (1, 5, 2, 'migration-fixture')");
   await pool.query(`INSERT INTO PRESCRIPTION_ITEMS
     (prescription_id, outside_name, dosage, frequency, duration_days, quantity_dispensed)
     VALUES (1, 'fixture', 'fixture', 'fixture', 1, 4)`);
-  assert.equal(await runMigrations(pool), 11);
+  assert.equal(await runMigrations(pool), 12);
+  const [[legacyDevice]] = await pool.query("SELECT installation_id, sos_mode FROM DEVICE_TOKENS WHERE fcm_token = 'legacy-token'");
+  assert.deepEqual(legacyDevice, { installation_id: null, sos_mode: 'on_duty' });
   const [dayIndex] = await pool.query("SHOW INDEX FROM APPOINTMENTS WHERE Key_name = 'idx_app_status_datetime'");
   assert.deepEqual(dayIndex.map(row => row.Column_name), ['status', 'date_time', 'deleted_at']);
   const [activityIndex] = await pool.query("SHOW INDEX FROM INVENTORY_LOGS WHERE Key_name = 'idx_inv_activity_date'");
@@ -186,7 +191,7 @@ test('an interrupted responder schema change resumes with its original backfill 
   assert.equal(await responderFlag(pool), 0);
   const [[{ applied_at }]] = await pool.query('SELECT applied_at FROM SCHEMA_MIGRATIONS WHERE version = 3');
   assert.equal(applied_at, null);
-  assert.equal(await runMigrations(pool), 9);
+  assert.equal(await runMigrations(pool), 10);
   assert.equal(await responderFlag(pool), 1);
 });
 

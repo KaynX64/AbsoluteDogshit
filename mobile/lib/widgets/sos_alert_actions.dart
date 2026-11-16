@@ -1,181 +1,123 @@
-// mobile/lib/widgets/sos_alert_actions.dart
-//
-// Shared SOS status actions — the single status-change path for
-// ResponderScreen and the EmergencyAlertService SOS dialog.
-// ANY responder tier (clinical or community/qualified) may acknowledge,
-// dispatch, resolve or flag a false alarm — closing an incident is an
-// operational action, not a PHI disclosure, so it is not gated on the
-// medical-detail tier the payload was redacted to.
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import '../config/api_config.dart';
-import '../main.dart';
 
-/// PATCH /api/emergency/:alertId/status.
-///
-/// Returns a result map:
-///   { ok: true, status }                              on 200
-///   { ok: false, error, code?, currentStatus? }       on failure
-/// `currentStatus` is set for 409s so callers can tell "someone else
-/// already closed it" (treat as done) apart from a real failure.
-Future<Map<String, dynamic>> updateSosAlertStatus(int alertId, String status) async {
-  const storage = FlutterSecureStorage();
-  final token = await storage.read(key: 'jwt_token');
-  if (token == null) {
-    return {'ok': false, 'error': 'You are signed out. Sign in again to respond.'};
-  }
-  try {
-    final res = await ApiConfig.client.patch(
-      Uri.parse('${ApiConfig.baseUrl}/api/emergency/$alertId/status'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      },
-      body: jsonEncode({'status': status}),
-    );
-    if (res.statusCode == 200) {
-      return {'ok': true, 'status': status};
-    }
-    try {
-      final body = jsonDecode(res.body);
-      return {
-        'ok': false,
-        'error': body['error'] ?? 'Could not update the SOS alert.',
-        'code': body['code'],
-        'currentStatus': body['currentStatus'],
-      };
-    } catch (_) {
-      return {'ok': false, 'error': 'Could not update the SOS alert. Check your connection.'};
-    }
-  } catch (_) {
-    return {'ok': false, 'error': 'Could not update the SOS alert. Check your connection.'};
-  }
-}
-
-/// True when a 409 body says the incident is already closed — the caller
-/// should behave as if its own action succeeded.
-bool _alreadyClosedElsewhere(Map<String, dynamic> result) {
-  final current = result['currentStatus'];
-  return result['code'] == 'ALERT_ALREADY_CLOSED' ||
-      current == 'resolved' ||
-      current == 'false_alarm';
-}
+import '../services/responder_roster.dart';
 
 class SosAlertActions extends StatefulWidget {
-  final int alertId;
-  final String status;
-
-  /// Notifies the host screen after every successful status transition (or
-  /// after discovering another responder closed the incident first).
-  final void Function(String status)? onChanged;
-
   const SosAlertActions({
     super.key,
-    required this.alertId,
-    required this.status,
-    this.onChanged,
+    required this.incident,
+    required this.onUpdate,
   });
+
+  final Incident incident;
+  final Future<String?> Function(int id, IncidentStatus status) onUpdate;
 
   @override
   State<SosAlertActions> createState() => _SosAlertActionsState();
 }
 
 class _SosAlertActionsState extends State<SosAlertActions> {
-  late String _status;
+  bool _busy = false;
+  bool _submitting = false;
+  String? _error;
 
-  @override
-  void initState() {
-    super.initState();
-    _status = widget.status;
-  }
-
-  Future<void> _run(String next) async {
-    final result = await updateSosAlertStatus(widget.alertId, next);
-
-    if (result['ok'] == true) {
-      if (mounted) setState(() => _status = next);
-      widget.onChanged?.call(next);
-      return;
-    }
-
-    // Another responder closed the incident while we were looking at it —
-    // from this device's point of view the outcome is the same: it's closed.
-    if (_alreadyClosedElsewhere(result)) {
-      final current = (result['currentStatus'] as String?) ?? next;
-      if (mounted) setState(() => _status = current);
-      widget.onChanged?.call(current);
-      return;
-    }
-
-    final ctx = navigatorKey.currentContext;
-    if (ctx != null && ctx.mounted) {
-      ScaffoldMessenger.of(ctx).showSnackBar(
-        SnackBar(
-          content: Text('${result['error']}'),
-          backgroundColor: const Color(0xFF7A2E26),
-        ),
-      );
+  Future<void> _run(IncidentStatus status) async {
+    if (_busy) return;
+    final id = widget.incident.id;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      if (status.isClosed) {
+        final resolve = status == IncidentStatus.resolved;
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(
+              resolve
+                  ? 'Resolve this emergency?'
+                  : 'Mark this as a false alarm?',
+            ),
+            content: const Text(
+              'Closing the incident ends the active alert for all responders.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(
+                  resolve ? 'Resolve incident' : 'Confirm false alarm',
+                ),
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true || !mounted) return;
+      }
+      setState(() => _submitting = true);
+      final error = await widget.onUpdate(id, status);
+      if (mounted) setState(() => _error = error);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _submitting = false;
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final status = widget.incident.status;
+    const target = Size.fromHeight(48);
+    final secondaryStyle = TextButton.styleFrom(minimumSize: const Size(48, 48));
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
+      spacing: 12,
       children: [
-        if (_status == 'triggered')
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.amber,
-                foregroundColor: Colors.black,
-                minimumSize: const Size.fromHeight(42),
+        if (status == IncidentStatus.triggered)
+          FilledButton(
+            style: FilledButton.styleFrom(minimumSize: target),
+            onPressed: _busy ? null : () => _run(IncidentStatus.acknowledged),
+            child: const Text('Acknowledge'),
+          ),
+        if (status.index < IncidentStatus.dispatched.index)
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(minimumSize: target),
+            onPressed: _busy ? null : () => _run(IncidentStatus.dispatched),
+            child: const Text('Dispatch to location'),
+          ),
+        if (!status.isClosed)
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            children: [
+              TextButton(
+                style: secondaryStyle,
+                onPressed: _busy ? null : () => _run(IncidentStatus.resolved),
+                child: const Text('Resolve'),
               ),
-              onPressed: () => _run('acknowledged'),
-              icon: const Icon(Icons.check_circle_outline, size: 18),
-              label: const Text('ACKNOWLEDGE', style: TextStyle(fontWeight: FontWeight.w900)),
-            ),
-          ),
-        if (_status != 'dispatched' && _status != 'resolved' && _status != 'false_alarm')
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue.shade700,
-                foregroundColor: Colors.white,
-                minimumSize: const Size.fromHeight(42),
+              TextButton(
+                style: secondaryStyle,
+                onPressed: _busy ? null : () => _run(IncidentStatus.falseAlarm),
+                child: const Text('False alarm'),
               ),
-              onPressed: () => _run('dispatched'),
-              icon: const Icon(Icons.directions_run, size: 18),
-              label: const Text('DISPATCH TO LOCATION', style: TextStyle(fontWeight: FontWeight.w900)),
+            ],
+          ),
+        if (_submitting) const LinearProgressIndicator(),
+        if (_error case final error?)
+          Semantics(
+            liveRegion: true,
+            child: Text(
+              error,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ),
-        if (_status != 'resolved' && _status != 'false_alarm') ...[
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF15803D),
-              foregroundColor: Colors.white,
-              minimumSize: const Size.fromHeight(42),
-            ),
-            onPressed: () => _run('resolved'),
-            icon: const Icon(Icons.verified_outlined, size: 18),
-            label: const Text('MARK RESOLVED', style: TextStyle(fontWeight: FontWeight.w900)),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white,
-              side: const BorderSide(color: Colors.white54),
-              minimumSize: const Size.fromHeight(40),
-            ),
-            onPressed: () => _run('false_alarm'),
-            icon: const Icon(Icons.flag_outlined, size: 18),
-            label: const Text('FALSE ALARM', style: TextStyle(fontWeight: FontWeight.w900)),
-          ),
-        ],
       ],
     );
   }

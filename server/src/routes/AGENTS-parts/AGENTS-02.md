@@ -44,3 +44,5 @@ Super Admins can grant `INCIDENT_RECORDS_VIEW` during Limited Admin creation or 
 
 - Terminal routes are mounted under `/api/admin/operations`. `TERMINAL_VIEW` grants Limited Admin access to status and built-in diagnostics. Restart requires Super Admin access and `npm start`.
 - Admin System Health reads live Socket.IO presence from `GET /api/admin/connected-users` with `TELEMETRY_VIEW`. The response covers this server process, groups windows by sign-in session, and exposes token issue time and earliest currently connected socket time.
+
+The consent-independent `GET /api/emergency/responder-access` reports live eligibility, qualification and tier. The open roster includes a persisted `formattedAddress` when available. Status changes use a conditional forward transition. Android device registration accepts `installation_id` and `sos_mode` together. See the [Android rollout](../../../../QUALIFIED_RESPONDER_REVAMP_SPECIFICATION.md).

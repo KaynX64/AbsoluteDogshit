@@ -23,6 +23,31 @@ const {
   LEGACY_RESPONDER_ROLES,
   CLINICAL_ROLES,
 } = await import('../src/emergency/responderAccess.js');
+const { groupSosDevices, sosPushForMode } = await import('../src/emergency/deviceDelivery.js');
+
+test('SOS push groups separate legacy, audible, quiet and off-duty registrations', () => {
+  const device = (fcm_token, installation_id, sos_mode, device_type = 'android') => ({
+    fcm_token, installation_id, sos_mode, device_type,
+  });
+  assert.deepEqual(groupSosDevices([
+    device('legacy', null, 'on_duty'),
+    device('phone-1', 'one', 'on_duty'),
+    device('phone-2', 'two', 'quiet'),
+    device('phone-3', 'three', 'off_duty'),
+    device('older-ios', null, 'on_duty', 'ios'),
+  ]), {
+    legacy: ['legacy', 'older-ios'], on_duty: ['phone-1'], quiet: ['phone-2'],
+  });
+  const incident = { alertId: 7, latitude: 16.1, longitude: 120.2 };
+  const silent = sosPushForMode('quiet', incident);
+  assert.deepEqual(silent.data, { type: 'EMERGENCY_SOS', alertId: 7 });
+  assert.equal(silent.androidNotification.channelId, 'responder_sos_quiet_v1');
+  assert.equal(sosPushForMode('on_duty', incident).androidNotification.channelId, 'responder_sos_audible_v1');
+  const legacy = sosPushForMode('legacy', incident);
+  assert.equal(legacy.androidNotification.channelId, 'emergency_sos_channel_v4');
+  assert.equal(legacy.data.latitude, 16.1);
+  assert.equal(legacy.title, silent.title);
+});
 
 test('the self capability reflects live access while the alert list still rejects a denied user', async (t) => {
   const { pool } = await import('../src/db/pool.js');
@@ -45,14 +70,14 @@ test('the self capability reflects live access while the alert list still reject
       ? [[{ is_active: 1, deleted_at: null, is_qualified_responder: flagged }]]
       : [[{ code: role }]];
   });
-  const check = async (expected) => {
+  const check = async (authorized, tier = null) => {
     const headers = {};
     let body;
     await capability(req, {
       set(name, value) { headers[name] = value; },
       json(value) { body = value; },
     });
-    assert.deepEqual(body, { authorized: expected });
+    assert.deepEqual(body, { authorized, tier, isQualifiedResponder: flagged });
     assert.equal(headers['Cache-Control'], 'no-store');
   };
 
@@ -68,11 +93,11 @@ test('the self capability reflects live access while the alert list still reject
   });
   assert.equal(denied.code, 'RESPONDER_ACCESS_DENIED');
   flagged = true;
-  await check(true);
+  await check(true, 'clinical');
   flagged = false;
   await check(false);
   role = 'DOCTOR';
-  await check(true);
+  await check(true, 'clinical');
 });
 
 // ── Tier resolution ────────────────────────────────────────────────────────
