@@ -1588,7 +1588,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                             Icon(
                               Icons.favorite_border_rounded,
                               size: 16,
-                              color: AppPalette.of(context).color(0xFF191C1A),
+                              color: Colors.white,
                             ),
                             SizedBox(width: rs.w(8)),
                             Text(
@@ -1597,13 +1597,13 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                 fontSize: rs.sp(10),
                                 letterSpacing: 1.8,
                                 fontWeight: FontWeight.w700,
-                                color: AppPalette.of(context).color(0xFF191C1A),
+                                color: Colors.white,
                               ),
                             ),
                           ],
                         ),
                         IconButton(
-                          icon: const Icon(Icons.more_horiz, color: Colors.white70),
+                          icon: const Icon(Icons.more_horiz, color: Colors.white),
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
                           onPressed: () => setState(() => _currentIndex = 4),

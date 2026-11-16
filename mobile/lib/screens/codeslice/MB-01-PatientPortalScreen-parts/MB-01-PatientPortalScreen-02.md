@@ -13,7 +13,7 @@
 | 35 | 1181-1333 | QrImageView | campus health pass card: dynamic QR, name, role-aware identity lines, optional Qualified Responder badge |
 | 36 | 1334-1455 | Book consultation | pass actions: Refresh pass (_fetchQRPass), Book consultation to tab 1; actions wrap when needed |
 | 37 | 1456-1570 | Prescriptions | shortcut cards: Prescriptions and Medical clearances, both jump to documents tab |
-| 38 | 1571-1656 | YOUR HEALTH AT A GLANCE | dark at-a-glance card head: initials avatar, name, role line, link to profile |
+| 38 | 1571-1656 | YOUR HEALTH AT A GLANCE | dark card head: white heading, heart and menu icons; initials avatar, name, role line, profile link |
 | 39 | 1657-1747 | Blood type | at-a-glance stats: blood type and known allergy; View full profile to tab 4 |
 | 40 | 1748-1806 | Your campus infirmary | campus infirmary card: PSU Lingayen address, Mon-Fri 8AM-5PM hours |
 | 41 | 1807-1855 | A gentle reminder | wellness reminder card; closes overview tab build |
