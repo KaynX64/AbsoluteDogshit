@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   offlineImportLegacy: (rows) => ipcRenderer.invoke('offline-import-legacy', rows),
   offlineUnassignedAppointments: () => ipcRenderer.invoke('offline-unassigned-appointments'),
   offlineAssignLegacy: (data) => ipcRenderer.invoke('offline-assign-legacy', data),
+  offlineDiscardUnassigned: (expectedCount) => ipcRenderer.invoke('offline-discard-unassigned', expectedCount),
   offlinePendingCount: () => ipcRenderer.invoke('offline-pending-count'),
   offlineQueueMutation: (mutation) => ipcRenderer.invoke('offline-queue-mutation', mutation),
   offlineGetPendingMutations: (limit) => ipcRenderer.invoke('offline-get-pending-mutations', limit),
