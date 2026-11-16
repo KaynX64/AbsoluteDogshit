@@ -14,10 +14,8 @@
 - Embedded QR verification view (for scanned docs): L177 and L532 (`GET /api/documents/verify/$qrToken`).
 - Lists: prescriptions L918 · clearances L1126 · diagnostics L1327; modals: prescription L174, clearance certificate L529.
 
-### responder_screen.dart — 795 lines / 29 KB. SOS dispatch console
-- **Slice maps:** `codeslice/MB-04-ResponderScreen.md` (18 slices) · SOS service → `codeslice/MB-07-EmergencyAlertService.md` (31 slices) — verified @ 93b4172.
-- `_fetchActiveAlerts` L56 (`GET /api/emergency/active`), `_updateAlertStatus` L103 (delegates to shared `updateSosAlertStatus()` — `lib/widgets/sos_alert_actions.dart`; surfaces the server's 409 message, treats "already closed elsewhere" as success), Google Maps deep-link L138 (stops the alarm first), SOS dialog broadcast L82 (passes `onStatusChanged` so list actions made in the dialog refresh the screen), sign out ~L248 (logout body sends `fcm_token`), alert card L429, stat pills L754.
-- `lib/services/emergency_alert_service.dart` handles both FCM and Socket.IO events. The screen polls and refreshes its active list. The screen owns the listener lifecycle for EMERGENCY_RESPONDER-route accounts (start L41 / stop L52; the service's flag-change handler deliberately skips those accounts).
+### responder_screen.dart — dedicated responder route
+- [Slice map](../codeslice/MB-04-ResponderScreen.md). The screen hosts the shared `ResponderHub` and retains account settings and sign-out. The authenticated alert session serves both responder routes and reconciles incidents independently of screen lifetime.
 
 ### change_password_screen.dart
 - **Slice map:** `codeslice/MB-05-ChangePasswordScreen.md`.
@@ -28,12 +26,12 @@
 
 ### login_screen.dart — 426 lines / 16 KB
 - **Slice map:** `codeslice/MB-06-LoginScreen.md` (14 slices, verified @ 93b4172).
-- `_handleLogin` L35 (`POST /api/auth/login` L43) → stores `jwt_token` + `user_data`, syncs FCM token (`EmergencyAlertService().syncFcmTokenWithBackend()`), routes by role.
+- `_handleLogin` persists the JWT and user, binds the account theme and starts the shared alert session. Device registration runs asynchronously.
 - After storing the session, bind its account theme through `AccountThemeScope` before navigation. Never carry the previous account's theme into a new sign-in.
 
-### splash_screen.dart — 309 lines / 13 KB
-- `_checkSavedSession` L36 (`GET /api/profile/me` L64) → `_routeUser` L83 by roles → `_goToLogin` L100.
-- Restore the theme with `fromCache: true`, then refresh the dedicated theme endpoint. Cached login profile theme fields may be older than the device's last successful preference save. Reset theme state on authentication rejection.
+### splash_screen.dart
+- `_checkSavedSession` checks `/api/profile/me` while restoring the account theme from cache. It routes by role after validation, retains the saved session on a network failure, and treats `PRIVACY_CONSENT_REQUIRED` as a valid session. A successful profile response also seeds the patient portal's initial profile.
+- Refresh the dedicated theme endpoint after accepting the session. Cached login profile theme fields may be older than the device's last successful preference save. Reset theme state on authentication rejection.
 
 ## Rules
 

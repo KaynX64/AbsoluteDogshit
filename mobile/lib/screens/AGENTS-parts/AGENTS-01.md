@@ -26,6 +26,6 @@ Start with the [code-slice index](../CODESLICE.md) when navigating the patient p
 - **QR health pass**: `_fetchQRPass` L495 (`GET /api/health-pass/token`).
 - **Profile**: `_fetchProfile` L510 (`GET /api/profile/me`), profile tab L2328.
 - **SOS**: hold-to-trigger button `_startHold` L591 (progress `ValueNotifier` L163, `_sosConsent` gate), `_triggerEmergencySOS` L631 (`POST /api/emergency/sos` L673), confirmation dialog L703; offline SOS queueing `_replayQueuedSosEvents` L208 (replayed on reconnect).
-- **Qualified Responder** (flag from login/splash, stored in `user_data`): `_isQualifiedResponder` L171 drives (1) the header chip (build L848), (2) `startResponderListener()` on entry L193, stop on dispose L227 / sign-out. `WidgetsBindingObserver` didChangeAppLifecycleState L206 re-checks via `EmergencyAlertService().syncQualifiedResponderFlag()` on resume and refreshes the chip.
+- **Responder Hub**: The health pass and profile cards show the live Qualified Responder badge with the hub button below it. `ActiveIncidentBanner` stays below the header and opens the shared incident detail.
 - **Offline**: `_onConnectivityChanged` L203, banner L853, call-button L2285, SMS-button L2305.
-- Sign out L744 (`POST /api/auth/logout` with `fcm_token` body so the server releases the device push). Tabs: overview L1070 · SOS L1860 · profile L2328; bottom nav L886, SOS nav item L1014.
+- Sign out goes through the shared alert session to release the installation or legacy FCM token. Tabs: overview L1070 · SOS L1860 · profile L2328; bottom nav L886, SOS nav item L1014.

@@ -2,19 +2,23 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:flutter_background/flutter_background.dart';
+import 'package:http/http.dart' as http;
+
 import '../config/api_config.dart';
-import '../main.dart';
-import '../widgets/sos_alert_actions.dart';
+import 'responder_roster.dart';
+
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+}
 
 // Top-level function executed on a background isolate to avoid UI thread jank
 Uint8List _generateWavBytesIsolate(int durationSeconds) {
@@ -25,12 +29,21 @@ Uint8List _generateWavBytesIsolate(int durationSeconds) {
   final ByteData byteData = ByteData(44 + dataSize);
 
   // RIFF Header
-  byteData.setUint8(0, 0x52); byteData.setUint8(1, 0x49); byteData.setUint8(2, 0x46); byteData.setUint8(3, 0x46);
+  byteData.setUint8(0, 0x52);
+  byteData.setUint8(1, 0x49);
+  byteData.setUint8(2, 0x46);
+  byteData.setUint8(3, 0x46);
   byteData.setUint32(4, fileSize, Endian.little);
-  byteData.setUint8(8, 0x57); byteData.setUint8(9, 0x41); byteData.setUint8(10, 0x56); byteData.setUint8(11, 0x45);
+  byteData.setUint8(8, 0x57);
+  byteData.setUint8(9, 0x41);
+  byteData.setUint8(10, 0x56);
+  byteData.setUint8(11, 0x45);
 
   // fmt chunk
-  byteData.setUint8(12, 0x66); byteData.setUint8(13, 0x6D); byteData.setUint8(14, 0x74); byteData.setUint8(15, 0x20);
+  byteData.setUint8(12, 0x66);
+  byteData.setUint8(13, 0x6D);
+  byteData.setUint8(14, 0x74);
+  byteData.setUint8(15, 0x20);
   byteData.setUint32(16, 16, Endian.little);
   byteData.setUint16(20, 1, Endian.little);
   byteData.setUint16(22, 1, Endian.little);
@@ -40,7 +53,10 @@ Uint8List _generateWavBytesIsolate(int durationSeconds) {
   byteData.setUint16(34, 16, Endian.little);
 
   // data chunk
-  byteData.setUint8(36, 0x64); byteData.setUint8(37, 0x61); byteData.setUint8(38, 0x74); byteData.setUint8(39, 0x61);
+  byteData.setUint8(36, 0x64);
+  byteData.setUint8(37, 0x61);
+  byteData.setUint8(38, 0x74);
+  byteData.setUint8(39, 0x61);
   byteData.setUint32(40, dataSize, Endian.little);
 
   int offset = 44;
@@ -50,7 +66,8 @@ Uint8List _generateWavBytesIsolate(int durationSeconds) {
 
   for (int i = 0; i < numSamples; i++) {
     final double t = i / sampleRate;
-    final double sampleValue = 0.5 * (math.sin(twoPi * f1 * t) + math.sin(twoPi * f2 * t));
+    final double sampleValue =
+        0.5 * (math.sin(twoPi * f1 * t) + math.sin(twoPi * f2 * t));
     final int sample16 = (sampleValue * 28000).toInt().clamp(-32768, 32767);
     byteData.setInt16(offset, sample16, Endian.little);
     offset += 2;
@@ -59,497 +76,883 @@ Uint8List _generateWavBytesIsolate(int durationSeconds) {
   return byteData.buffer.asUint8List();
 }
 
+enum DeliveryStatus { pending, saved, failed }
+
 class EmergencyAlertService {
-  static final EmergencyAlertService _instance = EmergencyAlertService._internal();
+  EmergencyAlertService._([this._client, this._connectRealtime = true]) {
+    roster.addListener(_updateAlarm);
+  }
+  static final _instance = EmergencyAlertService._();
   factory EmergencyAlertService() => _instance;
-  EmergencyAlertService._internal();
 
+  @visibleForTesting
+  EmergencyAlertService.test(http.Client client) : this._(client, false);
+
+  final http.Client? _client;
+  final bool _connectRealtime;
+  http.Client get _http => _client ?? ApiConfig.client;
+  final roster = ResponderRoster();
+  final delivery = ValueNotifier(DeliveryStatus.pending);
+  final notificationOpen = ValueNotifier<int?>(null);
+  final _storage = const FlutterSecureStorage(
+    aOptions: AndroidOptions(storageNamespace: 'responder_device'),
+  );
+  final _notifications = FlutterLocalNotificationsPlugin();
+
+  static const _installationKey = 'responder_installation_id';
+  static const _modeKey = 'responder_duty_mode';
+  static const _audibleChannel = 'responder_sos_audible_v1';
+  static const _quietChannel = 'responder_sos_quiet_v1';
+  static const _foregroundChannel = 'responder_sos_foreground_v1';
+  static const _timeout = Duration(seconds: 5);
+
+  String? _jwt;
+  String? installationId;
+  String? _fcmToken;
+  int _session = 0;
+  int _accessVersion = 0;
+  bool _foreground = false;
+  bool _terminating = false;
+  bool _requestInitialized = false;
   io.Socket? _socket;
-  final AudioPlayer _audioPlayer = AudioPlayer();
-  final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
-  final _storage = const FlutterSecureStorage();
+  int? _pendingOpen;
+  Future<bool>? _accessRequest;
+  Future<bool>? _refreshRequest;
+  int _refreshVersion = 0;
+  Future<bool>? _firebase;
+  Future<bool>? _channels;
+  Future<void>? _permission;
+  Future<void>? _registration;
+  Future<void> _modeWrites = Future.value();
+  final _announced = <int>{};
+  final _updating = <int>{};
+  final _localPosts = <int>{};
+  Future<void> _notificationQueue = Future.value();
 
-  bool _isAlarmPlaying = false;
-  Timer? _vibrationTimer;
-  Uint8List? _cachedWavBytes;
-  bool _isInitialized = false;
-  bool _isFcmListening = false;
-  StreamSubscription<String>? _tokenRefreshSub;
+  AudioPlayer? _player;
+  Uint8List? _fallback;
+  Future<void> _audioQueue = Future.value();
+  bool _wantsAudio = false;
+  bool _testing = false;
+  Timer? _testTimer;
+  int _audioVersion = 0;
 
-  bool _isResponderActive = false;
-  int? _lastAlertIdProcessed;
+  bool get _android =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
-  // Live SOS dialog bookkeeping — lets the socket listener close the exact
-  // dialog (and stop its alarm) when ANY responder closes the incident.
-  BuildContext? _sosDialogContext;
-  int? _sosDialogAlertId;
+  Map<String, String> _headers(String token) => {
+    'Authorization': 'Bearer $token',
+    'Content-Type': 'application/json',
+  };
+  Uri _url(String path) => Uri.parse(ApiConfig.baseUrl + path);
+  bool _current(int session) => _jwt != null && session == _session;
+  bool get _automatic => roster.mode != ResponderDutyMode.offDuty;
 
-  /// Read-only view for screens that drive the listener lifecycle.
-  bool get isResponderActive => _isResponderActive;
-
-  // 1. Critical Channel for Responders
-  static const AndroidNotificationChannel _responderCriticalChannel = AndroidNotificationChannel(
-    'emergency_sos_channel_v4',
-    '🚨 Critical Emergency SOS',
-    description: 'High-priority campus emergency dispatch alerts with heads-up banners',
-    importance: Importance.max,
-    playSound: true,
-    sound: RawResourceAndroidNotificationSound('emr_sound'),
-    enableVibration: true,
-    enableLights: true,
-  );
-
-  // 2. Student Confirmation Channel
-  static const AndroidNotificationChannel _studentConfirmChannel = AndroidNotificationChannel(
-    'student_sos_confirmation_channel',
-    'SOS Dispatch Confirmation',
-    description: 'Confirmation alert when student sends an SOS emergency',
-    importance: Importance.high,
-    playSound: true,
-    enableVibration: true,
-  );
-
-  // 3. Queue Turn Channel
-  static const AndroidNotificationChannel _queueTurnChannel = AndroidNotificationChannel(
-    'clinic_queue_channel',
-    '🔔 Clinic Queue Turn',
-    description: 'Alerts when your queue ticket is called for consultation',
-    importance: Importance.high,
-    playSound: true,
-    enableVibration: true,
-  );
-
-  // 4. Consultation Appointments Channel
-  static const AndroidNotificationChannel _appointmentChannel = AndroidNotificationChannel(
-    'appointment_channel',
-    '📅 Consultation Appointments',
-    description: 'Appointment booking confirmations and scheduled reminders',
-    importance: Importance.high,
-    playSound: true,
-    enableVibration: true,
-  );
-
-  Future<void> initialize() async {
-    if (_isInitialized) return;
-    _isInitialized = true;
-
-    // 1. Initialize Android System Notification Channels
-    const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
-    const InitializationSettings initializationSettings =
-        InitializationSettings(android: initializationSettingsAndroid);
-
-    await _localNotifications.initialize(initializationSettings);
-
-    final androidImplementation = _localNotifications
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-
-    await androidImplementation?.createNotificationChannel(_responderCriticalChannel);
-    await androidImplementation?.createNotificationChannel(_studentConfirmChannel);
-    await androidImplementation?.createNotificationChannel(_queueTurnChannel);
-    await androidImplementation?.createNotificationChannel(_appointmentChannel);
-    await androidImplementation?.requestNotificationsPermission();
-
-    // 2. Pre-generate procedural WAV on background isolate so UI never stutters during alarm
-    compute(_generateWavBytesIsolate, 3).then((bytes) {
-      _cachedWavBytes = bytes;
-    }).catchError((_) {});
-
-    // 3. Configure audio player context
-    try {
-      await _audioPlayer.setAudioContext(
-        AudioContext(
-          android: AudioContextAndroid(
-            stayAwake: true,
-            contentType: AndroidContentType.sonification,
-            usageType: AndroidUsageType.alarm,
-            audioFocus: AndroidAudioFocus.gainTransientExclusive,
-          ),
-        ),
-      );
-    } catch (_) {}
-
-    await connectSocket();
+  void beginSession(String token, Object? userId) {
+    endSession(preserveNotification: _jwt == null && !_terminating);
+    _jwt = token;
+    _terminating = false;
+    roster.begin(Incident.readId(userId));
+    final session = _session;
+    unawaited(_startSession(session, token));
   }
 
-
-  // --- FIREBASE CLOUD MESSAGING (FCM) TOKEN REGISTRATION ---
-  Future<void> syncFcmTokenWithBackend() async {
-      if (kIsWeb) return; // Skip FCM token registration on Web
-    try {
-      final messaging = FirebaseMessaging.instance;
-
-      await messaging.requestPermission(
-        alert: true,
-        badge: true,
-        sound: true,
-      );
-
-      String? token = await messaging.getToken();
-
-
-      if (token != null && token.isNotEmpty) {
-        await _postTokenToServer(token);
-      }
-
-      // Handle automatic FCM token rotation
-      _tokenRefreshSub?.cancel();
-      _tokenRefreshSub = messaging.onTokenRefresh.listen((newToken) async {
-        if (newToken.isNotEmpty) {
-          await _postTokenToServer(newToken);
+  Future<void> _startSession(int session, String token) async {
+    ResponderDutyMode mode = ResponderDutyMode.onDuty;
+    String? id;
+    if (_android) {
+      try {
+        await _modeWrites.catchError((Object _) {});
+        final savedId = await _storage.read(key: _installationKey);
+        final random = math.Random.secure();
+        id =
+            savedId ??
+            List.generate(
+              16,
+              (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+            ).join();
+        if (savedId == null) {
+          await _storage.write(key: _installationKey, value: id);
         }
-      });
-
-      if (!_isFcmListening) {
-        _isFcmListening = true;
-        FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-          final type = message.data['type'] ?? '';
-
-          if (type == 'EMERGENCY_SOS') {
-            if (!_isResponderActive) return;
-            _handleForegroundSosPush(message.data);
-          } else if (type == 'QUEUE_TURN') {
-            showQueueTurnNotification(
-              ticketNo: message.data['ticketNo'] ?? message.data['ticket_no'] ?? 'Your Ticket',
-              doctorName: message.data['doctorName'] ?? message.data['doctor_name'] ?? 'Attending Doctor',
-            );
-          } else {
-            showAppointmentConfirmedNotification(
-              message.notification?.title ?? message.data['title'],
-              message.notification?.body ?? message.data['body'],
-            );
-          }
-        });
+        mode = ResponderDutyMode.read(await _storage.read(key: _modeKey));
+      } catch (_) {
+        id = null;
       }
-    } catch (e) {
-      debugPrint("❌ [FCM Mobile Token Error]: $e");
     }
+    if (!_current(session)) return;
+    installationId = id;
+    roster.setMode(mode);
+    _requestInitialized = true;
+    if (_connectRealtime) _connect(token, session);
+    unawaited(_syncRegistration());
+    await refreshAccess();
+    if (_current(session) && _automatic) unawaited(refreshIncidents());
+    unawaited(_openPendingNotification());
   }
 
-  /// Current FCM token, or null on web / failure. Used by the logout paths
-  /// so the server can release this device's push registration.
-  Future<String?> currentFcmToken() async {
-    if (kIsWeb) return null;
+  void endSession({bool preserveNotification = false}) {
+    _session++;
+    _accessVersion++;
+    _jwt = null;
+    _requestInitialized = false;
+    _socket?.dispose();
+    _socket = null;
+    _accessRequest = null;
+    _refreshRequest = null;
+    _registration = null;
+    installationId = null;
+    _announced.clear();
+    _updating.clear();
+    _cancelLocalNotifications();
+    _testing = false;
+    _testTimer?.cancel();
+    // A cold-start tap can precede the first authenticated session.
+    if (!preserveNotification) _pendingOpen = null;
+    notificationOpen.value = null;
+    roster.begin(null);
+    delivery.value = DeliveryStatus.pending;
+  }
+
+  /// Stops token updates while the server removes this registration.
+  Future<Map<String, String>> terminationDevice() async {
+    _terminating = true;
+    _pendingOpen = null;
+    notificationOpen.value = null;
+    _updateAlarm();
+    String? id = installationId;
+    if (id == null && _android) {
+      try {
+        id = await _storage.read(key: _installationKey).timeout(_timeout);
+      } catch (_) {
+        // Older registrations can still be removed by their FCM token.
+      }
+    }
+    final registration = _registration;
+    if (registration != null) await registration;
+    final token =
+        _fcmToken ??
+        await currentFcmToken().timeout(
+          const Duration(seconds: 2),
+          onTimeout: () => null,
+        );
+    return {'installation_id': ?id, 'fcm_token': ?token};
+  }
+
+  void resumeRegistration() {
+    _terminating = false;
+    _updateAlarm();
+    if (_requestInitialized) unawaited(_syncRegistration());
+  }
+
+  Future<void> signOut(String? token) async {
     try {
-      return await FirebaseMessaging.instance.getToken();
+      if (token != null) {
+        final device = await terminationDevice();
+        await _http
+            .post(
+              _url('/api/auth/logout'),
+              headers: _headers(token),
+              body: jsonEncode(device),
+            )
+            .timeout(_timeout);
+      }
     } catch (_) {
-      return null;
+      debugPrint('Remote sign-out could not be confirmed.');
+    } finally {
+      _terminating = true;
+      endSession();
     }
   }
 
-  /// FCM foreground SOS pushes carry the alertId + coordinates only (no
-  /// PHI on the lock screen). Deduplicate against the socket path by
-  /// alertId, then fetch the full tiered payload from /active so the alarm
-  /// dialog has real details instead of "Unknown User at 0,0".
-  Future<void> _handleForegroundSosPush(Map<String, dynamic> data) async {
-    final alertId = int.tryParse('${data['alertId'] ?? ''}');
-    if (alertId == null) return;
-    if (_lastAlertIdProcessed == alertId && _isAlarmPlaying) return; // socket already alarmed
-    _lastAlertIdProcessed = alertId;
-
-    Map<String, dynamic> full = Map<String, dynamic>.from(data);
-    try {
-      final jwt = await _storage.read(key: 'jwt_token');
-      if (jwt != null) {
-        final res = await ApiConfig.client.get(
-          Uri.parse('${ApiConfig.baseUrl}/api/emergency/active'),
-          headers: {'Authorization': 'Bearer $jwt'},
-        );
-        if (res.statusCode == 200) {
-          final List<dynamic> active = jsonDecode(res.body);
-          final match = active.firstWhere(
-            (a) => a['alert_id'] == alertId,
-            orElse: () => null,
-          );
-          if (match != null) {
-            full = Map<String, dynamic>.from(match);
-          }
-        }
-      }
-    } catch (_) {/* fall back to the push payload */}
-
-    triggerEmergencyBroadcast(full);
+  void setForeground(bool value) {
+    _foreground = value;
+    _updateAlarm();
+    if (!value || !_requestInitialized) return;
+    unawaited(recover());
   }
 
-  Future<void> _postTokenToServer(String token) async {
-    try {
-      final jwt = await _storage.read(key: 'jwt_token');
-      if (jwt != null) {
-        await ApiConfig.client.post(
-          Uri.parse('${ApiConfig.baseUrl}/api/profile/fcm-token'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $jwt',
-          },
-          body: jsonEncode({'fcm_token': token, 'device_type': 'android'}),
-        );
-      }
-    } catch (e) {
-      debugPrint("⚠️ [FCM Post Token Error]: $e");
-    }
+  Future<void> recover() async {
+    if (!_requestInitialized) return;
+    await refreshAccess();
+    if (_automatic) await refreshIncidents();
+    if (delivery.value != DeliveryStatus.saved) unawaited(_syncRegistration());
+    await _openPendingNotification();
   }
 
-  Future<void> _enableBackgroundService() async {
+  void _connect(String token, int session) {
     try {
-      const androidConfig = FlutterBackgroundAndroidConfig(
-        notificationTitle: "PSU Quick-Response Unit",
-        notificationText: "Active on-call in background for campus emergencies.",
-        notificationImportance: AndroidNotificationImportance.normal,
-        notificationIcon: AndroidResource(name: 'ic_launcher', defType: 'mipmap'),
-        enableWifiLock: true,
-      );
-
-      // Always (re)initialize — the plugin's AndroidConfig lives in memory
-      // and is discarded every time the Flutter process is recreated (e.g.
-      // when the user swipes the app away from the Android recents screen
-      // and reopens it). The previous version only initialized when the
-      // notification permission was missing, which meant that on every
-      // subsequent launch enableBackgroundExecution() had no config to
-      // work with and the foreground service silently never started.
-      await FlutterBackground.initialize(androidConfig: androidConfig);
-
-      if (!FlutterBackground.isBackgroundExecutionEnabled) {
-        await FlutterBackground.enableBackgroundExecution();
-      }
-    } catch (e) {
-      debugPrint('⚠️ [Background Service Error]: $e');
-    }
-  }
-
-  Future<void> _disableBackgroundService() async {
-    try {
-      if (FlutterBackground.isBackgroundExecutionEnabled) {
-        await FlutterBackground.disableBackgroundExecution();
-      }
-    } catch (_) {}
-  }
-
-  Future<void> connectSocket({bool force = false}) async {
-    if (_socket != null && _socket!.connected && !force) return;
-
-    try {
-      _socket?.dispose();
-      _socket = null;
-    } catch (_) {}
-
-    final token = await _storage.read(key: 'jwt_token');
-
-    try {
-      _socket = io.io(
+      final socket = io.io(
         ApiConfig.socketUrl,
         io.OptionBuilder()
             .setTransports(['websocket', 'polling'])
             .setAuth({'token': token})
-            .enableAutoConnect()
-            .enableReconnection()
-            .setReconnectionDelay(1500)
+            .enableForceNew()
+            .disableAutoConnect()
             .build(),
       );
-
-      _socket!.onConnect((_) {
-        // Only join privileged responder room if user is actively in responder mode
-        if (_isResponderActive) {
-          _socket!.emit('join:responders');
+      _socket = socket;
+      socket.onConnect((_) {
+        if (_current(session)) unawaited(recover());
+      });
+      socket.on('responder:status_changed', (_) {
+        if (!_current(session)) return;
+        _clearAccess();
+        unawaited(recover());
+      });
+      socket.on('emergency:new_alert', (value) {
+        if (!_current(session) || value is! Map || !_automatic) return;
+        final incident = Incident.parse(value);
+        if (incident != null) roster.accept(incident);
+      });
+      socket.on('emergency:status_change', (value) {
+        if (!_current(session) || value is! Map) return;
+        final id = Incident.readId(value['alertId']);
+        final status = IncidentStatus.read(value['status']);
+        if (id != null && status != null) {
+          roster.statusChanged(id, status);
+          if (status != IncidentStatus.triggered) _cancelLocalNotification(id);
         }
       });
-
-      _socket!.on('emergency:new_alert', (data) async {
-        final alertMap = data is Map<String, dynamic> ? data : Map<String, dynamic>.from(data);
-
-        if (!_isResponderActive) return;
-
-        final userDataStr = await _storage.read(key: 'user_data');
-        if (userDataStr != null) {
-          try {
-            final currentUser = jsonDecode(userDataStr);
-            if (currentUser['user_id'] == alertMap['userId']) return;
-          } catch (_) {}
-        }
-
-        final alertId = alertMap['alertId'] ?? alertMap['alert_id'];
-        if (_lastAlertIdProcessed == alertId && _isAlarmPlaying) return;
-        _lastAlertIdProcessed = alertId;
-
-        triggerEmergencyBroadcast(alertMap);
-      });
-
-      // ANY responder (this device included) closed an incident → the alarm
-      // on this phone must stop and the SOS dialog for that alert must go.
-      // Without this, "False alarm" worked only on the device that pressed
-      // it while every other responder's phone kept ringing.
-      _socket!.on('emergency:status_change', (data) {
-        if (data is! Map) return;
-        final alertId = data['alertId'] ?? data['alert_id'];
-        final status = data['status'];
-        if (status != 'resolved' && status != 'false_alarm') return;
-
-        if (_sosDialogAlertId != null && '$_sosDialogAlertId' == '$alertId') {
-          stopAlarmSound();
-          _cancelEmergencyNotification();
-          _closeSosDialog();
-        } else if ('$_lastAlertIdProcessed' == '$alertId') {
-          stopAlarmSound();
-          _cancelEmergencyNotification();
-        }
-      });
-
-      // Qualified Responder flag toggled from the Admin Console mid-session:
-      // start or stop listening WITHOUT a re-login. The server emits this to
-      // the user's own room, so it only ever reaches the affected account.
-      _socket!.on('responder:status_changed', (data) {
-        final enabled = data is Map && data['isQualifiedResponder'] == true;
-        debugPrint('🛡️ [QR] responder:status_changed → $enabled');
-        _applyFlagChange(enabled);
-      });
-    } catch (e) {
-      debugPrint('[Socket.IO Mobile] Connection error: $e');
+      socket.connect();
+    } catch (_) {
+      debugPrint('Responder realtime connection could not start.');
     }
   }
 
-  void startResponderListener() {
-    _isResponderActive = true;
-    _lastAlertIdProcessed = null;
-    initialize();
-    connectSocket(force: true);
-    _enableBackgroundService();
-    syncFcmTokenWithBackend();
-    _catchUpOnOpenAlerts();
+  void _clearAccess() {
+    _accessVersion++;
+    _accessRequest = null;
+    _announced.clear();
+    _updating.clear();
+    _pendingOpen = null;
+    notificationOpen.value = null;
+    _cancelLocalNotifications();
+    _testing = false;
+    _testTimer?.cancel();
+    roster.setAccess(null, false);
   }
 
-  void stopResponderListener() {
-    _isResponderActive = false;
-    _lastAlertIdProcessed = null;
-    stopAlarmSound();
-    _disableBackgroundService();
+  Future<bool> refreshAccess() {
+    final token = _jwt;
+    if (token == null || !_requestInitialized) return Future.value(false);
+    final running = _accessRequest;
+    if (running != null) return running;
+    final session = _session, access = _accessVersion;
+    return _accessRequest = _loadAccess(token, session, access).whenComplete(
+      () {
+        if (_current(session) && access == _accessVersion) {
+          _accessRequest = null;
+        }
+      },
+    );
   }
 
-  // ── QUALIFIED RESPONDER FLAG ─────────────────────────────────────────
-
-  /// True when the stored user is routed to ResponderScreen (the
-  /// EMERGENCY_RESPONDER role). For those accounts the SCREEN governs the
-  /// listener — flag changes must never stop it (the flag is additive and
-  /// the role keeps receiving SOS regardless).
-  Future<bool> _storedUserIsResponderRoute() async {
-    final userDataStr = await _storage.read(key: 'user_data');
-    if (userDataStr == null) return false;
+  Future<bool> _loadAccess(String token, int session, int access) async {
     try {
-      final user = jsonDecode(userDataStr);
-      final roles = (user['roles'] as List?) ?? [];
-      return roles.contains('EMERGENCY_RESPONDER');
-    } catch (_) {
+      final response = await _http
+          .get(
+            _url('/api/emergency/responder-access'),
+            headers: _headers(token),
+          )
+          .timeout(_timeout);
+      if (!_current(session) || access != _accessVersion) return false;
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        _clearAccess();
+        return false;
+      }
+      if (response.statusCode != 200) return false;
+      final result = jsonDecode(response.body);
+      final tier = result['tier'];
+      if (result['authorized'] != true ||
+          (tier != 'community' && tier != 'clinical')) {
+        _clearAccess();
+        return false;
+      }
+      if (roster.eligible && tier != roster.tier) {
+        // Invalidate any outstanding snapshot from the previous detail tier.
+        _clearAccess();
+      }
+      roster.setAccess(tier as String, result['isQualifiedResponder'] == true);
+      return true;
+    } catch (error) {
+      debugPrint('Unable to check responder access (${error.runtimeType}).');
       return false;
     }
   }
 
-  /// Apply a live flag change to this device (responder:status_changed).
-  /// Ignored for EMERGENCY_RESPONDER-route accounts (see above).
-  Future<void> _applyFlagChange(bool enabled) async {
-    if (await _storedUserIsResponderRoute()) return;
-    if (enabled && !_isResponderActive) {
-      startResponderListener();
-    } else if (!enabled && _isResponderActive) {
-      stopResponderListener();
+  Future<bool> refreshIncidents({bool manual = false}) {
+    final token = _jwt;
+    if (token == null || !roster.eligible || (!manual && !_automatic)) {
+      return Future.value(false);
+    }
+    final running = _refreshRequest;
+    if (running != null) {
+      if (_refreshVersion == _accessVersion) return running;
+      final session = _session;
+      return running.then(
+        (_) => _current(session) ? refreshIncidents(manual: manual) : false,
+      );
+    }
+    final session = _session, access = _accessVersion;
+    _refreshVersion = access;
+    return _refreshRequest = _loadIncidents(token, session, access, manual)
+        .whenComplete(() {
+          if (_current(session)) _refreshRequest = null;
+        });
+  }
+
+  Future<bool> _loadIncidents(
+    String token,
+    int session,
+    int access,
+    bool manual,
+  ) async {
+    final revision = roster.revision;
+    roster.setLoading(true);
+    var succeeded = false;
+    try {
+      final response = await _http
+          .get(_url('/api/emergency/active'), headers: _headers(token))
+          .timeout(_timeout);
+      if (!_current(session) || access != _accessVersion) return false;
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        _clearAccess();
+      } else if (response.statusCode == 200 && (manual || _automatic)) {
+        final body = jsonDecode(response.body) as List;
+        roster.reconcile(
+          body.whereType<Map>().map(Incident.parse).nonNulls,
+          revision,
+        );
+        succeeded = true;
+      }
+      return succeeded;
+    } catch (error) {
+      debugPrint(
+        'Could not refresh the incident roster (${error.runtimeType}).',
+      );
+      return false;
+    } finally {
+      if (_current(session) && access == _accessVersion) {
+        roster.setLoading(false, error: !succeeded && (manual || _automatic));
+      }
     }
   }
 
-  /// Re-check /api/profile/me and apply + persist the live flag.
-  /// Returns the live flag, or null when it could not be determined.
-  /// Called on app resume and usable for splash refresh.
-  Future<bool?> syncQualifiedResponderFlag() async {
+  Future<String?> updateStatus(int id, IncidentStatus status) async {
+    final token = _jwt;
+    final session = _session, access = _accessVersion;
+    if (token == null || roster[id] == null) return 'Incident unavailable.';
+    if (!_updating.add(id)) return 'An update is already in progress.';
     try {
-      final jwt = await _storage.read(key: 'jwt_token');
-      if (jwt == null) return null;
-      final res = await ApiConfig.client.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/profile/me'),
-        headers: {'Authorization': 'Bearer $jwt'},
-      );
-      if (res.statusCode != 200) return null;
-      final data = jsonDecode(res.body);
-      final flag = data['user']?['is_qualified_responder'] == true;
-
-      // Persist so the next launch (splash) routes with the live value.
-      final userDataStr = await _storage.read(key: 'user_data');
-      if (userDataStr != null) {
-        try {
-          final user = jsonDecode(userDataStr);
-          if (user is Map<String, dynamic> && user['is_qualified_responder'] != flag) {
-            user['is_qualified_responder'] = flag;
-            await _storage.write(key: 'user_data', value: jsonEncode(user));
-          }
-        } catch (_) {}
+      final response = await _http
+          .patch(
+            _url('/api/emergency/$id/status'),
+            headers: _headers(token),
+            body: jsonEncode({'status': status.code}),
+          )
+          .timeout(_timeout);
+      if (!_current(session) || access != _accessVersion) {
+        return 'Responder access changed.';
       }
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        _clearAccess();
+        return 'Responder access is unavailable.';
+      }
+      if (response.statusCode == 200) {
+        roster.statusChanged(id, status);
+        _cancelLocalNotification(id);
+        return null;
+      }
+      if (response.statusCode == 409) {
+        final current = IncidentStatus.read(
+          jsonDecode(response.body)['currentStatus'],
+        );
+        if (current != null) {
+          roster.statusChanged(id, current);
+          _cancelLocalNotification(id);
+          return current.isClosed || current == status
+              ? null
+              : 'The incident is already ${current.label.toLowerCase()}.';
+        }
+      }
+      if (response.statusCode == 404) {
+        roster.statusChanged(id, IncidentStatus.resolved);
+        _cancelLocalNotification(id);
+      }
+      return 'The incident could not be updated.';
+    } catch (_) {
+      return 'Could not update the incident. Check your connection and try again.';
+    } finally {
+      if (_current(session) && access == _accessVersion) _updating.remove(id);
+    }
+  }
 
-      await _applyFlagChange(flag);
-      return flag;
+  Future<void> setDutyMode(ResponderDutyMode mode) async {
+    if (!_android || !roster.eligible || _jwt == null || roster.mode == mode) {
+      return;
+    }
+    if (mode == ResponderDutyMode.offDuty) {
+      _testing = false;
+      _testTimer?.cancel();
+      _cancelLocalNotifications();
+    }
+    roster.setMode(mode);
+    if (_automatic) unawaited(refreshIncidents());
+    await retryDelivery();
+  }
+
+  Future<void> retryDelivery() async {
+    if (_jwt == null) return;
+    final session = _session;
+    final mode = roster.mode;
+    delivery.value = DeliveryStatus.pending;
+    try {
+      await (_modeWrites = _modeWrites.catchError((Object _) {}).then((
+        _,
+      ) async {
+        if (_current(session)) {
+          await _storage.write(key: _modeKey, value: mode.code);
+        }
+      }));
+    } catch (_) {
+      if (_current(session) && roster.mode == mode) {
+        delivery.value = DeliveryStatus.failed;
+      }
+      return;
+    }
+    if (_current(session) && roster.mode == mode) await _syncRegistration();
+  }
+
+  Future<bool> initializeFirebase() => _firebase ??= _initializeFirebase();
+
+  Future<bool> _initializeFirebase() async {
+    if (!_android && (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS)) {
+      return false;
+    }
+    try {
+      await Firebase.initializeApp();
+      FirebaseMessaging.onBackgroundMessage(
+        _firebaseMessagingBackgroundHandler,
+      );
+      FirebaseMessaging.onMessage.listen(_onForegroundMessage);
+      FirebaseMessaging.onMessageOpenedApp.listen(_onPushTap);
+      FirebaseMessaging.instance.onTokenRefresh.listen((token) {
+        _fcmToken = token;
+        unawaited(_syncRegistration());
+      });
+      final initial = await FirebaseMessaging.instance.getInitialMessage();
+      if (initial != null) _onPushTap(initial);
+      return true;
+    } catch (_) {
+      debugPrint('Firebase messaging is unavailable.');
+      return false;
+    }
+  }
+
+  void _onForegroundMessage(RemoteMessage message) {
+    if (_jwt == null || !_foreground || _terminating) return;
+    final data = message.data;
+    if (data['type'] == 'EMERGENCY_SOS') {
+      final id = Incident.readId(data['alertId']);
+      if (_automatic && id != null) unawaited(_refreshForPush(id));
+    } else if (data['type'] == 'QUEUE_TURN') {
+      unawaited(
+        showQueueTurnNotification(
+          ticketNo: data['ticketNo'] ?? data['ticket_no'] ?? 'Your Ticket',
+          doctorName:
+              data['doctorName'] ?? data['doctor_name'] ?? 'Attending Doctor',
+        ),
+      );
+    } else {
+      unawaited(
+        showAppointmentConfirmedNotification(
+          message.notification?.title,
+          message.notification?.body,
+        ),
+      );
+    }
+  }
+
+  Future<void> _refreshForPush(int id) async {
+    final session = _session;
+    if (!await refreshAccess() || !_current(session) || roster[id] != null) {
+      return;
+    }
+    final running = _refreshRequest;
+    if (running != null) await running;
+    if (_current(session) && roster[id] == null) await refreshIncidents();
+  }
+
+  void _onPushTap(RemoteMessage message) {
+    if (message.data['type'] == 'EMERGENCY_SOS') {
+      handleNotificationTap(message.data['alertId']);
+    }
+  }
+
+  void handleNotificationTap(Object? value) {
+    final id = Incident.readId(value);
+    if (id == null || _terminating) return;
+    _pendingOpen = id;
+    unawaited(_openPendingNotification());
+  }
+
+  bool _openingNotification = false;
+  Future<void> _openPendingNotification() async {
+    final id = _pendingOpen;
+    if (id == null ||
+        !_foreground ||
+        !_requestInitialized ||
+        _openingNotification) {
+      return;
+    }
+    _openingNotification = true;
+    final session = _session;
+    _pendingOpen = null;
+    try {
+      final allowed = await refreshAccess();
+      final loaded = allowed && await refreshIncidents(manual: true);
+      if (!_current(session) || _terminating) return;
+      if (!_foreground) {
+        _pendingOpen ??= id;
+        return;
+      }
+      notificationOpen.value = loaded && roster[id] != null ? id : -1;
+    } finally {
+      _openingNotification = false;
+      if (_foreground && _pendingOpen != null) {
+        unawaited(_openPendingNotification());
+      }
+    }
+  }
+
+  Future<String?> currentFcmToken() async {
+    if (_fcmToken != null) return _fcmToken;
+    try {
+      if (!await initializeFirebase().timeout(_timeout)) return null;
+      return _fcmToken ??= await FirebaseMessaging.instance.getToken().timeout(
+        _timeout,
+      );
     } catch (_) {
       return null;
     }
   }
 
-  /// A responder connecting mid-incident must see open alerts. Fetch
-  /// /active on listener start: alarm on the newest 'triggered' alert, or
-  /// surface already-acknowledged/dispatched incidents quietly.
-  Future<void> _catchUpOnOpenAlerts() async {
-    try {
-      final jwt = await _storage.read(key: 'jwt_token');
-      if (jwt == null) return;
-      final res = await ApiConfig.client.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/emergency/active'),
-        headers: {'Authorization': 'Bearer $jwt'},
-      );
-      if (res.statusCode != 200) return;
-      final List<dynamic> alerts = jsonDecode(res.body);
-      if (alerts.isEmpty) return;
-
-      final triggered = alerts.where((a) => a['status'] == 'triggered').toList();
-      if (triggered.isNotEmpty) {
-        final newest = triggered.first; // /active is ordered newest-first
-        final alertId = newest['alert_id'];
-        if (_lastAlertIdProcessed != alertId) {
-          _lastAlertIdProcessed = alertId;
-          triggerEmergencyBroadcast(Map<String, dynamic>.from(newest));
-        }
-      } else {
-        showResponderCatchUpNotification(alerts.length);
-      }
-    } catch (_) {}
+  Future<void> _syncRegistration() {
+    final token = _jwt;
+    if (token == null ||
+        !_requestInitialized ||
+        _terminating ||
+        kIsWeb ||
+        (!_android && defaultTargetPlatform != TargetPlatform.iOS)) {
+      return Future.value();
+    }
+    final running = _registration;
+    if (running != null) return running;
+    final session = _session;
+    return _registration = _register(token, session).whenComplete(() {
+      if (_current(session)) _registration = null;
+    });
   }
 
-  Future<void> showResponderCatchUpNotification(int openCount) async {
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'emergency_sos_channel_v4',
-      '🚨 Critical Emergency SOS',
-      channelDescription: 'High-priority campus emergency dispatch alerts',
-      importance: Importance.max,
-      priority: Priority.high,
-      ticker: 'Open incidents',
-    );
-    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
+  Future<void> _register(String token, int session) async {
+    delivery.value = DeliveryStatus.pending;
+    try {
+      if (_android && !await (_channels ??= _initializeNotifications())) {
+        throw StateError('SOS channels unavailable');
+      }
+      if (!_android && await initializeFirebase()) {
+        await FirebaseMessaging.instance.requestPermission().timeout(_timeout);
+      }
+      do {
+        await _modeWrites;
+        final fcmToken = await currentFcmToken();
+        if (!_current(session) || _terminating) return;
+        if (fcmToken == null || (_android && installationId == null)) {
+          throw StateError('Push device unavailable');
+        }
+        final mode = roster.mode;
+        final response = await _http
+            .post(
+              _url('/api/profile/fcm-token'),
+              headers: _headers(token),
+              body: jsonEncode({
+                'fcm_token': fcmToken,
+                'device_type': _android ? 'android' : 'ios',
+                if (_android) 'installation_id': installationId,
+                if (_android) 'sos_mode': mode.code,
+              }),
+            )
+            .timeout(_timeout);
+        if (!_current(session) || _terminating) return;
+        if (response.statusCode != 200 ||
+            (_android && jsonDecode(response.body)['sos_mode'] != mode.code)) {
+          throw StateError('Push registration not confirmed');
+        }
+        if (roster.mode == mode && _fcmToken == fcmToken) {
+          delivery.value = DeliveryStatus.saved;
+          return;
+        }
+      } while (_current(session) && !_terminating);
+    } catch (_) {
+      if (_current(session)) delivery.value = DeliveryStatus.failed;
+    }
+  }
 
-    await _localNotifications.show(
-      104,
-      '🚨 $openCount open SOS incident${openCount == 1 ? '' : 's'}',
-      'Already acknowledged by others. Open the app if you can assist.',
-      platformDetails,
+  Future<void> requestNotificationPermission() =>
+      _permission ??= _requestNotificationPermission();
+
+  Future<void> _requestNotificationPermission() async {
+    if (!await (_channels ??= _initializeNotifications())) return;
+    try {
+      await _notifications
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >()
+          ?.requestNotificationsPermission();
+    } catch (_) {
+      debugPrint('Notification permission is unavailable.');
+    }
+  }
+
+  Future<bool> _initializeNotifications() async {
+    if (!_android) return false;
+    try {
+      await _notifications.initialize(
+        const InitializationSettings(
+          android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+        ),
+        onDidReceiveNotificationResponse: (response) =>
+            handleNotificationTap(response.payload),
+      );
+      final android = _notifications
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >();
+      if (android == null) return false;
+      const channels = [
+        AndroidNotificationChannel(
+          _audibleChannel,
+          'Campus SOS · On duty',
+          importance: Importance.max,
+          sound: RawResourceAndroidNotificationSound('emr_sound'),
+        ),
+        AndroidNotificationChannel(
+          _quietChannel,
+          'Campus SOS · Quiet',
+          importance: Importance.high,
+          playSound: false,
+          enableVibration: true,
+        ),
+        AndroidNotificationChannel(
+          _foregroundChannel,
+          'Campus SOS · In app',
+          importance: Importance.high,
+          playSound: false,
+          enableVibration: false,
+        ),
+        AndroidNotificationChannel(
+          'student_sos_confirmation_channel',
+          'SOS Dispatch Confirmation',
+          importance: Importance.high,
+        ),
+        AndroidNotificationChannel(
+          'clinic_queue_channel',
+          'Clinic Queue Turn',
+          importance: Importance.high,
+        ),
+        AndroidNotificationChannel(
+          'appointment_channel',
+          'Consultation Appointments',
+          importance: Importance.high,
+        ),
+      ];
+      await Future.wait(channels.map(android.createNotificationChannel));
+      final launch = await _notifications.getNotificationAppLaunchDetails();
+      if (launch?.didNotificationLaunchApp == true) {
+        handleNotificationTap(launch?.notificationResponse?.payload);
+      }
+      return true;
+    } catch (_) {
+      debugPrint('Android notification channels are unavailable.');
+      return false;
+    }
+  }
+
+  Future<void> _showNotification(
+    int id,
+    String? title,
+    String? body,
+    NotificationDetails details,
+  ) async {
+    if (!await (_channels ??= _initializeNotifications())) return;
+    try {
+      await _notifications.show(id, title, body, details);
+    } catch (_) {
+      debugPrint('Local notification could not be shown.');
+    }
+  }
+
+  void _announce(Incident incident) {
+    final session = _session;
+    _notificationQueue = _notificationQueue.then((_) async {
+      if (!await (_channels ??= _initializeNotifications()) ||
+          !_current(session) ||
+          !_foreground ||
+          !_automatic ||
+          roster[incident.id]?.status != IncidentStatus.triggered ||
+          _terminating) {
+        return;
+      }
+      try {
+        final quiet = roster.mode == ResponderDutyMode.quiet;
+        await _notifications.show(
+          999,
+          'Campus emergency SOS',
+          'Open LeoVital to view the incident.',
+          NotificationDetails(
+            android: AndroidNotificationDetails(
+              quiet ? _quietChannel : _foregroundChannel,
+              quiet ? 'Campus SOS · Quiet' : 'Campus SOS · In app',
+              importance: Importance.high,
+              priority: Priority.high,
+              playSound: false,
+              enableVibration: quiet,
+              visibility: NotificationVisibility.private,
+              tag: 'responder-sos-${incident.id}',
+            ),
+          ),
+          payload: '${incident.id}',
+        );
+        _localPosts.add(incident.id);
+      } catch (_) {
+        debugPrint('SOS notification could not be shown.');
+      }
+    });
+  }
+
+  void _cancelLocalNotification(int id) {
+    _notificationQueue = _notificationQueue.then((_) async {
+      if (!_localPosts.remove(id)) return;
+      try {
+        await _notifications.cancel(999, tag: 'responder-sos-$id');
+      } catch (_) {
+        debugPrint('SOS notification could not be removed.');
+      }
+    });
+  }
+
+  void _cancelLocalNotifications() {
+    _notificationQueue = _notificationQueue.then((_) async {
+      for (final id in _localPosts.toList()) {
+        try {
+          await _notifications.cancel(999, tag: 'responder-sos-$id');
+        } catch (_) {
+          debugPrint('SOS notification could not be removed.');
+        }
+      }
+      _localPosts.clear();
+    });
+  }
+
+  void testSiren() {
+    if (!_foreground ||
+        !roster.eligible ||
+        roster.incidents.any(
+          (incident) => incident.status == IncidentStatus.triggered,
+        )) {
+      return;
+    }
+    _testing = true;
+    _testTimer?.cancel();
+    _testTimer = Timer(const Duration(seconds: 3), () {
+      _testing = false;
+      _updateAlarm();
+    });
+    _updateAlarm();
+  }
+
+  void _updateAlarm() {
+    final triggered = roster.incidents.where(
+      (incident) => incident.status == IncidentStatus.triggered,
     );
+    final current = triggered.map((incident) => incident.id).toSet();
+    for (final id
+        in _localPosts.where((id) => !current.contains(id)).toList()) {
+      _cancelLocalNotification(id);
+    }
+    if (triggered.isNotEmpty || !_foreground || !roster.eligible) {
+      _testing = false;
+      _testTimer?.cancel();
+    }
+    if (_foreground && _automatic && !_terminating) {
+      for (final incident in triggered) {
+        if (_announced.add(incident.id) && !roster.isMuted(incident.id)) {
+          _announce(incident);
+        }
+      }
+    }
+    final desired =
+        _foreground && !_terminating && (roster.shouldRing || _testing);
+    if (desired == _wantsAudio) return;
+    _wantsAudio = desired;
+    final version = ++_audioVersion;
+    _audioQueue = _audioQueue.then((_) async {
+      try {
+        if (!desired) {
+          await _player?.release();
+          return;
+        }
+        if (version != _audioVersion) return;
+        final player = _player ??= AudioPlayer();
+        try {
+          await player.setAudioContext(
+            AudioContext(
+              android: AudioContextAndroid(
+                usageType: AndroidUsageType.alarm,
+                contentType: AndroidContentType.sonification,
+                audioFocus: AndroidAudioFocus.gainTransientExclusive,
+              ),
+            ),
+          );
+        } catch (_) {
+          debugPrint('Alarm audio context is unavailable.');
+        }
+        await player.setReleaseMode(ReleaseMode.loop);
+        if (version != _audioVersion) return;
+        try {
+          await player.play(AssetSource('emr_sound.ogg'));
+        } catch (_) {
+          _fallback ??= await compute(_generateWavBytesIsolate, 3);
+          if (version == _audioVersion) {
+            await player.play(BytesSource(_fallback!, mimeType: 'audio/wav'));
+          }
+        }
+      } catch (_) {
+        if (version == _audioVersion) _wantsAudio = false;
+        debugPrint('Alarm playback is unavailable.');
+      }
+    });
   }
 
   Future<void> showStudentSosSentNotification() async {
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'student_sos_confirmation_channel',
-      'SOS Dispatch Confirmation',
-      channelDescription: 'Emergency dispatch confirmation',
-      importance: Importance.high,
-      priority: Priority.high,
-      ticker: 'SOS Dispatched',
-      playSound: true,
-      enableVibration: true,
-      fullScreenIntent: false,
+    const AndroidNotificationDetails androidDetails =
+        AndroidNotificationDetails(
+          'student_sos_confirmation_channel',
+          'SOS Dispatch Confirmation',
+          channelDescription: 'Emergency dispatch confirmation',
+          importance: Importance.high,
+          priority: Priority.high,
+          ticker: 'SOS Dispatched',
+          playSound: true,
+          enableVibration: true,
+          fullScreenIntent: false,
+        );
+
+    const NotificationDetails platformDetails = NotificationDetails(
+      android: androidDetails,
     );
 
-    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
-
-    await _localNotifications.show(
+    await _showNotification(
       101,
       '🚨 SOS Alert Dispatched',
       'Your SOS has been broadcasted. Responders have your GPS coordinates and medical profile.',
@@ -557,21 +960,28 @@ class EmergencyAlertService {
     );
   }
 
-  Future<void> showAppointmentConfirmedNotification([String? title, String? body]) async {
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'appointment_channel',
-      '📅 Consultation Appointments',
-      channelDescription: 'Appointment booking confirmations and scheduled reminders',
-      importance: Importance.high,
-      priority: Priority.high,
-      ticker: 'Appointment Confirmed',
-      playSound: true,
-      enableVibration: true,
+  Future<void> showAppointmentConfirmedNotification([
+    String? title,
+    String? body,
+  ]) async {
+    const AndroidNotificationDetails androidDetails =
+        AndroidNotificationDetails(
+          'appointment_channel',
+          '📅 Consultation Appointments',
+          channelDescription:
+              'Appointment booking confirmations and scheduled reminders',
+          importance: Importance.high,
+          priority: Priority.high,
+          ticker: 'Appointment Confirmed',
+          playSound: true,
+          enableVibration: true,
+        );
+
+    const NotificationDetails platformDetails = NotificationDetails(
+      android: androidDetails,
     );
 
-    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
-
-    await _localNotifications.show(
+    await _showNotification(
       102,
       title ?? '📅 Consultation Confirmed',
       body ?? 'Your consultation appointment has been scheduled successfully.',
@@ -583,319 +993,28 @@ class EmergencyAlertService {
     required String ticketNo,
     required String doctorName,
   }) async {
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'clinic_queue_channel',
-      '🔔 Clinic Queue Turn',
-      channelDescription: 'Alerts when your queue ticket is called for consultation',
-      importance: Importance.high,
-      priority: Priority.high,
-      ticker: 'Your Turn!',
-      playSound: true,
-      enableVibration: true,
+    const AndroidNotificationDetails androidDetails =
+        AndroidNotificationDetails(
+          'clinic_queue_channel',
+          '🔔 Clinic Queue Turn',
+          channelDescription:
+              'Alerts when your queue ticket is called for consultation',
+          importance: Importance.high,
+          priority: Priority.high,
+          ticker: 'Your Turn!',
+          playSound: true,
+          enableVibration: true,
+        );
+
+    const NotificationDetails platformDetails = NotificationDetails(
+      android: androidDetails,
     );
 
-    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
-
-    await _localNotifications.show(
+    await _showNotification(
       103,
       '🔔 It\'s Your Turn! ($ticketNo)',
       'Please proceed to the consultation room with $doctorName.',
       platformDetails,
-    );
-  }
-
-  void playAlarmSound() async {
-    if (_isAlarmPlaying) return;
-    _isAlarmPlaying = true;
-
-    try {
-      try {
-        await _audioPlayer.stop();
-        await _audioPlayer.release();
-      } catch (_) {}
-
-      await _audioPlayer.setReleaseMode(ReleaseMode.loop);
-      await _audioPlayer.setVolume(1.0);
-
-      try {
-        await _audioPlayer.play(AssetSource('emr_sound.ogg'));
-      } catch (assetErr) {
-        // Fallback to pre-cached procedural WAV bytes if asset cannot be opened
-        _cachedWavBytes ??= await compute(_generateWavBytesIsolate, 3);
-        await _audioPlayer.play(BytesSource(_cachedWavBytes!, mimeType: 'audio/wav'));
-      }
-
-      _vibrationTimer?.cancel();
-      _vibrationTimer = Timer.periodic(const Duration(milliseconds: 600), (timer) {
-        if (!_isAlarmPlaying) {
-          timer.cancel();
-        } else {
-          HapticFeedback.heavyImpact();
-        }
-      });
-    } catch (e) {
-      debugPrint('❌ [Audio alarm error]: $e');
-    }
-  }
-
-  void stopAlarmSound() async {
-    _isAlarmPlaying = false;
-    _vibrationTimer?.cancel();
-    try {
-      await _audioPlayer.stop();
-      await _audioPlayer.release();
-    } catch (_) {}
-  }
-
-  /// Remove the persistent SOS notification (id 999) from the tray once the
-  /// incident it advertised is closed.
-  Future<void> _cancelEmergencyNotification() async {
-    try {
-      await _localNotifications.cancel(999);
-    } catch (_) {}
-  }
-
-  /// Close the live SOS dialog (if any) from outside the dialog itself —
-  /// used by the socket listener when another responder closes the incident.
-  void _closeSosDialog() {
-    final ctx = _sosDialogContext;
-    _sosDialogContext = null;
-    _sosDialogAlertId = null;
-    if (ctx != null && ctx.mounted) {
-      Navigator.of(ctx).pop();
-    }
-  }
-
-  Future<void> triggerEmergencyBroadcast(
-    Map<String, dynamic> alertData, {
-    void Function(String status)? onStatusChanged,
-  }) async {
-    playAlarmSound();
-
-    final patientName = alertData['patientName'] ??
-        "${alertData['first_name'] ?? 'Unknown'} ${alertData['last_name'] ?? 'User'}";
-    final studentNo = alertData['studentNo'] ?? alertData['identifier_no'] ?? 'Verified User';
-    final roleLabel = alertData['roleLabel'] ?? alertData['role'] ?? 'Campus Member';
-
-    // Server tiering: community (non-clinical) responders receive a reduced
-    // payload — medical details are stripped before they ever reach us.
-    // Closing actions are NOT tiered: any responder may resolve / flag a
-    // false alarm, so those buttons stay for every tier.
-    final redacted = alertData['medicalDetailsRedacted'] == true;
-    final bloodType = alertData['bloodType'] ?? alertData['blood_type'];
-    final allergies = alertData['allergies'];
-    final lat = double.tryParse(alertData['latitude'].toString()) ?? 0.0;
-    final lng = double.tryParse(alertData['longitude'].toString()) ?? 0.0;
-    final googleMapsUrl = alertData['googleMapsUrl'] ?? 'https://www.google.com/maps?q=$lat,$lng';
-    final rawAlertId = alertData['alertId'] ?? alertData['alert_id'];
-    final alertId = rawAlertId is int ? rawAlertId : int.tryParse('$rawAlertId') ?? 0;
-
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'emergency_sos_channel_v4',
-      '🚨 Critical Emergency SOS',
-      channelDescription: 'High-priority campus emergency dispatch alerts',
-      importance: Importance.max,
-      priority: Priority.high,
-      ticker: 'EMERGENCY SOS',
-      fullScreenIntent: true,
-      enableVibration: true,
-      playSound: true,
-      sound: RawResourceAndroidNotificationSound('emr_sound'),
-      category: AndroidNotificationCategory.alarm,
-    );
-
-    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
-
-    // Lock-screen privacy for EVERY tier: the notification shows the patient
-    // name and location only. Blood type and allergies were previously leaked
-    // here — they stay inside the in-app dialog from now on.
-    await _localNotifications.show(
-      999,
-      '🚨 EMERGENCY SOS: $patientName',
-      'Location: ${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)} — open the app for details.',
-      platformDetails,
-    );
-
-    final context = navigatorKey.currentContext;
-    if (context == null || !context.mounted) return;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        // Track the live dialog so the socket listener can close it when
-        // another responder resolves / false-alarms this alert.
-        _sosDialogContext = ctx;
-        _sosDialogAlertId = alertId;
-
-        return AlertDialog(
-          backgroundColor: const Color(0xFF7F1D1D),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: Colors.amber, width: 3),
-          ),
-          contentPadding: const EdgeInsets.all(16),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.amber,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.warning_rounded, color: Colors.black, size: 26),
-                      SizedBox(width: 8),
-                      Text(
-                        'EMERGENCY ALERT (CRITICAL)',
-                        style: TextStyle(
-                          color: Colors.black,
-                          fontWeight: FontWeight.w900,
-                          fontSize: 15,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'PSU DISASTER RISK REDUCTION & INFIRMARY PROTOCOL',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold),
-                ),
-                const Divider(color: Colors.white24, height: 20),
-
-                Text(
-                  patientName,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white, fontSize: 21, fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  '$roleLabel · ID: $studentNo',
-                  style: const TextStyle(color: Colors.white70, fontSize: 14),
-                ),
-                const SizedBox(height: 14),
-
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.black45,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.red.shade400),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: redacted
-                        ? [
-                            const Text(
-                              '🩸 Medical details not shared at your responder level',
-                              style: TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 14),
-                            ),
-                            const SizedBox(height: 4),
-                            const Text(
-                              'Reduced payload for non-clinical responders (R.A. 10173).',
-                              style: TextStyle(color: Colors.white54, fontSize: 12),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '📍 Coordinates: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
-                              style: const TextStyle(color: Colors.white70, fontSize: 13),
-                            ),
-                          ]
-                        : [
-                            Text(
-                              '🩸 Blood Type: ${bloodType ?? 'Unknown'}',
-                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '⚠️ Allergies: ${allergies ?? 'None recorded'}',
-                              style: const TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 14),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '📍 Coordinates: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
-                              style: const TextStyle(color: Colors.white70, fontSize: 13),
-                            ),
-                          ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue.shade700,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size.fromHeight(42),
-                  ),
-                  onPressed: () async {
-                    // Navigating to the scene stops the siren — the incident
-                    // itself stays open and actionable from the alert list.
-                    stopAlarmSound();
-                    final uri = Uri.parse(googleMapsUrl);
-                    if (await canLaunchUrl(uri)) {
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
-                    }
-                  },
-                  icon: const Icon(Icons.navigation, size: 18),
-                  label: const Text('Open in Google Maps', style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
-                const SizedBox(height: 12),
-
-                // Shared status actions (responder_screen / dialog parity).
-                // ANY responder tier may close the incident — the buttons
-                // are shown regardless of medical-detail redaction.
-                SosAlertActions(
-                  alertId: alertId,
-                  status: '${alertData['status'] ?? 'triggered'}',
-                  onChanged: (status) {
-                    stopAlarmSound();
-                    // Closing the incident dismisses the SOS dialog on this
-                    // device too — the alarm must not outlive the incident.
-                    if (status == 'resolved' || status == 'false_alarm') {
-                      _cancelEmergencyNotification();
-                      if (ctx.mounted) {
-                        Navigator.of(ctx).pop();
-                      }
-                      _sosDialogContext = null;
-                      _sosDialogAlertId = null;
-                    }
-                    onStatusChanged?.call(status);
-                  },
-                ),
-                const SizedBox(height: 10),
-
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: Colors.red.shade900,
-                    minimumSize: const Size.fromHeight(46),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                  onPressed: () {
-                    stopAlarmSound();
-                    _sosDialogContext = null;
-                    _sosDialogAlertId = null;
-                    if (ctx.mounted) {
-                      Navigator.pop(ctx);
-                    }
-                  },
-                  child: const Text(
-                    'SILENCE ALARM',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 }

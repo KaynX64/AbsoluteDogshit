@@ -114,12 +114,15 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
         return;
       }
 
-      String? deviceToken;
+      final alerts = EmergencyAlertService();
+      Map<String, String> device = {};
       try {
-        deviceToken =
-            await (widget.deviceToken ??
-                    EmergencyAlertService().currentFcmToken)()
-                .timeout(const Duration(seconds: 2));
+        if (widget.deviceToken case final readToken?) {
+          final token = await readToken().timeout(const Duration(seconds: 2));
+          if (token != null && token.isNotEmpty) device = {'fcm_token': token};
+        } else {
+          device = await alerts.terminationDevice();
+        }
       } catch (_) {
         // Push registration may be unavailable on this device.
       }
@@ -134,8 +137,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
             body: jsonEncode({
               'currentPassword': currentPassword,
               'newPassword': newPassword,
-              if (deviceToken != null && deviceToken.isNotEmpty)
-                'fcm_token': deviceToken,
+              ...device,
             }),
           )
           .timeout(const Duration(seconds: 15));
@@ -166,6 +168,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     } catch (_) {
       if (mounted) _showUnconfirmed();
     } finally {
+      if (widget.deviceToken == null) EmergencyAlertService().resumeRegistration();
       if (mounted) setState(() => _saving = false);
     }
   }
@@ -220,8 +223,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     _newPassword.clear();
     _confirmPassword.clear();
     final themes = AccountThemeScope.of(context);
-    final alerts = EmergencyAlertService();
-    if (alerts.isResponderActive) alerts.stopResponderListener();
+    EmergencyAlertService().endSession();
     themes.reset();
 
     try {

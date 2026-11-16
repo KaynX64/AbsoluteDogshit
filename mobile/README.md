@@ -31,3 +31,5 @@ In **Appearance**, choose **Light** or **Dark** and a **LeoVital**, **Blossom**,
 **Change password** uses your current password and confirmation of the new one. After a successful change, sign in again with the new password.
 
 Appearance saves to the signed-in account using the same preferences as desktop. Pending saves remain cached for that account and retry when connectivity returns or the app resumes. Saved selections survive restarts. Sign-in uses the default appearance, and the app checks for desktop changes on resume or reconnect.
+
+Android responder delivery, duty settings and staging checks are documented in the [Qualified Responder specification](../QUALIFIED_RESPONDER_REVAMP_SPECIFICATION.md).

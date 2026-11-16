@@ -14,18 +14,19 @@ export function registerAlertRoutes(router, io) {
   router.get('/responder-access', authenticateToken, async (req, res) => {
     res.set('Cache-Control', 'no-store');
     try {
-      const { authorized } = await resolveResponderAccess(req.user.user_id);
-      return res.json({ authorized });
+      return res.json(await resolveResponderAccess(req.user.user_id));
     } catch {
       return res.status(500).json({ error: 'Responder access lookup failed.' });
     }
   });
 
   router.get('/active', authenticateToken, requireResponderAccess, async (req, res) => {
+    res.set('Cache-Control', 'no-store');
     try {
       const tier = req.responderTier;
       const [alerts] = await pool.query(
         `SELECT a.alert_id, a.user_id, a.latitude, a.longitude, a.status, a.created_at, a.notes,
+                a.location_label AS formattedAddress,
                 u.first_name, u.last_name, u.phone,
                 COALESCE(r.code, 'STUDENT') AS primary_role,
                 COALESCE(sp.student_no, fp.faculty_no, st.license_no, ntp.employee_no, 'PSU Member') AS identifier_no,
@@ -33,15 +34,14 @@ export function registerAlertRoutes(router, io) {
                 hp.blood_type, hp.allergies
          FROM EMERGENCY_ALERTS a
          JOIN USERS u ON a.user_id = u.user_id
-         LEFT JOIN USER_ROLES ur ON u.user_id = ur.user_id
-         LEFT JOIN ROLES r ON ur.role_id = r.role_id
+         LEFT JOIN ROLES r ON r.role_id = (SELECT MIN(ur.role_id) FROM USER_ROLES ur WHERE ur.user_id = u.user_id)
          LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
          LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
          LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
          LEFT JOIN NON_TEACHING_PROFILES ntp ON u.user_id = ntp.user_id
-         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
+         LEFT JOIN HEALTH_PROFILES hp ON hp.user_id = u.user_id AND hp.deleted_at IS NULL
          WHERE a.status IN ('triggered', 'acknowledged', 'dispatched')
-         ORDER BY a.created_at DESC`
+         ORDER BY a.created_at DESC, a.alert_id DESC`
       );
 
       const decryptedAlerts = alerts.map((a) => {
@@ -113,7 +113,10 @@ export function registerAlertRoutes(router, io) {
                          response_time_seconds = TIMESTAMPDIFF(SECOND, created_at, CURRENT_TIMESTAMP)`;
         }
 
-        params.push(alertId);
+        const from = status === 'acknowledged' ? ['triggered']
+          : status === 'dispatched' ? ['triggered', 'acknowledged']
+            : ['triggered', 'acknowledged', 'dispatched'];
+        params.push(alertId, from);
 
         // Atomic open-state guard: the UPDATE only matches while the alert
         // is still open. Two responders closing the same SOS → exactly one
@@ -122,13 +125,13 @@ export function registerAlertRoutes(router, io) {
         const [updateResult] = await connection.query(
           `UPDATE EMERGENCY_ALERTS
            SET status = ?, assigned_responder_id = ? ${extraUpdate}
-           WHERE alert_id = ? AND status IN ('triggered', 'acknowledged', 'dispatched')`,
+           WHERE alert_id = ? AND status IN (?)`,
           params
         );
 
         if (updateResult.affectedRows === 0) {
           await connection.rollback();
-          const [existing] = await pool.query(
+          const [existing] = await connection.query(
             'SELECT status FROM EMERGENCY_ALERTS WHERE alert_id = ?',
             [alertId]
           );

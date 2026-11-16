@@ -784,6 +784,59 @@ test('a Super Admin can grant and revoke incident archive access while responder
   assert.deepEqual((await prefill.json()).report, { reportId: 1 });
 });
 
+test('multi-role incident rows stay unique and concurrent responders cannot reverse a transition', { skip }, async t => {
+  const db = await fixture(t);
+  await db.query("INSERT IGNORE INTO USER_ROLES (user_id, role_id) SELECT 5, role_id FROM ROLES WHERE code = 'FACULTY'");
+  await db.query("UPDATE USERS SET is_qualified_responder = 1 WHERE user_id = 7");
+  await db.query(`INSERT INTO EMERGENCY_ALERTS (alert_id, user_id, location, location_label)
+    VALUES (1, 5, ST_GeomFromText('POINT(0 0)', 4326), 'Campus gate')`);
+  const { request, emit } = await mountedApi(t);
+  const active = await request('/emergency/active', { userId: 7, roles: ['STUDENT'] });
+  assert.equal(active.status, 200);
+  const rows = await active.json();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].formattedAddress, 'Campus gate');
+  assert.equal(rows[0].medicalDetailsRedacted, true);
+  assert.equal('blood_type' in rows[0], false);
+  const change = (status, options) => request('/emergency/1/status', {
+    ...options, method: 'PATCH', json: { status },
+  });
+  assert.equal((await change('dispatched')).status, 200);
+  const stale = await change('acknowledged');
+  assert.equal(stale.status, 409);
+  assert.equal((await stale.json()).currentStatus, 'dispatched');
+  emit.mock.resetCalls();
+  const results = await Promise.all([
+    change('resolved'),
+    change('false_alarm', { userId: 7, roles: ['STUDENT'] }),
+  ]);
+  assert.deepEqual(results.map(response => response.status).sort(), [200, 409]);
+  const updates = emit.mock.calls.filter(call => call.arguments[0] === 'emergency:status_change');
+  assert.ok(updates.length > 0);
+  assert.equal(new Set(updates.map(call => call.arguments[1].status)).size, 1);
+});
+
+test('device rotation preserves other installations and logout removes only its registration', { skip }, async t => {
+  const db = await fixture(t);
+  const { request } = await mountedApi(t);
+  const id = 'a'.repeat(32), other = 'b'.repeat(32);
+  const register = (token, installation_id, sos_mode) => request('/profile/fcm-token', {
+    method: 'POST', json: { fcm_token: token, installation_id, sos_mode },
+  });
+  assert.equal((await register('first-token', id, 'quiet')).status, 200);
+  assert.equal((await register('second-device', other, 'on_duty')).status, 200);
+  assert.equal((await register('rotated-token')).status, 200);
+  assert.equal((await register('rotated-token', id, 'off_duty')).status, 200);
+  const [rows] = await db.query('SELECT fcm_token, sos_mode FROM DEVICE_TOKENS WHERE user_id = 2 ORDER BY fcm_token');
+  assert.deepEqual(rows, [
+    { fcm_token: 'rotated-token', sos_mode: 'off_duty' },
+    { fcm_token: 'second-device', sos_mode: 'on_duty' },
+  ]);
+  assert.equal((await request('/auth/logout', { method: 'POST', json: { installation_id: id } })).status, 200);
+  const [remaining] = await db.query('SELECT installation_id FROM DEVICE_TOKENS WHERE user_id = 2');
+  assert.deepEqual(remaining, [{ installation_id: other }]);
+});
+
 test('concurrent incident filing publishes a single report after commit', { skip }, async t => {
   const db = await fixture(t);
   await db.query(`INSERT INTO EMERGENCY_ALERTS (alert_id, user_id, location, created_at, resolved_at, status)

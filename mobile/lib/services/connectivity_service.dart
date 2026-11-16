@@ -1,5 +1,6 @@
 // mobile/lib/services/connectivity_service.dart
 import 'dart:async';
+
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 
@@ -14,6 +15,7 @@ class ConnectivityService extends ChangeNotifier {
 
   final Connectivity _connectivity = Connectivity();
   StreamSubscription<List<ConnectivityResult>>? _sub;
+  Future<void>? _initialization;
 
   bool _isOnline = true;
   bool get isOnline => _isOnline;
@@ -22,11 +24,22 @@ class ConnectivityService extends ChangeNotifier {
   String _transport = 'Unknown';
   String get transport => _transport;
 
-  Future<void> initialize() async {
-    final initial = await _connectivity.checkConnectivity();
-    _applyResults(initial);
+  Future<void> initialize() => _initialization ??= _initialize();
 
-    _sub = _connectivity.onConnectivityChanged.listen(_applyResults);
+  Future<void> _initialize() async {
+    try {
+      _applyResults(await _connectivity.checkConnectivity());
+    } catch (_) {
+      debugPrint('Initial connectivity check failed.');
+    }
+    try {
+      _sub = _connectivity.onConnectivityChanged.listen(
+        _applyResults,
+        onError: (Object _) => debugPrint('Connectivity update failed.'),
+      );
+    } catch (_) {
+      debugPrint('Connectivity monitoring could not start.');
+    }
   }
 
   void _applyResults(List<ConnectivityResult> results) {

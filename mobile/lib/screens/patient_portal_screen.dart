@@ -17,6 +17,7 @@ import '../utils/responsive.dart';
 import '../widgets/session_timeout_listener.dart';
 import '../widgets/valetudo_logo.dart';
 import '../services/emergency_alert_service.dart';
+import '../widgets/responder_hub.dart';
 import '../services/offline_sos_service.dart';
 import '../services/connectivity_service.dart';
 import 'login_screen.dart';
@@ -139,14 +140,14 @@ class _PatientIdentity {
 
 class PatientPortalScreen extends StatefulWidget {
   final Map<String, dynamic> user;
-  const PatientPortalScreen({super.key, required this.user});
+  final Map<String, dynamic>? initialProfile;
+  const PatientPortalScreen({super.key, required this.user, this.initialProfile});
 
   @override
   State<PatientPortalScreen> createState() => _PatientPortalScreenState();
 }
 
-class _PatientPortalScreenState extends State<PatientPortalScreen>
-    with WidgetsBindingObserver {
+class _PatientPortalScreenState extends State<PatientPortalScreen> {
   int _currentIndex = 0;
   final _storage = const FlutterSecureStorage();
 
@@ -170,10 +171,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
   bool _isDispatchingSOS = false;
   String _sosStatusMessage = '';
 
-  /// Qualified Responder flag (snapshot at open; refreshed on resume via
-  /// EmergencyAlertService().syncQualifiedResponderFlag()).
-  bool _isQualifiedResponder = false;
-
   /// Role-aware display strings, recomputed on every build from the
   /// currently loaded profile. Cheap enough — no caching needed.
   _PatientIdentity get _identity =>
@@ -182,23 +179,18 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
   @override
   void initState() {
     super.initState();
-    _isQualifiedResponder = widget.user['is_qualified_responder'] == true;
     _checkPrivacyConsent();
     _fetchQRPass();
-    _fetchProfile();
+    final initialProfile = widget.initialProfile;
+    if (initialProfile != null) {
+      _profileData = initialProfile;
+      unawaited(_cacheEmergencyInfo(initialProfile));
+    } else {
+      _fetchProfile();
+    }
     _fetchActiveQueueTicket();
     _initQueueSocket();
     ConnectivityService().addListener(_onConnectivityChanged);
-
-    // Qualified Responder: a flagged patient-side account (any role —
-    // student, faculty, non-teaching, nurse, doctor, dentist, admin…) runs
-    // the SOS listener while this portal is open. Role routing itself is
-    // unchanged: EMERGENCY_RESPONDER accounts still land on ResponderScreen.
-    if (_isQualifiedResponder) {
-      EmergencyAlertService().startResponderListener();
-    }
-
-    WidgetsBinding.instance.addObserver(this);
 
     _queuePollingTimer = Timer.periodic(
       const Duration(seconds: 30),
@@ -207,30 +199,12 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Re-check the flag whenever the app resumes: the Admin Console can
-    // grant or revoke it while the phone is backgrounded.
-    if (state == AppLifecycleState.resumed) {
-      EmergencyAlertService().syncQualifiedResponderFlag().then((flag) {
-        if (flag != null && mounted && flag != _isQualifiedResponder) {
-          setState(() => _isQualifiedResponder = flag);
-        }
-      });
-    }
-  }
-
-  @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     ConnectivityService().removeListener(_onConnectivityChanged);
     _queuePollingTimer?.cancel();
     _holdTimer?.cancel();
     _holdProgressNotifier.dispose();
     _socket?.disconnect();
-    // Listener only runs while the portal is open (flag-gated).
-    if (EmergencyAlertService().isResponderActive) {
-      EmergencyAlertService().stopResponderListener();
-    }
     super.dispose();
   }
 
@@ -347,6 +321,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
         },
       );
       if (res.statusCode == 200) {
+        await EmergencyAlertService().signOut(token);
         if (mounted) AccountThemeScope.of(context).reset();
         await _storage.deleteAll();
         if (mounted) {
@@ -408,6 +383,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
           if (isMandatory)
             TextButton(
               onPressed: () async {
+                await EmergencyAlertService().signOut(await _storage.read(key: 'jwt_token'));
                 if (mounted) AccountThemeScope.of(context).reset();
                 await _storage.deleteAll();
                 if (mounted) {
@@ -485,8 +461,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
   // ===========================================================================
 
   Future<void> _initQueueSocket() async {
-    final token = await _storage.read(key: 'jwt_token');
     try {
+      final token = await _storage.read(key: 'jwt_token');
+      if (!mounted || token == null) return;
       _socket = io.io(
         ApiConfig.socketUrl,
         io.OptionBuilder()
@@ -534,47 +511,60 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
 
   Future<void> _fetchQRPass() async {
     setState(() => _loadingQR = true);
-    final token = await _storage.read(key: 'jwt_token');
     try {
+      final token = await _storage.read(key: 'jwt_token');
+      if (!mounted || token == null) return;
       final res = await ApiConfig.client.get(
         Uri.parse('${ApiConfig.baseUrl}/api/health-pass/token'),
         headers: {'Authorization': 'Bearer $token'},
       );
-      if (res.statusCode == 200) {
+      if (mounted && res.statusCode == 200) {
         setState(() => _qrToken = jsonDecode(res.body)['qrToken']);
       }
-    } catch (_) {}
-    if (mounted) setState(() => _loadingQR = false);
+    } catch (_) {
+      // Keep the last displayed pass when the refresh fails.
+    } finally {
+      if (mounted) setState(() => _loadingQR = false);
+    }
   }
 
   Future<void> _fetchProfile() async {
     setState(() => _loadingProfile = true);
-    final token = await _storage.read(key: 'jwt_token');
     try {
+      final token = await _storage.read(key: 'jwt_token');
+      if (!mounted || token == null) return;
       final res = await ApiConfig.client.get(
         Uri.parse('${ApiConfig.baseUrl}/api/profile/me'),
         headers: {'Authorization': 'Bearer $token'},
       );
-      if (res.statusCode == 200) {
-        final decoded = jsonDecode(res.body);
+      if (mounted && res.statusCode == 200) {
+        final decoded = jsonDecode(res.body) as Map<String, dynamic>;
         setState(() => _profileData = decoded);
-
-        try {
-          final hp = decoded['healthProfile'] ?? {};
-          if (hp['emergency_contact_name'] != null &&
-              hp['emergency_contact_phone'] != null) {
-            await OfflineSosService().cacheEmergencyInfo(
-              contactName: hp['emergency_contact_name'],
-              contactPhone: hp['emergency_contact_phone'],
-              bloodType: hp['blood_type'],
-              allergies: hp['allergies'],
-              chronicConditions: hp['chronic_conditions'],
-            );
-          }
-        } catch (_) {}
+        await _cacheEmergencyInfo(decoded);
       }
+    } catch (_) {
+      // Keep the last displayed profile when the refresh fails.
+    } finally {
+      if (mounted) setState(() => _loadingProfile = false);
+    }
+  }
+
+  Future<void> _cacheEmergencyInfo(Map<String, dynamic> profile) async {
+    try {
+      final hp = profile['healthProfile'];
+      if (hp is! Map ||
+          hp['emergency_contact_name'] == null ||
+          hp['emergency_contact_phone'] == null) {
+        return;
+      }
+      await OfflineSosService().cacheEmergencyInfo(
+        contactName: hp['emergency_contact_name'],
+        contactPhone: hp['emergency_contact_phone'],
+        bloodType: hp['blood_type'],
+        allergies: hp['allergies'],
+        chronicConditions: hp['chronic_conditions'],
+      );
     } catch (_) {}
-    if (mounted) setState(() => _loadingProfile = false);
   }
 
   // ===========================================================================
@@ -762,24 +752,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
 
   Future<void> _signOut() async {
     final token = await _storage.read(key: 'jwt_token');
-    if (token != null) {
-      try {
-        // Release this device's FCM token so a signed-out phone stops
-        // receiving SOS pushes (backward compatible when null).
-        final fcmToken = await EmergencyAlertService().currentFcmToken();
-        await ApiConfig.client.post(
-          Uri.parse('${ApiConfig.baseUrl}/api/auth/logout'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $token',
-          },
-          body: jsonEncode({'fcm_token': fcmToken}),
-        );
-      } catch (_) {}
-    }
-    if (EmergencyAlertService().isResponderActive) {
-      EmergencyAlertService().stopResponderListener();
-    }
+    await EmergencyAlertService().signOut(token);
     if (mounted) AccountThemeScope.of(context).reset();
     await _storage.delete(key: 'jwt_token');
     await _storage.delete(key: 'user_data');
@@ -823,15 +796,13 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
     final primaryGreen = AppPalette.of(context).color(0xFF284E3A);
     final firstName = widget.user['first_name'] ?? 'User';
     final lastName = widget.user['last_name'] ?? '';
-    final initials = _getInitials(firstName, lastName);
-
-    final tabs = [
-      _buildOverviewTab(firstName),
-      const ConsultationSchedulerScreen(),
-      _buildSOSTab(),
-      const DocumentsViewerScreen(),
-      _buildProfileTab(initials),
-    ];
+    final tab = switch (_currentIndex) {
+      1 => const ConsultationSchedulerScreen(),
+      2 => _buildSOSTab(),
+      3 => const DocumentsViewerScreen(),
+      4 => _buildProfileTab(_getInitials(firstName, lastName)),
+      _ => _buildOverviewTab(firstName),
+    };
 
     return SessionTimeoutListener(
       timeoutMinutes: 480,
@@ -894,8 +865,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
         ),
         body: Column(
           children: [
+            const ActiveIncidentBanner(),
             if (!ConnectivityService().isOnline) _buildOfflineBanner(rs),
-            Expanded(child: tabs[_currentIndex]),
+            Expanded(child: tab),
           ],
         ),
         bottomNavigationBar: _buildCustomBottomNav(rs),
@@ -1120,6 +1092,16 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
   // TAB 0: OVERVIEW
   // ===========================================================================
 
+  Widget _qualifiedResponderBadge({required double top, required Widget child}) {
+    final roster = EmergencyAlertService().roster;
+    return ListenableBuilder(
+      listenable: roster,
+      child: Padding(padding: EdgeInsets.only(top: top), child: child),
+      builder: (context, badge) =>
+          roster.qualified ? badge! : const SizedBox.shrink(),
+    );
+  }
+
   Widget _buildOverviewTab(String firstName) {
     final rs = Rs.of(context);
     final primaryGreen = AppPalette.of(context).color(0xFF284E3A);
@@ -1292,9 +1274,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                       ),
                     ],
 
-                    if (_isQualifiedResponder) ...[
-                      SizedBox(height: rs.h(12)),
-                      Container(
+                    _qualifiedResponderBadge(
+                      top: rs.h(12),
+                      child: Container(
                         padding: EdgeInsets.symmetric(
                           horizontal: rs.w(12),
                           vertical: rs.h(8),
@@ -1330,7 +1312,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                           ],
                         ),
                       ),
-                    ],
+                    ),
+                    const ResponderHubButton(),
                     SizedBox(height: rs.h(18)),
 
                     // Buttons collapse to a column on compact screens.
@@ -2203,96 +2186,103 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                         onTapDown: (_) => _startHold(),
                         onTapUp: (_) => _cancelHold(),
                         onTapCancel: () => _cancelHold(),
-                        child: ValueListenableBuilder<double>(
-                          valueListenable: _holdProgressNotifier,
-                          builder: (context, progress, _) {
-                            return Container(
-                              width: outerSize,
-                              height: outerSize,
-                              decoration: BoxDecoration(
-                                color: _sosConsent ? activeHalo : inactiveHalo,
-                                shape: BoxShape.circle,
-                              ),
-                              alignment: Alignment.center,
-                              child: Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  if (progress > 0.0)
-                                    SizedBox(
-                                      width: progressSize,
-                                      height: progressSize,
-                                      child: CircularProgressIndicator(
+                        child: Container(
+                          width: outerSize,
+                          height: outerSize,
+                          decoration: BoxDecoration(
+                            color: _sosConsent ? activeHalo : inactiveHalo,
+                            shape: BoxShape.circle,
+                          ),
+                          alignment: Alignment.center,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              SizedBox(
+                                width: progressSize,
+                                height: progressSize,
+                                child: RepaintBoundary(
+                                  child: ValueListenableBuilder<double>(
+                                    valueListenable: _holdProgressNotifier,
+                                    builder: (context, progress, _) {
+                                      if (progress == 0) {
+                                        return const SizedBox.shrink();
+                                      }
+                                      return CircularProgressIndicator(
                                         value: progress,
                                         strokeWidth: 5,
-                                        valueColor:
-                                            const AlwaysStoppedAnimation<Color>(
+                                        valueColor: const AlwaysStoppedAnimation<Color>(
                                           Colors.white,
                                         ),
                                         backgroundColor: Colors.transparent,
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
+                              Container(
+                                width: innerSize,
+                                height: innerSize,
+                                decoration: BoxDecoration(
+                                  color: _sosConsent ? activeCrimson : inactiveCircle,
+                                  shape: BoxShape.circle,
+                                  boxShadow: _isHolding
+                                      ? [
+                                          BoxShadow(
+                                            color: activeCrimson.withValues(alpha: 0.45),
+                                            blurRadius: 20,
+                                            spreadRadius: 4,
+                                          ),
+                                        ]
+                                      : null,
+                                ),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.back_hand_rounded,
+                                      size: rs.w(30),
+                                      color: Colors.white,
+                                    ),
+                                    SizedBox(height: rs.h(6)),
+                                    Text(
+                                      'HOLD TO',
+                                      style: TextStyle(
+                                        fontSize: rs.sp(11),
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 1.2,
+                                        color: Colors.white,
                                       ),
                                     ),
-                                  Container(
-                                    width: innerSize,
-                                    height: innerSize,
-                                    decoration: BoxDecoration(
-                                      color: _sosConsent ? activeCrimson : inactiveCircle,
-                                      shape: BoxShape.circle,
-                                      boxShadow: _isHolding
-                                          ? [
-                                              BoxShadow(
-                                                color:
-                                                    activeCrimson.withValues(alpha: 0.45),
-                                                blurRadius: 20,
-                                                spreadRadius: 4,
-                                              )
-                                            ]
-                                          : null,
+                                    Text(
+                                      'TRY SOS',
+                                      style: TextStyle(
+                                        fontSize: rs.sp(18),
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: 0.8,
+                                        color: Colors.white,
+                                      ),
                                     ),
-                                    child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Icon(
-                                          Icons.back_hand_rounded,
-                                          size: rs.w(30),
-                                          color: Colors.white,
-                                        ),
-                                        SizedBox(height: rs.h(6)),
-                                        Text(
-                                          'HOLD TO',
-                                          style: TextStyle(
-                                            fontSize: rs.sp(11),
-                                            fontWeight: FontWeight.w800,
-                                            letterSpacing: 1.2,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                        Text(
-                                          'TRY SOS',
-                                          style: TextStyle(
-                                            fontSize: rs.sp(18),
-                                            fontWeight: FontWeight.w900,
-                                            letterSpacing: 0.8,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                        SizedBox(height: rs.h(2)),
-                                        Text(
-                                          _isHolding
-                                              ? '${((1.0 - progress) * 2.5).toStringAsFixed(1)}s remaining'
-                                              : 'for 2.5 seconds',
-                                          style: TextStyle(
-                                            fontSize: rs.sp(11),
-                                            fontWeight: FontWeight.w500,
-                                            color: Colors.white.withValues(alpha: 0.85),
-                                          ),
-                                        ),
-                                      ],
+                                    SizedBox(height: rs.h(2)),
+                                    DefaultTextStyle(
+                                      style: TextStyle(
+                                        fontSize: rs.sp(11),
+                                        fontWeight: FontWeight.w500,
+                                        color: Colors.white.withValues(alpha: 0.85),
+                                      ),
+                                      child: _isHolding
+                                          ? ValueListenableBuilder<double>(
+                                              valueListenable: _holdProgressNotifier,
+                                              builder: (context, progress, _) => Text(
+                                                '${((1.0 - progress) * 2.5).toStringAsFixed(1)}s remaining',
+                                              ),
+                                            )
+                                          : const Text('for 2.5 seconds'),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
-                            );
-                          },
+                            ],
+                          ),
                         ),
                       ),
                       SizedBox(height: rs.h(18)),
@@ -2563,9 +2553,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                         ),
                       ],
                     ),
-                    if (_isQualifiedResponder) ...[
-                      SizedBox(height: rs.h(14)),
-                      Container(
+                    _qualifiedResponderBadge(
+                      top: rs.h(14),
+                      child: Container(
                         width: double.infinity,
                         padding: EdgeInsets.symmetric(
                           horizontal: rs.w(12),
@@ -2623,7 +2613,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                           ],
                         ),
                       ),
-                    ],
+                    ),
+                    const ResponderHubButton(),
                     SizedBox(height: rs.h(16)),
                     SizedBox(
                       width: double.infinity,

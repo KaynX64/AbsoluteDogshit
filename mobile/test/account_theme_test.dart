@@ -10,6 +10,7 @@ import 'package:mobile/main.dart';
 import 'package:mobile/screens/change_password_screen.dart';
 import 'package:mobile/screens/patient_portal_screen.dart';
 import 'package:mobile/screens/responder_screen.dart';
+import 'package:mobile/services/emergency_alert_service.dart';
 import 'package:mobile/theme/account_theme_controller.dart';
 import 'package:mobile/theme/app_palette.dart';
 import 'package:mobile/widgets/account_settings_button.dart';
@@ -222,6 +223,64 @@ void main() {
           );
         }
       }
+    },
+  );
+
+  testWidgets(
+    'the Responder Hub is below the badge on the health pass and profile',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final roster = EmergencyAlertService().roster;
+      roster.begin(21);
+      roster.setAccess('clinical', false);
+      addTearDown(() => roster.begin(null));
+      await tester.pumpWidget(
+        ValetudoMobileApp(
+          home: PatientPortalScreen(
+            user: {
+              ...account(21),
+              'first_name': 'Test',
+              'roles': ['NURSE'],
+            },
+          ),
+        ),
+      );
+      final badge = find.text('Qualified Responder');
+      final hub = find.text('Responder Hub · On duty');
+      expect(badge, findsNothing);
+      expect(hub, findsOneWidget);
+
+      roster.setAccess('clinical', true);
+      await tester.pump();
+      expect(find.text('Campus health pass'), findsOneWidget);
+      expect(badge, findsOneWidget);
+      expect(hub, findsOneWidget);
+      expect(
+        tester.getTopLeft(hub).dy,
+        greaterThan(tester.getBottomLeft(badge).dy),
+      );
+
+      await tester.tap(find.text('Profile'));
+      await tester.pump();
+      expect(find.text('Campus emergency support'), findsOneWidget);
+      expect(badge, findsOneWidget);
+      expect(
+        tester.getTopLeft(hub).dy,
+        greaterThan(tester.getBottomLeft(badge).dy),
+      );
+      await tester.tap(hub);
+      await tester.pumpAndSettle();
+      expect(find.text('Responder Hub'), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+
+      roster.setAccess('clinical', false);
+      await tester.pump();
+      expect(badge, findsNothing);
+      expect(hub, findsOneWidget);
     },
   );
 
