@@ -286,7 +286,7 @@ void main() {
 
   for (final responder in [false, true]) {
     testWidgets(
-      '${responder ? 'Responder' : 'Patient'} gear opens shared settings and both tasks return there',
+      '${responder ? 'Responder' : 'Patient'} gear opens the shared drawer and password returns there',
       (tester) async {
         tester.view.physicalSize = responder
             ? const Size(390, 844)
@@ -314,15 +314,25 @@ void main() {
         );
         final gear = find.byTooltip('Account settings');
         expect(tester.getSize(gear).shortestSide, greaterThanOrEqualTo(48));
+        expect(
+          find.widgetWithIcon(IconButton, Icons.settings_outlined),
+          findsOneWidget,
+        );
         await tester.tap(gear);
         await tester.pumpAndSettle();
+        expect(find.byType(BottomSheet), findsOneWidget);
+        expect(find.byType(AccountSettingsSheet), findsOneWidget);
+        expect(
+          tester.getTopLeft(find.byType(AccountSettingsSheet)).dy,
+          greaterThan(0),
+        );
         expect(find.text('Appearance'), findsOneWidget);
-        expect(find.text('Change password').hitTestable(), findsOneWidget);
-        expect(find.text('Light · LeoVital'), findsOneWidget);
-        await tester.tap(find.text('Appearance'));
-        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('appearance-preview')), findsNothing);
+        expect(find.text('Preview'), findsNothing);
+        await tester.ensureVisible(find.text('Blossom'));
         await tester.tap(find.text('Blossom'));
         await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Dark'));
         await tester.tap(find.text('Dark'));
         await tester.pumpAndSettle();
         expect(controller.selection.preset, ThemePreset.blossom);
@@ -330,15 +340,16 @@ void main() {
         final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
         expect(app.theme!.brightness, Brightness.dark);
         expect(find.text('Saved to your account'), findsOneWidget);
-        await tester.pageBack();
-        await tester.pumpAndSettle();
-        expect(find.text('Dark · Blossom'), findsOneWidget);
+        await tester.ensureVisible(find.text('Change password'));
         await tester.tap(find.text('Change password'));
         await tester.pumpAndSettle();
         expect(find.byType(ChangePasswordScreen), findsOneWidget);
         await tester.pageBack();
         await tester.pumpAndSettle();
-        expect(find.byType(AccountSettingsScreen), findsOneWidget);
+        expect(find.byType(AccountSettingsSheet), findsOneWidget);
+        await tester.tap(find.byTooltip('Close settings'));
+        await tester.pumpAndSettle();
+        expect(find.byType(AccountSettingsSheet), findsNothing);
         await tester.pumpWidget(const SizedBox());
         await tester.pump();
       },

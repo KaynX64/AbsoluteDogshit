@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:ui' show CheckedState;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -106,7 +105,7 @@ void expectReadable(WidgetTester tester, Finder label, {required bool dark}) {
 void main() {
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
 
-  testWidgets('appearance shows saving, pending and successful retry', (
+  testWidgets('settings drawer shows saving, pending and successful retry', (
     tester,
   ) async {
     final firstSave = Completer<http.Response>();
@@ -122,18 +121,16 @@ void main() {
     await tester.pumpWidget(
       ValetudoMobileApp(
         themeController: controller,
-        home: const AppearanceScreen(),
+        home: const Scaffold(body: AccountSettingsSheet()),
       ),
     );
-    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-    await tester.pumpAndSettle();
-    final focused = tester.widget<ListTile>(
-      find.widgetWithText(ListTile, 'Light'),
+    final mode = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, 'Light'),
     );
-    final outline = (focused.shape! as RoundedRectangleBorder).side;
+    final outline = mode.style!.side!.resolve({WidgetState.focused})!;
     expect(outline.width, 2);
     expect(
-      contrastRatio(outline.color, focused.selectedTileColor!),
+      contrastRatio(outline.color, mode.style!.backgroundColor!.resolve({})!),
       greaterThanOrEqualTo(3),
     );
     await tester.tap(find.text('Dark'));
@@ -146,6 +143,7 @@ void main() {
       find.text('Applied here. Waiting to sync with your account.'),
       findsOneWidget,
     );
+    await tester.ensureVisible(find.text('Retry saving'));
     await tester.tap(find.text('Retry saving'));
     await tester.pumpAndSettle();
     expect(find.text('Saved to your account'), findsOneWidget);
@@ -154,7 +152,7 @@ void main() {
 
   for (final initiallyDark in [false, true]) {
     testWidgets(
-      'appearance page and preview follow changes from ${initiallyDark ? 'dark' : 'light'}',
+      'open settings drawer follows changes from ${initiallyDark ? 'dark' : 'light'}',
       (tester) async {
         tester.view.physicalSize = const Size(390, 844);
         tester.view.devicePixelRatio = 1;
@@ -176,32 +174,33 @@ void main() {
         );
         await tester.tap(find.byTooltip('Account settings'));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Appearance'));
-        await tester.pumpAndSettle();
-        final page = tester.element(find.byType(AppearanceScreen));
+        final sheet = tester.element(find.byType(AccountSettingsSheet));
 
         void expectCurrentSurface() {
-          expect(tester.element(find.byType(AppearanceScreen)), same(page));
-          final title = find.text('Appearance');
+          expect(
+            tester.element(find.byType(AccountSettingsSheet)),
+            same(sheet),
+          );
+          final title = find.text('Account settings');
           final scheme = Theme.of(tester.element(title)).colorScheme;
           expect(
             tester
-                .widget<DecoratedBox>(
-                  find.byKey(const ValueKey('appearance-preview')),
+                .widget<Material>(
+                  find.byKey(const ValueKey('account-settings-surface')),
                 )
-                .decoration,
-            isA<BoxDecoration>().having(
-              (decoration) => decoration.color,
-              'surface',
-              scheme.surface,
-            ),
+                .color,
+            scheme.surface,
+          );
+          expect(
+            find.byKey(const ValueKey('appearance-preview')),
+            findsNothing,
           );
           for (final label in [
+            'Account settings',
             'Appearance',
-            'Preview',
-            'Display mode',
             'Color palette',
             'Saved to your account',
+            ...ThemePreset.values.map((preset) => preset.label),
           ]) {
             expectReadable(
               tester,
@@ -236,9 +235,9 @@ void main() {
             expectCurrentSurface();
           }
         }
-        await tester.pageBack();
+        await tester.tap(find.byTooltip('Close settings'));
         await tester.pumpAndSettle();
-        expect(find.byType(AccountSettingsScreen), findsOneWidget);
+        expect(find.byType(AccountSettingsSheet), findsNothing);
       },
     );
   }
@@ -353,9 +352,8 @@ void main() {
       );
       await tester.tap(find.byTooltip('Account settings'));
       await tester.pumpAndSettle();
-      expect(find.text('Change password').hitTestable(), findsOneWidget);
-      await tester.tap(find.text('Appearance'));
-      await tester.pumpAndSettle();
+      expect(find.byType(AccountSettingsSheet), findsOneWidget);
+      expect(find.byKey(const ValueKey('appearance-preview')), findsNothing);
       final semantics = tester.ensureSemantics();
       try {
         for (final preset in ThemePreset.values) {

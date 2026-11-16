@@ -25,6 +25,7 @@ Start with the [code-slice index](../CODESLICE.md) when navigating the patient p
 - **Queue**: `_initQueueSocket` L447 (socket `queue:updated` L458 → refetch), `_fetchActiveQueueTicket` L464 (`GET /api/appointments/queue/my`), active-queue card L1759.
 - **QR health pass**: `_fetchQRPass` L495 (`GET /api/health-pass/token`).
 - **Profile**: `_fetchProfile` L510 (`GET /api/profile/me`), profile tab L2328.
+- The Overview's dark `YOUR HEALTH AT A GLANCE` card keeps its heading, heart and menu icons white in both modes. Do not use the global surface text color on this dark card.
 - **SOS**: hold-to-trigger button `_startHold` L591 (progress `ValueNotifier` L163, `_sosConsent` gate), `_triggerEmergencySOS` L631 (`POST /api/emergency/sos` L673), confirmation dialog L703; offline SOS queueing `_replayQueuedSosEvents` L208 (replayed on reconnect).
 - **Responder Hub**: The health pass and profile cards show the live Qualified Responder badge with the hub button below it. `ActiveIncidentBanner` stays below the header and opens the shared incident detail.
 - **Offline**: `_onConnectivityChanged` L203, banner L853, call-button L2285, SMS-button L2305.

@@ -4,7 +4,7 @@
 Mobile screens slice map · [index](../../CODESLICE.md) · base commit `93b4172` · check from repo root: `python3 scripts/verify_codeslice.py mobile/lib/screens/codeslice .`
 
 ## MB-01 · mobile/lib/screens/patient_portal_screen.dart
-**LOC:** 3177 · **Anchor verification:** Android responder revamp · **Role:** Patient 5-tab shell: overview/QR pass, appointments, SOS, documents, profile; queue socket, offline SOS
+**LOC:** 3186 · **Anchor verification:** current Overview contrast fix · **Role:** Patient 5-tab shell: overview/QR pass, appointments, SOS, documents, profile; queue socket, offline SOS
 **Mounted by:** login_screen.dart (every non-EMERGENCY_RESPONDER role); splash_screen.dart (saved-session revalidation)
 **API surface:** POST /api/emergency/sos (L253,L674) · GET /api/privacy/status · POST /api/privacy/consent · POST /api/privacy/revoke · GET /api/appointments/queue/my · GET /api/health-pass/token · GET /api/profile/me · POST /api/auth/logout
 **Socket events:** on queue:updated triggers silent refetch of active queue ticket; socket.io connect with JWT auth; no emits

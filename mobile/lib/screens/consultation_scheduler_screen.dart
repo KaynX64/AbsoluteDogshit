@@ -11,6 +11,7 @@ import 'package:socket_io_client/socket_io_client.dart' as io;
 import '../config/api_config.dart';
 import '../utils/responsive.dart';
 import '../services/emergency_alert_service.dart';
+import '../widgets/appointment_booking_review.dart';
 
 class ConsultationSchedulerScreen extends StatefulWidget {
   const ConsultationSchedulerScreen({super.key, this.client});
@@ -85,6 +86,7 @@ class _ConsultationSchedulerScreenState
 
   final _notesController = TextEditingController();
   bool _isSubmitting = false;
+  bool _isReviewing = false;
 
   List<dynamic> _myAppointments = [];
   bool _loadingHistory = false;
@@ -515,7 +517,7 @@ class _ConsultationSchedulerScreenState
   }
 
   Future<void> _submitBooking() async {
-    if (_isSubmitting) return;
+    if (_isSubmitting || _isReviewing || _loadingSlots) return;
     if (_selectedDoctorId == null) {
       _showToast('Please select a doctor or dentist.', isError: true);
       return;
@@ -528,9 +530,48 @@ class _ConsultationSchedulerScreenState
 
     final doctorId = _selectedDoctorId;
     final purpose = _selectedPurpose;
+    final date = _selectedDate;
+    final slotTime = _selectedSlotTime!;
+    final notes = _notesController.text.trim();
+    final slotsRequest = _slotsRequest;
+    final doctor = _doctors.firstWhere((doc) => doc['user_id'] == doctorId);
     final formattedDate =
-        "${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}";
-    final scheduledDateTime = "$formattedDate $_selectedSlotTime:00";
+        "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
+    final scheduledDateTime = "$formattedDate $slotTime:00";
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => _isReviewing = true);
+    bool? confirmed;
+    try {
+      confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AppointmentBookingReview(
+          clinician: 'Dr. ${doctor['first_name']} ${doctor['last_name']}',
+          specialty: doctor['specialty']?.toString() ?? '',
+          purpose: purpose,
+          date: date,
+          time: _formatSlotDisplay(slotTime),
+          notes: notes,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isReviewing = false);
+    }
+    if (!mounted || confirmed != true) return;
+    // A live refresh clears the selected slot. Require a fresh review rather
+    // than submitting a slot whose availability changed behind the dialog.
+    if (_loadingSlots ||
+        slotsRequest != _slotsRequest ||
+        _selectedDoctorId != doctorId ||
+        _selectedPurpose != purpose ||
+        _selectedDate != date ||
+        _selectedSlotTime != slotTime) {
+      _showToast(
+        'Availability has updated. Please select a time and review your appointment again.',
+        isError: true,
+      );
+      return;
+    }
 
     setState(() => _isSubmitting = true);
     try {
@@ -546,15 +587,18 @@ class _ConsultationSchedulerScreenState
           'doctor_user_id': doctorId,
           'date_time': scheduledDateTime,
           'appointment_type': purpose,
-          'notes': _notesController.text.trim(),
+          'notes': notes,
         }),
       );
 
+      if (!mounted) return;
       final data = jsonDecode(res.body);
       if (res.statusCode == 201) {
         _notesController.clear();
         await _fetchAvailableSlots();
+        if (!mounted) return;
         await _fetchMyAppointments();
+        if (!mounted) return;
 
         EmergencyAlertService().showAppointmentConfirmedNotification(
           '📅 Consultation Confirmed',
@@ -1002,9 +1046,7 @@ class _ConsultationSchedulerScreenState
 
   Widget _buildBookingTab(Rs rs) {
     if (_loadingDoctors) {
-      return Center(
-        child: CircularProgressIndicator(color: primaryGreen),
-      );
+      return Center(child: CircularProgressIndicator(color: primaryGreen));
     }
 
     return RefreshIndicator(
@@ -1084,7 +1126,11 @@ class _ConsultationSchedulerScreenState
                 elevation: 0,
                 shape: const StadiumBorder(),
               ),
-              onPressed: _isSubmitting || _selectedSlotTime == null
+              onPressed:
+                  _isSubmitting ||
+                      _isReviewing ||
+                      _loadingSlots ||
+                      _selectedSlotTime == null
                   ? null
                   : _submitBooking,
               child: _isSubmitting
@@ -1101,7 +1147,7 @@ class _ConsultationSchedulerScreenState
                       children: [
                         Flexible(
                           child: Text(
-                            'Confirm appointment',
+                            'Review appointment',
                             maxLines: 2,
                             textAlign: TextAlign.center,
                             style: TextStyle(
@@ -1374,11 +1420,7 @@ class _ConsultationSchedulerScreenState
                   ),
                 ),
                 SizedBox(width: rs.w(4)),
-                Icon(
-                  Icons.arrow_drop_down,
-                  color: primaryGreen,
-                  size: 20,
-                ),
+                Icon(Icons.arrow_drop_down, color: primaryGreen, size: 20),
               ],
             ),
           ),
@@ -1603,9 +1645,7 @@ class _ConsultationSchedulerScreenState
 
   Widget _buildHistoryTab(Rs rs) {
     if (_loadingHistory) {
-      return Center(
-        child: CircularProgressIndicator(color: primaryGreen),
-      );
+      return Center(child: CircularProgressIndicator(color: primaryGreen));
     }
 
     if (_myAppointments.isEmpty) {
@@ -2033,10 +2073,7 @@ class _ConsultationSchedulerScreenState
         Container(
           width: badgeSize,
           height: badgeSize,
-          decoration: BoxDecoration(
-            color: softSage,
-            shape: BoxShape.circle,
-          ),
+          decoration: BoxDecoration(color: softSage, shape: BoxShape.circle),
           alignment: Alignment.center,
           child: Text(
             number,
@@ -2077,7 +2114,11 @@ class _CheckItem extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.check, size: 16, color: AppPalette.of(context).color(0xFF284E3A)),
+          Icon(
+            Icons.check,
+            size: 16,
+            color: AppPalette.of(context).color(0xFF284E3A),
+          ),
           SizedBox(width: rs.w(8)),
           Expanded(
             child: Text(
