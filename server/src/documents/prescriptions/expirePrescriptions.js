@@ -2,6 +2,7 @@
 
 import { inTransaction } from '../../db/transaction.js';
 import { logAudit } from '../../utils/auditLogger.js';
+import { today } from './structuredContract.js';
 
 export function expireDuePrescriptions() {
   return inTransaction(async connection => {
@@ -10,13 +11,14 @@ export function expireDuePrescriptions() {
          FROM PRESCRIPTIONS p
          WHERE p.status = 'active'
            AND p.deleted_at IS NULL
-           AND (
+           AND ((p.contract_version = 2 AND p.expires_at < ?) OR (p.contract_version <> 2 AND (
              SELECT MAX(DATE_ADD(p.issued_at, INTERVAL pi.duration_days DAY))
              FROM PRESCRIPTION_ITEMS pi
              WHERE pi.prescription_id = p.prescription_id
-           ) < NOW()
+           ) < NOW()))
          ORDER BY p.prescription_id
          FOR UPDATE SKIP LOCKED`,
+      [today()],
     );
     const ids = expired.map(row => row.prescription_id);
 

@@ -62,6 +62,8 @@ describe('column classification', () => {
   test('encrypted columns', () => {
     assert.equal(isEncryptedCol('EMR_RECORDS', 'diagnosis'), true);
     assert.equal(isEncryptedCol('HEALTH_PROFILES', 'allergies'), true);
+    assert.equal(isEncryptedCol('PRESCRIPTIONS', 'clinical_snapshot'), true);
+    assert.equal(isEncryptedCol('PRESCRIPTION_ITEMS', 'structured_details'), true);
     assert.equal(isEncryptedCol('EMR_RECORDS', 'encounter_date'), false);
     assert.equal(isEncryptedCol('NO_SUCH_TABLE', 'diagnosis'), false);
   });

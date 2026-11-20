@@ -4,6 +4,8 @@ import { authenticateToken } from '../../../auth/middleware.js';
 import { requireRoles } from '../../../middleware/rbac.js';
 import { isCalendarDate } from '../../../config/appointmentRules.js';
 import { SignerError } from '../../../documents/signing/signatory.js';
+import { reviewStructuredPrescription, issueStructuredPrescription } from '../../../documents/prescriptions/structuredIssuance.js';
+import { makeReviewToken, enabled } from '../../../documents/prescriptions/structuredContract.js';
 import { issuePrescription } from '../../../documents/prescriptions/issuePrescription.js';
 
 function quantityInt(value, minimum = 1) {
@@ -13,11 +15,39 @@ function quantityInt(value, minimum = 1) {
 }
 
 export function registerPrescriptionIssuance(router, io) {
+  const roles = [authenticateToken, requireRoles('DOCTOR', 'DENTIST')];
+  const structuredError = (res, error) => res.status(error.status || (error.code === 'INSUFFICIENT_STOCK' ? 409 : 503)).json({
+    error: error.status ? error.message : error.code === 'INSUFFICIENT_STOCK' ? 'Insufficient clinic stock. Review fulfillment and quantities.' : 'Prescribing checks are unavailable. Retry without changing the request identifier.',
+    code: error.code || 'PRESCRIBING_UNAVAILABLE', errors: error.errors,
+  });
+  router.get('/prescription-capabilities', ...roles, (_req, res) => res.json({
+    contract_versions: [1, 2], structured_issuance_enabled: enabled(), max_items: 20,
+  }));
+  router.post('/prescriptions/review', ...roles, async (req, res) => {
+    if (!enabled()) return res.status(503).json({ error: 'Structured prescribing is not enabled yet.', code: 'PRESCRIBING_DISABLED' });
+    try {
+      const assessment = await reviewStructuredPrescription(req.body, req.user.user_id);
+      res.json({ ...assessment, review_token: makeReviewToken(assessment, req.user.user_id) });
+    } catch (error) { structuredError(res, error); }
+  });
   // =============================================================================
   // 1. PRESCRIPTIONS WITH AUTOMATED FEFO INVENTORY DEDUCTION
   // =============================================================================
 
   router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST'), async (req, res) => {
+    if (req.body.contract_version === 2) {
+      if (!enabled()) return res.status(503).json({ error: 'Structured prescribing is not enabled yet.', code: 'PRESCRIBING_DISABLED' });
+      try {
+        const result = await issueStructuredPrescription(req.body, req.user.user_id, {
+          ipAddress: req.ip, onInventoryUpdated: () => io?.emit('inventory:updated'),
+        });
+        return res.status(result.replayed ? 200 : 201).json(result);
+      } catch (error) { return structuredError(res, error); }
+    }
+    if (req.body.contract_version != null && req.body.contract_version !== 1) return res.status(400).json({ error: 'Unsupported prescribing contract.', code: 'UPDATE_REQUIRED' });
+    if (Array.isArray(req.body.items) && req.body.items.some(item => item && !item.medicine_id)) {
+      return res.status(400).json({ error: 'Update the desktop app to issue structured external prescriptions.', code: 'UPDATE_REQUIRED' });
+    }
     const { emr_id, patient_user_id, items, notes: rawNotes, appointment_id, expires_at } = req.body;
     const doctorUserId = req.user.user_id;
 

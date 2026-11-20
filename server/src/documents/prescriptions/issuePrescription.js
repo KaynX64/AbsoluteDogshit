@@ -84,6 +84,7 @@ export async function issuePrescription({
       }
     }
 
+    if (severeInteractions.length) throw new SignerError('Update the app to record a reasoned severe-interaction override.', 409, 'SEVERE_OVERRIDE_REQUIRED');
     const plannedDeductions = await planStock(connection, requestedByMedicine);
 
     // ── Ensure EMR parent encounter exists ──────────────────────────────────

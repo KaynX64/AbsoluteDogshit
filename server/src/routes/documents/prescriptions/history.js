@@ -1,5 +1,6 @@
 // Lists saved prescriptions and medication instructions for patients and issuing clinicians.
 
+import { hydratePrescription } from '../../../documents/prescriptions/structuredRead.js';
 import { pool } from '../../../db/pool.js';
 import { authenticateToken } from '../../../auth/middleware.js';
 import { requireRoles } from '../../../middleware/rbac.js';
@@ -15,7 +16,7 @@ export function registerPrescriptionHistory(router) {
 
       const [rows] = await pool.query(
         `SELECT p.prescription_id, p.emr_id, p.issued_at, p.expires_at, p.status, p.notes, p.qr_token,
-                p.signature_metadata, p.pdf_s3_key,
+                p.signature_metadata, p.pdf_s3_key, p.contract_version, p.clinical_snapshot,
                 doc.first_name AS doctor_first_name, doc.last_name AS doctor_last_name,
                 COALESCE(sp.license_no, 'Not on file') AS doctor_license,
                 COALESCE(sp.specialty, 'Infirmary Physician') AS doctor_specialty,
@@ -50,12 +51,9 @@ export function registerPrescriptionHistory(router) {
           ...it,
           instructions: decrypt(it.instructions),
         }));
-        return {
-          ...rx,
-          notes: decrypt(rx.notes),
-          pdfAvailable: Boolean(rx.pdf_s3_key),
-          items,
-        };
+        return hydratePrescription({
+          ...rx, notes: decrypt(rx.notes), pdfAvailable: Boolean(rx.pdf_s3_key), items,
+        });
       });
 
       res.json(decryptedRows);
@@ -81,7 +79,7 @@ export function registerPrescriptionHistory(router) {
 
       try {
         const [rows] = await pool.query(
-          `SELECT prescription_id, emr_id, issued_at, expires_at, status, notes, pdf_s3_key
+          `SELECT prescription_id, emr_id, issued_at, expires_at, status, notes, pdf_s3_key, contract_version, clinical_snapshot, signature_metadata
            FROM PRESCRIPTIONS
            WHERE patient_user_id = ? AND doctor_user_id = ? AND deleted_at IS NULL
            ORDER BY issued_at DESC, prescription_id DESC`,
@@ -116,7 +114,7 @@ export function registerPrescriptionHistory(router) {
           ipAddress: req.ip,
         });
 
-        res.json([...history.values()]);
+        res.json([...history.values()].map(hydratePrescription));
       } catch (error) {
         console.error('[Documents] Error fetching issuer prescription history:', error);
         res.status(500).json({ error: 'Failed to retrieve prescription history.' });

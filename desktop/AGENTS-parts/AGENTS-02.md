@@ -12,9 +12,10 @@
 
 ## Shared desktop interaction
 
-- Keep the shell height in `src/app/shell.css` so the workspace fits beneath the title bar. Feature views scroll within the shell and inherit its available height.
+- Keep the shell height in `src/app/shell.css` so the workspace fits beneath the title bar. Doctor/Dentist clinic sections inherit this height and keep their forms/actions visible; scroll notes, patient lists and other long components internally. The clinic CSS enables this at 1024px × 700px and above, with an accessible flowing fallback below that. Do not restore whole-workspace scrolling for ordinary clinic sections. Run `npm run build` and `npm run test:layout` when changing these constraints.
 - Use `src/shared/ui/Dialog.tsx` for modal workflows, `ConfirmAction.tsx` for destructive confirmations, and `feedback.tsx` for inline action status. Keep save and draft state in the feature controller.
 - Use `data-dialog-initial` on the heading for long reviews or on the safe action for destructive confirmations. Group headings and actions with `dialog-header` and `dialog-footer`. Keep form drafts safe from outside clicks.
+- Prescribing lives in `StructuredPrescriptionGenerator.tsx`, `MedicationEditor.tsx` and `StructuredPrescriptionReview.tsx`; `PrescriptionGenerator.tsx` retains the import entry. Keep drafts in memory, invalidate review on edits, and retain the exact body/UUID after uncertain issuance until a retry resolves it. Server capability detection gates issuance. [Contract](../../server/STRUCTURED-PRESCRIBING.md).
 - Link every tab to a panel. Use `navigateTabs` with automatic activation for local views and manual activation for views that fetch on selection. Use `selectionMotion.ts` for selection-driven motion and `interactions.css` for hover and press feedback. Keep destination order in `app/consoleNavigation.ts`. Mark route content with `data-workspace-view` and keep sticky controls and urgent messages outside those targets. Only staff-initiated navigation starts a workspace transition.
 
 ## Commands

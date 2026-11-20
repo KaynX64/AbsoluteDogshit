@@ -1,9 +1,15 @@
 // mobile/lib/screens/consultation_scheduler_screen.dart
 import 'dart:convert';
+import 'dart:async';
+
+import '../services/mobile_session_data.dart';
+import '../widgets/lazy_card_columns.dart';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+
 import '../theme/app_palette.dart';
+
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
@@ -28,6 +34,8 @@ class _ConsultationSchedulerScreenState
   final _storage = const FlutterSecureStorage();
   http.Client get _client => widget.client ?? ApiConfig.client;
 
+  final _data = MobileSessionData.instance;
+  late final int _generation;
   int _activeSubTab = 0;
 
   io.Socket? _socket;
@@ -80,7 +88,10 @@ class _ConsultationSchedulerScreenState
   List<dynamic> _slots = [];
   bool _loadingSlots = false;
   String? _selectedSlotTime;
+  String? _restoredSlot;
   int _slotsRequest = 0;
+  Timer? _slotRefreshTimer;
+  bool _slotRefreshQueued = false;
   List<String> _currentPurposes = [];
   String _selectedPurpose = '';
 
@@ -97,7 +108,8 @@ class _ConsultationSchedulerScreenState
   Color get textMain => AppPalette.of(context).color(0xFF191C1A);
   Color get textSub => AppPalette.of(context).color(0xFF5A635B);
   Color get borderColor => AppPalette.of(context).color(0xFFD6DFD5);
-  Color get disabledSlotBg => Theme.of(context).colorScheme.surfaceContainerHigh;
+  Color get disabledSlotBg =>
+      Theme.of(context).colorScheme.surfaceContainerHigh;
   Color get disabledSlotText => Theme.of(context).colorScheme.onSurfaceVariant;
 
   Color get _selectedDoctorBg => AppPalette.of(context).color(0xFFE2EBE1);
@@ -111,12 +123,21 @@ class _ConsultationSchedulerScreenState
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _generation = _data.generation;
+    final saved = _data.schedulerState;
+    _activeSubTab = saved['tab'] as int? ?? 0;
+    _selectedDoctorId = saved['doctor'] as int?;
+    _selectedDate = saved['date'] as DateTime? ?? _selectedDate;
+    _selectedPurpose = saved['purpose'] as String? ?? '';
+    _restoredSlot = saved['slot'] as String?;
+    _notesController.text = saved['notes'] as String? ?? '';
+    _isAppointmentGridView = saved['grid'] as bool? ?? false;
     _monthNotifier.value =
         "${_months[_selectedDate.month - 1]} ${_selectedDate.year}";
     _generateWeekdaysList();
     _dateScrollController.addListener(_onDateScroll);
     _fetchDoctors();
-    _fetchMyAppointments();
+    if (_activeSubTab == 1) _fetchMyAppointments(force: false);
     _initSlotSocket();
   }
 
@@ -134,11 +155,23 @@ class _ConsultationSchedulerScreenState
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    if (_data.isCurrent(_generation)) {
+      _data.schedulerState.addAll({
+        'tab': _activeSubTab,
+        'doctor': _selectedDoctorId,
+        'date': _selectedDate,
+        'slot': _selectedSlotTime,
+        'purpose': _selectedPurpose,
+        'notes': _notesController.text,
+        'grid': _isAppointmentGridView,
+      });
+    }
     _notesController.dispose();
     _dateScrollController.removeListener(_onDateScroll);
     _dateScrollController.dispose();
     _monthNotifier.dispose();
-    _socket?.disconnect();
+    _slotRefreshTimer?.cancel();
+    _socket?.dispose();
     super.dispose();
   }
 
@@ -158,20 +191,39 @@ class _ConsultationSchedulerScreenState
         io.OptionBuilder()
             .setTransports(['websocket', 'polling'])
             .setAuth({'token': token})
+            .enableForceNew()
             .enableAutoConnect()
             .build(),
       );
 
       _socket?.on('appointment:booked', (data) {
+        if (!_data.isCurrent(_generation)) return;
+        _data.invalidateAppointments();
         if (!mounted || _selectedDoctorId == null) return;
-        _fetchAvailableSlots();
+        _scheduleSlotRefresh();
       });
 
       _socket?.on('appointment:cancelled', (_) {
+        if (!_data.isCurrent(_generation)) return;
+        _data.invalidateAppointments();
         if (!mounted) return;
-        _fetchAvailableSlots();
+        _scheduleSlotRefresh();
       });
     } catch (_) {}
+  }
+
+  void _scheduleSlotRefresh() {
+    if (!mounted || !_data.isCurrent(_generation)) return;
+    // Invalidate a review immediately, even while the network refresh is delayed.
+    _selectedSlotTime = null;
+    _restoredSlot = null;
+    _slotRefreshQueued = true;
+    _slotRefreshTimer?.cancel();
+    _slotRefreshTimer = Timer(const Duration(milliseconds: 120), () {
+      if (!mounted || _loadingSlots || !_slotRefreshQueued) return;
+      _slotRefreshQueued = false;
+      _fetchAvailableSlots();
+    });
   }
 
   void _onDateScroll() {
@@ -417,19 +469,29 @@ class _ConsultationSchedulerScreenState
   }
 
   Future<void> _fetchDoctors() async {
-    setState(() => _loadingDoctors = true);
+    if (!mounted || !_data.isCurrent(_generation)) return;
+    final cached = _data.peek(
+      '/api/appointments/doctors',
+      maxAge: const Duration(minutes: 5),
+    );
+    if (cached is List) _doctors = cached;
+    setState(() => _loadingDoctors = _doctors.isEmpty);
     final token = await _storage.read(key: 'jwt_token');
+    if (!mounted || !_data.isCurrent(_generation)) return;
     try {
-      final res = await _client.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/appointments/doctors'),
-        headers: {'Authorization': 'Bearer $token'},
+      final data = await _data.get(
+        '/api/appointments/doctors',
+        token,
+        maxAge: const Duration(minutes: 5),
+        client: _client,
       );
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        if (!mounted) return;
+      if (mounted && _data.isCurrent(_generation)) {
         setState(() {
-          _doctors = data;
-          if (_doctors.isNotEmpty) {
+          _doctors = data as List<dynamic>;
+          if (_doctors.isNotEmpty &&
+              !_doctors.any(
+                (doctor) => doctor['user_id'] == _selectedDoctorId,
+              )) {
             _selectedDoctorId = _doctors[0]['user_id'];
           }
         });
@@ -444,7 +506,7 @@ class _ConsultationSchedulerScreenState
 
   Future<void> _fetchAvailableSlots() async {
     final doctorId = _selectedDoctorId;
-    if (!mounted || doctorId == null) return;
+    if (!mounted || !_data.isCurrent(_generation) || doctorId == null) return;
     final request = ++_slotsRequest;
     final selectedDate = _selectedDate;
 
@@ -459,16 +521,16 @@ class _ConsultationSchedulerScreenState
         "${selectedDate.year}-${selectedDate.month.toString().padLeft(2, '0')}-${selectedDate.day.toString().padLeft(2, '0')}";
 
     try {
-      final res = await _client.get(
-        Uri.parse(
-          '${ApiConfig.baseUrl}/api/appointments/slots?doctorId=$doctorId&date=$formattedDate',
-        ),
-        headers: {'Authorization': 'Bearer $token'},
-      );
-      if (!mounted || request != _slotsRequest) return;
-      final data = jsonDecode(res.body);
-      if (res.statusCode != 200) {
-        throw StateError(data['error'] ?? 'Availability is unavailable.');
+      final data = await _data.get(
+        '/api/appointments/slots?doctorId=$doctorId&date=$formattedDate',
+        token,
+        force: true,
+        client: _client,
+      ) as Map<String, dynamic>;
+      if (!mounted ||
+          request != _slotsRequest ||
+          !_data.isCurrent(_generation)) {
+        return;
       }
       final types = data['rules']?['appointmentTypes'] as List? ?? [];
       final purposes = types
@@ -485,6 +547,16 @@ class _ConsultationSchedulerScreenState
         if (!purposes.contains(_selectedPurpose)) {
           _selectedPurpose = purposes.isEmpty ? '' : purposes.first;
         }
+        if (_restoredSlot != null &&
+            _slots.any(
+              (slot) =>
+                  slot['time'] == _restoredSlot &&
+                  slot['availabilityByType']?[_selectedPurpose]?['available'] ==
+                      true,
+            )) {
+          _selectedSlotTime = _restoredSlot;
+        }
+        _restoredSlot = null;
       });
     } catch (e) {
       if (mounted && request == _slotsRequest) {
@@ -494,20 +566,30 @@ class _ConsultationSchedulerScreenState
     } finally {
       if (mounted && request == _slotsRequest) {
         setState(() => _loadingSlots = false);
+        if (_slotRefreshQueued) _scheduleSlotRefresh();
       }
     }
   }
 
-  Future<void> _fetchMyAppointments() async {
+  Future<void> _fetchMyAppointments({bool force = true}) async {
+    if (!mounted) return;
+    final cached = force ? null : _data.peek('/api/appointments/my');
+    if (cached is List && _data.isCurrent(_generation)) {
+      setState(() => _myAppointments = cached);
+      return;
+    }
     setState(() => _loadingHistory = true);
     final token = await _storage.read(key: 'jwt_token');
+    if (!mounted || !_data.isCurrent(_generation)) return;
     try {
-      final res = await _client.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/appointments/my'),
-        headers: {'Authorization': 'Bearer $token'},
+      final data = await _data.get(
+        '/api/appointments/my',
+        token,
+        force: force,
+        client: _client,
       );
-      if (res.statusCode == 200) {
-        setState(() => _myAppointments = jsonDecode(res.body));
+      if (mounted && _data.isCurrent(_generation)) {
+        setState(() => _myAppointments = data as List<dynamic>);
       }
     } catch (e) {
       _showToast('Failed to load history: $e', isError: true);
@@ -577,6 +659,30 @@ class _ConsultationSchedulerScreenState
     try {
       final token = await _storage.read(key: 'jwt_token');
       if (!mounted) return;
+      final latest = await _data.get(
+        '/api/appointments/slots?doctorId=$doctorId&date=$formattedDate',
+        token,
+        force: true,
+        client: _client,
+      ) as Map<String, dynamic>;
+      if (!mounted || !_data.isCurrent(_generation)) return;
+      final stillAvailable = (latest['slots'] as List? ?? []).any(
+        (slot) =>
+            slot['time'] == slotTime &&
+            slot['availabilityByType']?[purpose]?['available'] == true,
+      );
+      if (!stillAvailable ||
+          slotsRequest != _slotsRequest ||
+          _selectedSlotTime != slotTime ||
+          _slotRefreshQueued ||
+          _loadingSlots) {
+        _showToast(
+          'Availability has updated. Please select a time and review your appointment again.',
+          isError: true,
+        );
+        await _fetchAvailableSlots();
+        return;
+      }
       final res = await _client.post(
         Uri.parse('${ApiConfig.baseUrl}/api/appointments'),
         headers: {
@@ -594,6 +700,7 @@ class _ConsultationSchedulerScreenState
       if (!mounted) return;
       final data = jsonDecode(res.body);
       if (res.statusCode == 201) {
+        _data.invalidateAppointments();
         _notesController.clear();
         await _fetchAvailableSlots();
         if (!mounted) return;
@@ -745,6 +852,7 @@ class _ConsultationSchedulerScreenState
     if (confirm != true) return;
 
     final token = await _storage.read(key: 'jwt_token');
+    if (!mounted || !_data.isCurrent(_generation)) return;
     try {
       final res = await _client.patch(
         Uri.parse(
@@ -758,6 +866,7 @@ class _ConsultationSchedulerScreenState
       );
 
       if (res.statusCode == 200) {
+        _data.invalidateAppointments();
         _showToast('Appointment cancelled.');
         _fetchMyAppointments();
         _fetchAvailableSlots();
@@ -836,10 +945,13 @@ class _ConsultationSchedulerScreenState
 
   void _showToast(String message, {bool isError = false}) {
     if (!mounted) return;
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: isError ? AppPalette.of(context).color(0xFF7A2E26) : primaryGreen,
+        backgroundColor: isError
+            ? AppPalette.of(context).color(0xFF7A2E26)
+            : primaryGreen,
       ),
     );
   }
@@ -935,7 +1047,10 @@ class _ConsultationSchedulerScreenState
                 ),
                 Expanded(
                   child: GestureDetector(
-                    onTap: () => setState(() => _activeSubTab = 1),
+                    onTap: () {
+                      setState(() => _activeSubTab = 1);
+                      _fetchMyAppointments(force: false);
+                    },
                     behavior: HitTestBehavior.opaque,
                     child: Container(
                       padding: EdgeInsets.symmetric(vertical: rs.h(9)),
@@ -1008,7 +1123,9 @@ class _ConsultationSchedulerScreenState
             vertical: rs.h(7),
           ),
           decoration: BoxDecoration(
-            color: selected ? AppPalette.of(context).surface : Colors.transparent,
+            color: selected
+                ? AppPalette.of(context).surface
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(rs.r(11)),
             boxShadow: selected
                 ? [
@@ -1053,6 +1170,7 @@ class _ConsultationSchedulerScreenState
       color: primaryGreen,
       onRefresh: _fetchAvailableSlots,
       child: ListView(
+        key: const PageStorageKey('booking'),
         padding: EdgeInsets.symmetric(horizontal: rs.w(20), vertical: rs.h(8)),
         scrollCacheExtent: const ScrollCacheExtent.pixels(300),
         addAutomaticKeepAlives: false,
@@ -1195,7 +1313,9 @@ class _ConsultationSchedulerScreenState
               vertical: rs.h(12),
             ),
             decoration: BoxDecoration(
-              color: isSelected ? _selectedDoctorBg : AppPalette.of(context).surface,
+              color: isSelected
+                  ? _selectedDoctorBg
+                  : AppPalette.of(context).surface,
               borderRadius: BorderRadius.circular(rs.r(18)),
               border: Border.all(
                 color: isSelected ? primaryGreen : borderColor,
@@ -1304,7 +1424,9 @@ class _ConsultationSchedulerScreenState
                     constraints: BoxConstraints(minHeight: rs.h(104)),
                     padding: EdgeInsets.all(rs.w(13)),
                     decoration: BoxDecoration(
-                      color: isSelected ? softSage : AppPalette.of(context).surface,
+                      color: isSelected
+                          ? softSage
+                          : AppPalette.of(context).surface,
                       borderRadius: radius,
                       border: Border.all(
                         color: isSelected ? primaryGreen : borderColor,
@@ -1330,7 +1452,9 @@ class _ConsultationSchedulerScreenState
                               height: rs.w(36),
                               decoration: BoxDecoration(
                                 color: isSelected
-                                    ? Theme.of(context).colorScheme.surfaceContainerHigh
+                                    ? Theme.of(context)
+                                          .colorScheme
+                                          .surfaceContainerHigh
                                     : softSage,
                                 shape: BoxShape.circle,
                               ),
@@ -1441,6 +1565,7 @@ class _ConsultationSchedulerScreenState
     return SizedBox(
       height: carouselHeight,
       child: ListView.builder(
+        key: const PageStorageKey('booking-dates'),
         controller: _dateScrollController,
         scrollDirection: Axis.horizontal,
         itemExtent: extent,
@@ -1468,7 +1593,9 @@ class _ConsultationSchedulerScreenState
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
                 decoration: BoxDecoration(
-                  color: isSelected ? primaryGreen : AppPalette.of(context).surface,
+                  color: isSelected
+                      ? primaryGreen
+                      : AppPalette.of(context).surface,
                   borderRadius: BorderRadius.circular(rs.r(22)),
                   border: Border.all(
                     color: isSelected ? primaryGreen : borderColor,
@@ -1504,7 +1631,9 @@ class _ConsultationSchedulerScreenState
                       style: TextStyle(
                         fontSize: rs.sp(22),
                         fontWeight: FontWeight.w800,
-                        color: isSelected ? AppPalette.of(context).onPrimary : textMain,
+                        color: isSelected
+                            ? AppPalette.of(context).onPrimary
+                            : textMain,
                       ),
                     ),
                   ],
@@ -1683,6 +1812,7 @@ class _ConsultationSchedulerScreenState
         color: primaryGreen,
         onRefresh: _fetchMyAppointments,
         child: CustomScrollView(
+          key: const PageStorageKey('appointment-history-grid'),
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverPadding(
@@ -1692,45 +1822,13 @@ class _ConsultationSchedulerScreenState
                 rs.w(20),
                 rs.h(8),
               ),
-              sliver: SliverToBoxAdapter(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: List.generate(columnCount, (columnIndex) {
-                    return Expanded(
-                      child: Padding(
-                        padding: EdgeInsets.only(
-                          right: columnIndex == columnCount - 1 ? 0 : rs.w(12),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            for (
-                              var index = columnIndex;
-                              index < _myAppointments.length;
-                              index += columnCount
-                            )
-                              Padding(
-                                padding: EdgeInsets.only(
-                                  bottom:
-                                      index + columnCount <
-                                          _myAppointments.length
-                                      ? rs.h(12)
-                                      : 0,
-                                ),
-                                child: SizedBox(
-                                  width: double.infinity,
-                                  child: _buildAppointmentGridCard(
-                                    _myAppointments[index],
-                                    rs,
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }),
-                ),
+              sliver: LazyCardColumns(
+                columnCount: columnCount,
+                itemCount: _myAppointments.length,
+                gap: rs.w(12),
+                trailingGap: false,
+                itemBuilder: (context, index) =>
+                    _buildAppointmentGridCard(_myAppointments[index], rs),
               ),
             ),
           ],
@@ -1742,6 +1840,7 @@ class _ConsultationSchedulerScreenState
       color: primaryGreen,
       onRefresh: _fetchMyAppointments,
       child: ListView.builder(
+        key: const PageStorageKey('appointment-history-list'),
         padding: EdgeInsets.symmetric(horizontal: rs.w(20), vertical: rs.h(8)),
         itemCount: _myAppointments.length,
         addAutomaticKeepAlives: false,

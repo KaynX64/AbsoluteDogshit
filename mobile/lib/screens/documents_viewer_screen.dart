@@ -1,11 +1,20 @@
 // mobile/lib/screens/documents_viewer_screen.dart
 import 'dart:convert';
+
+import '../models/prescription_item.dart';
+
+import '../services/mobile_session_data.dart';
+import '../services/document_download.dart';
+import '../widgets/lazy_card_columns.dart';
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import '../theme/app_palette.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+
+import '../theme/app_palette.dart';
+
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -15,7 +24,8 @@ import '../config/api_config.dart';
 import '../utils/responsive.dart';
 
 class DocumentsViewerScreen extends StatefulWidget {
-  const DocumentsViewerScreen({super.key});
+  const DocumentsViewerScreen({super.key, this.client});
+  final http.Client? client;
 
   @override
   State<DocumentsViewerScreen> createState() => _DocumentsViewerScreenState();
@@ -23,6 +33,7 @@ class DocumentsViewerScreen extends StatefulWidget {
 
 class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
   final _storage = const FlutterSecureStorage();
+  http.Client get _client => widget.client ?? ApiConfig.client;
 
   int _selectedSubTab = 0;
   bool _isGridView = false;
@@ -43,57 +54,116 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
   Color get textSub => AppPalette.of(context).color(0xFF5A635B);
   Color get borderColor => AppPalette.of(context).color(0xFFE2EBE2);
 
+  final _data = MobileSessionData.instance;
+  late final int _generation;
+
   @override
   void initState() {
     super.initState();
-    _fetchPrescriptions();
-    _fetchClearances();
-    _fetchDiagnostics();
+    _generation = _data.generation;
+    _selectedSubTab = _data.documentsState['tab'] as int? ?? 0;
+    _isGridView = _data.documentsState['grid'] as bool? ?? false;
+    _loadSelected();
   }
 
-  Future<void> _fetchPrescriptions() async {
+  @override
+  void dispose() {
+    if (_data.isCurrent(_generation)) {
+      _data.documentsState.addAll({
+        'tab': _selectedSubTab,
+        'grid': _isGridView,
+      });
+    }
+    super.dispose();
+  }
+
+  void _loadSelected() {
+    switch (_selectedSubTab) {
+      case 1:
+        _fetchClearances(force: false);
+      case 2:
+        _fetchDiagnostics(force: false);
+      default:
+        _fetchPrescriptions(force: false);
+    }
+  }
+
+  Future<void> _fetchPrescriptions({bool force = true}) async {
+    if (!mounted) return;
+    final cached = force ? null : _data.peek('/api/documents/prescriptions/my');
+    if (cached is List && _data.isCurrent(_generation)) {
+      setState(() => _prescriptions = cached);
+      return;
+    }
     setState(() => _loadingPrescriptions = true);
-    final token = await _storage.read(key: 'jwt_token');
     try {
-      final res = await ApiConfig.client.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/documents/prescriptions/my'),
-        headers: {'Authorization': 'Bearer $token'},
+      final token = await _storage.read(key: 'jwt_token');
+      if (!mounted || !_data.isCurrent(_generation)) return;
+      final value = await _data.get(
+        '/api/documents/prescriptions/my',
+        token,
+        force: force,
+        client: _client,
       );
-      if (res.statusCode == 200) {
-        setState(() => _prescriptions = jsonDecode(res.body));
+      if (mounted && _data.isCurrent(_generation)) {
+        setState(() => _prescriptions = value as List<dynamic>);
       }
-    } catch (_) {}
-    if (mounted) setState(() => _loadingPrescriptions = false);
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _loadingPrescriptions = false);
+    }
   }
 
-  Future<void> _fetchClearances() async {
+  Future<void> _fetchClearances({bool force = true}) async {
+    if (!mounted) return;
+    final cached = force ? null : _data.peek('/api/documents/clearances/my');
+    if (cached is List && _data.isCurrent(_generation)) {
+      setState(() => _clearances = cached);
+      return;
+    }
     setState(() => _loadingClearances = true);
-    final token = await _storage.read(key: 'jwt_token');
     try {
-      final res = await ApiConfig.client.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/documents/clearances/my'),
-        headers: {'Authorization': 'Bearer $token'},
+      final token = await _storage.read(key: 'jwt_token');
+      if (!mounted || !_data.isCurrent(_generation)) return;
+      final value = await _data.get(
+        '/api/documents/clearances/my',
+        token,
+        force: force,
+        client: _client,
       );
-      if (res.statusCode == 200) {
-        setState(() => _clearances = jsonDecode(res.body));
+      if (mounted && _data.isCurrent(_generation)) {
+        setState(() => _clearances = value as List<dynamic>);
       }
-    } catch (_) {}
-    if (mounted) setState(() => _loadingClearances = false);
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _loadingClearances = false);
+    }
   }
 
-  Future<void> _fetchDiagnostics() async {
+  Future<void> _fetchDiagnostics({bool force = true}) async {
+    if (!mounted) return;
+    final cached = force ? null : _data.peek('/api/documents/attachments/my');
+    if (cached is List && _data.isCurrent(_generation)) {
+      setState(() => _diagnosticAttachments = cached);
+      return;
+    }
     setState(() => _loadingDiagnostics = true);
-    final token = await _storage.read(key: 'jwt_token');
     try {
-      final res = await ApiConfig.client.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/documents/attachments/my'),
-        headers: {'Authorization': 'Bearer $token'},
+      final token = await _storage.read(key: 'jwt_token');
+      if (!mounted || !_data.isCurrent(_generation)) return;
+      final value = await _data.get(
+        '/api/documents/attachments/my',
+        token,
+        force: force,
+        client: _client,
       );
-      if (res.statusCode == 200) {
-        setState(() => _diagnosticAttachments = jsonDecode(res.body));
+      if (mounted && _data.isCurrent(_generation)) {
+        setState(() => _diagnosticAttachments = value as List<dynamic>);
       }
-    } catch (_) {}
-    if (mounted) setState(() => _loadingDiagnostics = false);
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _loadingDiagnostics = false);
+    }
   }
 
   String _formatDate(String? rawDate, {bool compact = false}) {
@@ -139,30 +209,19 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
         '${ApiConfig.baseUrl}/api/documents/$kind/$documentId/pdf',
       );
 
-      final res = await http.get(
-        url,
-        headers: {'Authorization': 'Bearer $token'},
-      );
-
-      if (res.statusCode != 200) {
-        String msg = 'Server returned ${res.statusCode}';
-        try {
-          final decoded = jsonDecode(res.body);
-          if (decoded is Map && decoded['error'] != null) {
-            msg = decoded['error'];
-          }
-        } catch (_) {}
-        throw Exception(msg);
-      }
-
       final dir = await getApplicationDocumentsDirectory();
       final fileName = kind == 'prescriptions'
           ? 'prescription-$documentId.pdf'
           : 'clearance-$documentId.pdf';
       final file = File('${dir.path}/$fileName');
-      await file.writeAsBytes(res.bodyBytes, flush: true);
+      await downloadDocument(
+        client: _client,
+        url: url,
+        token: token,
+        destination: file,
+      );
 
-      if (!mounted) return;
+      if (!mounted || !_data.isCurrent(_generation)) return;
 
       final result = await OpenFilex.open(file.path);
       if (result.type != ResultType.done && mounted) {
@@ -268,7 +327,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                         textAlign: TextAlign.center,
                       ),
                       Text(
-                        'Lingayen Campus · Republic Act No. 10173 Verified E-Prescription',
+                        'Lingayen Campus · Digital Prescription',
                         style: TextStyle(fontSize: rs.sp(10.5), color: textSub),
                         textAlign: TextAlign.center,
                       ),
@@ -307,7 +366,10 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                 SizedBox(height: rs.h(10)),
 
                 Text(
-                  items.any((it) => it['is_outside'] == true)
+                  items.any(
+                        (it) =>
+                            (it['is_outside'] == true || it['is_outside'] == 1),
+                      )
                       ? 'PRESCRIBED MEDICATION (INCLUDES OUTSIDE-PHARMACY ITEMS):'
                       : 'PRESCRIBED FORMULARY MEDICATION:',
                   style: TextStyle(
@@ -345,9 +407,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                             children: [
                               Expanded(
                                 child: Text(
-                                  it['is_outside'] == true
-                                      ? "${it['medicine_name'] ?? 'Prescribed medication'}"
-                                      : "${it['medicine_name']} (${it['generic_name']})",
+                                  PrescriptionItemView(it).name,
                                   style: TextStyle(
                                     fontWeight: FontWeight.w800,
                                     fontSize: rs.sp(14),
@@ -357,7 +417,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                               ),
                               SizedBox(width: rs.w(6)),
                               Text(
-                                "${it['dosage'] ?? '500mg'}",
+                                PrescriptionItemView.recorded(it['dosage']),
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: rs.sp(12),
@@ -367,29 +427,39 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                             ],
                           ),
                           SizedBox(height: rs.h(4)),
+                          if (PrescriptionItemView(it).structured)
+                            Text(
+                              PrescriptionItemView(it).preparation,
+                              style: TextStyle(
+                                fontSize: rs.sp(12),
+                                color: textSub,
+                              ),
+                            ),
                           Text(
-                            "Sig: ${it['instructions'] ?? 'Take as directed'} • ${it['frequency'] ?? 'Daily'}",
+                            '${PrescriptionItemView(it).administration}\n${PrescriptionItemView(it).schedule}\n${PrescriptionItemView(it).directions}',
                             style: TextStyle(
                               fontSize: rs.sp(12),
                               color: textSub,
                             ),
                           ),
                           Text(
-                            "Duration: ${it['duration_days'] ?? 3} days (Qty: ${it['quantity_prescribed'] ?? it['quantity_dispensed'] ?? 10} pcs)",
+                            '${PrescriptionItemView(it).course}\n${PrescriptionItemView(it).supply}',
                             style: TextStyle(
                               fontSize: rs.sp(11.5),
                               color: textSub,
                             ),
                           ),
-                          if (it['is_outside'] == true)
+                          if ((it['is_outside'] == true ||
+                              it['is_outside'] == 1))
                             Padding(
                               padding: EdgeInsets.only(top: rs.h(4)),
                               child: Text(
-                                '🛒 Outside pharmacy purchase — not dispensed by the infirmary',
+                                'External pharmacy — not dispensed by the infirmary',
                                 style: TextStyle(
                                   fontSize: rs.sp(11),
                                   fontWeight: FontWeight.w700,
-                                  color: AppPalette.of(context).color(0xFF8C6826),
+                                  color: AppPalette.of(context)
+                                      .color(0xFF8C6826),
                                 ),
                               ),
                             ),
@@ -402,7 +472,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                     rx['notes'].toString().isNotEmpty) ...[
                   SizedBox(height: rs.h(10)),
                   Text(
-                    "Doctor Dietary Notes: ${rx['notes']}",
+                    "${rx['contract_version'] == 2 ? 'Patient advice — printed on prescription' : 'Recorded prescription notes'}: ${rx['notes']}",
                     style: TextStyle(
                       fontSize: rs.sp(12.5),
                       fontStyle: FontStyle.italic,
@@ -441,7 +511,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'R.A. 10173 DIGITAL SEAL',
+                              'PRESCRIPTION RECORD VERIFICATION',
                               style: TextStyle(
                                 fontSize: rs.sp(9.5),
                                 fontWeight: FontWeight.w800,
@@ -963,7 +1033,10 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     final isSelected = _selectedSubTab == index;
     return Expanded(
       child: GestureDetector(
-        onTap: () => setState(() => _selectedSubTab = index),
+        onTap: () {
+          setState(() => _selectedSubTab = index);
+          _loadSelected();
+        },
         child: Container(
           padding: EdgeInsets.symmetric(vertical: rs.h(9)),
           decoration: BoxDecoration(
@@ -978,7 +1051,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
             style: TextStyle(
               fontSize: rs.sp(12),
               fontWeight: FontWeight.w700,
-              color: isSelected ? AppPalette.of(context).onPrimary : primaryGreen,
+              color: isSelected
+                  ? AppPalette.of(context).onPrimary
+                  : primaryGreen,
             ),
           ),
         ),
@@ -1020,7 +1095,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
             vertical: rs.h(7),
           ),
           decoration: BoxDecoration(
-            color: selected ? AppPalette.of(context).surface : Colors.transparent,
+            color: selected
+                ? AppPalette.of(context).surface
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(rs.r(11)),
             boxShadow: selected
                 ? [
@@ -1068,40 +1145,16 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       color: primaryGreen,
       onRefresh: onRefresh,
       child: CustomScrollView(
+        key: PageStorageKey('documents-$_selectedSubTab-grid'),
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
           SliverPadding(
             padding: EdgeInsets.fromLTRB(rs.w(20), rs.h(8), rs.w(20), 0),
-            sliver: SliverToBoxAdapter(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: List.generate(columnCount, (columnIndex) {
-                  return Expanded(
-                    child: Padding(
-                      padding: EdgeInsets.only(
-                        right: columnIndex == columnCount - 1 ? 0 : rs.w(12),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          for (
-                            var index = columnIndex;
-                            index < itemCount;
-                            index += columnCount
-                          )
-                            Padding(
-                              padding: EdgeInsets.only(bottom: rs.h(12)),
-                              child: SizedBox(
-                                width: double.infinity,
-                                child: itemBuilder(context, index),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  );
-                }),
-              ),
+            sliver: LazyCardColumns(
+              columnCount: columnCount,
+              itemCount: itemCount,
+              gap: rs.w(12),
+              itemBuilder: itemBuilder,
             ),
           ),
           if (includeDisclaimer)
@@ -1127,7 +1180,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
         ? ''
         : firstMed['is_outside'] == true
         ? 'Outside Rx · ${firstMed['dosage'] ?? '—'}'
-        : '${firstMed['generic_name'] ?? ''} · ${firstMed['dosage'] ?? '500 mg'}';
+        : '${firstMed['generic_name'] ?? ''} · ${firstMed['dosage'] ?? 'Not recorded'}';
 
     return _buildDocumentGridCard(
       rs: rs,
@@ -1164,7 +1217,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       iconColor: AppPalette.of(context).color(0xFF8C6826),
       iconBackground: AppPalette.of(context).color(0xFFF7F1E6),
       status: isExpired ? 'EXPIRED' : 'APPROVED',
-      statusColor: isExpired ? AppPalette.of(context).color(0xFF9B1C1C) : primaryGreen,
+      statusColor: isExpired
+          ? AppPalette.of(context).color(0xFF9B1C1C)
+          : primaryGreen,
       title: (clearance['purpose'] ?? 'Medical clearance').toString(),
       subtitle: 'Valid until ${_formatDate(clearance['expires_at'])}',
       details: [
@@ -1298,9 +1353,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
 
   Widget _buildPrescriptionsList(Rs rs) {
     if (_loadingPrescriptions) {
-      return Center(
-        child: CircularProgressIndicator(color: primaryGreen),
-      );
+      return Center(child: CircularProgressIndicator(color: primaryGreen));
     }
 
     if (_prescriptions.isEmpty) {
@@ -1346,188 +1399,177 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     return RefreshIndicator(
       color: primaryGreen,
       onRefresh: _fetchPrescriptions,
-      child: ListView(
+      child: ListView.builder(
+        key: PageStorageKey('documents-$_selectedSubTab-list'),
         padding: EdgeInsets.symmetric(horizontal: rs.w(20), vertical: rs.h(8)),
-        children: [
-          ..._prescriptions.map((rx) {
-            final items = rx['items'] as List<dynamic>? ?? [];
-            final status = (rx['status'] ?? 'active').toString().toLowerCase();
+        itemCount: _prescriptions.length + 2,
+        itemBuilder: (context, index) {
+          if (index == _prescriptions.length) return _buildSampleDisclaimer(rs);
+          if (index > _prescriptions.length) return SizedBox(height: rs.h(20));
+          final rx = _prescriptions[index];
+          final items = rx['items'] as List<dynamic>? ?? [];
+          final status = (rx['status'] ?? 'active').toString().toLowerCase();
 
-            final firstMed = items.isNotEmpty ? items[0] : null;
-            final isFirstOutside = firstMed?['is_outside'] == true;
-            final medName =
-                firstMed?['medicine_name'] ?? 'Prescribed medication';
-            final medStrength = firstMed != null
-                ? (isFirstOutside
-                      ? "OUTSIDE Rx · ${firstMed['dosage'] ?? '—'} · buy at an external pharmacy"
-                      : "${firstMed['generic_name']} · ${firstMed['dosage'] ?? '500 mg'}")
-                : '';
+          final firstMed = items.isNotEmpty ? items[0] : null;
+          final isFirstOutside = firstMed?['is_outside'] == true;
+          final medName = firstMed?['medicine_name'] ?? 'Prescribed medication';
+          final medStrength = firstMed != null
+              ? (isFirstOutside
+                    ? "OUTSIDE Rx · ${firstMed['dosage'] ?? '—'} · buy at an external pharmacy"
+                    : "${firstMed['generic_name']} · ${firstMed['dosage'] ?? 'Not recorded'}")
+              : '';
 
-            return Container(
-              margin: EdgeInsets.only(bottom: rs.h(14)),
-              padding: EdgeInsets.all(rs.w(18)),
-              decoration: BoxDecoration(
-                color: AppPalette.of(context).surface,
-                borderRadius: BorderRadius.circular(rs.r(22)),
-                border: Border.all(color: borderColor),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Container(
-                        padding: EdgeInsets.all(rs.w(8)),
-                        decoration: BoxDecoration(
-                          color: AppPalette.of(context).color(0xFFEDEBF7),
-                          borderRadius: BorderRadius.circular(rs.r(10)),
-                        ),
-                        child: Icon(
-                          Icons.medication_liquid_outlined,
-                          size: rs.w(20),
-                          color: AppPalette.of(context).color(0xFF5B4EA1),
-                        ),
+          return Container(
+            margin: EdgeInsets.only(bottom: rs.h(14)),
+            padding: EdgeInsets.all(rs.w(18)),
+            decoration: BoxDecoration(
+              color: AppPalette.of(context).surface,
+              borderRadius: BorderRadius.circular(rs.r(22)),
+              border: Border.all(color: borderColor),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Container(
+                      padding: EdgeInsets.all(rs.w(8)),
+                      decoration: BoxDecoration(
+                        color: AppPalette.of(context).color(0xFFEDEBF7),
+                        borderRadius: BorderRadius.circular(rs.r(10)),
                       ),
-                      Container(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: rs.w(10),
-                          vertical: rs.h(4),
-                        ),
-                        decoration: BoxDecoration(
-                          color: status == 'active'
-                              ? AppPalette.of(context).color(0xFFE5EDE4)
-                              : AppPalette.of(context).color(0xFFE2EBE1),
-                          borderRadius: BorderRadius.circular(rs.r(12)),
-                        ),
-                        child: Text(
-                          status.toUpperCase(),
-                          style: TextStyle(
-                            fontSize: rs.sp(10.5),
-                            fontWeight: FontWeight.w700,
-                            color: status == 'active'
-                                ? primaryGreen
-                                : AppPalette.of(context).color(0xFF15803D),
-                          ),
-                        ),
+                      child: Icon(
+                        Icons.medication_liquid_outlined,
+                        size: rs.w(20),
+                        color: AppPalette.of(context).color(0xFF5B4EA1),
                       ),
-                    ],
-                  ),
-                  SizedBox(height: rs.h(14)),
-
-                  Text(
-                    medName,
-                    style: TextStyle(
-                      fontSize: rs.sp(18),
-                      fontWeight: FontWeight.w800,
-                      color: textMain,
                     ),
+                    Container(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: rs.w(10),
+                        vertical: rs.h(4),
+                      ),
+                      decoration: BoxDecoration(
+                        color: status == 'active'
+                            ? AppPalette.of(context).color(0xFFE5EDE4)
+                            : AppPalette.of(context).color(0xFFE2EBE1),
+                        borderRadius: BorderRadius.circular(rs.r(12)),
+                      ),
+                      child: Text(
+                        status.toUpperCase(),
+                        style: TextStyle(
+                          fontSize: rs.sp(10.5),
+                          fontWeight: FontWeight.w700,
+                          color: status == 'active'
+                              ? primaryGreen
+                              : AppPalette.of(context).color(0xFF15803D),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: rs.h(14)),
+
+                Text(
+                  medName,
+                  style: TextStyle(
+                    fontSize: rs.sp(18),
+                    fontWeight: FontWeight.w800,
+                    color: textMain,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (medStrength.isNotEmpty)
+                  Text(
+                    medStrength,
+                    style: TextStyle(fontSize: rs.sp(12.5), color: textSub),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  if (medStrength.isNotEmpty)
-                    Text(
-                      medStrength,
-                      style: TextStyle(fontSize: rs.sp(12.5), color: textSub),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                SizedBox(height: rs.h(10)),
+
+                Row(
+                  children: [
+                    Icon(Icons.person_outline, size: rs.w(15), color: textSub),
+                    SizedBox(width: rs.w(6)),
+                    Expanded(
+                      child: Text(
+                        "Dr. ${rx['doctor_first_name']} ${rx['doctor_last_name']}",
+                        style: TextStyle(fontSize: rs.sp(12), color: textSub),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                  SizedBox(height: rs.h(10)),
+                  ],
+                ),
+                SizedBox(height: rs.h(4)),
+                Row(
+                  children: [
+                    Icon(Icons.event_outlined, size: rs.w(15), color: textSub),
+                    SizedBox(width: rs.w(6)),
+                    Expanded(
+                      child: Text(
+                        rx['expires_at'] != null
+                            ? "Issued ${_formatDate(rx['issued_at'])} · Valid until ${_formatDate(rx['expires_at'])}"
+                            : "Issued ${_formatDate(rx['issued_at'])}",
+                        style: TextStyle(fontSize: rs.sp(12), color: textSub),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: rs.h(14)),
+                Divider(color: borderColor, height: 1),
+                SizedBox(height: rs.h(12)),
 
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.person_outline,
-                        size: rs.w(15),
-                        color: textSub,
-                      ),
-                      SizedBox(width: rs.w(6)),
-                      Expanded(
-                        child: Text(
-                          "Dr. ${rx['doctor_first_name']} ${rx['doctor_last_name']}",
-                          style: TextStyle(fontSize: rs.sp(12), color: textSub),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: rs.h(4)),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.event_outlined,
-                        size: rs.w(15),
-                        color: textSub,
-                      ),
-                      SizedBox(width: rs.w(6)),
-                      Expanded(
-                        child: Text(
-                          rx['expires_at'] != null
-                              ? "Issued ${_formatDate(rx['issued_at'])} · Valid until ${_formatDate(rx['expires_at'])}"
-                              : "Issued ${_formatDate(rx['issued_at'])}",
-                          style: TextStyle(fontSize: rs.sp(12), color: textSub),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: rs.h(14)),
-                  Divider(color: borderColor, height: 1),
-                  SizedBox(height: rs.h(12)),
-
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      GestureDetector(
-                        onTap: () => _showPrescriptionDocumentModal(rx),
-                        child: Row(
-                          children: [
-                            Text(
-                              'View document',
-                              style: TextStyle(
-                                color: primaryGreen,
-                                fontSize: rs.sp(13),
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            SizedBox(width: rs.w(4)),
-                            Icon(
-                              Icons.arrow_forward_rounded,
-                              size: 15,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    GestureDetector(
+                      onTap: () => _showPrescriptionDocumentModal(rx),
+                      child: Row(
+                        children: [
+                          Text(
+                            'View document',
+                            style: TextStyle(
                               color: primaryGreen,
+                              fontSize: rs.sp(13),
+                              fontWeight: FontWeight.w700,
                             ),
-                          ],
-                        ),
+                          ),
+                          SizedBox(width: rs.w(4)),
+                          Icon(
+                            Icons.arrow_forward_rounded,
+                            size: 15,
+                            color: primaryGreen,
+                          ),
+                        ],
                       ),
-                      IconButton(
-                        icon: Icon(
-                          Icons.description_outlined,
-                          size: rs.w(20),
-                          color: textSub,
-                        ),
-                        onPressed: () => _showPrescriptionDocumentModal(rx),
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        Icons.description_outlined,
+                        size: rs.w(20),
+                        color: textSub,
                       ),
-                    ],
-                  ),
-                ],
-              ),
-            );
-          }),
-
-          _buildSampleDisclaimer(rs),
-          SizedBox(height: rs.h(20)),
-        ],
+                      onPressed: () => _showPrescriptionDocumentModal(rx),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
 
   Widget _buildClearancesList(Rs rs) {
     if (_loadingClearances) {
-      return Center(
-        child: CircularProgressIndicator(color: primaryGreen),
-      );
+      return Center(child: CircularProgressIndicator(color: primaryGreen));
     }
 
     if (_clearances.isEmpty) {
@@ -1573,180 +1615,170 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     return RefreshIndicator(
       color: primaryGreen,
       onRefresh: _fetchClearances,
-      child: ListView(
+      child: ListView.builder(
+        key: PageStorageKey('documents-$_selectedSubTab-list'),
         padding: EdgeInsets.symmetric(horizontal: rs.w(20), vertical: rs.h(8)),
-        children: [
-          ..._clearances.map((c) {
-            final rawExpiry = c['expires_at'];
-            bool isExpired = false;
-            if (rawExpiry != null) {
-              try {
-                isExpired = DateTime.parse(rawExpiry).isBefore(DateTime.now());
-              } catch (_) {}
-            }
+        itemCount: _clearances.length + 2,
+        itemBuilder: (context, index) {
+          if (index == _clearances.length) return _buildSampleDisclaimer(rs);
+          if (index > _clearances.length) return SizedBox(height: rs.h(20));
+          final c = _clearances[index];
+          final rawExpiry = c['expires_at'];
+          bool isExpired = false;
+          if (rawExpiry != null) {
+            try {
+              isExpired = DateTime.parse(rawExpiry).isBefore(DateTime.now());
+            } catch (_) {}
+          }
 
-            return Container(
-              margin: EdgeInsets.only(bottom: rs.h(14)),
-              padding: EdgeInsets.all(rs.w(18)),
-              decoration: BoxDecoration(
-                color: AppPalette.of(context).surface,
-                borderRadius: BorderRadius.circular(rs.r(22)),
-                border: Border.all(color: borderColor),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Container(
-                        padding: EdgeInsets.all(rs.w(8)),
-                        decoration: BoxDecoration(
-                          color: AppPalette.of(context).color(0xFFF7F1E6),
-                          borderRadius: BorderRadius.circular(rs.r(10)),
-                        ),
-                        child: Icon(
-                          Icons.description_outlined,
-                          size: rs.w(20),
-                          color: AppPalette.of(context).color(0xFF8C6826),
-                        ),
+          return Container(
+            margin: EdgeInsets.only(bottom: rs.h(14)),
+            padding: EdgeInsets.all(rs.w(18)),
+            decoration: BoxDecoration(
+              color: AppPalette.of(context).surface,
+              borderRadius: BorderRadius.circular(rs.r(22)),
+              border: Border.all(color: borderColor),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Container(
+                      padding: EdgeInsets.all(rs.w(8)),
+                      decoration: BoxDecoration(
+                        color: AppPalette.of(context).color(0xFFF7F1E6),
+                        borderRadius: BorderRadius.circular(rs.r(10)),
                       ),
-                      Container(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: rs.w(10),
-                          vertical: rs.h(4),
-                        ),
-                        decoration: BoxDecoration(
-                          color: isExpired
-                              ? AppPalette.of(context).color(0xFFFDE8E8)
-                              : AppPalette.of(context).color(0xFFE2EBE1),
-                          borderRadius: BorderRadius.circular(rs.r(12)),
-                        ),
-                        child: Text(
-                          isExpired ? 'EXPIRED' : 'APPROVED',
-                          style: TextStyle(
-                            fontSize: rs.sp(10.5),
-                            fontWeight: FontWeight.w700,
-                            color: isExpired
-                                ? AppPalette.of(context).color(0xFF9B1C1C)
-                                : AppPalette.of(context).color(0xFF15803D),
-                          ),
-                        ),
+                      child: Icon(
+                        Icons.description_outlined,
+                        size: rs.w(20),
+                        color: AppPalette.of(context).color(0xFF8C6826),
                       ),
-                    ],
-                  ),
-                  SizedBox(height: rs.h(14)),
-
-                  Text(
-                    c['purpose'] ?? 'Medical clearance',
-                    style: TextStyle(
-                      fontSize: rs.sp(18),
-                      fontWeight: FontWeight.w800,
-                      color: textMain,
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    "Valid until ${_formatDate(c['expires_at'])}",
-                    style: TextStyle(fontSize: rs.sp(12.5), color: textSub),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  SizedBox(height: rs.h(10)),
-
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.person_outline,
-                        size: rs.w(15),
-                        color: textSub,
+                    Container(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: rs.w(10),
+                        vertical: rs.h(4),
                       ),
-                      SizedBox(width: rs.w(6)),
-                      Expanded(
-                        child: Text(
-                          "Dr. ${c['doctor_first_name']} ${c['doctor_last_name']}",
-                          style: TextStyle(fontSize: rs.sp(12), color: textSub),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                      decoration: BoxDecoration(
+                        color: isExpired
+                            ? AppPalette.of(context).color(0xFFFDE8E8)
+                            : AppPalette.of(context).color(0xFFE2EBE1),
+                        borderRadius: BorderRadius.circular(rs.r(12)),
+                      ),
+                      child: Text(
+                        isExpired ? 'EXPIRED' : 'APPROVED',
+                        style: TextStyle(
+                          fontSize: rs.sp(10.5),
+                          fontWeight: FontWeight.w700,
+                          color: isExpired
+                              ? AppPalette.of(context).color(0xFF9B1C1C)
+                              : AppPalette.of(context).color(0xFF15803D),
                         ),
                       ),
-                    ],
-                  ),
-                  SizedBox(height: rs.h(4)),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.event_outlined,
-                        size: rs.w(15),
-                        color: textSub,
-                      ),
-                      SizedBox(width: rs.w(6)),
-                      Expanded(
-                        child: Text(
-                          "Issued ${_formatDate(c['issued_at'])}",
-                          style: TextStyle(fontSize: rs.sp(12), color: textSub),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: rs.h(14)),
-                  Divider(color: borderColor, height: 1),
-                  SizedBox(height: rs.h(12)),
+                    ),
+                  ],
+                ),
+                SizedBox(height: rs.h(14)),
 
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      GestureDetector(
-                        onTap: () => _showClearanceCertificateModal(c),
-                        child: Row(
-                          children: [
-                            Text(
-                              'View document',
-                              style: TextStyle(
-                                color: primaryGreen,
-                                fontSize: rs.sp(13),
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            SizedBox(width: rs.w(4)),
-                            Icon(
-                              Icons.arrow_forward_rounded,
-                              size: 15,
+                Text(
+                  c['purpose'] ?? 'Medical clearance',
+                  style: TextStyle(
+                    fontSize: rs.sp(18),
+                    fontWeight: FontWeight.w800,
+                    color: textMain,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  "Valid until ${_formatDate(c['expires_at'])}",
+                  style: TextStyle(fontSize: rs.sp(12.5), color: textSub),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                SizedBox(height: rs.h(10)),
+
+                Row(
+                  children: [
+                    Icon(Icons.person_outline, size: rs.w(15), color: textSub),
+                    SizedBox(width: rs.w(6)),
+                    Expanded(
+                      child: Text(
+                        "Dr. ${c['doctor_first_name']} ${c['doctor_last_name']}",
+                        style: TextStyle(fontSize: rs.sp(12), color: textSub),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: rs.h(4)),
+                Row(
+                  children: [
+                    Icon(Icons.event_outlined, size: rs.w(15), color: textSub),
+                    SizedBox(width: rs.w(6)),
+                    Expanded(
+                      child: Text(
+                        "Issued ${_formatDate(c['issued_at'])}",
+                        style: TextStyle(fontSize: rs.sp(12), color: textSub),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: rs.h(14)),
+                Divider(color: borderColor, height: 1),
+                SizedBox(height: rs.h(12)),
+
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    GestureDetector(
+                      onTap: () => _showClearanceCertificateModal(c),
+                      child: Row(
+                        children: [
+                          Text(
+                            'View document',
+                            style: TextStyle(
                               color: primaryGreen,
+                              fontSize: rs.sp(13),
+                              fontWeight: FontWeight.w700,
                             ),
-                          ],
-                        ),
+                          ),
+                          SizedBox(width: rs.w(4)),
+                          Icon(
+                            Icons.arrow_forward_rounded,
+                            size: 15,
+                            color: primaryGreen,
+                          ),
+                        ],
                       ),
-                      IconButton(
-                        icon: Icon(
-                          Icons.description_outlined,
-                          size: rs.w(20),
-                          color: textSub,
-                        ),
-                        onPressed: () => _showClearanceCertificateModal(c),
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        Icons.description_outlined,
+                        size: rs.w(20),
+                        color: textSub,
                       ),
-                    ],
-                  ),
-                ],
-              ),
-            );
-          }),
-
-          _buildSampleDisclaimer(rs),
-          SizedBox(height: rs.h(20)),
-        ],
+                      onPressed: () => _showClearanceCertificateModal(c),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
 
   Widget _buildDiagnosticsList(Rs rs) {
     if (_loadingDiagnostics) {
-      return Center(
-        child: CircularProgressIndicator(color: primaryGreen),
-      );
+      return Center(child: CircularProgressIndicator(color: primaryGreen));
     }
 
     if (_diagnosticAttachments.isEmpty) {
@@ -1793,6 +1825,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       color: primaryGreen,
       onRefresh: _fetchDiagnostics,
       child: ListView.builder(
+        key: const PageStorageKey('documents-diagnostics-list'),
         padding: EdgeInsets.symmetric(horizontal: rs.w(20), vertical: rs.h(8)),
         itemCount: _diagnosticAttachments.length,
         itemBuilder: (context, index) {
@@ -1918,7 +1951,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     final isPdf =
         mime.contains('pdf') || fileName.toLowerCase().endsWith('.pdf');
     final isImage = mime.contains('image');
-    final iconColor = isPdf ? AppPalette.of(context).color(0xFF9B1C1C) : AppPalette.of(context).color(0xFF0284C7);
+    final iconColor = isPdf
+        ? AppPalette.of(context).color(0xFF9B1C1C)
+        : AppPalette.of(context).color(0xFF0284C7);
     final downloadUrl =
         '${ApiConfig.baseUrl}/api/documents/attachments/${doc['attachment_id']}/download';
 
@@ -2026,7 +2061,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     final token = await _storage.read(key: 'jwt_token');
     // Keep the session JWT out of URLs; the download token is short-lived.
     try {
-      final res = await ApiConfig.client.post(
+      final res = await _client.post(
         Uri.parse('$downloadUrl-token'),
         headers: {
           'Content-Type': 'application/json',

@@ -6,14 +6,16 @@
 - `_initSlotSocket` refetches slots for the selected clinician and date on `appointment:booked` or `appointment:cancelled`.
 - Booking requires the themed, scrollable `widgets/appointment_booking_review.dart` dialog before POST. Snapshot the selected care team, purpose, date/time and trimmed notes; submit only after explicit confirmation. Edit/back/dismiss preserve the draft. `_isReviewing` prevents duplicate dialogs; `_isSubmitting` prevents duplicate requests. A slot refresh during review invalidates the snapshot and requires a new selection/review. `appointment_booking_review_test.dart` covers this flow and all palettes in light/dark at 320dp and 200% text.
 - All choice states use theme surfaces and paired foregrounds, including available/unavailable slots and unselected cards. Keep `onPrimary` on selected dates, slots and tabs. The date picker inherits the account theme. `mobile_appearance_test.dart` supplies an optional HTTP client and tests the rendered choices in all modes/presets.
-- The app lifecycle listener reconnects the slot socket. History supports list and grid layouts.
+- Resume refreshes availability. Slot-event bursts invalidate reviews immediately and debounce refetches. History loads on selection and supports lazy list/grid layouts. Draft and keyed scroll state survive tab disposal; availability revalidates before POST.
 
 ### documents_viewer_screen.dart — prescriptions, clearances and diagnostics
 
 - [Slice map](../codeslice/MB-03-DocumentsViewerScreen.md). Each tab supports list and grid layouts.
 - `_fetchPrescriptions`, `_fetchClearances` and `_fetchDiagnostics` read `GET /api/documents/{prescriptions,clearances,attachments}/my`.
-- `_downloadAndOpenPdf` retrieves a protected PDF and opens it through `open_filex`. `_openDiagnosticDocument` handles attachment downloads.
+- Document categories load on selection through the session cache; lists and independent variable-height grid columns build lazily.
+- `_downloadAndOpenPdf` streams a protected PDF through `services/document_download.dart` to a partial file, renames only on success and opens it through `open_filex`. `_openDiagnosticDocument` handles attachment downloads.
 - The prescription and clearance previews encode a public `/api/documents/verify/:qrToken` link in the QR seal.
+- V2 prescription items use issue-time snapshots. `models/prescription_item.dart` presents recorded units, dose/route, schedules, review dates and directions; missing legacy clinical fields display **Not recorded**. Never infer clinical fields from old notes or add fallback dosing. [Contract](../../../../server/STRUCTURED-PRESCRIBING.md).
 
 ### responder_screen.dart — dedicated responder route
 - [Slice map](../codeslice/MB-04-ResponderScreen.md). The screen hosts the shared `ResponderHub` and retains account settings and sign-out. The authenticated alert session serves both responder routes and reconciles incidents independently of screen lifetime.

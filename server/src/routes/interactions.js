@@ -29,35 +29,37 @@ router.post(
   async (req, res) => {
     const { medicine_ids } = req.body;
 
-    if (!Array.isArray(medicine_ids) || medicine_ids.length === 0) {
-      return res.status(400).json({ error: 'medicine_ids array is required.' });
+    if (!Array.isArray(medicine_ids) || medicine_ids.length === 0 || medicine_ids.length > 20 ||
+      medicine_ids.some(id => !['number', 'string'].includes(typeof id) || !Number.isSafeInteger(Number(id)) || Number(id) <= 0)) {
+      return res.status(400).json({ error: 'Include 1 to 20 valid catalog medicine identifiers.' });
     }
 
     // Validate all IDs are positive integers
-    const cleanIds = medicine_ids
-      .map(Number)
-      .filter((id) => Number.isInteger(id) && id > 0);
+    const cleanIds = [...new Set(medicine_ids.map(Number))];
 
     if (cleanIds.length < 2) {
       return res.json({
         hasInteractions: false,
         interactions: [],
         blocking: false,
-        message: 'Fewer than 2 medicines selected — no interaction check needed.',
+        coverage: 'not_checked', message: 'Fewer than two identified medicines; no pairwise check was performed.',
       });
     }
 
     try {
       const interactions = await checkInteractionsStandalone(cleanIds);
 
-      // Determine if any interaction is blocking (contraindicated or severe)
+      // Contraindications block; severe findings require a recorded override.
       const hasBlocking = interactions.some(
-        (i) => i.severity === 'contraindicated' || i.severity === 'severe'
+        (i) => i.severity === 'contraindicated'
       );
 
       res.json({
         hasInteractions: interactions.length > 0,
         blocking: hasBlocking,
+        requiresOverride: interactions.some(i => i.severity === 'severe'),
+        coverage: interactions.length < cleanIds.length * (cleanIds.length - 1) / 2 ? 'partial' : 'local_rules_checked',
+        scope: 'Draft medicine pairs in local rules only; not a complete safety assessment.',
         totalInteractions: interactions.length,
         interactions: interactions.map((i) => ({
           interaction_id: i.interaction_id,

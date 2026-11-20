@@ -44,7 +44,10 @@ export default {
     };
   },
   async schema(connection) {
-    await ensureColumns(connection, columns);
+    // A clean install can already contain migration 013's widened quantity.
+    const quantity = await readColumn(connection, 'PRESCRIPTION_ITEMS', 'quantity_prescribed');
+    const adopted = quantity?.COLUMN_TYPE?.toLowerCase() === 'decimal(12,3)' && quantity.IS_NULLABLE === 'NO';
+    await ensureColumns(connection, columns.filter(column => !(adopted && column.column === 'quantity_prescribed')));
     await ensureIndex(connection, 'PRESCRIPTIONS', 'idx_rx_expires', 'expires_at');
     const medicineId = await readColumn(connection, 'PRESCRIPTION_ITEMS', 'medicine_id');
     if (!medicineId || !/^bigint(?:\(\d+\))?$/.test(medicineId.COLUMN_TYPE)) {

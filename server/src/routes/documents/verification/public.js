@@ -8,6 +8,7 @@ import { redis, isRedisActive } from '../../../utils/redisClient.js';
 import { getServerPolicy } from '../../../config/serverPolicy.js';
 import { isQualifiedSigner, formatIssuedBy } from '../../../documents/signing/signatory.js';
 import { parseMetadata } from '../signatureMetadata.js';
+import { isPrescriptionExpired } from '../../../documents/prescriptions/structuredRead.js';
 
 const __filename = fileURLToPath(import.meta.url);
 
@@ -43,6 +44,7 @@ export function registerPublicVerificationRoutes(router) {
       algorithm: meta.algorithm ?? null,
       signed_at: meta.signed_at ?? null,
       document_sha256: meta.document_sha256 ?? null,
+      hash_scope: meta.hash_scope ?? 'legacy_record_identifier',
     };
   }
 
@@ -156,7 +158,7 @@ export function registerPublicVerificationRoutes(router) {
       // 2. Check if token is a Prescription
       // PUBLIC view = authenticity only. No medications, dosages, notes, student no., or course.
       const [prescriptions] = await pool.query(
-        `SELECT p.status, p.issued_at, p.expires_at, p.signature_metadata,
+        `SELECT p.status, p.issued_at, p.expires_at, DATE_FORMAT(p.expires_at, '%Y-%m-%d') AS validity_date, p.contract_version, p.signature_metadata,
                 u.first_name AS patient_first_name, u.last_name AS patient_last_name,
                 doc.first_name AS doc_first_name, doc.last_name AS doc_last_name,
                 staff.license_no AS doc_license
@@ -171,7 +173,7 @@ export function registerPublicVerificationRoutes(router) {
       if (prescriptions.length > 0) {
         const p = prescriptions[0];
         const isCancelled = p.status === 'cancelled';
-        const isExpired = p.status === 'expired' || (p.expires_at && new Date(p.expires_at) < new Date());
+        const isExpired = isPrescriptionExpired(p);
         const isValid = !isCancelled && !isExpired && (p.status === 'active' || p.status === 'dispensed');
 
         if (acceptsHtml) {
@@ -185,11 +187,11 @@ export function registerPublicVerificationRoutes(router) {
           type: 'PRESCRIPTION',
           status: isCancelled ? 'cancelled' : isExpired ? 'expired' : p.status,
           patient: maskPatientName(p.patient_first_name, p.patient_last_name),
-          studentNo: 'N/A',   // placeholder so existing verify.html does not break
-          course: 'N/A',      // placeholder so existing verify.html does not break
+          studentNo: 'N/A',   // Retained placeholders for older verification clients.
+          course: 'N/A',
           issuedBy: formatIssuedBy(p.doc_first_name, p.doc_last_name, p.doc_license, parseMetadata(p.signature_metadata).signer_role),
           issuedAt: p.issued_at,
-          expiresAt: p.expires_at,
+          expiresAt: Number(p.contract_version) === 2 ? p.validity_date ?? p.expires_at : p.expires_at,
           notes: null,
           items: [],
           metadata: pickPublicSignature(parseMetadata(p.signature_metadata)),

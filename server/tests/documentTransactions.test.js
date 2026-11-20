@@ -34,7 +34,7 @@ const cases = [
   },
 ];
 
-for (const { path, body, idField, pdfTable, service } of [...cases, { ...cases[0], service: true }]) {
+for (const { path, body, idField, pdfTable, service } of [cases[1], { ...cases[0], service: true }]) {
   test(`${service ? 'prescription service' : path} releases the issuance connection before querying for the PDF`, async (t) => {
     const actions = [];
     const connection = {
@@ -174,4 +174,13 @@ test('the stock workflow locks FEFO lots and links each deduction to its prescri
   await applyStockDeductions(connection, { plannedDeductions, formularyDispenseLines, prescriptionId: 7, doctorUserId: 2 });
   assert.deepEqual(changes, [[0, 11], [4, 12]]);
   assert.deepEqual(links, [[11, 21, -2], [11, 22, -1], [12, 22, -1]]);
+});
+
+test('legacy external issuance requires an updated prescribing client', async () => {
+  const router = documentRoutes();
+  const { route } = router.stack.find(({ route }) => route?.path === '/prescriptions' && route.methods.post);
+  const res = { status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+  await route.stack.at(-1).handle({ body: cases[0].body, user: { user_id: 21 } }, res);
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.code, 'UPDATE_REQUIRED');
 });

@@ -17,7 +17,7 @@ import { pool } from '../db/pool.js';
  * @param {number[]} medicineIds - Array of medicine IDs being prescribed
  * @returns {Promise<Array>} Array of interaction objects
  */
-export async function checkInteractions(connection, medicineIds) {
+export async function checkInteractions(connection, medicineIds, { lock = false } = {}) {
   // Need at least 2 medicines to have an interaction
   if (!medicineIds || medicineIds.length < 2) return [];
 
@@ -62,6 +62,7 @@ export async function checkInteractions(connection, medicineIds) {
       AND (${conditions.join(' OR ')})
     ORDER BY
       FIELD(di.severity, 'contraindicated', 'severe', 'moderate', 'mild')
+    ${lock ? 'FOR SHARE' : ''}
   `;
 
   const [rows] = await connection.query(sql, params);

@@ -5,6 +5,20 @@ import assert from 'node:assert/strict';
 import { renderIncidentReportPDF } from '../src/documents/pdf/templates/incidentReport.js';
 import { renderPrescriptionPDF } from '../src/documents/pdf/templates/prescription.js';
 import { renderClearancePDF } from '../src/documents/pdf/templates/clearance.js';
+import { prescriptionBlocks } from '../src/documents/pdf/templates/structuredPrescription.js';
+import { fixturePrescription } from './fixtures/structuredPrescription.js';
+
+test('prescription rendering preserves structured records and never fills missing historical values', async () => {
+  const missing = prescriptionBlocks({});
+  assert.ok(missing.slice(1).every(block => block[2].includes('Not recorded')));
+  const rx = fixturePrescription(20);
+  const blocks = prescriptionBlocks(rx.items[0]);
+  for (const text of ['2.5 mL', '2026-11-19', '1.5 bottle', '60 mL', rx.items[0].directions]) assert.ok(blocks.some(block => block[2].includes(text)));
+  rx.items[5].directions = 'Fixture newline continuation\n'.repeat(60);
+  const pdf = await renderPrescriptionPDF(rx);
+  assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
+  assert.ok((pdf.toString('latin1').match(/\/Type \/Page\b/g) || []).length >= 5);
+});
 
 test('the prescription and clearance templates render signed-document PDF buffers', async () => {
   const fixture = {

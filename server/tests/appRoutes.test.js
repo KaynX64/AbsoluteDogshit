@@ -385,6 +385,49 @@ test('public QR verification serves HTML and privacy-minimized JSON', async t =>
   assert.equal(data.studentNo, 'N/A');
 });
 
+test('public v2 prescription status remains valid through the clinic day and excludes clinical data', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-16T15:59:59.999Z') });
+  let status = 'active';
+  t.mock.method(pool, 'query', async sql => {
+    if (sql.includes('FROM MEDICAL_CLEARANCES')) return [[]];
+    assert.match(sql, /FROM PRESCRIPTIONS/);
+    assert.match(sql, /DATE_FORMAT\(p.expires_at/);
+    assert.doesNotMatch(sql, /clinical_snapshot|p.notes|PRESCRIPTION_ITEMS/);
+    return [[{ contract_version: 2, status, issued_at: '2026-11-16T00:00:00Z', expires_at: '2026-11-16',
+      patient_first_name: 'Fixture', patient_last_name: 'Surname', doc_first_name: 'Fixture', doc_last_name: 'Clinician',
+      signature_metadata: { signer_role: 'DOCTOR', hash_scope: 'prescription_payload_v2' } }]];
+  });
+  const route = '/api/documents/verify/fixture-prescription-date';
+  const current = await (await request(route, { headers: { accept: 'application/json' } })).json();
+  assert.equal(current.valid, true);
+  assert.equal(current.patient, 'Fixture S.');
+  assert.equal(current.expiresAt, '2026-11-16');
+  assert.deepEqual(current.items, []);
+  assert.equal(current.notes, null);
+  assert.equal(current.clinical_snapshot, undefined);
+  t.mock.timers.setTime(new Date('2026-11-16T16:00:00Z').getTime());
+  const expired = await (await request(route, { headers: { accept: 'application/json' } })).json();
+  assert.equal(expired.valid, false);
+  assert.equal(expired.status, 'expired');
+  status = 'cancelled';
+  const cancelled = await (await request(route, { headers: { accept: 'application/json' } })).json();
+  assert.equal(cancelled.status, 'cancelled');
+});
+
+test('public legacy prescriptions retain their original expiry timestamp response', async t => {
+  const expires_at = new Date('2026-11-16T00:00:00+08:00');
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-15T16:00:01Z') });
+  t.mock.method(pool, 'query', async sql => sql.includes('FROM MEDICAL_CLEARANCES') ? [[]] : [[{
+    contract_version: 1, status: 'active', expires_at, validity_date: '2026-11-16',
+    patient_first_name: 'Fixture', patient_last_name: 'Surname', signature_metadata: { signer_role: 'DOCTOR' },
+  }]]);
+  const response = await request('/api/documents/verify/fixture-legacy-expiry', { headers: { accept: 'application/json' } });
+  const result = await response.json();
+  assert.equal(result.valid, false);
+  assert.equal(result.status, 'expired');
+  assert.equal(result.expiresAt, expires_at.toISOString());
+});
+
 test('protected routes reject inactive accounts before doing clinical work', async t => {
   t.mock.method(pool, 'query', async (sql, params) => {
     assert.match(sql, /SELECT is_active, deleted_at FROM USERS/);
@@ -493,12 +536,34 @@ test('the feature routes are mounted behind authentication', async () => {
     ['POST', '/api/inventory/medicines'],
     ['POST', '/api/inventory/deduct'],
     ['POST', '/api/documents/prescriptions'],
+    ['GET', '/api/documents/prescription-capabilities'],
+    ['POST', '/api/documents/prescriptions/review'],
     ['GET', '/api/documents/prescriptions/my'],
     ['PATCH', '/api/documents/prescriptions/7/cancel'],
   ]) {
     const response = await request(path, { method });
     assert.equal(response.status, 401, method + ' ' + path);
     await response.json();
+  }
+});
+
+test('structured prescribing capabilities are clinician-only and the disabled rollout flag prevents issuance', async t => {
+  const prior = process.env.STRUCTURED_PRESCRIBING_ENABLED;
+  t.after(() => { if (prior == null) delete process.env.STRUCTURED_PRESCRIBING_ENABLED; else process.env.STRUCTURED_PRESCRIBING_ENABLED = prior; });
+  t.mock.method(pool, 'query', async () => [[{ is_active: 1, deleted_at: null }]]);
+  t.mock.method(pool, 'getConnection', () => assert.fail('Disabled prescribing must not open an issuance connection'));
+  process.env.STRUCTURED_PRESCRIBING_ENABLED = 'false';
+  for (const roles of [['STUDENT'], ['NURSE'], ['ADMIN']]) {
+    assert.equal((await request('/api/documents/prescription-capabilities', { roles })).status, 403);
+  }
+  for (const roles of [['DOCTOR'], ['DENTIST']]) {
+    const capability = await request('/api/documents/prescription-capabilities', { roles });
+    assert.deepEqual(await capability.json(), { contract_versions: [1, 2], structured_issuance_enabled: false, max_items: 20 });
+    for (const path of ['/api/documents/prescriptions/review', '/api/documents/prescriptions']) {
+      const response = await request(path, { roles, method: 'POST', json: { contract_version: 2 } });
+      assert.equal(response.status, 503);
+      assert.equal((await response.json()).code, 'PRESCRIBING_DISABLED');
+    }
   }
 });
 
