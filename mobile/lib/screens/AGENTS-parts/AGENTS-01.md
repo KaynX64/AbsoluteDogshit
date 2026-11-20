@@ -22,7 +22,8 @@ Start with the [code-slice index](../CODESLICE.md) when navigating the patient p
 
 - [Slice map](../CODESLICE.md#quick-index) (MB-01). The five destinations are Overview, Appointments, SOS, Documents and Profile.
 - Consent uses `_checkPrivacyConsent`, `_recordConsent` and `_revokeConsent`. The portal raises the required consent modal on startup when consent is missing.
-- `_initQueueSocket` calls `_fetchActiveQueueTicket` on `queue:updated`. The same fetch runs on a 30-second poll. `_fetchQRPass` loads the dynamic health pass and `_fetchProfile` loads profile data and caches emergency information.
+- `_initQueueSocket` calls `_fetchActiveQueueTicket` on `queue:updated`. The same fetch runs on a 30-second foreground/online poll. Overlapping triggers share a request and queue one follow-up; resume/reconnect refresh immediately, and unchanged tickets do not rebuild. `_fetchQRPass` loads the dynamic health pass and `_fetchProfile` loads profile data and caches emergency information.
+- `services/mobile_session_data.dart` owns session-only datasets, tab drafts and PageStorage. Auth session start/end binds/clears it; screens guard late results with its generation. See [performance behavior](../../../PERFORMANCE.md) for freshness and preloading.
 - The Overview's dark `YOUR HEALTH AT A GLANCE` card keeps its heading, heart and menu icons white in both modes. Use the card's own foreground colors.
 - `_startHold` checks `_sosConsent` before starting the hold timer. `_triggerEmergencySOS` submits the location online or queues the SOS and opens the dialer offline. `_onConnectivityChanged` triggers `_replayQueuedSosEvents` on reconnection.
 - The health pass and profile cards display the live Qualified Responder badge when applicable, with a Responder Hub entry for eligible accounts. `ActiveIncidentBanner` below the header opens the shared incident detail.

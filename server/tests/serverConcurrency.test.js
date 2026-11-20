@@ -166,6 +166,22 @@ test('prescription expiry skips a row being cancelled and audits only its commit
   assert.deepEqual(details.prescription_ids, [2]);
 });
 
+test('v2 expiry follows Manila midnight even when the database calendar differs', { skip }, async t => {
+  const db = await fixture(t);
+  const { expireDuePrescriptions } = await import('../src/documents/prescriptions/expirePrescriptions.js');
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-16T15:59:59.999Z') });
+  await db.query("INSERT INTO EMR_RECORDS (emr_id, patient_user_id, doctor_user_id, chief_complaint, diagnosis) VALUES (1, 5, 2, 'fixture', 'fixture')");
+  await db.query(`INSERT INTO PRESCRIPTIONS
+    (prescription_id, emr_id, patient_user_id, doctor_user_id, expires_at, qr_token, contract_version)
+    VALUES (1, 1, 5, 2, '2026-11-16', 'fixture-validity-today', 2),
+           (2, 1, 5, 2, '2026-11-15', 'fixture-validity-yesterday', 2)`);
+  assert.deepEqual(await expireDuePrescriptions(), [2]);
+  t.mock.timers.setTime(new Date('2026-11-16T16:00:00Z').getTime());
+  assert.deepEqual(await expireDuePrescriptions(), [1]);
+  assert.deepEqual(await expireDuePrescriptions(), []);
+  assert.deepEqual((await db.query('SELECT status FROM PRESCRIPTIONS ORDER BY prescription_id'))[0].map(row => row.status), ['expired', 'expired']);
+});
+
 test('concurrent reminder workers accept an appointment email once', { skip }, async t => {
   const db = await fixture(t);
   const { sendDueAppointmentReminders } = await withoutFirebaseCredentials(t, () => import('../src/workers/appointmentReminderWorker.js'));

@@ -156,9 +156,9 @@ export async function assertEmrBelongsToPatient(conn, emrId, patientId) {
 }
 
 
-export async function assertAppointmentInQueue(conn, appointmentId, patientId, signerId) {
+export async function assertAppointmentInQueue(conn, appointmentId, patientId, signerId, options) {
   try {
-    return await assertClinicalAppointment(conn, appointmentId, patientId, signerId);
+    return await assertClinicalAppointment(conn, appointmentId, patientId, signerId, options);
   } catch (error) {
     if (error instanceof AppointmentTransitionError) {
       throw new SignerError(error.message, error.status, error.code);

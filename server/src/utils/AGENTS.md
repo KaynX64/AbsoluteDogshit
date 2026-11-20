@@ -9,7 +9,7 @@
 | s3Vault.js | `uploadToS3`, `getFromS3`, `getBufferFromS3`, `deleteFromS3`, `ensureBucketExists` |
 | ../documents/documentService.js · ../documents/pdf/ | Document storage orchestration, shared PDF drawing helpers and document templates |
 | ../documents/signing/ | stored signatures and signatory data |
-| interactionChecker.js | drug-interaction logic |
+| interactionChecker.js | Shared local-rule pair lookup; v2 issuance requests current locking reads inside its transaction. Coverage and override policy live in `../documents/prescriptions/structuredContract.js`. |
 | ../appointments/dentalValidator.js | dental chart validation shared by online completion and replay |
 | ../appointments/vitals.js | shared desktop and API measurement validation and check-in note formatting |
 | ../appointments/encounterText.js | required encounter text and optional blanks for online finalization and offline replay |

@@ -14,6 +14,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/api_config.dart';
 import 'responder_roster.dart';
+import 'mobile_session_data.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -151,6 +152,7 @@ class EmergencyAlertService {
   void beginSession(String token, Object? userId) {
     endSession(preserveNotification: _jwt == null && !_terminating);
     _jwt = token;
+    MobileSessionData.instance.begin(token);
     _terminating = false;
     roster.begin(Incident.readId(userId));
     final session = _session;
@@ -191,6 +193,7 @@ class EmergencyAlertService {
   }
 
   void endSession({bool preserveNotification = false}) {
+    MobileSessionData.instance.clear();
     _session++;
     _accessVersion++;
     _jwt = null;

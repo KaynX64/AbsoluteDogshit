@@ -50,7 +50,7 @@ async function foundationSchema(pool) {
 test('fresh schema is adopted once even when two migration runners start together', { skip }, async t => {
   const pool = await fixture(t);
   const applied = await Promise.all([runMigrations(pool), runMigrations(pool)]);
-  assert.deepEqual(applied.sort(), [0, 12]);
+  assert.deepEqual(applied.sort(), [0, 13]);
   assert.equal(await responderFlag(pool), 1);
   const readOnlyPool = {
     async getConnection() {
@@ -78,7 +78,7 @@ test('replay migration removes legacy payloads and retains duplicate outcomes', 
     VALUES ('old-mutation', 2, 'desktop', 'EMR_RECORDS', 'old-record', 'CREATE',
             JSON_OBJECT('notes', 'fixture private text'), 1, 42, 'synced', 'legacy error')
   `);
-  assert.equal(await runMigrations(pool), 12);
+  assert.equal(await runMigrations(pool), 13);
   const [columns] = await pool.query('SHOW COLUMNS FROM LOCAL_SYNC_LOGS');
   assert.ok(columns.every(column => !['payload', 'error_message'].includes(column.Field)));
   const [[row]] = await pool.query(`
@@ -99,7 +99,7 @@ test('an existing schema keeps revoked responders, admin grants and saved policy
   await pool.query("DELETE FROM ADMIN_PERMISSIONS WHERE code IN ('INCIDENT_RECORDS_VIEW', 'TERMINAL_VIEW')");
   await pool.query('UPDATE SERVER_POLICY SET revision = 4 WHERE policy_id = 1');
   await pool.query('DROP TABLE STAFF_ANALYTICS_PERMISSIONS');
-  assert.equal(await runMigrations(pool), 12);
+  assert.equal(await runMigrations(pool), 13);
   const [[terminal]] = await pool.query("SELECT code FROM ADMIN_PERMISSIONS WHERE code = 'TERMINAL_VIEW'");
   assert.equal(terminal.code, 'TERMINAL_VIEW');
   const [[staffSettings]] = await pool.query('SELECT COUNT(*) AS total FROM STAFF_ANALYTICS_PERMISSIONS');
@@ -147,7 +147,7 @@ test('legacy tables and columns are rebuilt additively and the responder backfil
   await pool.query(`INSERT INTO PRESCRIPTION_ITEMS
     (prescription_id, outside_name, dosage, frequency, duration_days, quantity_dispensed)
     VALUES (1, 'fixture', 'fixture', 'fixture', 1, 4)`);
-  assert.equal(await runMigrations(pool), 12);
+  assert.equal(await runMigrations(pool), 13);
   const [[legacyDevice]] = await pool.query("SELECT installation_id, sos_mode FROM DEVICE_TOKENS WHERE fcm_token = 'legacy-token'");
   assert.deepEqual(legacyDevice, { installation_id: null, sos_mode: 'on_duty' });
   const [dayIndex] = await pool.query("SHOW INDEX FROM APPOINTMENTS WHERE Key_name = 'idx_app_status_datetime'");
@@ -164,7 +164,7 @@ test('legacy tables and columns are rebuilt additively and the responder backfil
   assert.equal(await responderFlag(pool), 1);
   const [[{ quantity_prescribed }]] = await pool.query('SELECT quantity_prescribed FROM PRESCRIPTION_ITEMS');
   const [[{ expiryDays }]] = await pool.query('SELECT DATEDIFF(expires_at, issued_at) AS expiryDays FROM PRESCRIPTIONS');
-  assert.equal(quantity_prescribed, 4);
+  assert.equal(Number(quantity_prescribed), 4);
   assert.equal(expiryDays, 30);
   await pool.query('UPDATE USERS SET is_qualified_responder = 0 WHERE user_id = 4');
   assert.equal(await runMigrations(pool), 0);
@@ -191,7 +191,7 @@ test('an interrupted responder schema change resumes with its original backfill 
   assert.equal(await responderFlag(pool), 0);
   const [[{ applied_at }]] = await pool.query('SELECT applied_at FROM SCHEMA_MIGRATIONS WHERE version = 3');
   assert.equal(applied_at, null);
-  assert.equal(await runMigrations(pool), 10);
+  assert.equal(await runMigrations(pool), 11);
   assert.equal(await responderFlag(pool), 1);
 });
 
@@ -200,4 +200,33 @@ test('an unprovisioned database fails before writing a migration ledger', { skip
   await assert.rejects(runMigrations(pool), /Missing or incompatible base tables/);
   const [tables] = await pool.query('SHOW TABLES');
   assert.deepEqual(tables, []);
+});
+
+test('migration 013 upgrades a v12 prescription schema to fresh-install parity without rewriting legacy content', { skip }, async t => {
+  const pool = await fixture(t);
+  const definition = async () => (await pool.query(`SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA
+    FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('PRESCRIPTIONS', 'PRESCRIPTION_ITEMS')
+    ORDER BY TABLE_NAME, COLUMN_NAME`))[0];
+  const fresh = await definition();
+  // The fresh schema can use the UUID index to support the doctor FK. V12
+  // instead had a doctor-only supporting index before that UUID index existed.
+  await pool.query('ALTER TABLE PRESCRIPTIONS ADD INDEX idx_rx_doctor_v12 (doctor_user_id)');
+  await pool.query(`ALTER TABLE PRESCRIPTIONS DROP INDEX uq_rx_request, DROP COLUMN contract_version,
+    DROP COLUMN issuance_request_id, DROP COLUMN request_hash, DROP COLUMN clinical_snapshot`);
+  await pool.query(`ALTER TABLE PRESCRIPTION_ITEMS DROP COLUMN catalog_medicine_id, DROP COLUMN item_sequence,
+    DROP COLUMN structured_details, MODIFY COLUMN quantity_prescribed INT NOT NULL DEFAULT 1,
+    MODIFY COLUMN duration_days INT NOT NULL`);
+  await pool.query("INSERT INTO EMR_RECORDS (patient_user_id, doctor_user_id, chief_complaint, diagnosis) VALUES (5, 2, 'fixture', 'fixture')");
+  await pool.query(`INSERT INTO PRESCRIPTIONS (emr_id, patient_user_id, doctor_user_id, expires_at, qr_token, notes, pdf_s3_key)
+    VALUES (1, 5, 2, CURDATE() + INTERVAL 7 DAY, 'legacy-013-fixture', 'Legacy recorded note', 'existing-unchanged.pdf')`);
+  await pool.query(`INSERT INTO PRESCRIPTION_ITEMS (prescription_id, outside_name, dosage, frequency, route, duration_days, quantity_prescribed)
+    VALUES (1, 'Legacy recorded name', '', '', 'Legacy route', 4, 4)`);
+  const { default: migration } = await import('../src/db/migrations/013-structured-prescriptions.js');
+  await migration.schema(pool);
+  assert.deepEqual(await definition(), fresh);
+  await migration.schema(pool);
+  const [[header]] = await pool.query('SELECT contract_version, clinical_snapshot, notes, pdf_s3_key FROM PRESCRIPTIONS');
+  assert.deepEqual(header, { contract_version: 1, clinical_snapshot: null, notes: 'Legacy recorded note', pdf_s3_key: 'existing-unchanged.pdf' });
+  const [[item]] = await pool.query('SELECT dosage, frequency, route, duration_days, quantity_prescribed, structured_details FROM PRESCRIPTION_ITEMS');
+  assert.deepEqual(item, { dosage: '', frequency: '', route: 'Legacy route', duration_days: 4, quantity_prescribed: '4.000', structured_details: null });
 });

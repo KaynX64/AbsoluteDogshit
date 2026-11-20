@@ -35,8 +35,8 @@ export const SECURITY_TABLES = [
 export const ENCRYPTED_COLUMNS = {
   EMR_RECORDS: ['chief_complaint', 'diagnosis', 'treatment_plan', 'notes'],
   HEALTH_PROFILES: ['allergies', 'chronic_conditions'],
-  PRESCRIPTIONS: ['notes'],
-  PRESCRIPTION_ITEMS: ['instructions'],
+  PRESCRIPTIONS: ['notes', 'clinical_snapshot'],
+  PRESCRIPTION_ITEMS: ['instructions', 'structured_details'],
   DENTAL_CHARTS: ['chart_data'],
 };
 
