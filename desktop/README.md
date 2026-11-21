@@ -20,7 +20,7 @@ npm run dist
 
 `npm run build` checks both TypeScript projects before building the renderer. `npm run dist` creates the Windows installer and unpacked app under `release/`. Do not edit or commit generated `dist/` or `release/` output.
 
-Windows uses `src/assets/valetudo_icon.ico` for the executable and the running window's taskbar icon. The packaged app also copies the icon into its resources folder for Electron to load at startup. Keep executable resource editing enabled and use the same application ID for Electron and the installer shortcuts. If an existing pin still shows the old icon after updating, unpin it, open the updated app, then pin it again.
+Windows uses `src/assets/valetudo_icon.ico` for the executable, the running window, and new taskbar pins. The installed app and its Start Menu shortcut share a Windows application ID. Development uses a separate ID so a shortcut to Electron cannot share the installed app's taskbar button. If an existing pin still shows the old icon, unpin it and pin the updated app from the Start Menu.
 
 ## Verification
 
