@@ -123,6 +123,31 @@ test('concurrent SOS retries share one audited alert and one dispatch lease', { 
   assert.notEqual((await otherAccount.json()).alertId, receipts[0].alertId);
 });
 
+test('SOS delivery and the active roster preserve the reported instant across time zones', { skip }, async t => {
+  const db = await fixture(t, 1);
+  const reportedAt = '2026-11-20T16:05:00.000Z';
+  const mysqlZone = new Date(reportedAt).getTimezoneOffset() === 0 ? '+08:00' : '+00:00';
+  await db.query('SET time_zone = ?', [mysqlZone]);
+  await db.query('SET timestamp = ?', [Date.parse(reportedAt) / 1000]);
+  const [result] = await db.query(`INSERT INTO EMERGENCY_ALERTS (user_id, location, dispatch_after)
+    VALUES (5, ST_GeomFromText('POINT(0 0)', 4326), NOW(3))`);
+  const { request, emit } = await mountedApi(t);
+  const { dispatchPendingSos } = await import('../src/emergency/sosDispatch.js');
+
+  await dispatchPendingSos({ to: () => ({ emit }) });
+  const packets = emit.mock.calls.map(({ arguments: args }) => args).filter(([event]) => event === 'emergency:new_alert');
+  assert.ok(packets.length > 0);
+  for (const [, payload] of packets) {
+    assert.equal(payload.alertId, result.insertId);
+    assert.equal(payload.createdAt, reportedAt);
+  }
+  const active = await request('/emergency/active');
+  assert.equal(active.status, 200);
+  const [alert] = await active.json();
+  assert.equal(alert.alert_id, result.insertId);
+  assert.equal(alert.created_at, reportedAt);
+});
+
 // Verify that shutdown waits for both HTTP and workers before closing shared dependencies.
 test('shutdown waits for both HTTP and workers before closing shared dependencies', async () => {
   const workers = Promise.withResolvers();

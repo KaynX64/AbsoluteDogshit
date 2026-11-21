@@ -60,7 +60,7 @@ async function dispatchAlert(alert, io) {
     formattedAddress,
     googleMapsUrl: `https://www.google.com/maps?q=${lat},${lng}`,
     status: alert.status,
-    createdAt: new Date(alert.created_at).toISOString(),
+    createdAt: new Date(alert.created_at_seconds * 1000).toISOString(),
   };
 
   // 1. Resolve the live audience (flag OR legacy role, sender excluded,
@@ -102,7 +102,8 @@ export async function dispatchPendingSos(io) {
       );
       if (!claim.affectedRows) continue;
       const [[alert]] = await pool.query(
-        `SELECT alert_id, user_id, latitude, longitude, location_label, status, created_at,
+        `SELECT alert_id, user_id, latitude, longitude, location_label, status,
+                UNIX_TIMESTAMP(created_at) AS created_at_seconds,
                 DATE_FORMAT(dispatch_after, '%Y-%m-%d %H:%i:%s.%f') AS lease,
                 created_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE) AS recent
          FROM EMERGENCY_ALERTS WHERE alert_id = ?`,
