@@ -6,8 +6,10 @@ import { fail } from '../../../utils/httpError.js';
 import { normalizeValue, auditSafe, assertKnownColumns, assertPrimaryKey, protectValues, planDelete, shouldBumpVersion } from './tablePolicy.js';
 import { getTableColumns } from './schema.js';
 
+// Mount guarded and audited Database Studio row writes.
 export function registerDatabaseStudioWrites(router, requireDatabaseAccess, requireWritableTable) {
   // 3. POST /api/admin/db/tables/:table/rows
+  // Validate and insert a row and save its audit entry in the same transaction.
   router.post('/db/tables/:table/rows', requireDatabaseAccess, requireWritableTable, async (req, res) => {
     const tableName = req.params.table;
     const rowData = req.body;
@@ -54,6 +56,7 @@ export function registerDatabaseStudioWrites(router, requireDatabaseAccess, requ
   });
 
   // 4. PUT /api/admin/db/tables/:table/rows
+  // Validate a row update and audit the protected before and after values.
   router.put('/db/tables/:table/rows', requireDatabaseAccess, requireWritableTable, async (req, res) => {
     const tableName = req.params.table;
     const { primaryKey, updates } = req.body;
@@ -73,11 +76,13 @@ export function registerDatabaseStudioWrites(router, requireDatabaseAccess, requ
       const { names, pk } = await getTableColumns(connection, tableName);
       assertPrimaryKey(primaryKey, pk);
       assertKnownColumns(Object.keys(updates), names);
-      if (Object.keys(updates).some((c) => pk.includes(c))) {
+      if (Object.keys(updates).some(/* Detect an attempt to modify a primary key column. */ (c) => pk.includes(c))) {
         throw fail('Primary key columns cannot be changed.');
       }
 
+      // Add an equality condition for each primary key field in the update.
       const pkClauses = pk.map(() => '?? = ?').join(' AND ');
+      // Bind each primary key identifier and value for the update.
       const pkParams = pk.flatMap((c) => [c, primaryKey[c]]);
 
       const [existing] = await connection.query(
@@ -138,6 +143,7 @@ export function registerDatabaseStudioWrites(router, requireDatabaseAccess, requ
   });
 
   // 5. DELETE /api/admin/db/tables/:table/rows
+  // Apply the table's deletion policy and audit the affected record.
   router.delete('/db/tables/:table/rows', requireDatabaseAccess, requireWritableTable, async (req, res) => {
     const tableName = req.params.table;
     const { primaryKey } = req.body;
@@ -153,7 +159,9 @@ export function registerDatabaseStudioWrites(router, requireDatabaseAccess, requ
       const { names, pk } = await getTableColumns(connection, tableName);
       assertPrimaryKey(primaryKey, pk);
 
+      // Add an equality condition for each primary key field in the delete.
       const pkClauses = pk.map(() => '?? = ?').join(' AND ');
+      // Bind each primary key identifier and value for the delete.
       const pkParams = pk.flatMap((c) => [c, primaryKey[c]]);
       const mode = planDelete(names);
 

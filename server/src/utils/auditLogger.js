@@ -2,6 +2,7 @@
 
 import crypto from 'crypto';
 
+// Append a hash-chained audit entry using the caller's connection.
 export async function logAudit(connection, { userId, action, table, recordId, oldValue, newValue, ipAddress }) {
   // 1. Lock and fetch the most recent hash to prevent branching in concurrent requests
   const [lastLog] = await connection.query(

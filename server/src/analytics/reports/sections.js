@@ -24,12 +24,13 @@ export function workflowSections({ surveillance, pharmacy }) {
     });
   }
   if (pharmacy) {
+    // Join available medicine attributes into a display label.
     const medicineName = ({ name, strength, form, unit }) => [name, strength, form, unit].filter(Boolean).join(' ');
     if (pharmacy.dispensing) sections.push({
       title: 'Formulary Dispensing',
       subtitle: `Last ${pharmacy.windowDays} days. Availability reflects current usable stock.`,
       columns: ['Medicine', 'Prescribed', 'Dispensed', 'Returned', 'Net', 'Availability'],
-      rows: pharmacy.dispensing.map(row => [
+      rows: pharmacy.dispensing.map(/* Build a dispensing row with numeric prescribing, dispensing, and return totals. */ row => [
         medicineName(row), Number(row.quantity_prescribed), Number(row.quantity_dispensed),
         Number(row.quantity_returned), Number(row.net_dispensed), row.availability === 'IN_STOCK' ? 'In stock' : 'Out of stock',
       ]),
@@ -38,7 +39,7 @@ export function workflowSections({ surveillance, pharmacy }) {
       sections.push({
         title: 'Reorder Priorities',
         columns: ['Medicine', 'On hand', 'Reorder buffer', 'Suggested order'],
-        rows: pharmacy.reorderPriorities.map(row => [
+        rows: pharmacy.reorderPriorities.map(/* Build a replenishment row with stock, buffer, and suggested order quantity. */ row => [
           medicineName(row), Number(row.total_stock_on_hand), Number(row.reorder_level), Number(row.suggested_reorder_qty),
         ]),
       });

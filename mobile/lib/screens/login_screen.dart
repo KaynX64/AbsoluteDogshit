@@ -1,8 +1,9 @@
 // mobile/lib/screens/login_screen.dart
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
 import '../config/api_config.dart';
 import '../widgets/valetudo_logo.dart';
 import '../utils/responsive.dart';
@@ -42,7 +43,7 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      final res = await http.post(
+      final res = await ApiConfig.client.post(
         Uri.parse('${ApiConfig.baseUrl}/api/auth/login'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
@@ -55,26 +56,36 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (res.statusCode == 200) {
         // Save BOTH token and user profile into secure storage
-        await _storage.write(key: 'jwt_token', value: data['token']);
-        await _storage.write(key: 'user_data', value: jsonEncode(data['user']));
+        await Future.wait([
+          _storage.write(key: 'jwt_token', value: data['token']),
+          _storage.write(key: 'user_data', value: jsonEncode(data['user'])),
+        ]);
         if (!mounted) return;
         await AccountThemeScope.of(context).bindAccount(
-          Map<String, dynamic>.from(data['user']), data['token'] as String,
+          Map<String, dynamic>.from(data['user']),
+          data['token'] as String,
         );
 
         if (!mounted) return;
-        EmergencyAlertService().beginSession(data['token'], data['user']['user_id']);
+        EmergencyAlertService().beginSession(
+          data['token'],
+          data['user']['user_id'],
+        );
         final List<dynamic> roles = data['user']['roles'] ?? [];
 
         if (roles.contains('EMERGENCY_RESPONDER')) {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (_) => ResponderScreen(user: data['user'])),
+            MaterialPageRoute(
+              builder: (_) => ResponderScreen(user: data['user']),
+            ),
           );
         } else {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (_) => PatientPortalScreen(user: data['user'])),
+            MaterialPageRoute(
+              builder: (_) => PatientPortalScreen(user: data['user']),
+            ),
           );
         }
       } else {
@@ -276,8 +287,9 @@ class _LoginScreenState extends State<LoginScreen> {
                           size: rs.w(20),
                           color: textSub,
                         ),
-                        onPressed: () =>
-                            setState(() => _obscurePassword = !_obscurePassword),
+                        onPressed: () => setState(
+                          () => _obscurePassword = !_obscurePassword,
+                        ),
                       ),
                     ),
                   ),
@@ -319,7 +331,21 @@ class _LoginScreenState extends State<LoginScreen> {
                         ],
                       ),
                       TextButton(
-                        onPressed: () {},
+                        onPressed: () => showDialog<void>(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text('Reset your password'),
+                            content: const Text(
+                              'Contact your campus clinic administrator to request a password reset.',
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context),
+                                child: const Text('Done'),
+                              ),
+                            ],
+                          ),
+                        ),
                         style: TextButton.styleFrom(padding: EdgeInsets.zero),
                         child: Text(
                           'Forgot password?',
@@ -395,7 +421,9 @@ class _LoginScreenState extends State<LoginScreen> {
                               children: [
                                 Flexible(
                                   child: Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 10),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 10,
+                                    ),
                                     child: Text(
                                       'Sign in to portal',
                                       textAlign: TextAlign.center,
@@ -407,7 +435,10 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                                 ),
                                 SizedBox(width: rs.w(8)),
-                                const Icon(Icons.arrow_forward_rounded, size: 18),
+                                const Icon(
+                                  Icons.arrow_forward_rounded,
+                                  size: 18,
+                                ),
                               ],
                             ),
                     ),

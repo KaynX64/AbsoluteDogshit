@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getBmiCategory } from '../src/utils/bmi.js';
 
+// Check which adult BMI category applies at each cutoff and immediately below it.
 test('classifies adult BMI thresholds', () => {
   assert.equal(getBmiCategory(18.49), 'Underweight');
   assert.equal(getBmiCategory(18.5), 'Normal');
@@ -13,6 +14,7 @@ test('classifies adult BMI thresholds', () => {
   assert.equal(getBmiCategory(30), 'Obese');
 });
 
+// Check that missing, nonnumeric, and nonpositive readings produce a null category.
 test('returns no category for missing or invalid BMI', () => {
   assert.equal(getBmiCategory(null), null);
   assert.equal(getBmiCategory(''), null);

@@ -7,6 +7,7 @@ import { fail } from '../../utils/httpError.js';
 import { parseQualifiedResponderBody } from '../../emergency/responderAccess.js';
 import { requireSuperAdminCaller, getUserRoleCode } from '../../admin/accounts/permissions.js';
 
+// Mount qualification changes behind the responder management grant.
 export function registerResponderManagementRoutes(router, io) {
   // 3.4 PUT /api/admin/users/:id/qualified-responder — Qualified Responder flag
   // ─────────────────────────────────────────────────────────────────────────
@@ -15,6 +16,7 @@ export function registerResponderManagementRoutes(router, io) {
   // PUT /users/:id and POST /users deliberately never read these columns — a
   // limited admin holding only USERS_MANAGE therefore cannot flip the flag.
   // Role changes never touch it either (role handlers only rewrite USER_ROLES).
+  // Validate and audit the target's designation and notify the target after commit.
   router.put('/users/:id/qualified-responder', requirePermission('RESPONDERS_MANAGE'), async (req, res) => {
     const targetUserId = Number(req.params.id);
     const parsed = parseQualifiedResponderBody(req.body);

@@ -10,6 +10,7 @@ import multer from 'multer';
 import { uploadToS3, getFromS3 } from '../../utils/s3Vault.js';
 import { logPhiAccess } from '../../utils/phiLogger.js';
 
+// Mount EMR upload, patient listing, and authorized attachment download endpoints.
 export function registerAttachmentRoutes(router) {
   // =============================================================================
   // 6. EMR DIAGNOSTIC & LAB ATTACHMENTS (MINIO S3)
@@ -50,6 +51,7 @@ export function registerAttachmentRoutes(router) {
   });
 
   // POST /api/documents/emr/:emrId/attachments
+  // Validate the uploaded content and save it as an encrypted EMR attachment.
   router.post(
     '/emr/:emrId/attachments',
     authenticateToken,
@@ -145,6 +147,7 @@ export function registerAttachmentRoutes(router) {
   );
 
   // GET /api/documents/attachments/my (Fetch all diagnostic attachments for patient)
+  // List attachment metadata for the signed-in patient.
   router.get('/attachments/my', authenticateToken, requirePrivacyConsent, async (req, res) => {
     try {
       const userId = req.user.user_id;
@@ -184,6 +187,7 @@ export function registerAttachmentRoutes(router) {
   // Issues a single-use, 60-second download token so clients (e.g. the mobile
   // app's "Open & View File") can hand the file to an external browser
   // WITHOUT exposing the primary 24-hour JWT in a URL query parameter.
+  // Authorize attachment access and issue a short-lived download token.
   router.post(
     '/attachments/:attachmentId/download-token',
     authenticateToken,
@@ -211,6 +215,7 @@ export function registerAttachmentRoutes(router) {
 
         const att = rows[0];
         const userRoles = req.user.roles || [];
+        // Check whether the caller's role can request a clinical attachment token.
         const isClinicalStaff = userRoles.some((r) => ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'].includes(r));
         const isOwner = Number(req.user.user_id) === Number(att.patient_user_id);
 
@@ -232,6 +237,7 @@ export function registerAttachmentRoutes(router) {
   );
 
   // GET /api/documents/attachments/:attachmentId/download
+  // Validate download access and return decrypted attachment content.
   router.get('/attachments/:attachmentId/download', authenticateAttachmentDownload, async (req, res) => {
     const { attachmentId } = req.params;
 
@@ -250,6 +256,7 @@ export function registerAttachmentRoutes(router) {
 
       const att = rows[0];
       const userRoles = req.user.roles || [];
+      // Check whether the caller has a clinical role when authorizing the download.
       const isClinicalStaff = userRoles.some((r) => ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'].includes(r));
       const isOwner = req.user.user_id === att.patient_user_id;
 

@@ -1,5 +1,6 @@
 // Loads the signed prescription and its medicine lines, then renders and stores the PDF.
 
+import { readSnapshot } from '../prescriptions/structuredRead.js';
 import { pool } from '../../db/pool.js';
 import { decrypt } from '../../utils/cryptoVault.js';
 import { renderPrescriptionPDF } from '../pdf/templates/prescription.js';
@@ -9,11 +10,12 @@ import { storeDocumentPdf } from './storage.js';
 
 // ─── PRESCRIPTIONS ────────────────────────────────────────────────────────
 
+// Render a saved prescription and its medication directions and publish the PDF key.
 export async function generateAndStorePrescriptionPDF(prescriptionId, database = pool) {
   try {
     // 1. Fetch header + patient + doctor
     const [rows] = await database.query(
-         `SELECT p.prescription_id, p.issued_at, p.expires_at, p.notes, p.qr_token, p.signature_metadata,
+         `SELECT p.prescription_id, p.contract_version, p.clinical_snapshot, p.issued_at, p.expires_at, p.notes, p.qr_token, p.signature_metadata,
               pt.first_name, pt.last_name,
               sp.student_no, sp.course,
               hp.blood_type, hp.allergies, hp.sex, hp.date_of_birth,
@@ -38,6 +40,17 @@ export async function generateAndStorePrescriptionPDF(prescriptionId, database =
            ? JSON.parse(p.signature_metadata)
            : p.signature_metadata || {};
 
+    const snapshot = readSnapshot(p);
+    if (snapshot) {
+      const buffer = await renderPrescriptionPDF({ ...snapshot, prescription_id: p.prescription_id,
+        qr_token: p.qr_token, verification_url: verificationUrl(p.qr_token),
+        doctor: { ...snapshot.doctor, signature_png: await loadSignature(snapshot.doctor.signature_s3_key) } });
+      const key = await storeDocumentPdf('prescriptions/rx', prescriptionId, buffer, storageKey =>
+        database.query('UPDATE PRESCRIPTIONS SET pdf_s3_key = ?, pdf_retry_at = NULL WHERE prescription_id = ? AND pdf_s3_key IS NULL AND deleted_at IS NULL', [storageKey, prescriptionId]));
+      if (key) return key;
+      const [[current]] = await database.query('SELECT pdf_s3_key FROM PRESCRIPTIONS WHERE prescription_id = ? AND deleted_at IS NULL', [prescriptionId]);
+      return current?.pdf_s3_key ?? null;
+    }
     // 2. Fetch line items
     //    LEFT JOIN + COALESCE so outside (non-formulary) drugs — which have a
     //    NULL medicine_id and a free-text outside_name — still render on the PDF.
@@ -79,12 +92,13 @@ export async function generateAndStorePrescriptionPDF(prescriptionId, database =
         role: rxMeta.signer_role,
         signature_png: await loadSignature(rxMeta.signature_s3_key),
       },
-      items: items.map((it) => ({
+      items: items.map(/* Decrypt medication instructions for the PDF renderer. */ (it) => ({
         ...it,
         instructions: decrypt(it.instructions),
       })),
     });
 
+    // Record the object key if the prescription still needs a PDF.
     const key = await storeDocumentPdf('prescriptions/rx', prescriptionId, buffer, storageKey =>
       database.query('UPDATE PRESCRIPTIONS SET pdf_s3_key = ?, pdf_retry_at = NULL WHERE prescription_id = ? AND pdf_s3_key IS NULL AND deleted_at IS NULL', [storageKey, prescriptionId]),
     );

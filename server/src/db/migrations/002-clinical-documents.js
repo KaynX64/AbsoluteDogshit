@@ -38,13 +38,18 @@ const columns = [
 export default {
   version: 2,
   name: 'clinical documents and inventory links',
+  // Inspect the existing prescription quantity column before applying document upgrades.
   async prepare(connection) {
     return {
       initializePrescribedQuantity: !(await readColumn(connection, 'PRESCRIPTION_ITEMS', 'quantity_prescribed')),
     };
   },
+  // Add or align clinical document fields, prescription types, and inventory links.
   async schema(connection) {
-    await ensureColumns(connection, columns);
+    // A clean install can already contain migration 013's widened quantity.
+    const quantity = await readColumn(connection, 'PRESCRIPTION_ITEMS', 'quantity_prescribed');
+    const adopted = quantity?.COLUMN_TYPE?.toLowerCase() === 'decimal(12,3)' && quantity.IS_NULLABLE === 'NO';
+    await ensureColumns(connection, columns.filter(column => !(adopted && column.column === 'quantity_prescribed')));
     await ensureIndex(connection, 'PRESCRIPTIONS', 'idx_rx_expires', 'expires_at');
     const medicineId = await readColumn(connection, 'PRESCRIPTION_ITEMS', 'medicine_id');
     if (!medicineId || !/^bigint(?:\(\d+\))?$/.test(medicineId.COLUMN_TYPE)) {
@@ -73,6 +78,7 @@ export default {
     await ensureEnum(connection, 'AUDIT_LOGS', 'action', ['LOGIN', 'VIEW', 'CREATE', 'UPDATE', 'DELETE', 'EXPORT', 'SIGN', 'REVOKE']);
     await ensureEnum(connection, 'MEDICAL_CLEARANCES', 'status', ['pending', 'approved', 'rejected', 'expired', 'revoked'], 'approved');
   },
+  // Backfill values needed by the upgraded clinical document schema.
   async data(connection, { initializePrescribedQuantity }) {
     if (typeof initializePrescribedQuantity !== 'boolean') throw new Error('Missing prescription backfill decision.');
     await connection.query(

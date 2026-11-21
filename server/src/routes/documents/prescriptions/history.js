@@ -1,21 +1,25 @@
 // Lists saved prescriptions and medication instructions for patients and issuing clinicians.
 
+import { hydratePrescription } from '../../../documents/prescriptions/structuredRead.js';
 import { pool } from '../../../db/pool.js';
 import { authenticateToken } from '../../../auth/middleware.js';
 import { requireRoles } from '../../../middleware/rbac.js';
 import { decrypt } from '../../../utils/cryptoVault.js';
 import { requirePrivacyConsent } from '../../../middleware/consent.js';
 import { logPhiAccess } from '../../../utils/phiLogger.js';
+import { verificationUrl } from '../../../documents/publicLinks.js';
 
+// Mount prescription history for recipients and authorized clinical staff.
 export function registerPrescriptionHistory(router) {
   // GET /api/documents/prescriptions/my (Decrypted for authorized patient)
+  // Return prescriptions relevant to the signed-in patient or issuing clinician.
   router.get('/prescriptions/my', authenticateToken, requirePrivacyConsent, async (req, res) => {
     try {
       const userId = req.user.user_id;
 
       const [rows] = await pool.query(
         `SELECT p.prescription_id, p.emr_id, p.issued_at, p.expires_at, p.status, p.notes, p.qr_token,
-                p.signature_metadata, p.pdf_s3_key,
+                p.signature_metadata, p.pdf_s3_key, p.contract_version, p.clinical_snapshot,
                 doc.first_name AS doctor_first_name, doc.last_name AS doctor_last_name,
                 COALESCE(sp.license_no, 'Not on file') AS doctor_license,
                 COALESCE(sp.specialty, 'Infirmary Physician') AS doctor_specialty,
@@ -45,17 +49,17 @@ export function registerPrescriptionHistory(router) {
         [userId]
       );
 
+      // Prepare the prescription and its decrypted medication directions for the response.
       const decryptedRows = rows.map((rx) => {
+        // Decrypt instructions for one saved medication line.
         const items = (rx.items || []).map((it) => ({
           ...it,
           instructions: decrypt(it.instructions),
         }));
-        return {
-          ...rx,
-          notes: decrypt(rx.notes),
-          pdfAvailable: Boolean(rx.pdf_s3_key),
-          items,
-        };
+        return hydratePrescription({
+          ...rx, notes: decrypt(rx.notes), pdfAvailable: Boolean(rx.pdf_s3_key), items,
+          verification_url: rx.qr_token ? verificationUrl(rx.qr_token) : null,
+        });
       });
 
       res.json(decryptedRows);
@@ -69,6 +73,7 @@ export function registerPrescriptionHistory(router) {
   // Prescription history for one patient, limited to what the logged-in
   // doctor/dentist issued themselves. The issuer is taken from the JWT, never
   // from the request, so another clinician's prescriptions cannot be requested.
+  // Return saved prescriptions and medication directions for the requested patient.
   router.get(
     '/prescriptions/patient/:patientId',
     authenticateToken,
@@ -81,13 +86,14 @@ export function registerPrescriptionHistory(router) {
 
       try {
         const [rows] = await pool.query(
-          `SELECT prescription_id, emr_id, issued_at, expires_at, status, notes, pdf_s3_key
+          `SELECT prescription_id, emr_id, issued_at, expires_at, status, notes, pdf_s3_key, contract_version, clinical_snapshot, signature_metadata
            FROM PRESCRIPTIONS
            WHERE patient_user_id = ? AND doctor_user_id = ? AND deleted_at IS NULL
            ORDER BY issued_at DESC, prescription_id DESC`,
           [patientId, req.user.user_id]
         );
 
+        // Index prescriptions by ID and initialize their item lists for the batched lookup.
         const history = new Map(rows.map(({ pdf_s3_key, ...rx }) => [rx.prescription_id, {
           ...rx, notes: decrypt(rx.notes), pdfAvailable: Boolean(pdf_s3_key), items: [],
         }]));
@@ -116,7 +122,7 @@ export function registerPrescriptionHistory(router) {
           ipAddress: req.ip,
         });
 
-        res.json([...history.values()]);
+        res.json([...history.values()].map(hydratePrescription));
       } catch (error) {
         console.error('[Documents] Error fetching issuer prescription history:', error);
         res.status(500).json({ error: 'Failed to retrieve prescription history.' });

@@ -4,12 +4,10 @@
 
 ## DT-07 · desktop/src/features/documents/PrescriptionGenerator.tsx
 
-`FormularySelect.tsx` owns the dropdown and stock labels.
+**LOC:** 2 · **Anchor commit:** working tree · **Role:** Stable import entry for structured prescribing.
+
+`StructuredPrescriptionGenerator.tsx` owns the memory draft, capabilities, review and exact-request retries. `MedicationEditor.tsx` owns active medicine fields; `StructuredPrescriptionReview.tsx` owns review and acknowledgements. `prescribingTypes.ts` provides client types/validation. `structured-prescribing.css` contains compact layout and component scrolling. See the [API contract](../../../server/STRUCTURED-PRESCRIBING.md).
 
 | # | Lines | Anchor | Entry point |
 |---|---|---|---|
-| 1 | 2-5 | — | Imports and declarations |
-| 2 | 6-93 | ClinicalReview | ClinicalReview |
-| 3 | 94-104 | export default function | export default function |
-| 4 | 105-396 | const [medicines | const [medicines |
-| 5 | 397-763 | <FormularySelect | <FormularySelect |
+| 1 | 1-2 | export | Structured workflow and props re-exports |

@@ -21,6 +21,7 @@ import { authenticateToken } from './middleware.js';
 const DOWNLOAD_TOKEN_TTL_SECONDS = 60;
 const DOWNLOAD_TOKEN_PURPOSE = 'EMR_ATTACHMENT_DOWNLOAD';
 
+// Sign an expiring token for a specific attachment and user.
 export function issueAttachmentDownloadToken(user, attachmentId) {
   return jwt.sign(
     {
@@ -39,6 +40,7 @@ export function issueAttachmentDownloadToken(user, attachmentId) {
 // fallback — the same degraded-mode philosophy as the login limiter (SEC-05).
 const usedDownloadTokens = new Map();
 
+// Claim the token's unique ID and report whether it has already been used.
 async function isDownloadTokenReplayed(jti, expiresAtSeconds) {
   const nowMs = Date.now();
 

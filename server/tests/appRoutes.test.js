@@ -23,6 +23,7 @@ Object.assign(process.env, {
 
 const keyPath = fileURLToPath(new URL('../serviceAccountKey.json', import.meta.url));
 const existsSync = fs.existsSync;
+// Hide the local Firebase credential when loading the test app.
 const hideKey = mock.method(fs, 'existsSync', filename => filename !== keyPath && existsSync(filename));
 let createApp, mountApiRoutes;
 try {
@@ -34,23 +35,29 @@ const { pool } = await import('../src/db/pool.js');
 
 let listener;
 let baseUrl;
+// Mount the real API with a read-only realtime double and open a test listener.
 before(async () => {
   const app = createApp();
   mountApiRoutes(app, {
+    // Fail if the read-only test API attempts to broadcast.
     emit() { assert.fail('Read-only fixture unexpectedly broadcast an event'); },
+    // Fail if the read-only test API attempts to emit to a room.
     to() { assert.fail('Read-only fixture unexpectedly targeted a realtime room'); },
   });
   listener = app.listen(0, '127.0.0.1');
   await once(listener, 'listening');
   baseUrl = 'http://127.0.0.1:' + listener.address().port;
 });
+// Close the API test listener after the suite finishes.
 after(async () => {
-  if (listener?.listening) await new Promise((resolve, reject) => {
+  if (listener?.listening) /* Wrap listener cleanup in a promise so the hook waits for it. */ await new Promise((resolve, reject) => {
+    // Resolve when the fixture listener closes or surface a close error.
     listener.close(error => error ? reject(error) : resolve());
   });
   await pool.end();
 });
 
+// Make an HTTP request to the test API with an optional signed session and JSON body.
 const request = (path, { roles, userId = 21, method = 'GET', headers = {}, json } = {}) => {
   if (roles) {
     const token = jwt.sign({ user_id: userId, roles }, process.env.JWT_SECRET, { expiresIn: '5m' });
@@ -61,8 +68,10 @@ const request = (path, { roles, userId = 21, method = 'GET', headers = {}, json 
   return fetch(baseUrl + path, { method, headers, body });
 };
 
+// Verify that account appearance reads only the authenticated user and shares desktop preference writes.
 test('account appearance reads only the authenticated user and shares desktop preference writes', async t => {
   const theme = { theme_mode: 'dark', theme_preset: 'blossom' };
+  // Respond to active account and theme preference queries for the fixture user.
   t.mock.method(pool, 'query', async (sql, params) => {
     if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
     if (sql.startsWith('SELECT theme_mode, theme_preset')) {
@@ -83,22 +92,27 @@ test('account appearance reads only the authenticated user and shares desktop pr
   assert.equal(save.status, 200);
 });
 
+// Verify that password change releases only the submitted device when the change commits.
 test('password change releases only the submitted device when the change commits', async t => {
   const priorPassword = 'Original21!';
   let passwordHash = await bcrypt.hash(priorPassword, 4);
   const devices = new Map([['this-device', 21], ['other-device', 21], ['another-account', 42]]);
   let failAudit = false;
   let loseRace = false;
+  // Supply the current password hash and active account status.
   t.mock.method(pool, 'query', async sql => {
     if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
     assert.match(sql, /SELECT u\.password_hash/);
     return [[{ password_hash: passwordHash }]];
   });
+  // Create a transaction double that stages credential and device updates.
   t.mock.method(pool, 'getConnection', async () => {
     let nextHash;
     let nextDevice;
     return {
+      // Stand in for beginning the fixture password transaction.
       async beginTransaction() {},
+      // Stage the password hash and push device removal and accept the audit write.
       async query(sql, params) {
         if (sql.startsWith('UPDATE USERS SET password_hash')) {
           assert.match(sql, /CAST\(password_hash AS BINARY\) = \?/);
@@ -119,14 +133,18 @@ test('password change releases only the submitted device when the change commits
         if (failAudit) throw new Error('fixture audit failure');
         return [{ affectedRows: 1 }];
       },
+      // Apply the staged password and device changes on commit.
       async commit() {
         if (nextHash) passwordHash = nextHash;
         if (nextDevice) devices.delete(nextDevice);
       },
+      // Provide the rollback method required by the password transaction fixture.
       async rollback() {},
+      // Provide connection cleanup without a live pool.
       release() {},
     };
   });
+  // Submit a password change as the fixture student.
   const change = (currentPassword, newPassword, fcm_token) => request('/api/auth/change-password', {
     roles: ['STUDENT'],
     method: 'PUT',
@@ -154,8 +172,10 @@ test('password change releases only the submitted device when the change commits
   assert.equal(devices.size, 2);
 });
 
+// Verify that inventory expiry alerts and summary use a 30-day window.
 test('inventory expiry alerts and summary use a 30-day window', async t => {
   const expiryQueries = [];
+  // Provide active-account and consent fixtures for the protected profile request.
   t.mock.method(pool, 'query', async sql => {
     if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
     if (sql.includes('CASE') && sql.includes('days_until_expiry')) {
@@ -189,17 +209,20 @@ test('inventory expiry alerts and summary use a 30-day window', async t => {
   }
 });
 
+// Verify that analytics headcount scope skips all other loaders and limits every report format.
 test('analytics headcount scope skips all other loaders and limits every report format', async t => {
   let codes = ['ANALYTICS_VIEW', 'ANALYTICS_HEADCOUNT', 'ANALYTICS_EXPORT'];
   const unexpected = [];
+  // Build analytics grant and department query results for the current test role.
   t.mock.method(pool, 'query', async sql => {
     if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
-    if (sql.includes('AS permission_code')) return [codes.map(permission_code => ({ role_code: 'ADMIN', permission_code }))];
+    if (sql.includes('AS permission_code')) return [codes.map(/* Pair each administrator grant with the Admin role in the joined result. */ permission_code => ({ role_code: 'ADMIN', permission_code }))];
     if (sql.includes('SELECT r.code, r.name')) return [[{ code: 'STUDENT', name: 'Fixture headcount', count: 12 }]];
     unexpected.push(sql);
     throw new Error('Unexpected analytics query');
   });
   const roles = ['ADMIN', 'DOCTOR'];
+  // Request an analytics endpoint with the selected roles.
   const analytics = (path) => request('/api/analytics/' + path, { roles });
   const summary = await analytics('summary');
   assert.equal(summary.status, 200);
@@ -219,7 +242,7 @@ test('analytics headcount scope skips all other loaders and limits every report 
   assert.equal(excel.status, 200);
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(await excel.arrayBuffer());
-  assert.deepEqual(workbook.worksheets.map(sheet => sheet.name), ['Campus Headcount']);
+  assert.deepEqual(workbook.worksheets.map(/* Extract worksheet names to check report section access. */ sheet => sheet.name), ['Campus Headcount']);
   const pdf = await analytics('export/pdf');
   assert.equal(pdf.status, 200);
   const pdfText = await readPdfText(pdf);
@@ -237,25 +260,31 @@ test('analytics headcount scope skips all other loaders and limits every report 
   assert.deepEqual(unexpected, []);
 });
 
+// Decode compressed PDF text streams for content assertions.
 async function readPdfText(response) {
   const body = Buffer.from(await response.arrayBuffer()).toString('latin1');
   const streams = [...body.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)];
+  // Inflate a content stream and collect its encoded text chunks.
   return streams.flatMap(([, stream]) => {
     try {
       const operators = inflateSync(Buffer.from(stream, 'latin1')).toString();
+      // Decode one hexadecimal PDF text segment for assertions.
       return [...operators.matchAll(/<([a-f0-9]+)>/gi)].map(([, hex]) => Buffer.from(hex, 'hex').toString('latin1'));
     } catch { return []; }
   }).join('');
 }
 
+// Verify that analytics report permissions map staff and Super Admin roles independently of the dashboard.
 test('analytics report permissions map staff and Super Admin roles independently of the dashboard', async t => {
   let codes = [];
   let liveRoles = [];
+  // Return the fixture account's live roles and grant rows.
   t.mock.method(pool, 'query', async sql => {
     if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
     assert.match(sql, /AS permission_code/);
+    // Return one joined row per live role and applicable admin grant.
     return [liveRoles.flatMap(role_code => role_code === 'ADMIN' && codes.length
-      ? codes.map(permission_code => ({ role_code, permission_code })) : [{ role_code }])];
+      ? codes.map(/* Pair an admin grant with its role in the simulated account query. */ permission_code => ({ role_code, permission_code })) : [{ role_code }])];
   });
   const common = ['ANALYTICS_OPERATIONS', 'ANALYTICS_EXPORT', 'ANALYTICS_SURVEILLANCE', 'ANALYTICS_DISPENSING'];
   const clinical = [...common, 'ANALYTICS_CLINICAL'];
@@ -280,10 +309,13 @@ test('analytics report permissions map staff and Super Admin roles independently
   assert.equal((await request('/api/analytics/summary', session)).status, 403);
 });
 
+// Verify that analytics outputs contain only the live clinical and pharmacy subsections.
 test('analytics outputs contain only the live clinical and pharmacy subsections', async t => {
   let role = 'NURSE';
   const unexpected = [];
+  // Record and fail an unexpected analytics query.
   const reject = sql => { unexpected.push(sql); throw new Error('Unexpected analytics query'); };
+  // Allow expected staff analytics reads and reject unauthorized section queries.
   t.mock.method(pool, 'query', async sql => {
     if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
     if (sql.includes('AS permission_code')) return [[{ role_code: role }]];
@@ -307,6 +339,7 @@ test('analytics outputs contain only the live clinical and pharmacy subsections'
     }
     return reject(sql);
   });
+  // Request an analytics endpoint as a fixture doctor.
   const analytics = path => request('/api/analytics/' + path, { roles: ['DOCTOR'] });
   for (role of ['NURSE', 'DOCTOR', 'DENTIST']) {
     const nurse = role === 'NURSE';
@@ -326,7 +359,7 @@ test('analytics outputs contain only the live clinical and pharmacy subsections'
       if (format === 'excel') {
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.load(await response.arrayBuffer());
-        content = workbook.worksheets.flatMap(sheet => [sheet.name, JSON.stringify(sheet.getSheetValues())]).join('\n');
+        content = workbook.worksheets.flatMap(/* Extract worksheet names and contents for restricted-section checks. */ sheet => [sheet.name, JSON.stringify(sheet.getSheetValues())]).join('\n');
       } else {
         content = format === 'pdf' ? await readPdfText(response) : await response.text();
       }
@@ -341,8 +374,11 @@ test('analytics outputs contain only the live clinical and pharmacy subsections'
   assert.deepEqual(unexpected, []);
 });
 
+// Verify that the mounted liveness route applies the HTTP allow-list and security headers.
 test('the mounted liveness route applies the HTTP allow-list and security headers', async t => {
+  // Fail the liveness test if the route attempts a MySQL query.
   t.mock.method(pool, 'query', () => assert.fail('Liveness probe accessed MySQL'));
+  // Stub logging for the liveness test.
   t.mock.method(console, 'warn', () => {});
   for (const [origin, allowed] of [['http://localhost:5173', true], ['https://other.invalid', false]]) {
     const response = await request('/api/ping', { headers: { origin } });
@@ -354,7 +390,9 @@ test('the mounted liveness route applies the HTTP allow-list and security header
   }
 });
 
+// Verify that public QR verification serves HTML and privacy-minimized JSON.
 test('public QR verification serves HTML and privacy-minimized JSON', async t => {
+  // Return a known clearance for the public verification token.
   t.mock.method(pool, 'query', async (sql, params) => {
     assert.match(sql, /FROM MEDICAL_CLEARANCES/);
     assert.deepEqual(params, ['fixture-qr']);
@@ -385,7 +423,52 @@ test('public QR verification serves HTML and privacy-minimized JSON', async t =>
   assert.equal(data.studentNo, 'N/A');
 });
 
+test('public v2 prescription status remains valid through the clinic day and excludes clinical data', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-16T15:59:59.999Z') });
+  let status = 'active';
+  t.mock.method(pool, 'query', async sql => {
+    if (sql.includes('FROM MEDICAL_CLEARANCES')) return [[]];
+    assert.match(sql, /FROM PRESCRIPTIONS/);
+    assert.match(sql, /DATE_FORMAT\(p.expires_at/);
+    assert.doesNotMatch(sql, /clinical_snapshot|p.notes|PRESCRIPTION_ITEMS/);
+    return [[{ contract_version: 2, status, issued_at: '2026-11-16T00:00:00Z', expires_at: '2026-11-16',
+      patient_first_name: 'Fixture', patient_last_name: 'Surname', doc_first_name: 'Fixture', doc_last_name: 'Clinician',
+      signature_metadata: { signer_role: 'DOCTOR', hash_scope: 'prescription_payload_v2' } }]];
+  });
+  const route = '/api/documents/verify/fixture-prescription-date';
+  const current = await (await request(route, { headers: { accept: 'application/json' } })).json();
+  assert.equal(current.valid, true);
+  assert.equal(current.patient, 'Fixture S.');
+  assert.equal(current.expiresAt, '2026-11-16');
+  assert.deepEqual(current.items, []);
+  assert.equal(current.notes, null);
+  assert.equal(current.clinical_snapshot, undefined);
+  t.mock.timers.setTime(new Date('2026-11-16T16:00:00Z').getTime());
+  const expired = await (await request(route, { headers: { accept: 'application/json' } })).json();
+  assert.equal(expired.valid, false);
+  assert.equal(expired.status, 'expired');
+  status = 'cancelled';
+  const cancelled = await (await request(route, { headers: { accept: 'application/json' } })).json();
+  assert.equal(cancelled.status, 'cancelled');
+});
+
+test('public legacy prescriptions retain their original expiry timestamp response', async t => {
+  const expires_at = new Date('2026-11-16T00:00:00+08:00');
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-15T16:00:01Z') });
+  t.mock.method(pool, 'query', async sql => sql.includes('FROM MEDICAL_CLEARANCES') ? [[]] : [[{
+    contract_version: 1, status: 'active', expires_at, validity_date: '2026-11-16',
+    patient_first_name: 'Fixture', patient_last_name: 'Surname', signature_metadata: { signer_role: 'DOCTOR' },
+  }]]);
+  const response = await request('/api/documents/verify/fixture-legacy-expiry', { headers: { accept: 'application/json' } });
+  const result = await response.json();
+  assert.equal(result.valid, false);
+  assert.equal(result.status, 'expired');
+  assert.equal(result.expiresAt, expires_at.toISOString());
+});
+
+// Verify that protected routes reject inactive accounts before doing clinical work.
 test('protected routes reject inactive accounts before doing clinical work', async t => {
+  // Return an inactive account for the authorization check.
   t.mock.method(pool, 'query', async (sql, params) => {
     assert.match(sql, /SELECT is_active, deleted_at FROM USERS/);
     assert.deepEqual(params, [21]);
@@ -396,7 +479,9 @@ test('protected routes reject inactive accounts before doing clinical work', asy
   assert.equal((await response.json()).error, 'ACCOUNT_INACTIVE');
 });
 
+// Verify that attachment downloads require authentication and enforce ownership.
 test('attachment downloads require authentication and enforce ownership', async t => {
+  // Return the fixture attachment used to check the ownership gate.
   t.mock.method(pool, 'query', async sql => {
     if (sql.includes('FROM USERS')) return [[{ is_active: 1, deleted_at: null }]];
     assert.match(sql, /FROM EMR_ATTACHMENTS/);
@@ -411,7 +496,9 @@ test('attachment downloads require authentication and enforce ownership', async 
   await otherPatient.json();
 });
 
+// Verify that attachment tokens are bound to one file and consumed once.
 test('attachment tokens are bound to one file and consumed once', async t => {
+  // Provide metadata for an attachment owned by the requesting account.
   t.mock.method(pool, 'query', async sql => {
     if (sql.includes('FROM USERS')) return [[{ is_active: 1, deleted_at: null }]];
     assert.match(sql, /FROM EMR_ATTACHMENTS/);
@@ -431,7 +518,9 @@ test('attachment tokens are bound to one file and consumed once', async t => {
   assert.match((await repeated.json()).error, /already used/);
 });
 
+// Verify that the mounted server policy checks the live Super Admin grant.
 test('the mounted server policy checks the live Super Admin grant', async t => {
+  // Return the restricted administrator grants used in the Database Studio denial test.
   t.mock.method(pool, 'query', async (sql, params) => {
     if (sql.includes('FROM USERS')) return [[{ is_active: 1, deleted_at: null }]];
     assert.match(sql, /FROM ADMIN_PERMISSIONS/);
@@ -450,7 +539,9 @@ test('the mounted server policy checks the live Super Admin grant', async t => {
   assert.ok(Number.isInteger((await superAdmin.json()).version));
 });
 
+// Verify that the mounted history route retains role checks and paging validation.
 test('the mounted history route retains role checks and paging validation', async t => {
+  // Supply the clinical encounter rows and accept the resulting PHI audit entries.
   t.mock.method(pool, 'query', async sql => {
     if (sql.includes('FROM USERS')) return [[{ is_active: 1, deleted_at: null }]];
     assert.match(sql, /FROM EMR_RECORDS|INSERT INTO PHI_ACCESS_LOGS/);
@@ -468,6 +559,7 @@ test('the mounted history route retains role checks and paging validation', asyn
   assert.deepEqual(await page.json(), { records: [], nextCursor: null });
 });
 
+// Verify that the feature routes are mounted behind authentication.
 test('the feature routes are mounted behind authentication', async () => {
   for (const [method, path] of [
     ['POST', '/api/emergency/sos'],
@@ -493,6 +585,8 @@ test('the feature routes are mounted behind authentication', async () => {
     ['POST', '/api/inventory/medicines'],
     ['POST', '/api/inventory/deduct'],
     ['POST', '/api/documents/prescriptions'],
+    ['GET', '/api/documents/prescription-capabilities'],
+    ['POST', '/api/documents/prescriptions/review'],
     ['GET', '/api/documents/prescriptions/my'],
     ['PATCH', '/api/documents/prescriptions/7/cancel'],
   ]) {
@@ -502,12 +596,35 @@ test('the feature routes are mounted behind authentication', async () => {
   }
 });
 
+test('structured prescribing capabilities are clinician-only and the disabled rollout flag prevents issuance', async t => {
+  const prior = process.env.STRUCTURED_PRESCRIBING_ENABLED;
+  t.after(() => { if (prior == null) delete process.env.STRUCTURED_PRESCRIBING_ENABLED; else process.env.STRUCTURED_PRESCRIBING_ENABLED = prior; });
+  t.mock.method(pool, 'query', async () => [[{ is_active: 1, deleted_at: null }]]);
+  t.mock.method(pool, 'getConnection', () => assert.fail('Disabled prescribing must not open an issuance connection'));
+  process.env.STRUCTURED_PRESCRIBING_ENABLED = 'false';
+  for (const roles of [['STUDENT'], ['NURSE'], ['ADMIN']]) {
+    assert.equal((await request('/api/documents/prescription-capabilities', { roles })).status, 403);
+  }
+  for (const roles of [['DOCTOR'], ['DENTIST']]) {
+    const capability = await request('/api/documents/prescription-capabilities', { roles });
+    assert.deepEqual(await capability.json(), { contract_versions: [1, 2], structured_issuance_enabled: false, max_items: 20 });
+    for (const path of ['/api/documents/prescriptions/review', '/api/documents/prescriptions']) {
+      const response = await request(path, { roles, method: 'POST', json: { contract_version: 2 } });
+      assert.equal(response.status, 503);
+      assert.equal((await response.json()).code, 'PRESCRIBING_DISABLED');
+    }
+  }
+});
+
+// Verify that admin role and account updates require the live user-management permission.
 test('admin role and account updates require the live user-management permission', async t => {
+  // Return the administrator grants used to check write denial.
   t.mock.method(pool, 'query', async sql => {
     if (sql.includes('FROM USERS')) return [[{ is_active: 1, deleted_at: null }]];
     assert.match(sql, /FROM ADMIN_PERMISSIONS/);
     return [[{ code: 'AUDIT_VIEW' }]];
   });
+  // Fail if the denied administrator opens a database transaction.
   t.mock.method(pool, 'getConnection', () => assert.fail('Denied admin opened a transaction'));
 
   for (const [method, path] of [
@@ -520,12 +637,15 @@ test('admin role and account updates require the live user-management permission
   }
 });
 
+// Verify that Database Studio enforces its grant and blocks protected writes before opening a transaction.
 test('Database Studio enforces its grant and blocks protected writes before opening a transaction', async t => {
+  // Provide the admin grant set used to test protected table writes.
   t.mock.method(pool, 'query', async (sql, [userId]) => {
     if (sql.includes('FROM USERS')) return [[{ is_active: 1, deleted_at: null }]];
     assert.match(sql, /FROM ADMIN_PERMISSIONS/);
     return [[{ code: userId === 21 ? 'DATABASE_MANAGE' : 'AUDIT_VIEW' }]];
   });
+  // Fail if the denied write opens a database transaction.
   t.mock.method(pool, 'getConnection', () => assert.fail('Denied write opened a transaction'));
 
   const admin = { roles: ['ADMIN'] };
@@ -546,8 +666,10 @@ test('Database Studio enforces its grant and blocks protected writes before open
   }
 });
 
+// Verify that Database Studio masks password hashes and logs PHI reads.
 test('Database Studio masks password hashes and logs PHI reads', async t => {
   const phiAccess = t.mock.fn();
+  // Simulate live admin grants and Database Studio read results for the patient audit check.
   t.mock.method(pool, 'query', async (sql, params) => {
     if (sql.includes('FROM USERS')) return [[{ is_active: 1, deleted_at: null }]];
     if (sql.includes('FROM ADMIN_PERMISSIONS')) return [[{ code: 'DATABASE_MANAGE' }]];
@@ -572,22 +694,31 @@ test('Database Studio masks password hashes and logs PHI reads', async t => {
   const body = await response.json();
   assert.deepEqual(body.rows, [{ user_id: 42, password_hash: '[REDACTED]' }]);
   assert.equal(body.readOnlyReason, 'security');
-  assert.deepEqual(phiAccess.mock.calls.map(call => call.arguments[0]), [[21, 42, 'USERS', 42]]);
+  assert.deepEqual(phiAccess.mock.calls.map(/* Extract the audit record supplied to each PHI log call. */ call => call.arguments[0]), [[21, 42, 'USERS', 42]]);
 });
 
+// Verify that Database Studio rolls back and releases when an audit write fails.
 test('Database Studio rolls back and releases when an audit write fails', async t => {
+  // Return administrator access fixtures for the audit failure case.
   t.mock.method(pool, 'query', async sql => {
     if (sql.includes('FROM USERS')) return [[{ is_active: 1, deleted_at: null }]];
     assert.match(sql, /FROM ADMIN_PERMISSIONS/);
     return [[{ code: 'DATABASE_MANAGE' }]];
   });
+  // Suppress the expected error log for a failed audit write.
   t.mock.method(console, 'error', () => {});
   const calls = [];
+  // Supply a write transaction double that forces audit failure.
   t.mock.method(pool, 'getConnection', async () => ({
+    // Record the start of the Database Studio write transaction.
     async beginTransaction() { calls.push('begin'); },
+    // Fail if a write with a rejected audit is committed.
     async commit() { assert.fail('Committed a failed audit write'); },
+    // Record rollback after the audit failure.
     async rollback() { calls.push('rollback'); },
+    // Record that the connection was released after rollback.
     release() { calls.push('release'); },
+    // Supply column metadata, stage the row insert, and fail the audit insert.
     async query(sql) {
       if (sql.includes('information_schema.COLUMNS')) return [[{ name: 'name' }]];
       if (sql.includes('INSERT INTO ??')) {
@@ -608,8 +739,10 @@ test('Database Studio rolls back and releases when an audit write fails', async 
 });
 
 
+// Verify that audit pagination keeps the array contract and applies the cursor under the live grant.
 test('audit pagination keeps the array contract and applies the cursor under the live grant', async t => {
   const queries = [];
+  // Capture PHI audit log queries and supply the expected authorization and page rows.
   t.mock.method(pool, 'query', async (sql, params) => {
     if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
     if (sql.includes('FROM USER_ROLES') && !sql.includes('FROM PHI_ACCESS_LOGS')) return [[{ code: 'ADMIN' }]];
@@ -627,14 +760,16 @@ test('audit pagination keeps the array contract and applies the cursor under the
     assert.equal(result.status, 200);
     assert.deepEqual(await result.json(), [{ id: 8 }]);
   }
-  assert.deepEqual(queries.map(query => query.params), [['9', 1], ['9', 1]]);
+  assert.deepEqual(queries.map(/* Extract the bound pagination parameters for assertions. */ query => query.params), [['9', 1], ['9', 1]]);
   assert.match(queries[0].sql, /WHERE a.audit_id < \?/);
   assert.match(queries[1].sql, /WHERE p.access_id < \?/);
   assert.match(queries[1].sql, /GROUP_CONCAT/);
 });
 
 
+// Verify that connected users is restricted to admins with telemetry access.
 test('connected users is restricted to admins with telemetry access', async t => {
+  // Supply admin grants for the telemetry access check.
   t.mock.method(pool, 'query', async (sql, params) => {
     if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
     if (sql.includes('FROM ADMIN_PERMISSIONS')) return [[{ code: params[0] === 22 ? 'TELEMETRY_VIEW' : 'AUDIT_VIEW' }]];
@@ -651,9 +786,12 @@ test('connected users is restricted to admins with telemetry access', async t =>
 });
 
 
+// Verify that server console grants diagnostics separately from Super Admin restart access.
 test('server console grants diagnostics separately from Super Admin restart access', async t => {
   const { s3 } = await import('../src/utils/s3Vault.js');
+  // Return a fixture MinIO version header for telemetry.
   t.mock.method(s3, 'send', async () => ({ $response: { headers: { 'x-minio-version': 'fixture-release' } } }));
+  // Simulate the MySQL version result and authorized telemetry reads.
   t.mock.method(pool, 'query', async (sql, params) => {
     if (sql.sql === 'SELECT VERSION() AS version') return [[{ version: 'fixture-mysql' }]];
     if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];

@@ -17,6 +17,7 @@ import { drainServer } from '../src/bootstrap/shutdown.js';
 const port = Number(process.env.VALETUDO_MIGRATION_TEST_PORT);
 const skip = !port && 'Set VALETUDO_MIGRATION_TEST_PORT to test against disposable MySQL';
 
+// Configure the server fixtures and provision an isolated MySQL schema.
 async function fixture(t, connectionLimit = 10) {
   Object.assign(process.env, {
     DB_PASSWORD: 'fixture-password',
@@ -31,6 +32,7 @@ async function fixture(t, connectionLimit = 10) {
   const database = 'vhl_concurrency_test_' + randomUUID().replaceAll('-', '');
   const admin = await mysql.createConnection({ ...options, multipleStatements: true });
   const databasePool = mysql.createPool({ ...options, database, connectionLimit });
+  // Close the fixture pool and remove the disposable schema after the test.
   t.after(async () => {
     await databasePool.end();
     try {
@@ -47,9 +49,11 @@ async function fixture(t, connectionLimit = 10) {
   return databasePool;
 }
 
+// Temporarily simulate an installation without local Firebase credentials.
 async function withoutFirebaseCredentials(t, load) {
   const keyPath = fileURLToPath(new URL('../serviceAccountKey.json', import.meta.url));
   const existsSync = fs.existsSync;
+  // Hide the Firebase service-account file from the selected fixture import.
   const hideKey = t.mock.method(fs, 'existsSync', filename => filename !== keyPath && existsSync(filename));
   try {
     return await load();
@@ -58,15 +62,19 @@ async function withoutFirebaseCredentials(t, load) {
   }
 }
 
+// Mount the real API on a fixture listener with mocked realtime delivery.
 async function mountedApi(t) {
+  // Load the API while Firebase credentials are hidden.
   const { createApp, mountApiRoutes } = await withoutFirebaseCredentials(t, () => import('../src/app.js'));
   const app = createApp();
   const emit = t.mock.fn();
-  mountApiRoutes(app, { emit, to: () => ({ emit }) });
+  mountApiRoutes(app, { emit, /* Return the same emission mock for a targeted realtime room. */ to: () => ({ emit }) });
   const server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
-  t.after(() => new Promise(resolve => server.close(resolve)));
+  // Register cleanup for the fixture HTTP listener.
+  t.after(() => new Promise(/* Wait for the fixture HTTP listener to finish closing. */ resolve => server.close(resolve)));
 
+  // Send an authenticated request to the mounted fixture API.
   const request = (path, { userId = 2, roles = ['DOCTOR'], method = 'GET', json, token } = {}) => {
     token ??= jwt.sign({ user_id: userId, roles }, process.env.JWT_SECRET, { expiresIn: '5m' });
     return fetch('http://127.0.0.1:' + server.address().port + '/api' + path, {
@@ -79,6 +87,7 @@ async function mountedApi(t) {
   return { request, emit };
 }
 
+// Seed checked-in appointments for concurrent queue and encounter scenarios.
 async function insertCheckedInAppointments(db) {
   await db.query(`INSERT INTO APPOINTMENTS (appointment_id, patient_user_id, doctor_user_id, date_time, appointment_type, status)
     VALUES (1, 5, 2, NOW(), 'Medical', 'checked_in'), (2, 7, 2, NOW(), 'Medical', 'checked_in')`);
@@ -86,13 +95,44 @@ async function insertCheckedInAppointments(db) {
     VALUES (1, 5, 1, CURDATE(), 1), (2, 7, 2, CURDATE(), 2)`);
 }
 
+test('concurrent SOS retries share one audited alert and one dispatch lease', { skip }, async t => {
+  const db = await fixture(t);
+  const { request } = await mountedApi(t);
+  const { dispatchPendingSos } = await import('../src/emergency/sosDispatch.js');
+  const payload = { client_sos_id: '9'.repeat(32), latitude: 16.0298, longitude: 120.2285 };
+  const submit = (json, userId = 5) => request('/emergency/sos/requests', { userId, roles: ['STUDENT'], method: 'POST', json });
+  const responses = await Promise.all([submit(payload), submit(payload)]);
+  assert.deepEqual(responses.map(response => response.status).sort(), [200, 201]);
+  const receipts = await Promise.all(responses.map(response => response.json()));
+  assert.equal(receipts[0].alertId, receipts[1].alertId);
+  assert.equal((await submit({ ...payload, latitude: 16.03 })).status, 409);
+  const [[audit]] = await db.query("SELECT COUNT(*) AS n FROM AUDIT_LOGS WHERE table_affected = 'EMERGENCY_ALERTS'");
+  assert.equal(Number(audit.n), 1);
+
+  const packets = [];
+  const io = { to: room => ({ emit: (event, data) => packets.push({ room, event, data }) }) };
+  await Promise.all([dispatchPendingSos(io), dispatchPendingSos(io)]);
+  assert.ok(packets.length > 0);
+  assert.equal(new Set(packets.map(packet => packet.room)).size, packets.length);
+  assert.ok(packets.every(packet => packet.event === 'emergency:new_alert' && packet.data.alertId === receipts[0].alertId));
+  const [[alert]] = await db.query('SELECT dispatch_after FROM EMERGENCY_ALERTS WHERE alert_id = ?', [receipts[0].alertId]);
+  assert.equal(alert.dispatch_after, null);
+
+  const otherAccount = await submit(payload, 7);
+  assert.equal(otherAccount.status, 201);
+  assert.notEqual((await otherAccount.json()).alertId, receipts[0].alertId);
+});
+
+// Verify that shutdown waits for both HTTP and workers before closing shared dependencies.
 test('shutdown waits for both HTTP and workers before closing shared dependencies', async () => {
   const workers = Promise.withResolvers();
   const http = Promise.withResolvers();
   let dependenciesClosed = false;
   const stopping = drainServer({
-    io: { close: async callback => { await http.promise; callback(); } },
+    io: { /* Delay listener closure until the test releases the HTTP promise. */ close: async callback => { await http.promise; callback(); } },
+    // Hold worker shutdown pending until the test releases the worker promise.
     stopWorkers: () => workers.promise,
+    // Mark shared dependencies as closed so the test can verify drain order.
     closeDependencies() { dependenciesClosed = true; },
   });
   http.resolve();
@@ -103,21 +143,26 @@ test('shutdown waits for both HTTP and workers before closing shared dependencie
   assert.equal(dependenciesClosed, true);
 });
 
+// Verify that startup waits for dependency checks and closes the Socket.IO HTTP listener.
 test('startup waits for dependency checks and closes the Socket.IO HTTP listener', { skip }, async t => {
   await fixture(t);
+  // Load the startup module with Firebase disabled for this fixture.
   const { startServer } = await withoutFirebaseCredentials(t, () => import('../src/bootstrap/startup.js'));
   const { redis } = await import('../src/utils/redisClient.js');
   const { s3 } = await import('../src/utils/s3Vault.js');
   const redisCheck = Promise.withResolvers();
   const objectCheck = Promise.withResolvers();
   const started = Promise.withResolvers();
+  // Hold the Redis startup check pending under the test's control.
   t.mock.method(redis, 'connect', () => redisCheck.promise);
+  // Signal that the storage check started and hold it pending under the test's control.
   t.mock.method(s3, 'send', () => {
     started.resolve();
     return objectCheck.promise;
   });
   const previousPort = process.env.PORT;
   process.env.PORT = '0';
+  // Restore the previous port setting after the startup test.
   t.after(() => {
     if (previousPort === undefined) delete process.env.PORT;
     else process.env.PORT = previousPort;
@@ -134,9 +179,11 @@ test('startup waits for dependency checks and closes the Socket.IO HTTP listener
   objectCheck.resolve();
   const stopWorkers = await startup;
   assert.equal(server.listening, true);
+  // Assert that the listener closed before dependency cleanup.
   await drainServer({ io, stopWorkers, closeDependencies() { assert.equal(server.listening, false); } });
 });
 
+// Verify that prescription expiry skips a row being cancelled and audits only its committed transition.
 test('prescription expiry skips a row being cancelled and audits only its committed transition', { skip }, async t => {
   const db = await fixture(t);
   const { expireDuePrescriptions } = await import('../src/documents/prescriptions/expirePrescriptions.js');
@@ -159,32 +206,54 @@ test('prescription expiry skips a row being cancelled and audits only its commit
   }
   assert.deepEqual(await expireDuePrescriptions(), []);
   const [rows] = await db.query('SELECT status FROM PRESCRIPTIONS ORDER BY prescription_id');
-  assert.deepEqual(rows.map(row => row.status), ['cancelled', 'expired']);
+  assert.deepEqual(rows.map(/* Extract prescription statuses after the competing expiry and cancellation operations. */ row => row.status), ['cancelled', 'expired']);
   const [audits] = await db.query('SELECT new_value FROM AUDIT_LOGS');
   assert.equal(audits.length, 1);
   const details = typeof audits[0].new_value === 'string' ? JSON.parse(audits[0].new_value) : audits[0].new_value;
   assert.deepEqual(details.prescription_ids, [2]);
 });
 
+test('v2 expiry follows Manila midnight even when the database calendar differs', { skip }, async t => {
+  const db = await fixture(t);
+  const { expireDuePrescriptions } = await import('../src/documents/prescriptions/expirePrescriptions.js');
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-16T15:59:59.999Z') });
+  await db.query("INSERT INTO EMR_RECORDS (emr_id, patient_user_id, doctor_user_id, chief_complaint, diagnosis) VALUES (1, 5, 2, 'fixture', 'fixture')");
+  await db.query(`INSERT INTO PRESCRIPTIONS
+    (prescription_id, emr_id, patient_user_id, doctor_user_id, expires_at, qr_token, contract_version)
+    VALUES (1, 1, 5, 2, '2026-11-16', 'fixture-validity-today', 2),
+           (2, 1, 5, 2, '2026-11-15', 'fixture-validity-yesterday', 2)`);
+  assert.deepEqual(await expireDuePrescriptions(), [2]);
+  t.mock.timers.setTime(new Date('2026-11-16T16:00:00Z').getTime());
+  assert.deepEqual(await expireDuePrescriptions(), [1]);
+  assert.deepEqual(await expireDuePrescriptions(), []);
+  assert.deepEqual((await db.query('SELECT status FROM PRESCRIPTIONS ORDER BY prescription_id'))[0].map(row => row.status), ['expired', 'expired']);
+});
+
+// Verify that concurrent reminder workers accept an appointment email once.
 test('concurrent reminder workers accept an appointment email once', { skip }, async t => {
   const db = await fixture(t);
+  // Load the reminder worker without credentials for external push delivery.
   const { sendDueAppointmentReminders } = await withoutFirebaseCredentials(t, () => import('../src/workers/appointmentReminderWorker.js'));
   await db.query(`INSERT INTO APPOINTMENTS (appointment_id, patient_user_id, doctor_user_id, date_time, appointment_type)
     VALUES (1, 1, 2, NOW() + INTERVAL 1 HOUR, 'Medical'), (2, 1, 2, NOW() + INTERVAL 1 HOUR, 'Medical')`);
   await db.query('UPDATE APPOINTMENTS SET deleted_at = NOW() WHERE appointment_id = 2');
+  // Stub the console while capturing simulated reminder deliveries.
   const log = t.mock.method(console, 'log', () => {});
   const io = { emit: t.mock.fn() };
   await Promise.all([sendDueAppointmentReminders(io), sendDueAppointmentReminders(io)]);
   await sendDueAppointmentReminders(io);
-  assert.equal(log.mock.calls.filter(call => call.arguments[0] === '[Email Dispatch Simulation] reminder').length, 1);
-  assert.deepEqual(io.emit.mock.calls.map(call => call.arguments[0]), ['appointment:reminder:1']);
+  assert.equal(log.mock.calls.filter(/* Select the simulated email deliveries for the concurrency assertion. */ call => call.arguments[0] === '[Email Dispatch Simulation] reminder').length, 1);
+  assert.deepEqual(io.emit.mock.calls.map(/* Extract realtime event names emitted when reminders are delivered. */ call => call.arguments[0]), ['appointment:reminder:1']);
   const [rows] = await db.query('SELECT reminder_sent FROM APPOINTMENTS ORDER BY appointment_id');
-  assert.deepEqual(rows.map(row => row.reminder_sent), [1, 0]);
+  assert.deepEqual(rows.map(/* Extract the persisted reminder flags to confirm delivery was recorded. */ row => row.reminder_sent), [1, 0]);
 });
 
+// Verify that reminder runs cap each batch and drain the remaining appointments on the next run.
 test('reminder runs cap each batch and drain the remaining appointments on the next run', { skip }, async t => {
   const db = await fixture(t);
+  // Load the reminder worker without external push credentials for the batch test.
   const { sendDueAppointmentReminders } = await withoutFirebaseCredentials(t, () => import('../src/workers/appointmentReminderWorker.js'));
+  // Stub the console to capture email dispatch counts across batches.
   const log = t.mock.method(console, 'log', () => {});
   await db.query(`INSERT INTO APPOINTMENTS (patient_user_id, doctor_user_id, date_time, appointment_type)
     VALUES ` + Array(51).fill("(1, 2, NOW() + INTERVAL 1 HOUR, 'Medical')").join(','));
@@ -192,9 +261,10 @@ test('reminder runs cap each batch and drain the remaining appointments on the n
   assert.deepEqual(first.metrics, { attempted: 50, delivered: 50 });
   const second = await sendDueAppointmentReminders();
   assert.deepEqual(second.metrics, { attempted: 1, delivered: 1 });
-  assert.equal(log.mock.calls.filter(call => call.arguments[0] === '[Email Dispatch Simulation] reminder').length, 51);
+  assert.equal(log.mock.calls.filter(/* Count simulated reminder email calls across the two passes. */ call => call.arguments[0] === '[Email Dispatch Simulation] reminder').length, 51);
 });
 
+// Verify that replay commits a mixed batch and concurrent duplicates reuse the recorded outcome.
 test('replay commits a mixed batch and concurrent duplicates reuse the recorded outcome', { skip }, async t => {
   const db = await fixture(t);
   const { replayMutations } = await import('../src/sync/replayService.js');
@@ -212,12 +282,12 @@ test('replay commits a mixed batch and concurrent duplicates reuse the recorded 
     replayMutations([appointment], context),
   ]);
   assert.deepEqual([mixed[0].status, duplicate[0].status].sort(), ['already_synced', 'synced']);
-  assert.deepEqual(mixed.slice(1).map(row => row.status), ['conflict', 'error', 'error']);
+  assert.deepEqual(mixed.slice(1).map(/* Extract the results of the repeated and failing replay mutations. */ row => row.status), ['conflict', 'error', 'error']);
   assert.deepEqual(await replayMutations([conflict, invalid], context), mixed.slice(1, 3));
   const [[row]] = await db.query('SELECT status, version FROM APPOINTMENTS WHERE appointment_id = 1');
   assert.deepEqual(row, { status: 'cancelled', version: 2 });
   const [saved] = await db.query('SELECT sync_status FROM LOCAL_SYNC_LOGS ORDER BY sync_id');
-  assert.deepEqual(saved.map(entry => entry.sync_status).sort(), ['conflict', 'error', 'synced']);
+  assert.deepEqual(saved.map(/* Inspect the persisted replay statuses for deduplication and failure handling. */ entry => entry.sync_status).sort(), ['conflict', 'error', 'synced']);
   const { request } = await mountedApi(t);
   const owned = await request('/sync/legacy-ownership', { method: 'POST', json: { appointmentIds: [1, 2, 3] } });
   assert.deepEqual(await owned.json(), { appointmentIds: [1, 2] });
@@ -229,6 +299,7 @@ test('replay commits a mixed batch and concurrent duplicates reuse the recorded 
   assert.equal(denied[0].status, 'error');
 });
 
+// Verify that both status endpoints release a single-connection pool before concurrent queue notifications.
 test('both status endpoints release a single-connection pool before concurrent queue notifications', { skip }, async t => {
   const db = await fixture(t, 1);
   await insertCheckedInAppointments(db);
@@ -240,14 +311,15 @@ test('both status endpoints release a single-connection pool before concurrent q
   for (const response of results) assert.equal(response.status, 200, await response.text());
   const [appointments] = await db.query('SELECT status FROM APPOINTMENTS ORDER BY appointment_id');
   const [tickets] = await db.query('SELECT status FROM QUEUE ORDER BY queue_id');
-  assert.deepEqual(appointments.map(row => row.status), ['serving', 'serving']);
-  assert.deepEqual(tickets.map(row => row.status), ['in-consultation', 'in-consultation']);
-  assert.equal(emit.mock.calls.filter(call => call.arguments[0] === 'appointment:status_changed').length, 2);
+  assert.deepEqual(appointments.map(/* Extract appointment statuses after the concurrent queue transitions. */ row => row.status), ['serving', 'serving']);
+  assert.deepEqual(tickets.map(/* Extract ticket statuses after the concurrent queue transitions. */ row => row.status), ['in-consultation', 'in-consultation']);
+  assert.equal(emit.mock.calls.filter(/* Select the emitted appointment status events. */ call => call.arguments[0] === 'appointment:status_changed').length, 2);
   const invalid = await request('/appointments/1/status', { method: 'PATCH', json: { status: 'scheduled' } });
   assert.equal(invalid.status, 409);
   assert.equal((await invalid.json()).code, 'INVALID_TRANSITION');
 });
 
+// Verify that online completion and offline replay racing for the same appointment write one encounter.
 test('online completion and offline replay racing for the same appointment write one encounter', { skip }, async t => {
   const db = await fixture(t);
   await insertCheckedInAppointments(db);
@@ -288,9 +360,11 @@ test('online completion and offline replay racing for the same appointment write
   assert.deepEqual(rolledBack, { status: 'checked_in', ticket_status: 'waiting', records: 0 });
 });
 
+// Verify that campus account creation saves optional health details and rolls back invalid profiles.
 test('campus account creation saves optional health details and rolls back invalid profiles', { skip }, async t => {
   const db = await fixture(t);
   const { request } = await mountedApi(t);
+  // Submit an account creation request as the fixture administrator.
   const create = (role, fields, health_profile) => request('/admin/users', {
     roles: ['ADMIN'], userId: 1, method: 'POST', json: {
       first_name: 'Campus', last_name: 'Fixture', password: 'Z7!aQ3#rT9%w',
@@ -328,6 +402,7 @@ test('campus account creation saves optional health details and rolls back inval
   assert.equal(emptyProfile.total, 0);
 });
 
+// Verify that Terminal grants can be assigned at account creation and revoked during the same session.
 test('Terminal grants can be assigned at account creation and revoked during the same session', { skip }, async t => {
   await fixture(t);
   const { request } = await mountedApi(t);
@@ -351,6 +426,8 @@ test('Terminal grants can be assigned at account creation and revoked during the
   assert.equal((await request(path, reviewer)).status, 403);
 });
 
+// Verify that both account update routes recognize mixed-role admins and failed profile edits roll back
+// grants.
 test('both account update routes recognize mixed-role admins and failed profile edits roll back grants', { skip }, async t => {
   const db = await fixture(t);
   const { request } = await mountedApi(t);
@@ -389,6 +466,7 @@ test('both account update routes recognize mixed-role admins and failed profile 
   assert.deepEqual(after, { first_name: 'Fixture', grants: 0, old_profiles: 0 });
 });
 
+// Verify that queue reads pick the latest live prescription and keep the clinic-day boundaries.
 test('queue reads pick the latest live prescription and keep the clinic-day boundaries', { skip }, async t => {
   const db = await fixture(t);
   await db.query(`INSERT INTO APPOINTMENTS (appointment_id, patient_user_id, doctor_user_id, date_time, appointment_type, status)
@@ -407,13 +485,15 @@ test('queue reads pick the latest live prescription and keep the clinic-day boun
            (3, 1, 5, 2, NOW(), CURDATE(), 'roster-3', 'deleted', NOW())`);
   const { request } = await mountedApi(t);
   const roster = await (await request('/appointments/today?filter=history')).json();
+  // Select the target appointment to check that joined records do not duplicate it.
   const completed = roster.filter(row => row.appointment_id === 1);
   assert.equal(completed.length, 1);
   assert.equal(completed[0].past_dietary_notes, 'latest');
   const arrivals = await (await request('/appointments/expected-today')).json();
-  assert.deepEqual(arrivals.map(row => row.appointment_id), [2]);
+  assert.deepEqual(arrivals.map(/* Extract arrival IDs for the clinic-day boundary check. */ row => row.appointment_id), [2]);
   assert.deepEqual(await (await request('/appointments/no-shows-today')).json(), { count: 2 });
 
+  // Build old no-show fixtures outside the clinic day.
   const older = Array.from({ length: 1000 }, () => [5, 2, '2025-01-01 10:00:00', 'Medical', 'no_show']);
   await db.query('INSERT INTO APPOINTMENTS (patient_user_id, doctor_user_id, date_time, appointment_type, status) VALUES ?', [older]);
   const select = "EXPLAIN SELECT COUNT(*) FROM APPOINTMENTS WHERE status = 'no_show' AND deleted_at IS NULL AND ";
@@ -425,10 +505,13 @@ test('queue reads pick the latest live prescription and keep the clinic-day boun
   t.diagnostic(`No-show query plan: ${before.type} (${before.key ?? 'no index'}) to ${after.type} (${after.key})`);
 });
 
+// Verify that paged offline bootstrap drains both streams and defers changes at the watermark.
 test('paged offline bootstrap drains both streams and defers changes at the watermark', { skip }, async t => {
   const db = await fixture(t);
+  // Build distinct patient fixture rows for bootstrap pagination.
   const extraPatients = Array.from({ length: 503 }, (_, index) => [`fixture-${index}@example.test`, 'fixture', 'Sync', 'Patient']);
   await db.query('INSERT INTO USERS (email, password_hash, first_name, last_name) VALUES ?', [extraPatients]);
+  // Build encounter fixture rows for bootstrap pagination and watermark checks.
   const encounters = Array.from({ length: 503 }, () => [5, 2, 'fixture complaint', 'fixture diagnosis']);
   await db.query('INSERT INTO EMR_RECORDS (patient_user_id, doctor_user_id, chief_complaint, diagnosis) VALUES ?', [encounters]);
   await db.query('UPDATE EMR_RECORDS SET updated_at = NOW() - INTERVAL 1 MINUTE');
@@ -448,18 +531,19 @@ test('paged offline bootstrap drains both streams and defers changes at the wate
   const second = await (await request(pagePath)).json();
   assert.equal(second.serverTime, first.serverTime);
   assert.equal(second.nextCursor, null);
-  assert.deepEqual(second.emrRecords.map(record => record.emr_id), [501, 502]);
-  assert.equal(new Set([...first.patients, ...second.patients].map(patient => patient.user_id)).size, 511);
+  assert.deepEqual(second.emrRecords.map(/* Extract IDs from the second encounter page. */ record => record.emr_id), [501, 502]);
+  assert.equal(new Set([...first.patients, ...second.patients].map(/* Combine IDs from both patient pages for completeness and duplicate checks. */ patient => patient.user_id)).size, 511);
 
   const [[clock]] = await db.query('SELECT UNIX_TIMESTAMP() AS now');
   if (clock.now <= upperTime) await setTimeout(1_050);
   const delta = await (await request('/sync/bootstrap?paging=1&checkpoint=' + encodeURIComponent(first.serverTime))).json();
-  assert.deepEqual(delta.emrRecords.map(record => record.emr_id), [503]);
+  assert.deepEqual(delta.emrRecords.map(/* Extract the encounter IDs returned after the previous watermark. */ record => record.emr_id), [503]);
   const legacy = await (await request('/sync/bootstrap')).json();
   assert.equal(legacy.emrRecords.length, 500);
   assert.equal(Object.hasOwn(legacy, 'nextCursor'), false);
 });
 
+// Verify that analytics timelines share the database calendar and empty summaries report real values.
 test('analytics timelines share the database calendar and empty summaries report real values', { skip }, async t => {
   const db = await fixture(t, 1);
   const [[clock]] = await db.query("SELECT UNIX_TIMESTAMP('2026-11-13 00:00:01') AS epoch");
@@ -482,16 +566,17 @@ test('analytics timelines share the database calendar and empty summaries report
   const data = await result.json();
   assert.equal(data.operations.emergencyMetrics.timedClosures, 0);
   assert.equal(data.operations.timeSeries.length, 14);
-  assert.deepEqual(data.operations.timeSeries.map(day => day.date), data.operations.emergencyTimeSeries.map(day => day.date));
-  assert.deepEqual(data.operations.timeSeries.slice(-2).map(({ date, count, partial }) => [date, count, partial]),
+  assert.deepEqual(data.operations.timeSeries.map(/* Read dates from the encounter timeline for calendar alignment checks. */ day => day.date), data.operations.emergencyTimeSeries.map(/* Read dates from the SOS timeline for calendar alignment checks. */ day => day.date));
+  assert.deepEqual(data.operations.timeSeries.slice(-2).map(/* Select encounter count and partial-day fields for the two latest dates. */ ({ date, count, partial }) => [date, count, partial]),
     [['2026-11-12', 1, false], ['2026-11-13', 1, true]]);
-  assert.deepEqual(data.operations.emergencyTimeSeries.slice(-2).map(day => day.count), [0, 1]);
+  assert.deepEqual(data.operations.emergencyTimeSeries.slice(-2).map(/* Select the two newest SOS counts for comparison. */ day => day.count), [0, 1]);
   await db.query("UPDATE EMERGENCY_ALERTS SET status = 'resolved', response_time_seconds = 0");
   const updated = await (await request('/analytics/summary')).json();
   assert.equal(updated.operations.emergencyMetrics.timedClosures, 1);
   assert.equal(Number(updated.operations.emergencyMetrics.avgResponseSeconds), 0);
 });
 
+// Verify that analytics exports and dashboard use the shared department totals.
 test('analytics exports and dashboard use the shared department totals', { skip }, async t => {
   const db = await fixture(t);
   await db.query(`INSERT INTO APPOINTMENTS (patient_user_id, doctor_user_id, date_time, appointment_type, status)
@@ -512,7 +597,7 @@ test('analytics exports and dashboard use the shared department totals', { skip 
   const { default: ExcelJS } = await import('exceljs');
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(await excel.arrayBuffer());
-  assert.deepEqual(workbook.worksheets.map(sheet => sheet.name), [
+  assert.deepEqual(workbook.worksheets.map(/* Extract report worksheet names to find the department section. */ sheet => sheet.name), [
     'Clinical Diagnoses', 'Department Volume', 'Respiratory Surveillance', 'Health-risk Groups', 'Formulary Dispensing',
   ]);
   assert.deepEqual(workbook.getWorksheet('Department Volume').getRow(2).values.slice(1), ['BS Information Technology', 2]);
@@ -522,6 +607,7 @@ test('analytics exports and dashboard use the shared department totals', { skip 
   assert.equal(Buffer.from(await pdf.arrayBuffer()).subarray(0, 4).toString(), '%PDF');
 });
 
+// Verify that new scoped analytics grants are effective and revocable without a new session.
 test('new scoped analytics grants are effective and revocable without a new session', { skip }, async t => {
   await fixture(t);
   const { request } = await mountedApi(t);
@@ -571,6 +657,7 @@ test('new scoped analytics grants are effective and revocable without a new sess
   assert.ok(changed.pharmacy.inventory);
 });
 
+// Verify that Super Admins can customize, disable and reset staff analytics for existing sessions.
 test('Super Admins can customize, disable and reset staff analytics for existing sessions', { skip }, async t => {
   const db = await fixture(t);
   const { request } = await mountedApi(t);
@@ -578,6 +665,7 @@ test('Super Admins can customize, disable and reset staff analytics for existing
   const nurseToken = jwt.sign({ user_id: 3, roles: ['NURSE'] }, process.env.JWT_SECRET, { expiresIn: '5m' });
   const nurse = { token: nurseToken };
   const path = '/admin/users/3/analytics-permissions';
+  // Save an analytics override as the fixture Super Admin.
   const write = (scopes, account = superAdmin) => request(path, { ...account, method: 'PUT', json: { scopes } });
   const original = await (await request(path, superAdmin)).json();
   assert.equal(original.override, null);
@@ -617,6 +705,7 @@ test('Super Admins can customize, disable and reset staff analytics for existing
   assert.equal(audit.total, 3);
 });
 
+// Verify that reorder suggestions put the lowest usable stock ahead of prescription demand.
 test('reorder suggestions put the lowest usable stock ahead of prescription demand', { skip }, async t => {
   const db = await fixture(t);
   await db.query(`INSERT INTO MEDICINES (medicine_id, name, generic_name, form, strength, unit, is_active)
@@ -649,20 +738,21 @@ test('reorder suggestions put the lowest usable stock ahead of prescription dema
   const summary = await request('/analytics/summary', { userId: 3, roles: ['NURSE'] });
   assert.equal(summary.status, 200);
   const { pharmacy } = await summary.json();
-  assert.deepEqual(pharmacy.inventory.reorderPriorities.map(row => row.medicine_id), [2, 5, 4, 3]);
-  assert.equal(pharmacy.dispensing.find(row => row.medicine_id === 2).availability, 'OUT_OF_STOCK');
-  assert.equal(pharmacy.dispensing.find(row => row.medicine_id === 5).availability, 'OUT_OF_STOCK');
-  assert.equal(pharmacy.dispensing.find(row => row.medicine_id === 1).availability, 'IN_STOCK');
+  assert.deepEqual(pharmacy.inventory.reorderPriorities.map(/* Extract medicine IDs from the ranked inventory recommendations. */ row => row.medicine_id), [2, 5, 4, 3]);
+  assert.equal(pharmacy.dispensing.find(/* Find the second medicine fixture in the dispensing activity results. */ row => row.medicine_id === 2).availability, 'OUT_OF_STOCK');
+  assert.equal(pharmacy.dispensing.find(/* Find the fifth medicine fixture in the dispensing activity results. */ row => row.medicine_id === 5).availability, 'OUT_OF_STOCK');
+  assert.equal(pharmacy.dispensing.find(/* Find the first medicine fixture in the dispensing activity results. */ row => row.medicine_id === 1).availability, 'IN_STOCK');
 
   const response = await request('/inventory/reorder-suggestions', { userId: 3, roles: ['NURSE'] });
   assert.equal(response.status, 200);
   const suggestions = await response.json();
-  assert.deepEqual(suggestions.map(row => row.medicine_id), [2, 5, 4, 3, 6, 1]);
-  assert.deepEqual(suggestions.map(row => Number(row.total_stock_on_hand)), [0, 0, 3, 3, 20, 120]);
+  assert.deepEqual(suggestions.map(/* Extract medicine IDs in the order returned by the reorder endpoint. */ row => row.medicine_id), [2, 5, 4, 3, 6, 1]);
+  assert.deepEqual(suggestions.map(/* Compare numeric usable-stock totals in recommendation order. */ row => Number(row.total_stock_on_hand)), [0, 0, 3, 3, 20, 120]);
   assert.equal(suggestions[0].stock_status, 'OUT_OF_STOCK');
   assert.equal(Number(suggestions[2].suggested_reorder_qty), 27);
 });
 
+// Verify that pharmacy analytics separates recent dispensing, returns, intent and reorder priorities.
 test('pharmacy analytics separates recent dispensing, returns, intent and reorder priorities', { skip }, async t => {
   const db = await fixture(t);
   const { request } = await mountedApi(t);
@@ -679,7 +769,7 @@ test('pharmacy analytics separates recent dispensing, returns, intent and reorde
   assert.equal(initial.status, 200);
   const initialPharmacy = (await initial.json()).pharmacy;
   assert.equal(initialPharmacy.dispensing.length, 6);
-  assert.ok(initialPharmacy.dispensing.every(row => Number(row.net_dispensed) === 0));
+  assert.ok(initialPharmacy.dispensing.every(/* Check that no dispensing fixture has a net movement before ledger activity is added. */ row => Number(row.net_dispensed) === 0));
   assert.equal(initialPharmacy.inventory.reorderPriorities.length, 6);
 
   await db.query(`INSERT INTO MEDICINE_BATCHES (batch_id, medicine_id, batch_no, manufacture_date, expiry_date, quantity_on_hand)
@@ -715,7 +805,7 @@ test('pharmacy analytics separates recent dispensing, returns, intent and reorde
   assert.equal(response.status, 200);
   const { pharmacy } = await response.json();
   assert.equal(pharmacy.windowDays, 14);
-  assert.deepEqual(pharmacy.dispensing.map(row => [
+  assert.deepEqual(pharmacy.dispensing.map(/* Normalize the activity quantities before comparing expected prescription and stock movements. */ row => [
     row.medicine_id, Number(row.quantity_prescribed), Number(row.quantity_dispensed),
     Number(row.quantity_returned), Number(row.net_dispensed),
   ]), [
@@ -724,16 +814,19 @@ test('pharmacy analytics separates recent dispensing, returns, intent and reorde
   ]);
   const nurseResponse = await request('/inventory/reorder-suggestions', { userId: 3, roles: ['NURSE'] });
   assert.equal(nurseResponse.status, 200);
+  // Keep items that need replenishment from the nurse reorder response.
   const nursePriorities = (await nurseResponse.json()).filter(row => row.stock_status !== 'ADEQUATE');
-  assert.deepEqual(pharmacy.inventory.reorderPriorities.map(row => row.medicine_id), [5, 3]);
+  assert.deepEqual(pharmacy.inventory.reorderPriorities.map(/* Extract medicine IDs in the response's recommended order. */ row => row.medicine_id), [5, 3]);
   assert.deepEqual(
-    pharmacy.inventory.reorderPriorities.map(({ medicine_id, total_stock_on_hand, suggested_reorder_qty }) =>
+    pharmacy.inventory.reorderPriorities.map(/* Select the dashboard recommendation fields shared with the reorder endpoint. */ ({ medicine_id, total_stock_on_hand, suggested_reorder_qty }) =>
       [medicine_id, total_stock_on_hand, suggested_reorder_qty]),
-    nursePriorities.map(({ medicine_id, total_stock_on_hand, suggested_reorder_qty }) =>
+    nursePriorities.map(/* Select matching fields from the nurse's reorder results for comparison. */ ({ medicine_id, total_stock_on_hand, suggested_reorder_qty }) =>
       [medicine_id, total_stock_on_hand, suggested_reorder_qty]),
   );
 });
 
+// Verify that a Super Admin can grant and revoke incident archive access while responder and patient access
+// still works.
 test('a Super Admin can grant and revoke incident archive access while responder and patient access still works', { skip }, async t => {
   const db = await fixture(t);
   await db.query(`INSERT INTO EMERGENCY_ALERTS (alert_id, user_id, location, created_at, resolved_at, status)
@@ -741,11 +834,12 @@ test('a Super Admin can grant and revoke incident archive access while responder
   await db.query(`INSERT INTO INCIDENT_REPORTS (report_id, alert_id, patient_user_id, documented_by, resolved_at, incident_details, pdf_s3_key)
     VALUES (1, 1, 5, 4, NOW(), 'Fixture archived narrative', 'incident-reports/fixture.pdf')`);
   const { s3 } = await import('../src/utils/s3Vault.js');
+  // Return a fixture PDF body in place of an object-storage download.
   t.mock.method(s3, 'send', async () => ({ Body: [Buffer.from('%PDF fixture')] }));
   const { request } = await mountedApi(t);
   const superAdmin = { userId: 1, roles: ['ADMIN'] };
   const catalog = await request('/admin/permissions', superAdmin);
-  assert.ok((await catalog.json()).permissions.some(permission => permission.code === 'INCIDENT_RECORDS_VIEW'));
+  assert.ok((await catalog.json()).permissions.some(/* Locate the incident archive grant in the permissions catalog. */ permission => permission.code === 'INCIDENT_RECORDS_VIEW'));
 
   const create = await request('/admin/users', {
     ...superAdmin, method: 'POST', json: {
@@ -784,6 +878,7 @@ test('a Super Admin can grant and revoke incident archive access while responder
   assert.deepEqual((await prefill.json()).report, { reportId: 1 });
 });
 
+// Verify that multi-role incident rows stay unique and concurrent responders cannot reverse a transition.
 test('multi-role incident rows stay unique and concurrent responders cannot reverse a transition', { skip }, async t => {
   const db = await fixture(t);
   await db.query("INSERT IGNORE INTO USER_ROLES (user_id, role_id) SELECT 5, role_id FROM ROLES WHERE code = 'FACULTY'");
@@ -798,6 +893,7 @@ test('multi-role incident rows stay unique and concurrent responders cannot reve
   assert.equal(rows[0].formattedAddress, 'Campus gate');
   assert.equal(rows[0].medicalDetailsRedacted, true);
   assert.equal('blood_type' in rows[0], false);
+  // Submit an emergency status change with the selected caller credentials.
   const change = (status, options) => request('/emergency/1/status', {
     ...options, method: 'PATCH', json: { status },
   });
@@ -810,16 +906,19 @@ test('multi-role incident rows stay unique and concurrent responders cannot reve
     change('resolved'),
     change('false_alarm', { userId: 7, roles: ['STUDENT'] }),
   ]);
-  assert.deepEqual(results.map(response => response.status).sort(), [200, 409]);
+  assert.deepEqual(results.map(/* Extract status codes from the competing transition attempts. */ response => response.status).sort(), [200, 409]);
+  // Collect realtime events produced by successful alert status changes.
   const updates = emit.mock.calls.filter(call => call.arguments[0] === 'emergency:status_change');
   assert.ok(updates.length > 0);
-  assert.equal(new Set(updates.map(call => call.arguments[1].status)).size, 1);
+  assert.equal(new Set(updates.map(/* Extract the alert state from each notification payload. */ call => call.arguments[1].status)).size, 1);
 });
 
+// Verify that device rotation preserves other installations and logout removes only its registration.
 test('device rotation preserves other installations and logout removes only its registration', { skip }, async t => {
   const db = await fixture(t);
   const { request } = await mountedApi(t);
   const id = 'a'.repeat(32), other = 'b'.repeat(32);
+  // Register a test push token and its installation's duty mode.
   const register = (token, installation_id, sos_mode) => request('/profile/fcm-token', {
     method: 'POST', json: { fcm_token: token, installation_id, sos_mode },
   });
@@ -837,12 +936,14 @@ test('device rotation preserves other installations and logout removes only its 
   assert.deepEqual(remaining, [{ installation_id: other }]);
 });
 
+// Verify that concurrent incident filing publishes a single report after commit.
 test('concurrent incident filing publishes a single report after commit', { skip }, async t => {
   const db = await fixture(t);
   await db.query(`INSERT INTO EMERGENCY_ALERTS (alert_id, user_id, location, created_at, resolved_at, status)
     VALUES (1, 5, ST_GeomFromText('POINT(0 0)', 4326), NOW() - INTERVAL 1 MINUTE, NOW(), 'resolved')`);
   const { s3 } = await import('../src/utils/s3Vault.js');
   const uploaded = Promise.withResolvers();
+  // Record how many reports were committed when PDF upload began.
   const upload = t.mock.method(s3, 'send', async () => {
     const [[row]] = await db.query('SELECT COUNT(*) AS reports FROM INCIDENT_REPORTS');
     uploaded.resolve(row.reports);
@@ -850,19 +951,27 @@ test('concurrent incident filing publishes a single report after commit', { skip
   });
   const { request, emit } = await mountedApi(t);
   const options = { userId: 4, roles: ['EMERGENCY_RESPONDER'], method: 'POST', json: { incident_details: 'Fixture incident report' } };
+  const pendingPath = '/emergency/incident-reports/pending?summary=1';
+  const [pending] = await (await request(pendingPath, { userId: 4, roles: options.roles })).json();
+  assert.equal(pending.alertId, 1);
+  assert.deepEqual(Object.keys(pending).sort(), ['alertId', 'resolvedAt']);
   const responses = await Promise.all([
     request('/emergency/1/incident-report', options),
     request('/emergency/1/incident-report', options),
   ]);
-  assert.deepEqual(responses.map(response => response.status).sort(), [201, 409]);
+  assert.deepEqual(responses.map(/* Extract response codes from both concurrent incident report submissions. */ response => response.status).sort(), [201, 409]);
+  // Locate the duplicate submission's conflict response.
   const duplicate = responses.find(response => response.status === 409);
   assert.equal((await duplicate.json()).code, 'REPORT_ALREADY_FILED');
+  // Locate the successful incident report creation response.
   await responses.find(response => response.status === 201).json();
-  assert.ok(emit.mock.calls.some(call => call.arguments[0] === 'emergency:incident_reported'));
+  assert.deepEqual(await (await request(pendingPath, { userId: 4, roles: options.roles })).json(), []);
+  assert.ok(emit.mock.calls.some(/* Confirm realtime delivery of the incident report filing event. */ call => call.arguments[0] === 'emergency:incident_reported'));
   const [[audit]] = await db.query("SELECT COUNT(*) AS count FROM AUDIT_LOGS WHERE table_affected = 'INCIDENT_REPORTS'");
   assert.equal(audit.count, 1);
   const waitForUpload = AbortSignal.timeout(4_000);
-  const [reports] = await Promise.race([uploaded.promise.then(value => [value]), once(waitForUpload, 'abort').then(() => [])]);
+  // Return the upload result in the race's expected array form.
+  const [reports] = await Promise.race([uploaded.promise.then(value => [value]), once(waitForUpload, 'abort').then(/* Return an empty result when the test times out waiting for upload. */ () => [])]);
   assert.equal(reports, 1);
   assert.equal(upload.mock.callCount(), 1);
   let pdfKey;
@@ -875,6 +984,7 @@ test('concurrent incident filing publishes a single report after commit', { skip
 });
 
 
+// Verify that PDF recovery skips another process holding the database lock and then resumes.
 test('PDF recovery skips another process holding the database lock and then resumes', { skip }, async t => {
   const db = await fixture(t);
   const { backfillDocumentPdfs } = await import('../src/workers/documentPdfBackfillWorker.js');
@@ -895,6 +1005,7 @@ test('PDF recovery skips another process holding the database lock and then resu
 });
 
 
+// Verify that formulary preserves zero reorder level and rejects deductions from archived lots.
 test('formulary preserves zero reorder level and rejects deductions from archived lots', { skip }, async t => {
   const db = await fixture(t);
   const { request } = await mountedApi(t);
@@ -920,6 +1031,7 @@ test('formulary preserves zero reorder level and rejects deductions from archive
   assert.equal(stock.quantity_on_hand, 2);
 });
 
+// Verify that concurrent prescription cancellations return stock and write the return ledger once.
 test('concurrent prescription cancellations return stock and write the return ledger once', { skip }, async t => {
   const db = await fixture(t);
   const { request, emit } = await mountedApi(t);
@@ -930,13 +1042,14 @@ test('concurrent prescription cancellations return stock and write the return le
   await db.query("INSERT INTO PRESCRIPTIONS (prescription_id, emr_id, patient_user_id, doctor_user_id, expires_at, qr_token) VALUES (1, 1, 1, 2, CURDATE(), 'fixture-cancel')");
   await db.query("INSERT INTO PRESCRIPTION_ITEMS (item_id, prescription_id, medicine_id, dosage, frequency, duration_days) VALUES (1, 1, 1, '10mg', 'daily', 1)");
   await db.query("INSERT INTO INVENTORY_LOGS (batch_id, prescription_item_id, quantity_change, transaction_type, performed_by) VALUES (1, 1, -2, 'dispense', 2)");
+  // Submit cancellation for the fixture prescription.
   const cancel = () => request('/documents/prescriptions/1/cancel', { method: 'PATCH', json: { reason: 'Fixture' } });
   const results = await Promise.all([cancel(), cancel()]);
-  assert.deepEqual(results.map(response => response.status).sort(), [200, 409]);
-  assert.equal((await results.find(response => response.status === 409).json()).code, 'INVALID_STATE');
+  assert.deepEqual(results.map(/* Extract the HTTP statuses from the concurrent cancellation requests. */ response => response.status).sort(), [200, 409]);
+  assert.equal((await results.find(/* Locate the cancellation that received a conflict. */ response => response.status === 409).json()).code, 'INVALID_STATE');
   const [returns] = await db.query("SELECT quantity_change FROM INVENTORY_LOGS WHERE transaction_type = 'return'");
   assert.deepEqual(returns, [{ quantity_change: 2 }]);
   const [[stock]] = await db.query('SELECT quantity_on_hand FROM MEDICINE_BATCHES WHERE batch_id = 1');
   assert.equal(stock.quantity_on_hand, 5);
-  assert.equal(emit.mock.calls.filter(call => call.arguments[0] === 'inventory:updated').length, 1);
+  assert.equal(emit.mock.calls.filter(/* Select inventory refresh events emitted after cancellation. */ call => call.arguments[0] === 'inventory:updated').length, 1);
 });

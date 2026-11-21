@@ -4,6 +4,7 @@ import { pool } from '../db/pool.js';
 import { activateServerPolicy, makeServerPolicy, validatePolicyOverrides } from '../config/serverPolicy.js';
 import { logAudit } from './auditLogger.js';
 
+// Read the saved policy revision and overrides, with optional locking for writes.
 export async function readServerPolicy(connection, lock = '', allowMissing = false) {
   const [[row]] = await connection.query(`SELECT revision, overrides FROM SERVER_POLICY WHERE policy_id = 1 ${lock}`);
   if (!row && allowMissing) return null;
@@ -14,10 +15,12 @@ export async function readServerPolicy(connection, lock = '', allowMissing = fal
   return makeServerPolicy(row.revision, values);
 }
 
+// Load the saved policy and activate it for the current process.
 export async function loadServerPolicy() {
   activateServerPolicy(await readServerPolicy(pool));
 }
 
+// Audit and save an updated revision, then activate it after commit.
 export async function saveServerPolicy(version, overrides, userId, ipAddress) {
   const connection = await pool.getConnection();
   try {

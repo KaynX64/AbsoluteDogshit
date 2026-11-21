@@ -3,8 +3,10 @@
 import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth/middleware.js';
 
+// Mount the authenticated replay telemetry endpoint.
 export function registerSyncStatus(router) {
   // GET /api/sync/status - Sync status telemetry
+  // Return replay ledger counts by result status.
   router.get('/status', authenticateToken, async (req, res) => {
     try {
       const [rows] = await pool.query(

@@ -7,21 +7,27 @@ process.env.DB_PASSWORD ||= 'fixture';
 const { listConnectedSessions, disconnectSessionSockets } = await import('../src/realtime/presence.js');
 const now = Date.parse('2026-11-14T08:00:00Z');
 
+// Create a socket with test session timestamps, expiry, and connection state.
 function makeSocket(userId, jti, age, expiresIn = 60) {
   return {
     user: { user_id: userId, jti, iat: now / 1000 - 180, exp: now / 1000 + expiresIn },
     data: { connectedAt: now - age * 1000 }, connected: true,
+    // Mark the simulated socket disconnected.
     disconnect() { this.connected = false; },
   };
 }
 
+// Verify that presence groups windows per session, uses live roles, and excludes disconnected or expired
+// sessions.
 test('presence groups windows per session, uses live roles, and excludes disconnected or expired sessions', async () => {
   const first = makeSocket(7, 'first', 120);
   const second = makeSocket(7, 'first', 30);
   const other = makeSocket(7, 'other', 5);
   const expired = makeSocket(8, 'expired', 900, -1);
   const inactive = makeSocket(9, 'inactive', 10);
-  const io = { of: () => ({ sockets: new Map([first, second, other, expired, inactive].map((socket, i) => [i, socket])) }) };
+  // Return the fixture sockets when presence opens the default namespace.
+  const io = { of: () => ({ sockets: new Map([first, second, other, expired, inactive].map(/* Associate each socket with a stable fixture map key. */ (socket, i) => [i, socket])) }) };
+  // Return the live account details for the test's remaining session owners.
   const database = { async query(_sql, [ids]) {
     assert.deepEqual(ids, [7, 9]);
     return [[{ user_id: 7, first_name: 'Fixture', last_name: 'User', email: 'fixture@example.test', role_codes: 'DOCTOR,NURSE' }]];

@@ -7,10 +7,13 @@ import { logAudit } from '../../utils/auditLogger.js';
 import { inTransaction } from '../../db/transaction.js';
 import { commands, recordOperation, serverStatus } from '../../bootstrap/operations.js';
 
+// Build the Terminal router and guard its diagnostic and restart actions.
 export default function operationsRoutes(restart) {
   const router = express.Router();
   let restarting = false;
+  // Check whether this API instance has a connected supervisor that can restart it.
   const canRestart = () => Boolean(restart && process.connected && process.env.VALETUDO_SUPERVISED === '1');
+  // Resolve the caller's administrator grants before allowing Terminal access.
   router.use(async (req, res, next) => {
     res.set('Cache-Control', 'no-store');
     try {
@@ -23,6 +26,7 @@ export default function operationsRoutes(restart) {
          WHERE ur.user_id = ? AND r.code = 'ADMIN'`,
         [req.user.user_id],
       );
+      // Extract the caller's current administrator permission codes.
       const { isSuper, codes } = classifyAdminPermissions(rows.map(row => row.code).filter(Boolean));
       if (rows.length === 0 || (!isSuper && !codes.includes('TERMINAL_VIEW'))) {
         return res.status(403).json({ error: 'Terminal access is required.' });
@@ -34,7 +38,9 @@ export default function operationsRoutes(restart) {
     }
   });
 
+  // Return the recent Terminal events and whether the caller can restart the server.
   router.get('/', (_req, res) => res.json({ ...serverStatus(), restartAvailable: res.locals.canRestartServer && canRestart(), restartAuthorized: res.locals.canRestartServer, restarting }));
+  // Run one of the fixed diagnostic commands requested by the caller.
   router.post('/command', async (req, res) => {
     const { command } = req.body ?? {};
     if (typeof command !== 'string' || !Object.hasOwn(commands, command)) {
@@ -46,12 +52,14 @@ export default function operationsRoutes(restart) {
       res.status(503).json({ error: 'Diagnostic command failed.' });
     }
   });
+  // Audit an authorized restart and schedule it after the response.
   router.post('/restart', async (req, res) => {
     if (!res.locals.canRestartServer) return res.status(403).json({ error: 'Restart requires Super Admin access.' });
     if (!canRestart()) return res.status(409).json({ error: 'Restart requires the npm start supervisor.' });
     if (restarting) return res.status(409).json({ error: 'A restart is already in progress.' });
     restarting = true;
     try {
+      // Write the restart audit before handing off to the supervisor.
       await inTransaction(connection => logAudit(connection, {
         userId: req.user.user_id, action: 'UPDATE', table: 'SERVER_PROCESS', recordId: 0,
         oldValue: null, newValue: { operation: 'RESTART_REQUESTED' }, ipAddress: req.ip,
@@ -65,7 +73,9 @@ export default function operationsRoutes(restart) {
       restarting = false;
       return;
     }
+    // Handle an interrupted restart response and reset its in-progress state when applicable.
     res.once('close', () => { if (!res.writableFinished) restarting = false; });
+    // Hand the restart request to the supervisor after the HTTP response finishes.
     res.once('finish', async () => {
       try {
         await restart();

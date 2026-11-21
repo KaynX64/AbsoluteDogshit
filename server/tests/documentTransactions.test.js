@@ -34,14 +34,20 @@ const cases = [
   },
 ];
 
-for (const { path, body, idField, pdfTable, service } of [...cases, { ...cases[0], service: true }]) {
+for (const { path, body, idField, pdfTable, service } of [cases[1], { ...cases[0], service: true }]) {
+  // Verify that issuance releases its database connection before PDF generation and notifications.
   test(`${service ? 'prescription service' : path} releases the issuance connection before querying for the PDF`, async (t) => {
     const actions = [];
     const connection = {
+      // Stand in for the start of the issuing transaction.
       async beginTransaction() {},
+      // Record when the fixture transaction commits.
       async commit() { actions.push('commit'); },
+      // Record the rollback path if issuance fails.
       async rollback() { actions.push('rollback'); },
+      // Record when the issuing workflow releases its connection.
       release() { actions.push('release'); },
+      // Supply signer, recipient, and document fixtures for the issuance queries.
       async query(sql) {
         if (sql.includes('sp.license_no')) {
           return [[{ user_id: 21, first_name: 'Fixture', last_name: 'Doctor', is_active: 1,
@@ -58,8 +64,11 @@ for (const { path, body, idField, pdfTable, service } of [...cases, { ...cases[0
         throw new Error('Unexpected issuance query');
       },
     };
+    // Provide the simulated prescription transaction connection.
     t.mock.method(pool, 'getConnection', async () => connection);
+    // Stub cache invalidation for the issuance test.
     t.mock.method(console, 'error', () => {});
+    // Record a PDF lookup and simulate a draft without saved PDF data.
     const pdfQuery = t.mock.method(pool, 'query', async () => {
       actions.push('PDF query');
       return [[]];
@@ -70,15 +79,18 @@ for (const { path, body, idField, pdfTable, service } of [...cases, { ...cases[0
       const { issued, failure } = await issuePrescription({
         doctorUserId: 21, appointment_id: 8, emr_id: body.emr_id, patient_user_id: body.patient_user_id,
         expires_at, notes: '', formularyItems: [], outsideItems: [{ ...body.items[0], instructions: '' }],
-        itemCount: 1, ipAddress: '127.0.0.1', onInventoryUpdated: () => actions.push('inventory update'),
+        itemCount: 1, ipAddress: '127.0.0.1', /* Record when the inventory refresh callback runs. */ onInventoryUpdated: () => actions.push('inventory update'),
       });
       assert.ifError(failure);
       result = issued;
     } else {
       const router = documentRoutes();
+      // Find the POST route for the document being issued.
       const { route } = router.stack.find(({ route }) => route?.path === path && route.methods.post);
       const res = {
+        // Record the HTTP status on the issuance response double.
         status(code) { this.statusCode = code; return this; },
+        // Capture the issuance response payload for assertions.
         json(data) { this.body = data; return this; },
       };
       await route.stack.at(-1).handle({
@@ -97,12 +109,14 @@ for (const { path, body, idField, pdfTable, service } of [...cases, { ...cases[0
   });
 }
 
+// Verify that issuer history returns saved prescription details and clearance remarks even without PDFs.
 test('issuer history returns saved prescription details and clearance remarks even without PDFs', async (t) => {
   const rx = { prescription_id: 53, emr_id: 17, status: 'active', notes: encrypt('Fixture notes'), pdf_s3_key: null };
   const rxItem = { prescription_id: 53, item_id: 2, medicine_name: 'Fixture medicine', dosage: 'Fixture dosage',
     frequency: 'Fixture frequency', route: 'Fixture route', instructions: encrypt('Fixture directions') };
   const clearance = { clearance_id: 54, purpose: 'Fixture clearance', status: 'approved',
     signature_metadata: JSON.stringify({ clinical_remarks: 'Fixture remarks' }), pdf_s3_key: null };
+  // Return the prescription, medicine, and clearance fixture rows and accept read audits.
   t.mock.method(pool, 'query', async (sql, params) => {
     if (sql.includes('INSERT INTO PHI_ACCESS_LOGS')) return [{}];
     if (sql.includes('FROM PRESCRIPTION_ITEMS')) {
@@ -118,10 +132,13 @@ test('issuer history returns saved prescription details and clearance remarks ev
     ['/prescriptions/patient/:patientId', 53, 'prescription_id'],
     ['/clearances/patient/:patientId', 54, 'clearance_id'],
   ]) {
+    // Find the GET route for a document history request.
     const { route } = router.stack.find(({ route }) => route?.path === path && route.methods.get);
     const res = {
       statusCode: 200,
+      // Record the HTTP status on the history response double.
       status(code) { this.statusCode = code; return this; },
+      // Capture the saved document history for assertions.
       json(result) { this.body = result; return this; },
     };
     await route.stack.at(-1).handle({ params: { patientId: '42' }, user: { user_id: 21 } }, res);
@@ -139,18 +156,23 @@ test('issuer history returns saved prescription details and clearance remarks ev
   }
 });
 
+// Verify that encounter text preserves blank optional fields and requires actual complaint and diagnosis.
 test('encounter text preserves blank optional fields and requires actual complaint and diagnosis', () => {
   assert.deepEqual(readEncounterText({ chief_complaint: ' Fixture complaint ', diagnosis: 'Fixture diagnosis', notes: '  ' }), {
     chief_complaint: 'Fixture complaint', diagnosis: 'Fixture diagnosis', treatment_plan: '', notes: '',
   });
+  // Submit a blank chief complaint to exercise required text validation.
   assert.throws(() => readEncounterText({ chief_complaint: ' ', diagnosis: 'Fixture diagnosis' }), /required/);
+  // Submit a numeric diagnosis to exercise text type validation.
   assert.throws(() => readEncounterText({ chief_complaint: 'Complaint', diagnosis: 1 }), /must be text/);
 });
 
+// Verify that the stock workflow locks FEFO lots and links each deduction to its prescription item.
 test('the stock workflow locks FEFO lots and links each deduction to its prescription item', async () => {
   const changes = [];
   const links = [];
   const connection = {
+    // Supply stock lots and capture ledger changes for the FEFO assertions.
     async query(sql, params) {
       if (sql.includes('FROM MEDICINES')) return [[{ name: 'Fixture', generic_name: 'Fixture', is_active: 1 }]];
       if (sql.includes('FROM MEDICINE_BATCHES')) {
@@ -174,4 +196,13 @@ test('the stock workflow locks FEFO lots and links each deduction to its prescri
   await applyStockDeductions(connection, { plannedDeductions, formularyDispenseLines, prescriptionId: 7, doctorUserId: 2 });
   assert.deepEqual(changes, [[0, 11], [4, 12]]);
   assert.deepEqual(links, [[11, 21, -2], [11, 22, -1], [12, 22, -1]]);
+});
+
+test('legacy external issuance requires an updated prescribing client', async () => {
+  const router = documentRoutes();
+  const { route } = router.stack.find(({ route }) => route?.path === '/prescriptions' && route.methods.post);
+  const res = { status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+  await route.stack.at(-1).handle({ body: cases[0].body, user: { user_id: 21 } }, res);
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.code, 'UPDATE_REQUIRED');
 });

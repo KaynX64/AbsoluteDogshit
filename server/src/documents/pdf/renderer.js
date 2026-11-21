@@ -14,6 +14,7 @@ export const DANGER      = '#7A2E26';
 
 // ─── Low-level helpers ────────────────────────────────────────────────────
 
+// Initialize an A4 PDF with the clinic's shared margins and metadata.
 export function createDoc() {
   return new PDFDocument({
     size: 'A4',
@@ -25,15 +26,20 @@ export function createDoc() {
   });
 }
 
+// Collect PDFKit output into a promise that resolves to the complete buffer.
 export function bufferFromDoc(doc) {
+  // Register stream listeners that collect output and propagate rendering errors.
   return new Promise((resolve, reject) => {
     const chunks = [];
+    // Append each PDF chunk to the output buffer's parts.
     doc.on('data', (c) => chunks.push(c));
+    // Combine PDF chunks when rendering finishes.
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
   });
 }
 
+// Render QR text as a PNG in the shared document style.
 export async function qrBuffer(text, size = 110) {
   return QRCode.toBuffer(text, {
     type: 'png',
@@ -43,6 +49,7 @@ export async function qrBuffer(text, size = 110) {
   });
 }
 
+// Draw the university and infirmary letterhead and document subtitle.
 export function drawLetterhead(doc, subtitle) {
   doc
     .fillColor(TEXT_SUB)
@@ -71,6 +78,7 @@ export function drawLetterhead(doc, subtitle) {
   doc.moveDown(1.2);
 }
 
+// Draw a label and value side by side in a document information row.
 export function drawInfoRow(doc, label, value) {
   const labelWidth = 150;
   const startY = doc.y;
@@ -92,6 +100,7 @@ export function drawInfoRow(doc, label, value) {
   doc.moveDown(0.3);
 }
 
+// Draw a styled section title and adjust vertical spacing.
 export function drawSectionTitle(doc, text) {
   doc.moveDown(0.5);
   doc
@@ -102,6 +111,7 @@ export function drawSectionTitle(doc, text) {
   doc.moveDown(0.3);
 }
 
+// Draw the document reference, issue date, and verification footer.
 export function drawFooter(doc, refLabel, refValue, issuedAt) {
   const bottomY = doc.page.height - 90;
 

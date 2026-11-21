@@ -17,6 +17,7 @@ import {
   resolveExpiryDate,
 } from '../signing/signatory.js';
 
+// Sign and save a prescription with stock allocations, then attempt PDF generation after commit.
 export async function issuePrescription({
   doctorUserId, patient_user_id, appointment_id, emr_id, expires_at, notes,
   formularyItems, outsideItems, itemCount, ipAddress, onInventoryUpdated,
@@ -57,12 +58,14 @@ export async function issuePrescription({
     // resolved by the checker.
     let severeInteractions = [];
     {
+      // Collect numeric formulary IDs for the drug interaction check.
       const allMedicineIds = formularyItems.map((it) => Number(it.medicine_id)).filter(Boolean);
       if (allMedicineIds.length >= 2) {
         const { checkInteractions } = await import('../../utils/interactionChecker.js');
         const foundInteractions = await checkInteractions(connection, allMedicineIds);
 
         const contraindicated = foundInteractions.filter(
+          // Isolate interactions that prevent prescription issuance.
           (i) => i.severity === 'contraindicated'
         );
         if (contraindicated.length > 0) {
@@ -70,7 +73,7 @@ export async function issuePrescription({
           return { conflict: {
             error: 'CONTRAINDICATED_DRUG_INTERACTION',
             message: 'This prescription contains a contraindicated drug combination and cannot be issued.',
-            interactions: contraindicated.map((i) => ({
+            interactions: contraindicated.map(/* Format blocked interactions with medicine names for the error response. */ (i) => ({
               severity: i.severity,
               medicine_a: i.medicine_a_name,
               medicine_b: i.medicine_b_name,
@@ -80,10 +83,11 @@ export async function issuePrescription({
           } };
         }
 
-        severeInteractions = foundInteractions.filter((i) => i.severity === 'severe');
+        severeInteractions = foundInteractions.filter(/* Select severe interactions for the issuance warning. */ (i) => i.severity === 'severe');
       }
     }
 
+    if (severeInteractions.length) throw new SignerError('Update the app to record a reasoned severe-interaction override.', 409, 'SEVERE_OVERRIDE_REQUIRED');
     const plannedDeductions = await planStock(connection, requestedByMedicine);
 
     // ── Ensure EMR parent encounter exists ──────────────────────────────────
@@ -126,8 +130,8 @@ export async function issuePrescription({
         .update(`${patient_user_id}:${rxUuid}:${targetEmrId}:${itemCount}`)
         .digest('hex'),
       items_count: itemCount,
-      outside_items: outsideItems.map((o) => o.outside_drug_name),
-      allocated_batches: plannedDeductions.map((d) => ({
+      outside_items: outsideItems.map(/* Collect the outside-pharmacy medicine names for the issuance audit. */ (o) => o.outside_drug_name),
+      allocated_batches: plannedDeductions.map(/* Capture the allocated lot and quantity in the stock deduction summary. */ (d) => ({
         medicine_id: d.medicine_id,
         medicine_name: d.medicine_name,
         batch_id: d.batch_id,
@@ -214,7 +218,7 @@ export async function issuePrescription({
         oldValue: null,
         newValue: {
           event: 'SEVERE_INTERACTION_OVERRIDE',
-          interactions: severeInteractions.map((i) => ({
+          interactions: severeInteractions.map(/* Record the overridden severe interactions in the audit entry. */ (i) => ({
             medicine_a: i.medicine_a_name,
             medicine_b: i.medicine_b_name,
             severity: i.severity,

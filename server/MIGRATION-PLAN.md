@@ -19,6 +19,8 @@
 - Migration 010 adds the Terminal permission to the admin catalog. Existing grants carry forward. A Super Admin can opt Limited Admin accounts into diagnostics.
 - Migration 011 rebuilds `LOCAL_SYNC_LOGS` when upgrading older schemas to remove submitted payloads and free-form errors. Mutation IDs, owners, statuses, and resulting record IDs carry forward. Rehearse the table copy and account for locks and disk space. Bring the updated server up before the updated desktop so legacy ownership checks and bounded replay are available. Historical database backups, replicas and logs follow their own retention policies.
 - Migration 012 adds a unique installation ID and SOS mode to device tokens and a nullable location label to emergency alerts. Apply it before deploying the Android responder update. Legacy registrations keep their existing SOS channel.
+- Migration 013 adds structured prescription snapshots, ordered encrypted item details, decimal external quantities and issuance request uniqueness. Historical clinical values and stored PDFs are retained. Deploy updated server/readers with v2 issuance disabled, release desktop/mobile, complete clinician review, then enable the flag. See [prescribing rollout](PRESCRIBING-ROLLOUT.md) and [API contract](STRUCTURED-PRESCRIBING.md).
+- Migration 014 adds account-scoped SOS request identities and a delivery lease to `EMERGENCY_ALERTS`. Existing alerts have no scheduled delivery. Deploy the API and confirm the SOS Dispatch Worker is running before releasing the keyed mobile client. Test an interrupted receipt and a concurrent retry against disposable MySQL.
 
 ## Rehearsal and recovery
 

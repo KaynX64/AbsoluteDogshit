@@ -11,7 +11,7 @@ export async function requirePrivacyConsent(req, res, next) {
 
   // 1. Clinical staff and emergency responders bypass patient consent checks for clinical duties
   const clinicalStaffRoles = ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN', 'EMERGENCY_RESPONDER'];
-  if (userRoles.some((role) => clinicalStaffRoles.includes(role))) {
+  if (userRoles.some(/* Check whether the caller is clinical staff under the consent policy. */ (role) => clinicalStaffRoles.includes(role))) {
     return next();
   }
 

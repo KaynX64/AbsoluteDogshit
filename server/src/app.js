@@ -37,15 +37,17 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'file://',
   'null',
 ];
+// Build an origin checker from the default and configured CORS allow-list.
 export function createOriginCheck() {
   const configuredAllowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
     .split(',')
-    .map((origin) => origin.trim())
+    .map(/* Trim whitespace from each configured browser origin. */ (origin) => origin.trim())
     .filter(Boolean);
   const allowedOrigins = new Set([...DEFAULT_ALLOWED_ORIGINS, ...configuredAllowedOrigins]);
-  return origin => allowedOrigins.has(origin);
+  return /* Check an origin against the merged allow-list. */ origin => allowedOrigins.has(origin);
 }
 
+// Configure request middleware, security headers, and static assets on an Express app.
 export function createApp({ isOriginAllowed = createOriginCheck() } = {}) {
   const app = express();
 
@@ -62,6 +64,7 @@ export function createApp({ isOriginAllowed = createOriginCheck() } = {}) {
 
   app.use(
     cors({
+      // Accept requests without an Origin header and check browser origins against the allow-list.
       origin(origin, callback) {
         if (!origin || isOriginAllowed(origin)) return callback(null, true);
         console.warn(`⚠️ [CORS] Cross-origin request from unauthorized origin blocked: ${origin}`);
@@ -74,6 +77,7 @@ export function createApp({ isOriginAllowed = createOriginCheck() } = {}) {
   // =============================================================================
   // R.A. 10173 ENCRYPTION IN TRANSIT & HTTP SECURITY HEADERS
   // =============================================================================
+  // Set the shared security headers on HTTP responses.
   app.use((req, res, next) => {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -106,9 +110,12 @@ export function createApp({ isOriginAllowed = createOriginCheck() } = {}) {
   return app;
 }
 
+// Mount authentication, liveness, and feature routes on the app.
 export function mountApiRoutes(app, io, { restart } = {}) {
   app.post('/api/auth/login', loginRateLimit, loginUser);
+  // Pass the logout request and realtime server to the session handler.
   app.post('/api/auth/logout', authenticateToken, (req, res) => logoutUser(req, res, io));
+  // Pass the password change and realtime server to the credential handler.
   app.put('/api/auth/change-password', authenticateToken, (req, res) => changePassword(req, res, io));
 
   app.use('/api/privacy', privacyRouter);

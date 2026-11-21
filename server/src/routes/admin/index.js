@@ -16,6 +16,7 @@ import { registerResponderManagementRoutes } from './responders.js';
 import { registerDatabaseStudioRoutes } from './databaseStudio/index.js';
 import { registerStaffAnalyticsRoutes } from './staffAnalytics.js';
 
+// Build the administrator router with shared authentication and role checks.
 export default function adminRouter(io, restart) {
   const router = express.Router();
   router.use(authenticateToken, requireRoles('ADMIN'));

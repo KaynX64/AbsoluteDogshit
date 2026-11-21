@@ -3,7 +3,9 @@
 export default {
   version: 10,
   name: 'Terminal access permission',
+  // Leave the table structure as-is for this Terminal permission migration.
   async schema() {},
+  // Insert the Terminal grant into the administrator permission catalog.
   async data(connection) {
     await connection.query(
       `INSERT INTO ADMIN_PERMISSIONS (code, name, description, sort_order)

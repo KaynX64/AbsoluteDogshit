@@ -3,6 +3,7 @@
 export default {
   version: 8,
   name: 'staff analytics permissions',
+  // Create storage for per-account staff analytics scope overrides.
   async schema(connection) {
     await connection.query(`
       CREATE TABLE IF NOT EXISTS STAFF_ANALYTICS_PERMISSIONS (

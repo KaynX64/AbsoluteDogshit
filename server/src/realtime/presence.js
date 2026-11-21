@@ -2,6 +2,7 @@
 
 import { pool } from '../db/pool.js';
 
+// Group live sockets into sign-in sessions and load active account details for display.
 export async function listConnectedSessions(io, now = Date.now(), database = pool) {
   const byUser = new Map();
   for (const socket of io?.of?.('/')?.sockets?.values() ?? []) {
@@ -31,9 +32,12 @@ export async function listConnectedSessions(io, now = Date.now(), database = poo
      ORDER BY u.last_name, u.first_name, u.user_id`,
     [[...byUser.keys()]],
   );
-  return accounts.flatMap(account => [...byUser.get(Number(account.user_id)).values()].flatMap(session => {
+  // Collect each active account's connected sign-in sessions.
+  return accounts.flatMap(account => [...byUser.get(Number(account.user_id)).values()].flatMap(/* Format a session when at least one socket is still connected. */ session => {
+    // Keep only the sockets that are still connected at response time.
     const live = session.connections.filter(socket => socket.connected);
     if (!live.length) return [];
+    // Find the earliest connection time among the session's live sockets.
     const since = live.reduce((earliest, socket) => Math.min(earliest, socket.data.connectedAt), Infinity);
     return [{
       userId: account.user_id,
@@ -47,6 +51,7 @@ export async function listConnectedSessions(io, now = Date.now(), database = poo
   }));
 }
 
+// Disconnect every currently connected socket for the specified user session.
 export function disconnectSessionSockets(io, user) {
   if (!user?.jti) return;
   for (const socket of io?.of?.('/')?.sockets?.values() ?? []) {

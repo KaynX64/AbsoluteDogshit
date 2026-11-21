@@ -9,11 +9,12 @@ import { COMPLETED_APPOINTMENT_CONFLICT } from './conflicts.js';
 // Only a doctor or dentist may author or edit EMR records.
 function assertClinicalAuthor(user) {
   const roles = (user && user.roles) || [];
-  if (!roles.some((r) => ['DOCTOR', 'DENTIST'].includes(r))) {
+  if (!roles.some(/* Check whether the user has a clinician role that can author the encounter. */ (r) => ['DOCTOR', 'DENTIST'].includes(r))) {
     throw fail('Only a doctor or dentist may create or edit EMR records.', 403);
   }
 }
 
+// Validate a replayed encounter creation and finalize it through the shared workflow.
 export async function createEncounter(connection, { payload, local_version }, user) {
   try {
     assertClinicalAuthor(user);
@@ -33,6 +34,7 @@ export async function createEncounter(connection, { payload, local_version }, us
   }
 }
 
+// Update a clinician's existing encounter when the submitted base version still matches.
 export async function updateEncounter(connection, { payload }, user) {
   const userId = user.user_id;
   const { emr_id } = payload;

@@ -8,11 +8,14 @@ import { completeEncounter, prepareEncounter } from '../../appointments/complete
 import { AppointmentTransitionError, updateAppointmentStatus } from '../../appointments/transitions.js';
 import { publishQueueChange } from './queueNotifications.js';
 
+// Mount appointment status transitions and encounter completion.
 export function registerConsultationRoutes(router, io) {
+  // Apply an allowed appointment status change and publish the update.
   router.patch('/:id/status', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
     const appointmentId = Number(req.params.id);
     const { status } = req.body ?? {};
     try {
+      // Apply the appointment and queue status changes using the same transaction.
       const changed = await inTransaction(connection => updateAppointmentStatus(connection, appointmentId, status));
       if (changed) {
         await publishQueueChange(io, { appointment_id: appointmentId, status }, { callPatient: status === 'serving' });
@@ -27,12 +30,14 @@ export function registerConsultationRoutes(router, io) {
     }
   });
 
+  // Validate submitted encounter details and finalize the clinical visit.
   router.post('/:id/complete', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'ADMIN'), async (req, res) => {
     const appointmentId = Number(req.params.id);
     const clinicianId = req.user.user_id;
     const { patient_user_id: patientId } = req.body ?? {};
     try {
       const encounter = prepareEncounter(req.body ?? {}, req.user);
+      // Write the completed encounter, queue state, and audit record together.
       const emrId = await inTransaction(async connection => {
         const recordId = await completeEncounter(connection, {
           appointmentId, patientId, clinicianId, encounter, updateMeasurements: true,

@@ -5,6 +5,7 @@ import { ensureColumns, ensureIndex } from './schema.js';
 export default {
   version: 9,
   name: 'document PDF recovery',
+  // Add a retry timestamp and pending-document index to each applicable document table.
   async schema(connection) {
     for (const [table, id] of [
       ['PRESCRIPTIONS', 'prescription_id'],

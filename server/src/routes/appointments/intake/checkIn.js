@@ -9,10 +9,12 @@ import { reserveQueueTicket } from '../../../appointments/queueTickets.js';
 import { formatTriageNote, validateTriageVitals } from '../../../appointments/vitals.js';
 import { intakeCounterId, findActiveQueueEntry } from './activeQueue.js';
 
+// Mount check-in for a patient with a scheduled appointment.
 export function registerBookedCheckIn(router, io) {
   // ===========================================================================
   // NURSE QR INTAKE CHECK-IN
   // ===========================================================================
+  // Record the booked patient's arrival and vitals and assign an active queue ticket.
   router.post('/:id/checkin', authenticateToken, requireRoles('NURSE', 'ADMIN'), async (req, res) => {
     const appointmentId = Number(req.params.id);
     const { sex, date_of_birth } = req.body;

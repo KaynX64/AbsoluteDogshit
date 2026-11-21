@@ -16,6 +16,7 @@ const profileTable = {
 };
 const profileTables = [...new Set(Object.values(profileTable))];
 
+// Lock the live account row before checking or changing its role.
 export async function lockAccount(connection, userId) {
   const [[account]] = await connection.query(
     'SELECT is_active FROM USERS WHERE user_id = ? AND deleted_at IS NULL FOR UPDATE',
@@ -25,12 +26,14 @@ export async function lockAccount(connection, userId) {
   return account;
 }
 
+// Read the target's existing role and the caller's effective Super Admin status.
 export async function readAccountRoleAccess(connection, userId, callerId) {
   const previousRole = await getUserRoleCode(connection, userId);
   const { isSuper } = await resolveAdminPermissions(callerId, connection);
   return { previousRole, isSuper };
 }
 
+// Change the account role and related grants while enforcing administrator protections.
 export async function changeAccountRole(connection, { userId, role, access, license }) {
   const { previousRole, isSuper } = access;
   if (!isSuper && (role === 'ADMIN' || previousRole === 'ADMIN')) {

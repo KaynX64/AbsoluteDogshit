@@ -6,10 +6,12 @@ import { logAudit } from '../../utils/auditLogger.js';
 import { encrypt, decrypt } from '../../utils/cryptoVault.js';
 import { fail } from '../../utils/httpError.js';
 
+// Cancel a prescription and restore its dispensed stock atomically.
 export function cancelPrescription({ prescriptionId, reason, user, ipAddress }) {
+  // Lock the prescription, apply authorization and status rules, and audit the cancellation and returns.
   return inTransaction(async connection => {
     const [rows] = await connection.query(
-      'SELECT doctor_user_id, status, notes FROM PRESCRIPTIONS WHERE prescription_id = ? AND deleted_at IS NULL FOR UPDATE',
+      'SELECT doctor_user_id, patient_user_id, status, notes FROM PRESCRIPTIONS WHERE prescription_id = ? AND deleted_at IS NULL FOR UPDATE',
       [prescriptionId]
     );
 
@@ -66,6 +68,7 @@ export function cancelPrescription({ prescriptionId, reason, user, ipAddress }) 
       message: `Prescription cancelled successfully and stock was returned from ${restoredBatchCount} medication batch(es).`,
       prescriptionId,
       status: 'cancelled',
+      patientId: rx.patient_user_id,
     };
   });
 }

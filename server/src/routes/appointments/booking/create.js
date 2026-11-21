@@ -19,6 +19,7 @@ import { getServerPolicy } from '../../../config/serverPolicy.js';
 import { readServerPolicy } from '../../../utils/serverPolicyStore.js';
 
 // ── Rate Limiter Middleware para sa Booking (Audit Security Issue #6) ───────
+// Apply the configured booking limit before a request can reserve a slot.
 async function bookingRateLimit(req, res, next) {
   const { booking: BOOKING_LIMIT } = getServerPolicy().limits;
   if (!isRedisActive()) return next();
@@ -53,6 +54,7 @@ async function bookingRateLimit(req, res, next) {
   }
 }
 
+// Load the booked appointment details and send the patient a confirmation email.
 async function sendBookingConfirmation(patientUserId, doctorUserId, dateTime, appointmentType) {
   try {
     const [[details]] = await pool.query(
@@ -80,7 +82,9 @@ async function sendBookingConfirmation(patientUserId, doctorUserId, dateTime, ap
   }
 }
 
+// Mount the rate-limited appointment booking endpoint.
 export function registerBookingCreation(router, io) {
+  // Validate the requested slot, reserve it within clinic capacity, and confirm the booking.
   router.post('/', authenticateToken, requirePrivacyConsent, bookingRateLimit, async (req, res) => {
     const { doctor_user_id, date_time: requestedTime, appointment_type, notes } = req.body;
     const patientUserId = req.user.user_id;

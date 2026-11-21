@@ -40,19 +40,23 @@ function run(env, body) {
   return JSON.parse(r.stdout.split('@@').pop());
 }
 
+// Group tests for v2 envelope (the only supported format).
 describe('v2 envelope (the only supported format)', () => {
+  // Check the emitted envelope version and decrypt the fixture text.
   test('writes enc:v2 and round-trips', () => {
     const out = run({ ENCRYPTION_SALT: SALT_A }, `const c = v.encrypt('Asthma'); return { c, p: v.decrypt(c) };`);
     assert.match(out.c, /^enc:v2:/);
     assert.equal(out.p, 'Asthma');
   });
 
+  // Verify that a different salt cannot read v2 data (salt actually separates deployments).
   test('a different salt cannot read v2 data (salt actually separates deployments)', () => {
     const v2 = run({ ENCRYPTION_SALT: SALT_A }, `return v.encrypt('secret');`);
     const out = run({ ENCRYPTION_SALT: SALT_B }, `return v.decrypt(${JSON.stringify(v2)});`);
     assert.equal(out, DECRYPT_FAILED);
   });
 
+  // Verify that tampered v2 ciphertext fails authentication.
   test('tampered v2 ciphertext fails authentication', () => {
     const out = run({ ENCRYPTION_SALT: SALT_A }, `
       const parts = v.encrypt('Diabetes').split(':');
@@ -61,6 +65,7 @@ describe('v2 envelope (the only supported format)', () => {
     assert.equal(out, DECRYPT_FAILED);
   });
 
+  // Verify that leftover pre-migration enc:v1 values return the integrity marker, never garbage.
   test('leftover pre-migration enc:v1 values return the integrity marker, never garbage', () => {
     // A real enc:v1 envelope from a pre-migration backup. The vault must not
     // attempt to decrypt it with the v2 key — it reports the marker instead.
@@ -69,11 +74,13 @@ describe('v2 envelope (the only supported format)', () => {
     assert.equal(out, DECRYPT_FAILED);
   });
 
+  // Verify that an invalid version-two envelope produces the decryption failure marker.
   test('malformed enc:v2 envelopes are rejected, not decrypted blindly', () => {
     const out = run({ ENCRYPTION_SALT: SALT_A }, `return v.decrypt('enc:v2:zzzz:zzzz:zzzz');`);
     assert.equal(out, DECRYPT_FAILED);
   });
 
+  // Check the return values for existing plaintext and empty database fields.
   test('plaintext, null and blank values behave as before', () => {
     const out = run({ ENCRYPTION_SALT: SALT_A }, `
       return [v.decrypt('plain text'), v.decrypt(null) === null, v.encrypt(null) === null, v.encrypt('   ')];`);
@@ -81,7 +88,9 @@ describe('v2 envelope (the only supported format)', () => {
   });
 });
 
+// Group tests for helpers.
 describe('helpers', () => {
+  // Verify that isEncryptedValue recognises only enc:v2 envelopes.
   test('isEncryptedValue recognises only enc:v2 envelopes', () => {
     const out = run({ ENCRYPTION_SALT: SALT_A }, `
       return [v.isEncryptedValue('enc:v2:x'), v.isEncryptedValue('enc:v1:x'),
@@ -90,23 +99,29 @@ describe('helpers', () => {
   });
 });
 
+// Group tests for startup validation (fail-closed, v2-only).
 describe('startup validation (fail-closed, v2-only)', () => {
+  // Start a fixture process without the salt and check that vault initialization fails.
   test('refuses to boot without ENCRYPTION_SALT (no legacy mode)', () => {
     assert.equal(run({}, `return 1;`).crashed, true);
   });
 
+  // Verify that an empty ENCRYPTION_SALT is treated as unset (refuses to boot).
   test('an empty ENCRYPTION_SALT is treated as unset (refuses to boot)', () => {
     assert.equal(run({ ENCRYPTION_SALT: '' }, `return 1;`).crashed, true);
   });
 
+  // Start the vault with a short salt to check minimum-length validation.
   test('rejects a salt shorter than 16 characters', () => {
     assert.equal(run({ ENCRYPTION_SALT: 'short' }, `return 1;`).crashed, true);
   });
 
+  // Check that vault initialization rejects the retired fixed salt.
   test('rejects reusing the legacy hardcoded salt', () => {
     assert.equal(run({ ENCRYPTION_SALT: 'valetudo-healthlink-v1' }, `return 1;`).crashed, true);
   });
 
+  // Verify that still refuses a missing or short ENCRYPTION_KEY.
   test('still refuses a missing or short ENCRYPTION_KEY', () => {
     assert.equal(run({ ENCRYPTION_KEY: 'too-short' }, `return 1;`).crashed, true);
   });

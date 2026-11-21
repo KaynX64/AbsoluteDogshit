@@ -5,6 +5,7 @@ import { readColumn } from './schema.js';
 export default {
   version: 11,
   name: 'offline replay outcome ledger',
+  // Drop legacy payload and error text columns when they are present on the replay ledger.
   async schema(connection) {
     const drop = [];
     for (const column of ['payload', 'error_message']) {

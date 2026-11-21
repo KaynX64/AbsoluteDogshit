@@ -2,18 +2,19 @@
 
 import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth/middleware.js';
-import { decrypt } from '../../utils/cryptoVault.js';
-import { sendSosPush } from '../../utils/fcmNotifier.js';
+import { createHash } from 'node:crypto';
+import { inTransaction } from '../../db/transaction.js';
 import { logAudit } from '../../utils/auditLogger.js';
-import { redis, isRedisActive, invalidateCache } from '../../utils/redisClient.js';
+import { redis, isRedisActive } from '../../utils/redisClient.js';
 import { getServerPolicy } from '../../config/serverPolicy.js';
-import { redactForTier, getResponderAudience, roleLabelFor } from '../../emergency/responderAccess.js';
 
 // ── Rate Limiter Middleware para sa SOS ─────────────────────────────
+// Build the Redis throttling key for the caller's user ID or IP.
 function sosRateLimitKey(userIdOrIp) {
   return `ratelimit:sos:${userIdOrIp}`;
 }
 
+// Rate-limit SOS submission using the caller's account or IP.
 async function sosRateLimit(req, res, next) {
   const { sos: SOS_LIMIT } = getServerPolicy().limits;
   if (!isRedisActive()) return next();
@@ -49,6 +50,7 @@ async function sosRateLimit(req, res, next) {
 }
 
 // ── Reverse Geocoding Address Resolver ──────────────────────────────
+// Resolve an SOS position to a display address or use the campus fallback.
 async function resolveCampusAddress(lat, lng) {
   // 1. Kung may Google Maps API Key sa environment
   if (process.env.GOOGLE_MAPS_API_KEY) {
@@ -81,154 +83,94 @@ async function resolveCampusAddress(lat, lng) {
   return null;
 }
 
-export function registerSosRoutes(router, io) {
-  // ===========================================================================
-  // 1. POST /api/emergency/sos - Trigger SOS & Auto-prioritize in Queue
-  // ===========================================================================
-  router.post('/sos', authenticateToken, sosRateLimit, async (req, res) => {
+// Validate legacy coordinates and bind keyed retries to their original contents.
+function parseSos(req, res, next) {
+  const { latitude, longitude, notes, client_sos_id: id } = req.body ?? {};
+  const coordinate = value => typeof value === 'number' ||
+    (typeof value === 'string' && value.trim() !== '');
+  const lat = Number(latitude), lng = Number(longitude);
+  if (!coordinate(latitude) || !coordinate(longitude) || !Number.isFinite(lat) ||
+      !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    return res.status(400).json({ error: 'Invalid geographic coordinates provided.' });
+  }
+  if ((id !== undefined || /\/requests\/?$/.test(req.path)) &&
+      (typeof id !== 'string' || !/^[0-9a-f]{32}$/.test(id))) {
+    return res.status(400).json({ error: 'Invalid SOS request ID.' });
+  }
+  if (notes != null && (typeof notes !== 'string' || notes.length > 2000)) {
+    return res.status(400).json({ error: 'SOS notes must be text of at most 2000 characters.' });
+  }
+  const text = notes?.trim() || 'Emergency SOS pressed';
+  const hash = id ? createHash('sha256').update(JSON.stringify([lat, lng, text])).digest('hex') : null;
+  res.locals.sos = { userId: req.user.user_id, lat, lng, text, id: id ?? null, hash };
+  next();
+}
+
+async function readAccepted({ userId, id }) {
+  const [[alert]] = await pool.query(
+    'SELECT alert_id, location_label, request_hash FROM EMERGENCY_ALERTS WHERE user_id = ? AND client_sos_id = ?',
+    [userId, id],
+  );
+  return alert;
+}
+
+function replyWithReceipt(res, alert, replayed) {
+  if (replayed && alert.request_hash !== res.locals.sos.hash) {
+    return res.status(409).json({ error: 'SOS request contents changed.', code: 'SOS_REQUEST_MISMATCH' });
+  }
+  return res.status(replayed ? 200 : 201).json({
+    message: 'Emergency alert accepted by the server.',
+    alertId: Number(alert.alert_id),
+    formattedAddress: alert.location_label,
+    replayed,
+  });
+}
+
+async function reconcileSos(_req, res, next) {
+  const request = res.locals.sos;
+  if (!request.id) return next();
+  try {
+    const accepted = await readAccepted(request);
+    if (accepted) return replyWithReceipt(res, accepted, true);
+    next();
+  } catch (error) {
+    console.error('[SOS Receipt]:', error.code ?? error.name);
+    res.status(503).json({ error: 'Could not verify SOS receipt.' });
+  }
+}
+
+// Persist the alert and its dispatch schedule in the same audited transaction.
+export function registerSosRoutes(router) {
+  router.post(['/sos', '/sos/requests'], authenticateToken, parseSos, reconcileSos, sosRateLimit, async (req, res) => {
+    const request = res.locals.sos;
+    const { userId, lat, lng, text, id, hash } = request;
     try {
-      const userId = req.user.user_id;
-      const { latitude, longitude, notes } = req.body;
-
-      if (!latitude || !longitude) {
-        return res.status(400).json({ error: 'Latitude and Longitude are required coordinates.' });
-      }
-
-      const lat = Number(latitude);
-      const lng = Number(longitude);
-
-      if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-        return res.status(400).json({ error: 'Invalid geographic coordinates provided.' });
-      }
-
-      const formattedAddress = await resolveCampusAddress(lat, lng);
-      const enrichedNotes = `${notes || 'Emergency SOS pressed'} · Loc: ${formattedAddress ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`}`;
-
-      const connection = await pool.getConnection();
-      let alertId;
-
-      try {
-        await connection.beginTransaction();
-
-        // 1. Insert Emergency Alert
-        const [insertResult] = await connection.query(
-          `INSERT INTO EMERGENCY_ALERTS (user_id, location, status, notes, location_label)
-           VALUES (?, ST_SRID(POINT(?, ?), 4326), 'triggered', ?, ?)`,
-          [userId, lng, lat, enrichedNotes, formattedAddress]
+      const address = await resolveCampusAddress(lat, lng);
+      const notes = text + ' · Loc: ' + (address ?? (lat.toFixed(5) + ', ' + lng.toFixed(5)));
+      const alertId = await inTransaction(async connection => {
+        const [result] = await connection.query(
+          "INSERT INTO EMERGENCY_ALERTS (user_id, location, notes, location_label, client_sos_id, request_hash, dispatch_after) VALUES (?, ST_SRID(POINT(?, ?), 4326), ?, ?, ?, ?, NOW(3))",
+          [userId, lng, lat, notes, address, id, hash],
         );
-
-        alertId = insertResult.insertId;
-
-        // R.A. 10173 Audit Logging
         await logAudit(connection, {
-          userId,
-          action: 'CREATE',
-          table: 'EMERGENCY_ALERTS',
-          recordId: alertId,
-          oldValue: null,
-          newValue: {
-            latitude: lat,
-            longitude: lng,
-            formattedAddress,
-            notes: enrichedNotes,
-          },
+          userId, action: 'CREATE', table: 'EMERGENCY_ALERTS', recordId: result.insertId,
+          oldValue: null, newValue: { latitude: lat, longitude: lng, formattedAddress: address, notes },
           ipAddress: req.ip,
         });
-
-        await connection.commit();
-        await invalidateCache('queue:*');
-      } catch (dbErr) {
-        await connection.rollback();
-        throw dbErr;
-      } finally {
-        connection.release();
-      }
-
-      // Fetch user demographic & health indicators for responder payload
-      // (NON_TEACHING joined so the fix to roleLabel/identifier covers
-      // support staff; the patient identity itself is never redacted.)
-      const [details] = await pool.query(
-        `SELECT u.user_id, u.first_name, u.last_name, u.phone, u.email,
-                COALESCE(r.code, 'STUDENT') AS primary_role,
-                COALESCE(r.name, 'Student Patient') AS role_name,
-                COALESCE(sp.student_no, fp.faculty_no, st.license_no, ntp.employee_no, 'PSU Member') AS identifier_no,
-                COALESCE(sp.course, fp.department, st.department, ntp.department, 'PSU Lingayen') AS affiliation,
-                hp.blood_type, hp.allergies, hp.chronic_conditions,
-                hp.emergency_contact_name, hp.emergency_contact_phone
-         FROM USERS u
-         LEFT JOIN USER_ROLES ur ON u.user_id = ur.user_id
-         LEFT JOIN ROLES r ON ur.role_id = r.role_id
-         LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
-         LEFT JOIN STAFF_PROFILES st ON u.user_id = st.user_id
-         LEFT JOIN FACULTY_PROFILES fp ON u.user_id = fp.user_id
-         LEFT JOIN NON_TEACHING_PROFILES ntp ON u.user_id = ntp.user_id
-         LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
-         WHERE u.user_id = ?
-         LIMIT 1`,
-        [userId]
-      );
-
-      const patientInfo = details[0] || {};
-      const decryptedAllergies = decrypt(patientInfo.allergies) || 'None listed';
-      const decryptedConditions = decrypt(patientInfo.chronic_conditions) || 'None listed';
-
-      // Server-side roleLabel (shared with /active via responderAccess.js) —
-      // covers STUDENT and NON_TEACHING, which the old inline map missed.
-      const roleLabel = roleLabelFor(patientInfo.primary_role);
-
-      const alertPayload = {
-        alertId,
-        userId,
-        patientName: `${patientInfo.first_name} ${patientInfo.last_name}`,
-        phone: patientInfo.phone,
-        role: patientInfo.primary_role,
-        roleLabel,
-        studentNo: patientInfo.identifier_no,
-        course: patientInfo.affiliation,
-        bloodType: patientInfo.blood_type || 'Unknown',
-        allergies: decryptedAllergies,
-        chronicConditions: decryptedConditions,
-        emergencyContact: `${patientInfo.emergency_contact_name || 'N/A'} (${patientInfo.emergency_contact_phone || 'N/A'})`,
-        latitude: lat,
-        longitude: lng,
-        formattedAddress,
-        googleMapsUrl: `https://www.google.com/maps?q=${lat},${lng}`,
-        status: 'triggered',
-        createdAt: new Date().toISOString(),
-      };
-
-      // 1. Resolve the live audience (flag OR legacy role, sender excluded,
-      //    suspended/soft-deleted accounts dropped). Each recipient is then
-      //    served a payload tiered for their access level.
-      const audience = await getResponderAudience({ excludeUserId: userId });
-
-      // Upgraded device registrations receive an incident ID and generic text.
-      void sendSosPush(audience.map((recipient) => recipient.userId), {
-        alertId, latitude: lat, longitude: lng,
+        return result.insertId;
       });
-
-      // 3. Broadcast via WebSockets (Socket.IO) to each recipient's own
-      //    per-user room (user:<id>), with the medical details redacted for
-      //    community (non-clinical) responders. Per-user rooms — never a
-      //    shared role room — so suspensions, flag revocations and role
-      //    edits take effect immediately without stale room membership.
-      if (io) {
-        for (const recipient of audience) {
-          io.to(`user:${recipient.userId}`).emit(
-            'emergency:new_alert',
-            redactForTier(alertPayload, recipient.tier)
-          );
+      return replyWithReceipt(res, { alert_id: alertId, location_label: address }, false);
+    } catch (error) {
+      if (id && error.code === 'ER_DUP_ENTRY') {
+        try {
+          const accepted = await readAccepted(request);
+          if (accepted) return replyWithReceipt(res, accepted, true);
+        } catch (lookupError) {
+          console.error('[SOS Receipt]:', lookupError.code ?? lookupError.name);
         }
       }
-
-      res.status(201).json({
-        message: 'Emergency alert dispatched to campus responders.',
-        alertId,
-        formattedAddress,
-      });
-    } catch (error) {
-      console.error('SOS Trigger Error:', error);
-      res.status(500).json({ error: 'Failed to process SOS alert.' });
+      console.error('[SOS Submission]:', error.code ?? error.name);
+      res.status(503).json({ error: 'Could not verify SOS receipt.' });
     }
   });
 }

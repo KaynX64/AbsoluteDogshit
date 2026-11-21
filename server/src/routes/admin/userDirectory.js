@@ -6,8 +6,10 @@ import { logAudit } from '../../utils/auditLogger.js';
 import { decrypt } from '../../utils/cryptoVault.js';
 import { requireSuperAdminCaller } from '../../admin/accounts/permissions.js';
 
+// Mount directory reads and account archival.
 export function registerUserDirectoryRoutes(router, io) {
   // 1. GET /api/admin/users - Comprehensive User Accounts, Roles & Sub-profiles
+  // List accounts with their roles, profile fields, and applicable administrator grants.
   router.get('/users', requirePermission('USERS_MANAGE'), async (req, res) => {
     try {
       const includeArchived = req.query.archived === 'true';
@@ -61,13 +63,14 @@ export function registerUserDirectoryRoutes(router, io) {
       );
 
       // Derive the admin archetype per user (additive fields; non-admins get null).
-      const enriched = users.map((u) => {
+      const enriched = users.map(/* Normalize responder and permission fields for the account directory. */ (u) => {
         // Normalize the flag for JSON consumers (MySQL TINYINT arrives as 0/1).
         u.is_qualified_responder = Boolean(u.is_qualified_responder);
         u.sos_via_role = Boolean(u.sos_via_role);
         if (u.role !== 'ADMIN') {
           return { ...u, admin_permissions: null, admin_archetype: null };
         }
+        // Trim each permission code from the joined grant list.
         const granted = (u.admin_permissions_raw || '').split(',').map((c) => c.trim()).filter(Boolean);
         delete u.admin_permissions_raw;
         if (granted.length === 0 || granted.includes('SUPER_ADMIN')) {
@@ -84,6 +87,7 @@ export function registerUserDirectoryRoutes(router, io) {
   });
 
   // Archive an account without deleting clinical or audit history.
+  // Soft-archive a permitted target and audit the change while protecting the last active Super Admin.
   router.delete('/users/:id', requirePermission('USERS_MANAGE'), async (req, res) => {
     const targetUserId = Number(req.params.id);
     if (!Number.isSafeInteger(targetUserId) || targetUserId <= 0) {
@@ -118,6 +122,7 @@ export function registerUserDirectoryRoutes(router, io) {
        ORDER BY u.user_id
        FOR UPDATE`
       );
+      // Collect locked administrator IDs for checks inside the archival transaction.
       const activeAccountIds = adminLocks.map((row) => row.user_id);
       const [activeAdminRows] = activeAccountIds.length > 0
         ? await connection.query(
@@ -129,6 +134,7 @@ export function registerUserDirectoryRoutes(router, io) {
           [activeAccountIds]
         )
         : [[]];
+      // Collect active administrator IDs for grant lookup.
       const activeAdminIds = activeAdminRows.map((row) => row.user_id);
       const [activePermissionRows] = activeAdminIds.length > 0
         ? await connection.query(
@@ -163,6 +169,7 @@ export function registerUserDirectoryRoutes(router, io) {
        FOR UPDATE`,
         [targetUserId]
       );
+      // Check whether the archival target is an administrator.
       const targetRole = roleRows.some((row) => row.code === 'ADMIN')
         ? 'ADMIN'
         : (roleRows[0]?.code || null);
@@ -172,6 +179,7 @@ export function registerUserDirectoryRoutes(router, io) {
         const targetCodes = grantsByUser.get(targetUserId) || [];
         const targetIsSuper = targetCodes.length === 0 || targetCodes.includes('SUPER_ADMIN');
         if (targetRows[0].is_active && targetIsSuper) {
+          // Keep administrators whose grants classify them as Super Admins.
           const activeSuperCount = activeAdminRows.filter((row) => {
             const codes = grantsByUser.get(Number(row.user_id)) || [];
             return codes.length === 0 || codes.includes('SUPER_ADMIN');
@@ -218,12 +226,14 @@ export function registerUserDirectoryRoutes(router, io) {
   });
 }
 
+// Mount the advanced editor's protected health-profile read.
 export function registerUserHealthProfileRoute(router) {
   // 1c. GET /api/admin/users/:id/health-profile — Advanced profile editor
   // data source. Returns the decrypted HEALTH_PROFILES row (allergies and
   // chronic_conditions are AES-256-GCM encrypted at rest), the clinical
   // signature enrolment status for staff roles, and read-only account
   // metadata for the Advanced mode info panel.
+  // Decrypt the requested profile and record the PHI access.
   router.get('/users/:id/health-profile', requirePermission('USERS_MANAGE'), async (req, res) => {
     const targetUserId = Number(req.params.id);
     if (!Number.isInteger(targetUserId) || targetUserId <= 0) {
@@ -245,7 +255,7 @@ export function registerUserHealthProfileRoute(router) {
 
       // Multi-role safe: ADMIN wins over any secondary role so the
       // admin-lifecycle guard below cannot be sidestepped.
-      const role_code = targetRows.some((r) => r.role_code === 'ADMIN')
+      const role_code = targetRows.some(/* Check whether the health-profile target is an administrator. */ (r) => r.role_code === 'ADMIN')
         ? 'ADMIN'
         : (targetRows[0].role_code || 'STUDENT');
 

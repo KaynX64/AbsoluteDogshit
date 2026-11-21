@@ -2,6 +2,7 @@
 
 import { pool } from '../db/pool.js';
 
+// Count consultations by patient department with an optional result limit.
 export async function listConsultationsByDepartment({ fallback = 'General Walk-in', limit } = {}) {
   const [rows] = await pool.query(
     `SELECT department, COUNT(*) AS count
@@ -19,6 +20,7 @@ export async function listConsultationsByDepartment({ fallback = 'General Walk-i
   return rows;
 }
 
+// Count active accounts assigned to each role.
 export async function listActiveRoles() {
   const [rows] = await pool.query(
     `SELECT r.code, r.name, COUNT(u.user_id) AS count
@@ -31,6 +33,7 @@ export async function listActiveRoles() {
   return rows;
 }
 
+// Read medicine lots, quantities, and expiry dates for an inventory report.
 export async function listInventoryForReport({ orderByExpiry = false } = {}) {
   const [rows] = await pool.query(
     `SELECT m.name, b.batch_no, b.quantity_on_hand, b.expiry_date,
@@ -42,6 +45,7 @@ export async function listInventoryForReport({ orderByExpiry = false } = {}) {
   return rows;
 }
 
+// Read the medicine batches that meet the dashboard's inventory alert criteria.
 export async function listInventoryAlerts(limit) {
   const [rows] = await pool.query(
     `SELECT b.batch_id, m.name, m.generic_name, b.batch_no, b.quantity_on_hand, m.reorder_level,

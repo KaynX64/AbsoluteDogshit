@@ -13,6 +13,7 @@ const documentTypes = [
   ['INCIDENT_REPORTS', 'report_id', 'created_at', '', generateAndStoreIncidentReportPDF],
 ];
 
+// Retry missing PDFs in bounded batches and report failures and pending age for telemetry.
 export async function recoverMissingPdfs({ database = pool, types = documentTypes } = {}) {
   const summary = { attempted: 0, recovered: 0, failed: 0, queryFailures: 0, oldestPendingAt: null };
   for (const [table, id, created, extra, generate] of types) {

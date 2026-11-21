@@ -52,7 +52,7 @@ export function tierFromRow({ isQualifiedResponder = false, hasClinicalRole = fa
 export function resolveResponderTier({ isQualifiedResponder = false, roles = [] } = {}) {
   return tierFromRow({
     isQualifiedResponder,
-    hasClinicalRole: roles.some((r) => CLINICAL_ROLES.includes(r)),
+    hasClinicalRole: roles.some(/* Check whether a role qualifies for clinical alert details. */ (r) => CLINICAL_ROLES.includes(r)),
   });
 }
 
@@ -77,7 +77,9 @@ export async function getResponderAudience({ excludeUserId = null } = {}) {
     [CLINICAL_ROLES, LEGACY_RESPONDER_ROLES]
   );
 
+  // Shape each eligible responder's user ID and medical access tier.
   return rows
+    // Omit the SOS sender from the responder audience.
     .filter((row) => Number(row.user_id) !== Number(excludeUserId))
     .map((row) => ({
       userId: Number(row.user_id),
@@ -106,8 +108,10 @@ export async function resolveResponderAccess(userId) {
      WHERE ur.user_id = ?`,
     [userId]
   );
+  // Extract the live role codes used to resolve SOS eligibility.
   const roles = roleRows.map((r) => r.code);
   const isActive = Boolean(rows[0].is_active) && rows[0].deleted_at === null;
+  // Check whether a role grants legacy SOS access.
   const legacyRole = roles.some((r) => LEGACY_RESPONDER_ROLES.includes(r));
   const flagged = Boolean(rows[0].is_qualified_responder);
   const authorized = isActive && (legacyRole || flagged);
@@ -122,7 +126,9 @@ export async function resolveResponderAccess(userId) {
  * Sets req.responderTier ('clinical' | 'community') for payload tiering.
  */
 export function requireResponderAccess(req, res, next) {
+  // Forward a responder access lookup failure to Express.
   resolveResponderAccess(req.user.user_id)
+    // Attach the authorized responder tier to the request or return a denial.
     .then(({ authorized, tier }) => {
       if (!authorized) {
         return res.status(403).json({

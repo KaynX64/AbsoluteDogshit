@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/emergency_alert_service.dart';
 import '../services/responder_roster.dart';
+import '../screens/incident_reports_screen.dart';
 import 'sos_alert_actions.dart';
 
 class ActiveIncidentBanner extends StatelessWidget {
@@ -179,6 +180,15 @@ class ResponderHub extends StatelessWidget {
                     label: const Text('Test siren for 3 seconds'),
                   ),
                   const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => IncidentReportsScreen(service: service),
+                      ),
+                    ),
+                    icon: const Icon(Icons.assignment_outlined),
+                    label: const Text('Pending incident reports'),
+                  ),
                   Text(
                     'Active incidents',
                     style: Theme.of(context).textTheme.titleLarge,

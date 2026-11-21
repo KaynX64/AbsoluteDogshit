@@ -65,6 +65,7 @@ export const NOSHOW_LIMIT = {
 // ─────────────────────────────────────────────────────────────────────────
 // Startup log — confirms the active policy in the server console
 // ─────────────────────────────────────────────────────────────────────────
+// Print the effective rate limits and no-show grace period for the startup log.
 export function logActiveLimits({ login, sos, booking, verify, noShow }) {
   console.log(
     `🛡️  [Rate Limits] Login: ${login.maxAttempts} / ${login.windowSeconds}s · ` +

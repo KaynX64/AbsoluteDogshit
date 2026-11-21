@@ -4,20 +4,54 @@ import { authenticateToken } from '../../../auth/middleware.js';
 import { requireRoles } from '../../../middleware/rbac.js';
 import { isCalendarDate } from '../../../config/appointmentRules.js';
 import { SignerError } from '../../../documents/signing/signatory.js';
+import { reviewStructuredPrescription, issueStructuredPrescription } from '../../../documents/prescriptions/structuredIssuance.js';
+import { makeReviewToken, enabled } from '../../../documents/prescriptions/structuredContract.js';
 import { issuePrescription } from '../../../documents/prescriptions/issuePrescription.js';
 
+// Parse a submitted medicine quantity as a valid whole number.
 function quantityInt(value, minimum = 1) {
   if (typeof value !== 'number' && (typeof value !== 'string' || !/^\d+$/.test(value.trim()))) return null;
   const number = Number(value);
   return Number.isInteger(number) && number >= minimum && number <= 2147483647 ? number : null;
 }
 
+// Mount the endpoint that validates prescriptions and invokes the issuing service.
 export function registerPrescriptionIssuance(router, io) {
+  const roles = [authenticateToken, requireRoles('DOCTOR', 'DENTIST')];
+  const structuredError = (res, error) => res.status(error.status || (error.code === 'INSUFFICIENT_STOCK' ? 409 : 503)).json({
+    error: error.status ? error.message : error.code === 'INSUFFICIENT_STOCK' ? 'Insufficient clinic stock. Review fulfillment and quantities.' : 'Prescribing checks are unavailable. Retry without changing the request identifier.',
+    code: error.code || 'PRESCRIBING_UNAVAILABLE', errors: error.errors,
+  });
+  router.get('/prescription-capabilities', ...roles, (_req, res) => res.json({
+    contract_versions: [1, 2], structured_issuance_enabled: enabled(), max_items: 20,
+  }));
+  router.post('/prescriptions/review', ...roles, async (req, res) => {
+    if (!enabled()) return res.status(503).json({ error: 'Structured prescribing is not enabled yet.', code: 'PRESCRIBING_DISABLED' });
+    try {
+      const assessment = await reviewStructuredPrescription(req.body, req.user.user_id);
+      res.json({ ...assessment, review_token: makeReviewToken(assessment, req.user.user_id) });
+    } catch (error) { structuredError(res, error); }
+  });
   // =============================================================================
   // 1. PRESCRIPTIONS WITH AUTOMATED FEFO INVENTORY DEDUCTION
   // =============================================================================
 
+  // Validate the recipient, medication directions, and quantities before issuing the prescription.
   router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST'), async (req, res) => {
+    if (req.body.contract_version === 2) {
+      if (!enabled()) return res.status(503).json({ error: 'Structured prescribing is not enabled yet.', code: 'PRESCRIBING_DISABLED' });
+      try {
+        const result = await issueStructuredPrescription(req.body, req.user.user_id, {
+          ipAddress: req.ip, onInventoryUpdated: () => io?.emit('inventory:updated'),
+        });
+        if (!result.replayed) io?.to(`user:${Number(req.body.patient_user_id)}`).emit('documents:updated', { kind: 'prescriptions' });
+        return res.status(result.replayed ? 200 : 201).json(result);
+      } catch (error) { return structuredError(res, error); }
+    }
+    if (req.body.contract_version != null && req.body.contract_version !== 1) return res.status(400).json({ error: 'Unsupported prescribing contract.', code: 'UPDATE_REQUIRED' });
+    if (Array.isArray(req.body.items) && req.body.items.some(item => item && !item.medicine_id)) {
+      return res.status(400).json({ error: 'Update the desktop app to issue structured external prescriptions.', code: 'UPDATE_REQUIRED' });
+    }
     const { emr_id, patient_user_id, items, notes: rawNotes, appointment_id, expires_at } = req.body;
     const doctorUserId = req.user.user_id;
 
@@ -80,10 +114,14 @@ export function registerPrescriptionIssuance(router, io) {
     const result = await issuePrescription({
       doctorUserId, patient_user_id, appointment_id, emr_id, expires_at, notes,
       formularyItems, outsideItems, itemCount: items.length, ipAddress: req.ip,
+      // Notify connected clients after the stock deductions commit.
       onInventoryUpdated: () => io?.emit('inventory:updated'),
     });
     if (result.conflict) return res.status(409).json(result.conflict);
-    if (result.issued) return res.status(201).json(result.issued);
+    if (result.issued) {
+      io?.to(`user:${Number(patient_user_id)}`).emit('documents:updated', { kind: 'prescriptions' });
+      return res.status(201).json(result.issued);
+    }
     const error = result.failure;
     if (error instanceof SignerError) {
       return res.status(error.status).json({ error: error.message, code: error.code });

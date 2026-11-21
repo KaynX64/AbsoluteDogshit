@@ -4,11 +4,13 @@ import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';
 import { archiveMedicine, createMedicine } from '../../inventory/formularyMutations.js';
 
+// Mount medicine creation and archival endpoints.
 export function registerFormularyRoutes(router, io) {
   // =============================================================================
   // 3. MASTER FORMULARY REGISTRATION
   // =============================================================================
 
+  // Validate and create a formulary entry and publish the inventory refresh.
   router.post('/medicines', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
     const { name, generic_name, form, strength, unit, reorder_level: rawReorderLevel } = req.body;
 
@@ -39,6 +41,7 @@ export function registerFormularyRoutes(router, io) {
     }
   });
 
+  // Archive a medicine through the audited service and publish the inventory refresh.
   router.delete('/medicines/:id', authenticateToken, requireRoles('NURSE', 'ADMIN'), async (req, res) => {
     const medicineId = Number(req.params.id);
     try {

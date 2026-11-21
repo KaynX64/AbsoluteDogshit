@@ -10,6 +10,7 @@ const router = express.Router();
 
 // Mounted below the admin authentication gate. Check the actual admin grant
 // even if this account also holds a clinical role.
+// Resolve live administrator grants and require Super Admin access.
 router.use(async (req, res, next) => {
   try {
     const { isSuper } = await resolveAdminPermissions(req.user.user_id);
@@ -21,10 +22,12 @@ router.use(async (req, res, next) => {
   }
 });
 
+// Shape a policy snapshot for the editor with current values, defaults, and field definitions.
 function response({ version, values, overrides }) {
   return { version, values, overrides, defaults: serverPolicyDefaults, fields: serverPolicyFields };
 }
 
+// Validate the base revision and submitted override values.
 function validateUpdate(req, res, next) {
   const { version, overrides } = req.body ?? {};
   const { values, errors } = validatePolicyOverrides(overrides);
@@ -34,10 +37,13 @@ function validateUpdate(req, res, next) {
   next();
 }
 
+// Return a conflict when the policy revision has changed.
 const stalePolicy = (res) => res.status(409).json({ error: 'The policy has changed. Reload it before saving.', code: 'POLICY_CHANGED' });
 
+// Return the active server policy to the editor.
 router.get('/', (req, res) => res.json(response(getServerPolicy())));
 
+// Validate and preview proposed overrides against the current revision.
 router.post('/preview', validateUpdate, async (req, res) => {
   const { version, overrides } = res.locals.policyUpdate;
   try {
@@ -64,6 +70,7 @@ router.post('/preview', validateUpdate, async (req, res) => {
   }
 });
 
+// Save an audited policy revision when the submitted version still matches.
 router.put('/', validateUpdate, async (req, res) => {
   const { version, overrides } = res.locals.policyUpdate;
   try {

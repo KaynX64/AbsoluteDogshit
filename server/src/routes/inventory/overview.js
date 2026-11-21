@@ -5,12 +5,14 @@ import { listReorderSuggestions } from '../../inventory/pharmacyAnalytics.js';
 import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';
 
+// Mount stock, expiry, reorder, ledger, and catalog reads.
 export function registerInventoryOverview(router) {
   // =============================================================================
   // 1. READ / QUERY CATALOGUE & LOGS
   // =============================================================================
 
   // GET /api/inventory/batches - Fetch batches with active stock
+  // List the stock batches visible in the inventory view.
   router.get('/batches', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'DENTIST', 'ADMIN'), async (req, res) => {
     try {
       const [rows] = await pool.query(
@@ -31,6 +33,7 @@ export function registerInventoryOverview(router) {
   });
 
   // GET /api/inventory/medicines - Master drug catalogue with unexpired available stock
+  // List active formulary medicines.
   router.get('/medicines', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
     try {
       const [medicines] = await pool.query(
@@ -50,6 +53,7 @@ export function registerInventoryOverview(router) {
   });
 
   // GET /api/inventory/expiring-soon
+  // Return batches approaching expiry.
   router.get('/expiring-soon', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
     try {
       const [rows] = await pool.query(
@@ -76,6 +80,7 @@ export function registerInventoryOverview(router) {
   });
 
   // GET /api/inventory/reorder-suggestions
+  // Return medicines at or below their reorder threshold.
   router.get('/reorder-suggestions', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
     try {
       res.json(await listReorderSuggestions());
@@ -86,6 +91,7 @@ export function registerInventoryOverview(router) {
   });
 
   // GET /api/inventory/logs
+  // Return recent stock movement entries for the inventory log.
   router.get('/logs', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
     try {
       const [logs] = await pool.query(
@@ -111,6 +117,7 @@ export function registerInventoryOverview(router) {
   });
 
   // GET /api/inventory/dashboard-summary - Live pharmacy inventory metrics for nurse console
+  // Return inventory counts and stock alerts for the dashboard.
   router.get('/dashboard-summary', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
     try {
       const [lowStock] = await pool.query(

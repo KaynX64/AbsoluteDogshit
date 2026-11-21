@@ -1,4 +1,4 @@
-// server/src/documents/signing/signatureVault.js
+// Validates and stores clinician signature PNGs in MinIO and retrieves them for document generation.
 //
 // Stores each doctor's/dentist's handwritten signature as an IMMUTABLE,
 // content-addressed PNG in MinIO:  signatures/user-{id}-{sha12}.png
@@ -16,6 +16,7 @@ const MAX_W = 1200;
 const MAX_H = 600;
 
 export class SignatureError extends Error {
+  // Create a signature validation or storage failure with an HTTP status and code.
   constructor(message, status = 400, code = 'INVALID_SIGNATURE') {
     super(message);
     this.name = 'SignatureError';
@@ -52,6 +53,7 @@ export function validateSignaturePng(buf) {
   return { width, height };
 }
 
+// Validate the PNG and upload it under a key derived from the account ID and image hash.
 export async function storeSignature(userId, buf) {
   const dims = validateSignaturePng(buf);
   const sha256 = crypto.createHash('sha256').update(buf).digest('hex');

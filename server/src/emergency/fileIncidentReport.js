@@ -4,6 +4,7 @@ import { inTransaction } from '../db/transaction.js';
 import { logAudit } from '../utils/auditLogger.js';
 
 export class IncidentReportError extends Error {
+  // Create a filing error that carries the HTTP status and response code.
   constructor(message, status, code) {
     super(message);
     this.status = status;
@@ -11,8 +12,10 @@ export class IncidentReportError extends Error {
   }
 }
 
+// File the report and audit entry for a resolved alert, handling attempts to file it twice.
 export async function fileIncidentReport({ alertId, responderId, incidentDetails, treatmentNotes, resolution, ipAddress }) {
   try {
+    // Lock the alert, verify it is ready for documentation, and save the encrypted report and audit entry.
     return await inTransaction(async connection => {
       const [[alert]] = await connection.query(
         'SELECT user_id, status, created_at, resolved_at FROM EMERGENCY_ALERTS WHERE alert_id = ? FOR UPDATE',

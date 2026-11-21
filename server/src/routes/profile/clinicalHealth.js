@@ -6,12 +6,14 @@ import { logAudit } from '../../utils/auditLogger.js';
 import { requireRoles } from '../../middleware/rbac.js';
 import { SignerError, assertAppointmentInQueue } from '../../documents/signing/signatory.js';
 
+// Mount staff reads and writes for patient immunization records.
 export function registerClinicalHealthRoutes(router) {
   // =============================================================================
   // PATIENT IMMUNIZATION ENDPOINTS (CLINICAL WORKSPACE)
   // =============================================================================
 
   // GET /api/profile/patient/:patientId/immunizations
+  // Read the patient's saved immunization details and audit protected access.
   router.get(
     '/patient/:patientId/immunizations',
     authenticateToken,
@@ -51,6 +53,7 @@ export function registerClinicalHealthRoutes(router) {
   );
 
   // PUT /api/profile/patient/:patientId/immunizations
+  // Validate and save the patient's immunization history and record the change.
   router.put(
     '/patient/:patientId/immunizations',
     authenticateToken,

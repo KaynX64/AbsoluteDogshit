@@ -5,6 +5,7 @@ import { requirePermission } from '../../middleware/rbac.js';
 import { isRedisActive } from '../../utils/redisClient.js';
 import { getWorkerStats } from '../../workers/scheduler.js';
 
+// Validate audit log cursor and page size parameters.
 function readAuditPage(req, res) {
   const { before, limit } = req.query;
   if ((before !== undefined && (typeof before !== 'string' || !/^[1-9]\d{0,18}$/.test(before) || BigInt(before) > 9223372036854775807n)) ||
@@ -15,8 +16,10 @@ function readAuditPage(req, res) {
   return { before, limit: Number(limit ?? 100) };
 }
 
+// Mount the protected PHI access log endpoint.
 export function registerPhiAccessLogRoute(router) {
   // 2. GET /api/admin/phi-access-logs - PHI Surveillance Log
+  // Return a page of PHI access events with viewer details.
   router.get('/phi-access-logs', requirePermission('AUDIT_VIEW'), async (req, res) => {
     const page = readAuditPage(req, res);
     if (!page) return;
@@ -56,8 +59,10 @@ export function registerPhiAccessLogRoute(router) {
   });
 }
 
+// Mount change audit logs and server telemetry endpoints.
 export function registerAuditAndTelemetryRoutes(router) {
   // 4. GET /api/admin/audit-logs - Append-only Hash Chain
+  // Return a page of audited database changes in descending audit ID order.
   router.get('/audit-logs', requirePermission('AUDIT_VIEW'), async (req, res) => {
     const page = readAuditPage(req, res);
     if (!page) return;
@@ -85,6 +90,7 @@ export function registerAuditAndTelemetryRoutes(router) {
   });
 
   // 5. GET /api/admin/telemetry - Health Status
+  // Return system health and background worker metrics to an authorized administrator.
   router.get('/telemetry', requirePermission('TELEMETRY_VIEW'), async (req, res) => {
     try {
       const [dbTest] = await pool.query('SELECT 1 as isAlive');

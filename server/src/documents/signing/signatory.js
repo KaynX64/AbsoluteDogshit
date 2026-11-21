@@ -1,4 +1,4 @@
-// server/src/documents/signing/signatory.js
+// Checks clinical document signing requirements and formats the signer's credentials.
 //
 // Single source of truth for "who may sign a clinical document".
 // formatSignatory / formatIssuedBy are pure. The assert* guards take an open
@@ -12,6 +12,7 @@ const PATIENT_ROLES = ['STUDENT', 'FACULTY', 'NON_TEACHING'];
 const DESIGNATION = { DOCTOR: 'Physician', DENTIST: 'Dentist' };
 
 export class SignerError extends Error {
+  // Create a signing failure with the status and code returned by document handlers.
   constructor(message, status = 403, code = 'INVALID_SIGNER') {
     super(message);
     this.name = 'SignerError';
@@ -20,6 +21,7 @@ export class SignerError extends Error {
   }
 }
 
+// Check whether a role is allowed to sign a clinical document.
 export function isQualifiedSigner(role) {
   return SIGNER_ROLES.includes(role);
 }
@@ -67,7 +69,8 @@ export async function assertValidSigner(conn, userId, allowedRoles = SIGNER_ROLE
     throw new SignerError('Signer account is deactivated.', 403, 'SIGNER_INACTIVE');
   }
 
-  const role = rows.map((r) => r.role_code).find((c) => allowedRoles.includes(c));
+  // Extract live role codes from the signer's joined account rows.
+  const role = rows.map((r) => r.role_code).find(/* Select a signer role allowed for the document operation. */ (c) => allowedRoles.includes(c));
   if (!role) {
     throw new SignerError(
       'Your account no longer holds a role authorized to sign this document.',
@@ -101,6 +104,7 @@ export async function assertValidSigner(conn, userId, allowedRoles = SIGNER_ROLE
   };
 }
 
+// Require an enrolled signature and return its storage metadata.
 export async function assertSignatureEnrolled(conn, userId) {
   const [rows] = await conn.query(
     'SELECT signature_s3_key, signature_sha256 FROM STAFF_PROFILES WHERE user_id = ?',
@@ -139,7 +143,7 @@ export async function assertValidPatient(conn, patientId, signerId) {
   if (rows.length === 0 || !rows[0].is_active) {
     throw new SignerError('Patient account not found or inactive.', 404, 'PATIENT_NOT_FOUND');
   }
-  if (!rows.some((r) => PATIENT_ROLES.includes(r.role_code))) {
+  if (!rows.some(/* Check whether the recipient has a patient role. */ (r) => PATIENT_ROLES.includes(r.role_code))) {
     throw new SignerError('Documents can only be issued to patient accounts.', 400, 'NOT_A_PATIENT');
   }
 }
@@ -156,9 +160,10 @@ export async function assertEmrBelongsToPatient(conn, emrId, patientId) {
 }
 
 
-export async function assertAppointmentInQueue(conn, appointmentId, patientId, signerId) {
+// Check appointment eligibility with the caller's options and translate failures into signing errors.
+export async function assertAppointmentInQueue(conn, appointmentId, patientId, signerId, options) {
   try {
-    return await assertClinicalAppointment(conn, appointmentId, patientId, signerId);
+    return await assertClinicalAppointment(conn, appointmentId, patientId, signerId, options);
   } catch (error) {
     if (error instanceof AppointmentTransitionError) {
       throw new SignerError(error.message, error.status, error.code);

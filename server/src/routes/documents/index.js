@@ -10,13 +10,14 @@ import { registerVerificationDetailsRoute } from './verification/details.js';
 import { registerAttachmentRoutes } from './attachments.js';
 import { registerPdfRoutes } from './pdfs.js';
 
+// Build the document router and mount clinical files, verification, and signed PDF workflows.
 export default function documentRoutes(io) {
   const router = express.Router();
 
   registerPrescriptionIssuance(router, io);
   registerPrescriptionHistory(router);
   registerPrescriptionCancellation(router, io);
-  registerClearanceRoutes(router);
+  registerClearanceRoutes(router, io);
   registerPublicVerificationRoutes(router);
   registerVerificationDetailsRoute(router);
   registerAttachmentRoutes(router);

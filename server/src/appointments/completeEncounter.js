@@ -7,6 +7,7 @@ import { readEncounterText } from './encounterText.js';
 import { AppointmentTransitionError, updateLockedAppointmentStatus } from './transitions.js';
 import { validateVitals, VITAL_RULES } from './vitals.js';
 
+// Validate encounter text, structured vitals, and dental chart data before writing records.
 export function prepareEncounter(payload, user) {
   const { vitals: submittedVitals, dental_chart: chart } = payload;
   const roles = user.roles || [];
@@ -33,6 +34,7 @@ export function prepareEncounter(payload, user) {
   return { text, vitals, dentalChart };
 }
 
+// Save the encounter and measurements and complete the queued appointment using the caller's connection.
 export async function completeEncounter(connection, {
   appointmentId, patientId, clinicianId, encounter, version = 1, updateMeasurements = false,
 }) {
@@ -54,6 +56,7 @@ export async function completeEncounter(connection, {
   }
 
   const measurements = Object.entries(vitals).map(
+    // Form a vitals insert row with the metric's configured unit and recording clinician.
     ([metric, value]) => [emrId, metric, value, VITAL_RULES[metric].unit, clinicianId],
   );
   if (measurements.length) {

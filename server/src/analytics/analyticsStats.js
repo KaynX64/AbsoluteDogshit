@@ -1,4 +1,4 @@
-// server/src/analytics/analyticsStats.js
+// Aggregates encrypted diagnoses and health risks and caches the results for analytics.
 //
 // Fix for Audit Part 2, Issue #5 (Denial-of-Service & In-Memory PHI Decryption).
 //
@@ -32,7 +32,8 @@ const DECRYPT_FAILED = '[ENCRYPTED PHI - INTEGRITY VERIFICATION FAILED]';
 const DEFAULT_DIAGNOSIS = 'General Health Check';
 const UNREADABLE_LABEL = 'Unreadable record (integrity check failed)';
 
-const yieldToEventLoop = () => new Promise((resolve) => setImmediate(resolve));
+// Yield between database batches so other requests can run.
+const yieldToEventLoop = () => new Promise(/* Schedule promise resolution for the event loop's next check phase. */ (resolve) => setImmediate(resolve));
 
 // ─── Pure aggregators (take a query function so they are unit-testable) ──────
 
@@ -71,7 +72,9 @@ export async function countDiagnoses(queryFn, { batchSize = BATCH_SIZE, maxDisti
   }
 
   return [...counts.entries()]
+    // Convert an aggregate count entry into a diagnosis row.
     .map(([diagnosis, count]) => ({ diagnosis, count }))
+    // Rank by count and use diagnosis text to break ties.
     .sort((a, b) => b.count - a.count || a.diagnosis.localeCompare(b.diagnosis))
     .slice(0, maxDistinct);
 }
@@ -126,6 +129,7 @@ export async function countRiskGroups(queryFn, { batchSize = BATCH_SIZE } = {}) 
 const memoryCache = new Map(); // key -> { value, expiresAt }   (used when Redis is down)
 const inflight = new Map(); // key -> Promise                  (stampede protection)
 
+// Reuse cached aggregates or share the in-flight computation for this key.
 async function cached(key, compute) {
   // 1. Redis (shared across server instances)
   const fromRedis = await getCache(key);
@@ -138,6 +142,7 @@ async function cached(key, compute) {
   // 3. Single-flight: everyone who misses waits on the same computation
   if (inflight.has(key)) return inflight.get(key);
 
+  // Compute the aggregate once, cache the result, and clear the in-flight entry.
   const promise = (async () => {
     try {
       const value = await compute();
@@ -155,13 +160,15 @@ async function cached(key, compute) {
 
 const DIAG_KEY = 'analytics:diagnosis-counts:v1';
 const RISK_KEY = 'analytics:risk-groups:v1';
+// Run an aggregate query through the shared connection pool.
 const runQuery = (sql, params) => pool.query(sql, params);
 
 /** Full sorted diagnosis list (max 500). Callers slice what they need. */
-export const getDiagnosisCounts = () => cached(DIAG_KEY, () => countDiagnoses(runQuery));
+export const getDiagnosisCounts = () => cached(DIAG_KEY, /* Compute the diagnosis ranking after a cache miss. */ () => countDiagnoses(runQuery));
 
 /** { hypertension_count, asthma_count, diabetes_count, severe_allergies_count, total } */
-export const getRiskCounts = () => cached(RISK_KEY, () => countRiskGroups(runQuery));
+// Read the cached high-risk counts or compute them from health profiles.
+export const getRiskCounts = () => cached(RISK_KEY, /* Compute risk totals after a cache miss. */ () => countRiskGroups(runQuery));
 
 /** Call after bulk EMR/profile changes if you need the dashboard to refresh immediately. */
 export async function invalidateAnalyticsCache() {

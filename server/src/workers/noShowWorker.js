@@ -3,6 +3,7 @@
 import { getServerPolicy } from '../config/serverPolicy.js';
 import { markDueAppointmentsNoShow } from '../appointments/noShow.js';
 
+// Mark overdue appointments using the active policy and broadcast committed changes.
 export async function processAppointmentNoShows(io) {
   const { graceMinutes } = getServerPolicy().limits.noShow;
   const ids = await markDueAppointmentsNoShow(graceMinutes);

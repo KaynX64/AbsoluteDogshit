@@ -2,6 +2,7 @@
 
 import { expireDuePrescriptions } from '../documents/prescriptions/expirePrescriptions.js';
 
+// Expire eligible prescriptions and broadcast their committed status changes.
 export async function processPrescriptionExpiry(io) {
   const ids = await expireDuePrescriptions();
   if (ids.length === 0) return;
