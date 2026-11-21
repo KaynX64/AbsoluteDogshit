@@ -6,6 +6,7 @@ import { loadServerPolicy } from '../utils/serverPolicyStore.js';
 import { initRedis, redis } from '../utils/redisClient.js';
 import { ensureBucketExists, s3 } from '../utils/s3Vault.js';
 
+// Apply migrations, load policy, and initialize Redis and object storage before startup.
 export async function initializeDependencies(signal) {
   await runMigrations(pool);
   signal.throwIfAborted();
@@ -19,6 +20,7 @@ export async function initializeDependencies(signal) {
   signal.throwIfAborted();
 }
 
+// Close Redis, S3, and MySQL clients after requests and jobs have drained.
 export async function closeDependencies() {
   redis.disconnect();
   s3.destroy();

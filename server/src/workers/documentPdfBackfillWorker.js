@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { pool } from '../db/pool.js';
 import { recoverMissingPdfs } from '../documents/pdfRecovery.js';
 
+// Acquire the database-scoped recovery lock and run one PDF backfill pass.
 export async function backfillDocumentPdfs() {
   const connection = await pool.getConnection();
   let reusable = false;

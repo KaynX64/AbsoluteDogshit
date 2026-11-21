@@ -4,6 +4,7 @@ import { pool } from '../../db/pool.js';
 import { sendPushToUser } from '../../utils/fcmNotifier.js';
 import { invalidateCache } from '../../utils/redisClient.js';
 
+// Clear stale queue cache entries and send appointment and queue updates after commit.
 export async function publishQueueChange(io, change, { callPatient = false, queueFirst = false } = {}) {
   await invalidateCache('queue:*');
   if (io) {

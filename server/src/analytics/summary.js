@@ -7,6 +7,7 @@ import { getDiagnosisCounts, getRiskCounts } from './analyticsStats.js';
 import { getDailyTimelines } from './dailyTimelines.js';
 import { listActiveRoles, listConsultationsByDepartment, listInventoryAlerts } from './reportQueries.js';
 
+// Load appointment, student, department, and emergency metrics for Operations.
 async function operationsSummary() {
   // 1. All-time appointment records (legacy totalConsultations field).
   const [consultations] = await pool.query(
@@ -30,6 +31,7 @@ async function operationsSummary() {
   );
   const timelines = await getDailyTimelines();
   const deptBreakdown = (await listConsultationsByDepartment({ limit: 6 }))
+    // Rename the department aggregate for the dashboard response.
     .map(({ department, count }) => ({ department, consultations_count: count }));
   return {
     totalConsultations: consultations[0].total,
@@ -40,6 +42,7 @@ async function operationsSummary() {
   };
 }
 
+// Count recent respiratory encounters and load the high-risk profile totals.
 export async function loadSurveillance() {
   const [fluEmrs] = await pool.query(
     `SELECT diagnosis, encounter_date FROM EMR_RECORDS
@@ -84,6 +87,7 @@ export async function loadSurveillance() {
   };
 }
 
+// Combine the dashboard sections and activity figures allowed by the caller's scopes.
 export async function analyticsSummary(scopes) {
   const canViewInventory = scopes.has('ANALYTICS_PHARMACY');
   const canViewDispensing = scopes.has('ANALYTICS_DISPENSING');
@@ -104,6 +108,6 @@ export async function analyticsSummary(scopes) {
       dispensing: pharmacy.dispensing,
       inventory: canViewInventory ? { reorderPriorities: pharmacy.reorderPriorities, lowStockMeds } : null,
     },
-    headcount: headcount && { roleDistribution: headcount.map(({ code, name, count }) => ({ role_code: code, role_name: name, count })) },
+    headcount: headcount && { roleDistribution: headcount.map(/* Shape the roles and account counts for the headcount response. */ ({ code, name, count }) => ({ role_code: code, role_name: name, count })) },
   };
 }

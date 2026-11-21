@@ -6,6 +6,7 @@ import { fileIncidentReport, IncidentReportError } from '../../../emergency/file
 import { generateAndStoreIncidentReportPDF } from '../../../documents/documentService.js';
 import { requireResponderAccess, getResponderAudience, roleLabelFor } from '../../../emergency/responderAccess.js';
 
+// Mount pending report reads, form prefill, and incident report filing.
 export function registerIncidentWorkflowRoutes(router, io) {
   // ===========================================================================
   // 3a. GET /api/emergency/incident-reports/pending
@@ -13,6 +14,7 @@ export function registerIncidentWorkflowRoutes(router, io) {
   // report. Consoles call this on mount so the documentation popup still
   // appears when the status_change event fired while nobody was connected.
   // ===========================================================================
+  // List resolved alerts that still require an incident report.
   router.get('/incident-reports/pending', authenticateToken, requireResponderAccess, async (req, res) => {
     try {
       const [pending] = await pool.query(
@@ -36,7 +38,7 @@ export function registerIncidentWorkflowRoutes(router, io) {
       );
 
       res.json(
-        pending.map((p) => ({
+        pending.map(/* Format an unresolved documentation task for the pending report list. */ (p) => ({
           alertId: Number(p.alert_id),
           status: p.status,
           createdAt: new Date(p.created_at).toISOString(),
@@ -60,6 +62,7 @@ export function registerIncidentWorkflowRoutes(router, io) {
   // identity (name, ID number, contact number) fetched live from the server,
   // plus the alert timeline and any already-filed report.
   // ===========================================================================
+  // Return alert data for the incident report form or identify an already filed report.
   router.get('/:alertId/incident-report', authenticateToken, requireResponderAccess, async (req, res) => {
     try {
       const { alertId } = req.params;
@@ -131,6 +134,7 @@ export function registerIncidentWorkflowRoutes(router, io) {
   // popup. One report per alert (UNIQUE alert_id) — the first console to
   // submit wins; others are told it is already documented.
   // ===========================================================================
+  // File the report, notify connected clients, and attempt to generate its PDF.
   router.post('/:alertId/incident-report', authenticateToken, requireResponderAccess, async (req, res) => {
     try {
       const { alertId } = req.params;
@@ -160,9 +164,10 @@ export function registerIncidentWorkflowRoutes(router, io) {
         const [authorRows] = await pool.query(
           'SELECT CONCAT(first_name, " ", last_name) AS full_name FROM USERS WHERE user_id = ?',
           [responderId]
-        ).catch(() => [[]]);
+        ).catch(/* Supply an empty result if the documenting responder's display name cannot be loaded. */ () => [[]]);
         const documentedByName =
           Array.isArray(authorRows) && authorRows.length > 0 ? authorRows[0].full_name : null;
+        // Fall back to an empty recipient list if the responder audience lookup fails.
         const audience = await getResponderAudience({}).catch(() => []);
         for (const recipient of audience) {
           io.to(`user:${recipient.userId}`).emit('emergency:incident_reported', {
@@ -175,6 +180,7 @@ export function registerIncidentWorkflowRoutes(router, io) {
       }
 
       // Asynchronously generate PDF and upload to MinIO file server
+      // Log a PDF generation failure after the report has been filed.
       generateAndStoreIncidentReportPDF(reportId).catch((err) => {
         console.error(`[Incident Report PDF Generation] Report #${reportId} failed:`, err.message);
       });

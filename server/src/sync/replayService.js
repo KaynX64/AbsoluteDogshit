@@ -12,9 +12,12 @@ const handlers = new Map([
   ['APPOINTMENTS:UPDATE', updateAppointment],
 ]);
 
+// Accept a client mutation ID only when it matches the replay ledger format.
 const ledgerId = value => typeof value === 'string' && /^[a-z0-9_-]+$/i.test(value) ? value : null;
+// Identify MySQL lock failures that a client can retry.
 const retryable = error => error.code === 'ER_LOCK_DEADLOCK' || error.code === 'ER_LOCK_WAIT_TIMEOUT';
 
+// Read the recorded outcome and owner for a previously submitted mutation ID.
 async function findReplay(connection, clientMutationId, lock = false) {
   const [rows] = await connection.query(
     `SELECT sync_id, sync_status, record_id, user_id
@@ -24,6 +27,7 @@ async function findReplay(connection, clientMutationId, lock = false) {
   return rows[0];
 }
 
+// Reuse a stored result only for the account that owns the ledger entry.
 function previousResult(clientMutationId, userId, row) {
   const result = { client_mutation_id: clientMutationId };
   if (String(row.user_id) !== String(userId)) {
@@ -39,6 +43,7 @@ function previousResult(clientMutationId, userId, row) {
   return { ...result, status: 'error', error: 'Synchronization failed.' };
 }
 
+// Deduplicate and apply one mutation, recording its outcome with the database work.
 async function replayOne(connection, mutation, { user, deviceId, ipAddress }) {
   const { client_mutation_id, table_name, record_uuid, action, payload, local_version = 1 } = mutation ?? {};
   const result = { client_mutation_id };
@@ -127,6 +132,7 @@ async function replayOne(connection, mutation, { user, deviceId, ipAddress }) {
   }
 }
 
+// Process a batch with a shared connection and return one outcome per mutation.
 export async function replayMutations(mutations, context) {
   const connection = await pool.getConnection();
   try {

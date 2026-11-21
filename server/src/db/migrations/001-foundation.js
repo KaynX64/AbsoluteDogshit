@@ -5,6 +5,7 @@ import { ensureColumns } from './schema.js';
 export default {
   version: 1,
   name: 'operational and admin tables',
+  // Ensure the baseline policy, queue counter, permissions, and incident report structures exist.
   async schema(connection) {
     await ensureColumns(connection, [
       { table: 'USERS', column: 'theme_mode', type: "ENUM('light','dark') NOT NULL DEFAULT 'light'" },
@@ -60,6 +61,7 @@ export default {
     await connection.query(`SELECT report_id, alert_id, patient_user_id, resolved_at, incident_details,
       treatment_notes, documented_by, created_at FROM INCIDENT_REPORTS LIMIT 0`);
   },
+  // Seed and normalize foundational data needed by older installations.
   async data(connection) {
     await connection.query('INSERT IGNORE INTO SERVER_POLICY (policy_id, overrides) VALUES (1, JSON_OBJECT())');
     await connection.query(`INSERT IGNORE INTO ADMIN_PERMISSIONS (code, name, description, sort_order) VALUES

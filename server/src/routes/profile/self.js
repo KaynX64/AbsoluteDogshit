@@ -7,8 +7,10 @@ import { encrypt, decrypt } from '../../utils/cryptoVault.js';
 import { requirePrivacyConsent } from '../../middleware/consent.js';
 import { getBmiCategory } from '../../utils/bmi.js';
 
+// Mount the signed-in account's authorized profile read.
 export function registerSelfProfileRead(router) {
   // GET /api/profile/me - Dynamically retrieves role-aware profile & clinical data
+  // Return the caller's profile, role-specific details, and applicable health information.
   router.get('/me', authenticateToken, requirePrivacyConsent, async (req, res) => {
     try {
       const userId = req.user.user_id;
@@ -81,8 +83,10 @@ export function registerSelfProfileRead(router) {
   });
 }
 
+// Mount the signed-in account's authorized profile update.
 export function registerSelfProfileUpdate(router) {
   // PUT /api/profile/me - Dynamically persists updates to MySQL with AES-256 encryption
+  // Validate and save the caller's account and health-profile edits with an audit entry.
   router.put('/me', authenticateToken, requirePrivacyConsent, async (req, res) => {
     const userId = req.user.user_id;
     const {

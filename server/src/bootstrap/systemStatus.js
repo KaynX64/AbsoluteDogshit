@@ -13,6 +13,7 @@ const runFile = promisify(execFile);
 const { version: serverVersion } = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'));
 let coreProbe;
 
+// Report host memory totals and read Linux's available memory estimate when available.
 async function memorySnapshot() {
   const totalBytes = os.totalmem();
   let availableBytes = os.freemem();
@@ -29,6 +30,7 @@ async function memorySnapshot() {
   return { totalBytes, availableBytes, usedBytes: totalBytes - availableBytes };
 }
 
+// Determine the number of physical CPU cores using the host's platform facilities.
 async function physicalCores() {
   try {
     if (process.platform === 'win32') {
@@ -42,6 +44,7 @@ async function physicalCores() {
     }
     if (process.platform === 'linux') {
       const info = await readFile('/proc/cpuinfo', 'utf8');
+      // Form a physical package and core identifier from a Linux CPU record.
       const pairs = info.split(/\r?\n\r?\n/).flatMap(block => {
         const cpuPackage = block.match(/^physical id\s*:\s*(\d+)/m)?.[1];
         const core = block.match(/^core id\s*:\s*(\d+)/m)?.[1];
@@ -57,15 +60,16 @@ async function physicalCores() {
 
 const activeProbes = new Map();
 
+// Reuse one pending check per service and bound the wait for its result.
 async function probe(service, work, fallback = 'Unavailable') {
   let timer;
   try {
     if (!activeProbes.has(service)) {
-      activeProbes.set(service, Promise.resolve().then(work).finally(() => activeProbes.delete(service)));
+      activeProbes.set(service, Promise.resolve().then(work).finally(/* Release the service's pending probe entry when the check settles. */ () => activeProbes.delete(service)));
     }
     const version = await Promise.race([
       activeProbes.get(service),
-      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Probe timed out')), 3500); }),
+      new Promise(/* Schedule a timeout promise for the dependency probe. */ (_, reject) => { timer = setTimeout(/* Reject the probe wait after its diagnostic deadline. */ () => reject(new Error('Probe timed out')), 3500); }),
     ]);
     return { status: 'Operational', version: version || null };
   } catch {
@@ -75,6 +79,7 @@ async function probe(service, work, fallback = 'Unavailable') {
   }
 }
 
+// Check bucket reachability and read the available object-storage version details.
 async function minioVersion() {
   const bucket = await s3.send(new HeadBucketCommand({ Bucket: BUCKET_NAME }), { abortSignal: AbortSignal.timeout(3000) });
   // S3-compatible endpoints do not have to disclose their release.
@@ -83,20 +88,22 @@ async function minioVersion() {
 }
 
 let pending;
+// Share a single pending status snapshot across simultaneous requests.
 export function collectSystemStatus() {
-  pending ??= sampleSystemStatus().finally(() => { pending = undefined; });
+  pending ??= sampleSystemStatus().finally(/* Clear the shared snapshot promise so the next request can sample again. */ () => { pending = undefined; });
   return pending;
 }
 
+// Collect hardware and dependency checks into the operation status response.
 async function sampleSystemStatus() {
   const [cores, ram, mysql, redisStatus, minio] = await Promise.all([
     coreProbe ??= physicalCores(),
     memorySnapshot(),
-    probe('mysql', async () => {
+    probe('mysql', /* Read the MySQL version as part of its health check. */ async () => {
       const [[result]] = await pool.query({ sql: 'SELECT VERSION() AS version', timeout: 3000 });
       return result.version;
     }),
-    probe('redis', async () => {
+    probe('redis', /* Ping Redis and read its reported server version. */ async () => {
       if (!isRedisActive()) throw new Error('Redis unavailable');
       return (await redis.info('server')).match(/^redis_version:([^\r\n]+)/m)?.[1];
     }, 'Fallback'),
@@ -105,7 +112,7 @@ async function sampleSystemStatus() {
 
   return {
     overall: mysql.status !== 'Operational' ? 'Unavailable'
-      : [redisStatus, minio].every(service => service.status === 'Operational') ? 'Operational' : 'Degraded',
+      : [redisStatus, minio].every(/* Check whether all optional services are operational. */ service => service.status === 'Operational') ? 'Operational' : 'Degraded',
     serverVersion,
     environment: `${os.type()} ${os.release()} (${os.arch()})`,
     cores,

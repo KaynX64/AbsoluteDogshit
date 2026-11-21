@@ -18,6 +18,7 @@ import {
 
 // ─── INCIDENT REPORT PDF ──────────────────────────────────────────────────
 
+// Render incident details, treatment and response notes, and report metadata as a PDF.
 export async function renderIncidentReportPDF(incident) {
   const {
     report_id,

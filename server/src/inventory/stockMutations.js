@@ -4,7 +4,9 @@ import { inTransaction } from '../db/transaction.js';
 import { logAudit } from '../utils/auditLogger.js';
 import { fail } from '../utils/httpError.js';
 
+// Receive a delivery and audit the stock change.
 export function receiveStock({ medicine_id, batch_no, manufacture_date, expiry_date, supplier, quantity_received, userId, ipAddress }) {
+  // Verify the medicine, update the received batch, and write its movement and audit entries.
   return inTransaction(async connection => {
     const [medRows] = await connection.query(
       'SELECT name FROM MEDICINES WHERE medicine_id = ? AND deleted_at IS NULL FOR UPDATE',
@@ -64,7 +66,9 @@ export function receiveStock({ medicine_id, batch_no, manufacture_date, expiry_d
   });
 }
 
+// Record a manual deduction against an eligible lot.
 export function deductStock({ batch_id, quantity_deducted, reason, userId, ipAddress }) {
+  // Lock the lot, verify usable quantities, and persist the deduction and audit.
   return inTransaction(async connection => {
     const [batchRows] = await connection.query(
       'SELECT quantity_on_hand, batch_no, expiry_date, DATEDIFF(expiry_date, CURDATE()) as days_until_expiry FROM MEDICINE_BATCHES WHERE batch_id = ? AND deleted_at IS NULL FOR UPDATE',
@@ -111,7 +115,9 @@ export function deductStock({ batch_id, quantity_deducted, reason, userId, ipAdd
   });
 }
 
+// Adjust a lot's quantity and record the reason for the change.
 export function adjustStock({ batch_id, quantity_removed, transaction_type, reason, userId, ipAddress }) {
+  // Lock the lot and commit its quantity adjustment, ledger movement, and audit together.
   return inTransaction(async connection => {
     const [batchRows] = await connection.query(
       'SELECT quantity_on_hand, batch_no FROM MEDICINE_BATCHES WHERE batch_id = ? AND deleted_at IS NULL FOR UPDATE',

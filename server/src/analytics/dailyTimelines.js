@@ -2,6 +2,7 @@
 
 import { pool } from '../db/pool.js';
 
+// Read encounter and SOS counts against the same fourteen-day MySQL calendar.
 export async function getDailyTimelines() {
   const [days] = await pool.query(`
     WITH RECURSIVE calendar AS (
@@ -30,7 +31,8 @@ export async function getDailyTimelines() {
     LEFT JOIN emergencies s ON s.day = c.day
     ORDER BY c.day
   `);
-  const series = key => days.map(day => ({
+  // Shape one of the daily count columns for the dashboard.
+  const series = key => days.map(/* Convert a report day into a timeline point and flag the partial current day. */ day => ({
     date: day.date, label: day.label, count: Number(day[key]), partial: Boolean(day.partial),
   }));
   return { timeSeries: series('encounters'), emergencyTimeSeries: series('emergencies') };

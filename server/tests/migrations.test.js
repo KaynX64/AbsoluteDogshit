@@ -12,11 +12,13 @@ const port = Number(process.env.VALETUDO_MIGRATION_TEST_PORT);
 const skip = !port && 'Set VALETUDO_MIGRATION_TEST_PORT to rehearse against disposable MySQL';
 const schema = await readFile(new URL('../schema.sql', import.meta.url), 'utf8');
 
+// Create a disposable database and optionally load the base schema.
 async function fixture(t, provision = true) {
   const database = 'vhl_migrate_test_' + randomUUID().replaceAll('-', '');
   const options = { host: '127.0.0.1', port, user: 'root', password: process.env.VALETUDO_MIGRATION_TEST_PASSWORD || '' };
   const admin = await mysql.createConnection({ ...options, multipleStatements: true });
   const pool = mysql.createPool({ ...options, database, connectionLimit: 3 });
+  // Close fixture connections and drop the disposable database after the test.
   t.after(async () => {
     await pool.end();
     try {
@@ -33,11 +35,13 @@ async function fixture(t, provision = true) {
   return pool;
 }
 
+// Read the test account's current Qualified Responder flag.
 async function responderFlag(pool) {
   const [[row]] = await pool.query('SELECT is_qualified_responder FROM USERS WHERE user_id = 4');
   return row.is_qualified_responder;
 }
 
+// Capture the DDL for the foundational tables for schema comparison.
 async function foundationSchema(pool) {
   const definitions = {};
   for (const table of ['SERVER_POLICY', 'QUEUE_TICKET_COUNTERS', 'ADMIN_PERMISSIONS', 'USER_ADMIN_PERMISSIONS', 'INCIDENT_REPORTS']) {
@@ -47,20 +51,25 @@ async function foundationSchema(pool) {
   return definitions;
 }
 
+// Verify that fresh schema is adopted once even when two migration runners start together.
 test('fresh schema is adopted once even when two migration runners start together', { skip }, async t => {
   const pool = await fixture(t);
   const applied = await Promise.all([runMigrations(pool), runMigrations(pool)]);
   assert.deepEqual(applied.sort(), [0, 13]);
   assert.equal(await responderFlag(pool), 1);
   const readOnlyPool = {
+    // Wrap a fixture connection so completed migrations can only make read queries.
     async getConnection() {
       const connection = await pool.getConnection();
       return {
+        // Assert that rerunning completed migrations performs no writes.
         async query(sql, params) {
           assert.match(sql.trim(), /^SELECT\b/, 'Already migrated databases must use only read queries');
           return connection.query(sql, params);
         },
+        // Return the wrapped fixture connection to the pool.
         release: () => connection.release(),
+        // Forward connection destruction to the underlying fixture connection.
         destroy: () => connection.destroy(),
       };
     },
@@ -68,6 +77,7 @@ test('fresh schema is adopted once even when two migration runners start togethe
   assert.equal(await runMigrations(readOnlyPool), 0);
 });
 
+// Verify that replay migration removes legacy payloads and retains duplicate outcomes.
 test('replay migration removes legacy payloads and retains duplicate outcomes', { skip }, async t => {
   const pool = await fixture(t);
   await pool.query("ALTER TABLE LOCAL_SYNC_LOGS ADD COLUMN payload JSON NOT NULL, ADD COLUMN error_message TEXT NULL");
@@ -80,7 +90,7 @@ test('replay migration removes legacy payloads and retains duplicate outcomes', 
   `);
   assert.equal(await runMigrations(pool), 13);
   const [columns] = await pool.query('SHOW COLUMNS FROM LOCAL_SYNC_LOGS');
-  assert.ok(columns.every(column => !['payload', 'error_message'].includes(column.Field)));
+  assert.ok(columns.every(/* Check the remaining ledger columns for removed payload and error fields. */ column => !['payload', 'error_message'].includes(column.Field)));
   const [[row]] = await pool.query(`
     SELECT client_mutation_id, user_id, record_id, sync_status FROM LOCAL_SYNC_LOGS
   `);
@@ -90,6 +100,7 @@ test('replay migration removes legacy payloads and retains duplicate outcomes', 
   assert.equal(await runMigrations(pool), 0);
 });
 
+// Verify that an existing schema keeps revoked responders, admin grants and saved policy.
 test('an existing schema keeps revoked responders, admin grants and saved policy', { skip }, async t => {
   const pool = await fixture(t);
   await pool.query('UPDATE USERS SET is_qualified_responder = 0, qualified_responder_since = NULL WHERE user_id = 4');
@@ -111,7 +122,7 @@ test('an existing schema keeps revoked responders, admin grants and saved policy
   assert.equal(grants, 3);
   const [codes] = await pool.query(`SELECT p.code FROM ADMIN_PERMISSIONS p
     JOIN USER_ADMIN_PERMISSIONS g ON g.permission_id = p.permission_id WHERE g.user_id = 1 ORDER BY p.code`);
-  assert.deepEqual(codes.map(({ code }) => code), ['ANALYTICS_HEADCOUNT', 'ANALYTICS_VIEW', 'USERS_MANAGE']);
+  assert.deepEqual(codes.map(/* Extract the administrator grant codes after migration. */ ({ code }) => code), ['ANALYTICS_HEADCOUNT', 'ANALYTICS_VIEW', 'USERS_MANAGE']);
   await pool.query(`DELETE g FROM USER_ADMIN_PERMISSIONS g JOIN ADMIN_PERMISSIONS p USING (permission_id)
     WHERE g.user_id = 1 AND p.code = 'ANALYTICS_HEADCOUNT'`);
   assert.equal(await runMigrations(pool), 0);
@@ -121,6 +132,7 @@ test('an existing schema keeps revoked responders, admin grants and saved policy
   assert.equal(permission.name, 'View incident records');
 });
 
+// Verify that legacy tables and columns are rebuilt additively and the responder backfill runs once.
 test('legacy tables and columns are rebuilt additively and the responder backfill runs once', { skip }, async t => {
   const pool = await fixture(t);
   const freshFoundation = await foundationSchema(pool);
@@ -151,16 +163,16 @@ test('legacy tables and columns are rebuilt additively and the responder backfil
   const [[legacyDevice]] = await pool.query("SELECT installation_id, sos_mode FROM DEVICE_TOKENS WHERE fcm_token = 'legacy-token'");
   assert.deepEqual(legacyDevice, { installation_id: null, sos_mode: 'on_duty' });
   const [dayIndex] = await pool.query("SHOW INDEX FROM APPOINTMENTS WHERE Key_name = 'idx_app_status_datetime'");
-  assert.deepEqual(dayIndex.map(row => row.Column_name), ['status', 'date_time', 'deleted_at']);
+  assert.deepEqual(dayIndex.map(/* Extract indexed column names to verify the appointment-day index order. */ row => row.Column_name), ['status', 'date_time', 'deleted_at']);
   const [activityIndex] = await pool.query("SHOW INDEX FROM INVENTORY_LOGS WHERE Key_name = 'idx_inv_activity_date'");
-  assert.deepEqual(activityIndex.map(row => row.Column_name), ['transaction_type', 'created_at']);
+  assert.deepEqual(activityIndex.map(/* Extract indexed columns for the pharmacy activity index check. */ row => row.Column_name), ['transaction_type', 'created_at']);
   const [issuedIndex] = await pool.query("SHOW INDEX FROM PRESCRIPTIONS WHERE Key_name = 'idx_rx_issued_at'");
-  assert.deepEqual(issuedIndex.map(row => row.Column_name), ['issued_at']);
+  assert.deepEqual(issuedIndex.map(/* Extract indexed columns for the prescription issue date index check. */ row => row.Column_name), ['issued_at']);
   const migratedFoundation = await foundationSchema(pool);
   // InnoDB can place an ALTER-added index after implicit foreign-key indexes.
   const sortIndexes = ddl => ddl.split('\n').sort().join('\n');
-  assert.deepEqual(Object.fromEntries(Object.entries(migratedFoundation).map(([key, ddl]) => [key, sortIndexes(ddl)])),
-    Object.fromEntries(Object.entries(freshFoundation).map(([key, ddl]) => [key, sortIndexes(ddl)])));
+  assert.deepEqual(Object.fromEntries(Object.entries(migratedFoundation).map(/* Normalize migrated table definitions for comparison. */ ([key, ddl]) => [key, sortIndexes(ddl)])),
+    Object.fromEntries(Object.entries(freshFoundation).map(/* Normalize fresh table definitions for comparison. */ ([key, ddl]) => [key, sortIndexes(ddl)])));
   assert.equal(await responderFlag(pool), 1);
   const [[{ quantity_prescribed }]] = await pool.query('SELECT quantity_prescribed FROM PRESCRIPTION_ITEMS');
   const [[{ expiryDays }]] = await pool.query('SELECT DATEDIFF(expires_at, issued_at) AS expiryDays FROM PRESCRIPTIONS');
@@ -171,15 +183,17 @@ test('legacy tables and columns are rebuilt additively and the responder backfil
   assert.equal(await responderFlag(pool), 0);
 });
 
+// Verify that an interrupted responder schema change resumes with its original backfill decision.
 test('an interrupted responder schema change resumes with its original backfill decision', { skip }, async t => {
   const pool = await fixture(t);
   await pool.query('ALTER TABLE INCIDENT_REPORTS DROP INDEX idx_pending_pdf, DROP COLUMN pdf_s3_key');
   await pool.query('ALTER TABLE USERS DROP INDEX idx_users_qualified_responder, DROP COLUMN is_qualified_responder');
   const interruptingPool = {
+    // Wrap a connection to interrupt the responder migration at a specific schema change.
     async getConnection() {
       const connection = await pool.getConnection();
       const query = connection.query.bind(connection);
-      connection.query = (sql, params) => {
+      connection.query = /* Simulate failure while adding the responder index and forward other queries. */ (sql, params) => {
         if (sql.includes('ADD INDEX') && params?.[1] === 'idx_users_qualified_responder') throw new Error('fixture interruption');
         return query(sql, params);
       };
@@ -195,6 +209,7 @@ test('an interrupted responder schema change resumes with its original backfill 
   assert.equal(await responderFlag(pool), 1);
 });
 
+// Verify that an unprovisioned database fails before writing a migration ledger.
 test('an unprovisioned database fails before writing a migration ledger', { skip }, async t => {
   const pool = await fixture(t, false);
   await assert.rejects(runMigrations(pool), /Missing or incompatible base tables/);

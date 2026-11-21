@@ -14,6 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 
 const __dirname = path.dirname(__filename);
 
+// Mount public document verification and its legacy clearance endpoint.
 export function registerPublicVerificationRoutes(router) {
   // =============================================================================
   // 3. PUBLIC VERIFICATION HELPERS (privacy-minimizing + throttling)
@@ -27,6 +28,7 @@ export function registerPublicVerificationRoutes(router) {
       path.join(process.cwd(), 'server/public/verify.html'),
       path.join(process.cwd(), 'public/verify.html'),
     ];
+    // Find the first existing verification page in the supported directory layouts.
     return candidates.find((p) => fs.existsSync(p)) || null;
   }
 
@@ -52,6 +54,7 @@ export function registerPublicVerificationRoutes(router) {
   // falls back to an in-memory counter so it never fails open.
   const verifyMemoryHits = new Map();
 
+  // Rate-limit verification attempts by request IP.
   async function verifyRateLimit(req, res, next) {
     const { verify: VERIFY_LIMIT } = getServerPolicy().limits;
     const identifier = req.ip || 'unknown';
@@ -106,6 +109,7 @@ export function registerPublicVerificationRoutes(router) {
   // 4. UNIVERSAL QR VERIFICATION (PUBLIC — privacy-minimized)
   // =============================================================================
 
+  // Serve the QR landing page or return limited document verification data.
   router.get('/verify/:qrToken', verifyRateLimit, async (req, res) => {
     const { qrToken } = req.params;
     const acceptsHtml = req.accepts('html') && !req.xhr && !req.headers['accept']?.includes('application/json');
@@ -212,6 +216,7 @@ export function registerPublicVerificationRoutes(router) {
   });
 
   // PUBLIC: returns authenticity status only — no student number, course, or raw DB row.
+  // Return the legacy public verification response for a clearance token.
   router.get('/clearances/verify/:token', verifyRateLimit, async (req, res) => {
     const qrToken = req.params.token;
     try {

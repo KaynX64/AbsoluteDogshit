@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
+// Verify that an accepted restart replaces a failed drain once and reports a failed replacement.
 test('an accepted restart replaces a failed drain once and reports a failed replacement', { timeout: 10_000 }, async () => {
   const folder = await mkdtemp(join(tmpdir(), 'valetudo-supervisor-'));
   try {
@@ -31,6 +32,7 @@ test('an accepted restart replaces a failed drain once and reports a failed repl
       stdio: ['ignore', 'pipe', 'inherit'], signal: AbortSignal.timeout(7000),
     });
     let output = '';
+    // Collect supervisor process output for the restart assertions.
     supervisor.stdout.setEncoding('utf8').on('data', chunk => { output += chunk; });
     const [exit] = await once(supervisor, 'close');
     assert.equal(exit, 2);

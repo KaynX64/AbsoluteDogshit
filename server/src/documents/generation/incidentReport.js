@@ -8,6 +8,7 @@ import { storeDocumentPdf } from './storage.js';
 
 // ─── INCIDENT REPORTS ─────────────────────────────────────────────────────
 
+// Load the filed report and associated alert details and render and store the PDF.
 export async function generateAndStoreIncidentReportPDF(reportId, database = pool) {
   try {
     const [rows] = await database.query(
@@ -98,6 +99,7 @@ export async function generateAndStoreIncidentReportPDF(reportId, database = poo
         : null,
     });
 
+    // Record the object key if the report still needs a PDF.
     const key = await storeDocumentPdf('incident-reports/incident', reportId, buffer, storageKey =>
       database.query('UPDATE INCIDENT_REPORTS SET pdf_s3_key = ?, pdf_retry_at = NULL WHERE report_id = ? AND pdf_s3_key IS NULL', [storageKey, reportId]),
     );

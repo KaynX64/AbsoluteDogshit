@@ -6,11 +6,13 @@ import { requireRoles } from '../../../middleware/rbac.js';
 import { decrypt } from '../../../utils/cryptoVault.js';
 import { getBmiCategory } from '../../../utils/bmi.js';
 
+// Mount patient search for nurse intake and QR check-in.
 export function registerIntakeLookupRoutes(router) {
   // ===========================================================================
   // 6. QR INTAKE & PATIENT LOOKUP
   // ===========================================================================
 
+  // Look up a patient or their booked visit from the submitted intake search.
   router.get('/lookup', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
     const { query, userId } = req.query;
 
@@ -62,6 +64,7 @@ export function registerIntakeLookupRoutes(router) {
         params
       );
 
+      // Decrypt health alerts returned with the matched appointment.
       const decrypted = rows.map((app) => ({
         ...app,
         allergies: decrypt(app.allergies) || 'None reported',
@@ -77,10 +80,12 @@ export function registerIntakeLookupRoutes(router) {
   });
 }
 
+// Mount the read for a patient's existing active ticket.
 export function registerActiveTicket(router) {
   // ===========================================================================
   // 6.2 GET /api/appointments/patient/:patientId/active-ticket
   // ===========================================================================
+  // Return the patient's current queue entry for intake.
   router.get(
     '/patient/:patientId/active-ticket',
     authenticateToken,

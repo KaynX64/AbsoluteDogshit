@@ -25,7 +25,9 @@ const {
 } = await import('../src/emergency/responderAccess.js');
 const { groupSosDevices, sosPushForMode } = await import('../src/emergency/deviceDelivery.js');
 
+// Verify that SOS push groups separate legacy, audible, quiet and off-duty registrations.
 test('SOS push groups separate legacy, audible, quiet and off-duty registrations', () => {
+  // Create a push registration with a specific installation, device type, and SOS mode.
   const device = (fcm_token, installation_id, sos_mode, device_type = 'android') => ({
     fcm_token, installation_id, sos_mode, device_type,
   });
@@ -49,32 +51,39 @@ test('SOS push groups separate legacy, audible, quiet and off-duty registrations
   assert.equal(legacy.title, silent.title);
 });
 
+// Verify that the self capability reflects live access while the alert list still rejects a denied user.
 test('the self capability reflects live access while the alert list still rejects a denied user', async (t) => {
   const { pool } = await import('../src/db/pool.js');
   const keyPath = fileURLToPath(new URL('../serviceAccountKey.json', import.meta.url));
   const existsSync = fs.existsSync;
+  // Hide the local Firebase credential from the responder route test.
   const hideKey = t.mock.method(fs, 'existsSync', (path) => path !== keyPath && existsSync(path));
   const { default: emergencyRoutes } = await import('../src/routes/emergency/index.js');
   hideKey.mock.restore();
 
   const router = emergencyRoutes();
-  const getRoute = (path) => router.stack.find(({ route }) => route?.path === path).route;
+  // Get a responder route by path for a direct handler test.
+  const getRoute = (path) => router.stack.find(/* Match the router entry that owns the requested path. */ ({ route }) => route?.path === path).route;
   const capability = getRoute('/responder-access').stack.at(-1).handle;
   const requireActiveAccess = getRoute('/active').stack[1].handle;
   const req = { user: { user_id: 42 }, query: { userId: 99 } };
   let flagged = false;
   let role = 'DENTIST';
+  // Simulate live responder roles and qualification for the fixture account.
   t.mock.method(pool, 'query', async (sql, params) => {
     assert.deepEqual(params, [42]);
     return sql.includes('is_qualified_responder')
       ? [[{ is_active: 1, deleted_at: null, is_qualified_responder: flagged }]]
       : [[{ code: role }]];
   });
+  // Call the eligibility handler and capture its headers and JSON body.
   const check = async (authorized, tier = null) => {
     const headers = {};
     let body;
     await capability(req, {
+      // Save the header set by the eligibility handler.
       set(name, value) { headers[name] = value; },
+      // Capture the responder capability payload.
       json(value) { body = value; },
     });
     assert.deepEqual(body, { authorized, tier, isQualifiedResponder: flagged });
@@ -82,12 +91,16 @@ test('the self capability reflects live access while the alert list still reject
   };
 
   await check(false);
+  // Run the active alert guard and wait for its denial response.
   const denied = await new Promise((resolve, reject) => {
+    // Fail the test if the denied caller reaches the next handler.
     requireActiveAccess(req, {
+      // Assert that a denied caller receives HTTP 403.
       status(code) {
         assert.equal(code, 403);
         return this;
       },
+      // Resolve with the body returned by the alert authorization guard.
       json(body) { resolve(body); },
     }, () => reject(new Error('Unflagged dentist passed the alert-list guard')));
   });
@@ -101,38 +114,45 @@ test('the self capability reflects live access while the alert list still reject
 });
 
 // ── Tier resolution ────────────────────────────────────────────────────────
+// Verify that a clinical role alone qualifies the account for clinical SOS details.
 test('tier: clinical role wins even without the flag', () => {
   assert.equal(resolveResponderTier({ isQualifiedResponder: false, roles: ['NURSE'] }), 'clinical');
   assert.equal(resolveResponderTier({ isQualifiedResponder: false, roles: ['DENTIST'] }), 'clinical');
 });
 
+// Verify that a flagged student is classified as a community responder.
 test('tier: flagged non-clinical account is community', () => {
   assert.equal(resolveResponderTier({ isQualifiedResponder: true, roles: ['STUDENT'] }), 'community');
   assert.equal(resolveResponderTier({ isQualifiedResponder: true, roles: ['FACULTY'] }), 'community');
   assert.equal(resolveResponderTier({ isQualifiedResponder: true, roles: ['NON_TEACHING'] }), 'community');
 });
 
+// Verify that a student without the flag lacks responder access.
 test('tier: unflagged non-clinical account is null (no SOS access)', () => {
   assert.equal(resolveResponderTier({ isQualifiedResponder: false, roles: ['STUDENT'] }), null);
   assert.equal(resolveResponderTier({ isQualifiedResponder: false, roles: [] }), null);
 });
 
+// Verify that adding the flag preserves a physician's clinical tier.
 test('tier: flag on a clinical account stays clinical (flag is additive)', () => {
   assert.equal(resolveResponderTier({ isQualifiedResponder: true, roles: ['DOCTOR'] }), 'clinical');
 });
 
+// Verify that tierFromRow mirrors resolveResponderTier.
 test('tierFromRow mirrors resolveResponderTier', () => {
   assert.equal(tierFromRow({ isQualifiedResponder: true, hasClinicalRole: false }), 'community');
   assert.equal(tierFromRow({ isQualifiedResponder: false, hasClinicalRole: true }), 'clinical');
   assert.equal(tierFromRow({ isQualifiedResponder: false, hasClinicalRole: false }), null);
 });
 
+// Check the distinction between the dentist's medical detail tier and legacy SOS access.
 test('role lists: DENTIST is clinical but not a legacy recipient', () => {
   assert.ok(CLINICAL_ROLES.includes('DENTIST'));
   assert.ok(!LEGACY_RESPONDER_ROLES.includes('DENTIST')); // unflagged dentists never received SOS
 });
 
 // ── Payload redaction ──────────────────────────────────────────────────────
+// Build a complete fixture alert with clinical, contact, and location fields.
 const fullPayload = () => ({
   alertId: 7,
   patientName: 'Daniella Movida',
@@ -151,6 +171,7 @@ const fullPayload = () => ({
   googleMapsUrl: 'https://www.google.com/maps?q=16.0298,120.2285',
 });
 
+// Check that the community response strips protected medical fields.
 test('redaction: community tier loses every medical detail', () => {
   const out = redactForTier(fullPayload(), 'community');
   assert.equal(out.medicalDetailsRedacted, true);
@@ -160,6 +181,7 @@ test('redaction: community tier loses every medical detail', () => {
   assert.equal(out.emergencyContact, undefined);
 });
 
+// Check which identity, contact, and location fields remain visible to community responders.
 test('redaction: identity, contact and location survive the community tier', () => {
   const out = redactForTier(fullPayload(), 'community');
   assert.equal(out.patientName, 'Daniella Movida');
@@ -169,6 +191,7 @@ test('redaction: identity, contact and location survive the community tier', () 
   assert.equal(out.googleMapsUrl, 'https://www.google.com/maps?q=16.0298,120.2285');
 });
 
+// Compare the original field values with the clinical recipient's payload.
 test('redaction: clinical tier keeps everything and is marked unredacted', () => {
   const inP = fullPayload();
   const out = redactForTier(inP, 'clinical');
@@ -178,6 +201,7 @@ test('redaction: clinical tier keeps everything and is marked unredacted', () =>
   assert.equal(out.emergencyContact, 'Maria Movida (09299876543)');
 });
 
+// Check that the community filter also removes SQL-style field names in active alert rows.
 test('redaction: snake_case keys (/active rows) are stripped for community too', () => {
   const out = redactForTier({ alert_id: 9, blood_type: 'O+', allergies: 'Dust' }, 'community');
   assert.equal(out.blood_type, undefined);
@@ -185,6 +209,7 @@ test('redaction: snake_case keys (/active rows) are stripped for community too',
   assert.equal(out.medicalDetailsRedacted, true);
 });
 
+// Verify that redaction never mutates the caller payload.
 test('redaction never mutates the caller payload', () => {
   const inP = fullPayload();
   redactForTier(inP, 'community');
@@ -192,6 +217,7 @@ test('redaction never mutates the caller payload', () => {
 });
 
 // ── roleLabel ──────────────────────────────────────────────────────────────
+// Check the shared labels for student and non-teaching accounts.
 test('roleLabelFor covers STUDENT and NON_TEACHING (old map missed them)', () => {
   assert.equal(roleLabelFor('STUDENT'), 'Student');
   assert.equal(roleLabelFor('NON_TEACHING'), 'Non-Teaching Staff');
@@ -200,6 +226,7 @@ test('roleLabelFor covers STUDENT and NON_TEACHING (old map missed them)', () =>
 });
 
 // ── PUT /users/:id/qualified-responder input validation ────────────────────
+// Reject a responder qualification flag with a non-boolean value.
 test('flag endpoint body: boolean required', () => {
   assert.equal(parseQualifiedResponderBody({}).ok, false);
   assert.equal(parseQualifiedResponderBody({ is_qualified_responder: 'yes' }).ok, false);
@@ -208,6 +235,7 @@ test('flag endpoint body: boolean required', () => {
   assert.equal(parseQualifiedResponderBody({ is_qualified_responder: false }).ok, true);
 });
 
+// Check that notes are trimmed and that oversized notes fail validation.
 test('flag endpoint body: note trimmed and length-checked', () => {
   const long = 'x'.repeat(151);
   assert.equal(parseQualifiedResponderBody({ is_qualified_responder: true, note: long }).ok, false);

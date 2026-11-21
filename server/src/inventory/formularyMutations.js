@@ -4,7 +4,9 @@ import { inTransaction } from '../db/transaction.js';
 import { logAudit } from '../utils/auditLogger.js';
 import { fail } from '../utils/httpError.js';
 
+// Create a medicine catalog entry and its audit record.
 export function createMedicine({ name, generic_name, form, strength, unit, reorder_level, userId, ipAddress }) {
+  // Insert the catalog entry and audit it in the same transaction.
   return inTransaction(async connection => {
     const [result] = await connection.query(
       `INSERT INTO MEDICINES (name, generic_name, form, strength, unit, reorder_level)
@@ -27,7 +29,9 @@ export function createMedicine({ name, generic_name, form, strength, unit, reord
   });
 }
 
+// Archive an existing medicine and record the change.
 export function archiveMedicine({ medicineId, userId, ipAddress }) {
+  // Lock the medicine row before archiving it and writing its audit entry.
   return inTransaction(async connection => {
     const [medRows] = await connection.query(
       'SELECT name, generic_name, strength FROM MEDICINES WHERE medicine_id = ? AND deleted_at IS NULL FOR UPDATE',

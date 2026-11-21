@@ -65,6 +65,7 @@ const formularyMetrics = `
     FROM formulary f
   )`;
 
+// Read active medicines at or below their usable-stock reorder threshold.
 export async function listReorderSuggestions() {
   const [rows] = await pool.query(`
     ${formularyMetrics}
@@ -76,6 +77,7 @@ export async function listReorderSuggestions() {
   return rows;
 }
 
+// Load recent prescribing and dispensing metrics and any requested replenishment data.
 export async function getPharmacyAnalytics({ includeDispensing = true, includeReorder = false, limit = 6 } = {}) {
   if (!includeDispensing) {
     const [rows] = await pool.query(`
@@ -113,16 +115,23 @@ export async function getPharmacyAnalytics({ includeDispensing = true, includeRe
     WHERE usage_rank <= ?${reorderRows}
   `, includeReorder ? [limit, limit] : [limit]);
 
+  // Select shared medicine identity and display fields from a query row.
   const identity = ({ medicine_id, name, generic_name, form, strength, unit }) =>
     ({ medicine_id, name, generic_name, form, strength, unit });
+  // Retain medicines within the requested activity ranking.
   const dispensing = rows.filter(row => Number(row.usage_rank) <= limit)
+    // Sort dispensing results by their database-calculated rank.
     .sort((a, b) => Number(a.usage_rank) - Number(b.usage_rank))
+    // Shape the medicine's dispensing measures for the analytics response.
     .map(({ quantity_prescribed, quantity_dispensed, quantity_returned, net_dispensed, availability, ...medicine }) => ({
       ...identity(medicine), quantity_prescribed, quantity_dispensed, quantity_returned, net_dispensed, availability,
     }));
   const reorderPriorities = includeReorder ? rows
+    // Keep ranked medicines that are candidates for replenishment.
     .filter(row => Number(row.reorder_rank) <= limit && row.stock_status !== 'ADEQUATE')
+    // Sort replenishment candidates by their database-calculated rank.
     .sort((a, b) => Number(a.reorder_rank) - Number(b.reorder_rank))
+    // Shape the medicine's stock, buffer, and reorder recommendation.
     .map(({ total_stock_on_hand, reorder_level, suggested_reorder_qty, stock_status, ...medicine }) => ({
       ...identity(medicine), total_stock_on_hand, reorder_level, suggested_reorder_qty, stock_status,
     })) : null;

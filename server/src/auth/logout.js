@@ -10,6 +10,7 @@ import { removePushDevice } from '../emergency/deviceDelivery.js';
 // ─────────────────────────────────────────────────────────────────────────
 // LOGOUT & SESSION TERMINATION
 // ─────────────────────────────────────────────────────────────────────────
+// Revoke the current session where possible, remove its push registration, and disconnect its sockets.
 export async function logoutUser(req, res, io) {
   try {
     const user = req.user;

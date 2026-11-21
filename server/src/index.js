@@ -22,20 +22,24 @@ const startupController = new AbortController();
 let stopping;
 const startup = startServer(server, { io, isHttps, signal: startupController.signal });
 
+// Send the supervisor a restart request, then start draining this process.
 async function restart() {
-  await new Promise((resolve, reject) => process.send('restart-after-drain', error => error ? reject(error) : resolve()));
+  // Wait for the IPC restart request to be sent.
+  await new Promise((resolve, reject) => process.send('restart-after-drain', /* Resolve or reject the restart request based on IPC delivery. */ error => error ? reject(error) : resolve()));
   await shutdown();
 }
 
+// Coordinate one shutdown across startup, network, workers, and shared clients.
 function shutdown() {
-  stopping ??= (async () => {
+  stopping ??= (/* Abort active startup work and drain resources within the shutdown deadline. */ async () => {
     startupController.abort();
-    const timeout = setTimeout(() => {
+    const timeout = setTimeout(/* Force process exit if graceful shutdown exceeds its deadline. */ () => {
       console.error('[shutdown] Grace period expired.');
       process.exit(1);
     }, 30_000).unref();
 
     try {
+      // Allow the shutdown sequence to proceed when startup rejects.
       const stopWorkers = await startup.catch(() => undefined);
       await drainServer({ io, stopWorkers, closeDependencies });
     } catch (error) {
@@ -50,7 +54,9 @@ function shutdown() {
 }
 
 if (process.connected && process.env.VALETUDO_SUPERVISED === '1') {
+  // Shut down when the supervising process disconnects.
   process.once('disconnect', () => { void shutdown(); });
+  // Handle a shutdown message from the supervising process.
   process.on('message', message => { if (message === 'shutdown') void shutdown(); });
 }
 process.on('SIGINT', shutdown);

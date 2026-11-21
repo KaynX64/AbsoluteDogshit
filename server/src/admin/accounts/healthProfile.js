@@ -5,6 +5,7 @@ import { fail } from '../../utils/httpError.js';
 import { encrypt } from '../../utils/cryptoVault.js';
 import { logAudit } from '../../utils/auditLogger.js';
 
+// Validate and save the supplied health fields and audit the update in the caller's transaction.
 export async function saveHealthProfile(connection, targetUserId, health_profile, { actorId, ipAddress, operation = 'ADMIN_ADVANCED_PROFILE_OVERRIDE' }) {
   if (health_profile !== undefined) {
     if (health_profile === null || typeof health_profile !== 'object' || Array.isArray(health_profile)) {
@@ -17,7 +18,9 @@ export async function saveHealthProfile(connection, targetUserId, health_profile
     // it can never be written directly (writes would throw SQL errors).
     delete hpIn.bmi;
 
+    // Check whether a field was explicitly included in the submitted profile.
     const has = (k) => Object.prototype.hasOwnProperty.call(hpIn, k);
+    // Trim optional clinical text and enforce its length limit.
     const cleanOptionalText = (value, maxLen, label) => {
       if (value === null || value === undefined) return null;
       const s = String(value).trim();
@@ -56,6 +59,7 @@ export async function saveHealthProfile(connection, targetUserId, health_profile
       nextDob = dob;
     }
 
+    // Parse an optional measurement and check its allowed range.
     const cleanMetric = (value, min, max, label) => {
       if (value === null || value === undefined || value === '') return null;
       const num = Number(value);
@@ -75,6 +79,7 @@ export async function saveHealthProfile(connection, targetUserId, health_profile
 
     // Free-text clinical fields are AES-256-GCM encrypted at rest
     // (mirrors PUT /api/profile/me).
+    // Normalize optional clinical text and encrypt it when present.
     const encryptText = (value, label) => {
       const t = cleanOptionalText(value, 2000, label);
       return t === null ? null : encrypt(t);
@@ -89,6 +94,7 @@ export async function saveHealthProfile(connection, targetUserId, health_profile
       [targetUserId]
     );
     const oldHp = hpLockRows[0] || null;
+    // Keep the stored value when the caller omitted the field.
     const resolve = (provided, oldVal) => (provided === undefined ? (oldVal ?? null) : provided);
     const values = {
       blood_type: resolve(has('blood_type') ? nextBlood : undefined, oldHp?.blood_type),

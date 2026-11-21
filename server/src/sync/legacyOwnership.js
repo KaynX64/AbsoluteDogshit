@@ -2,6 +2,7 @@
 
 import { pool } from '../db/pool.js';
 
+// Return the submitted appointment IDs still assigned to the clinician.
 export async function assignedReplayAppointments(userId, appointmentIds) {
   const [rows] = await pool.query(
     `SELECT appointment_id FROM APPOINTMENTS
@@ -13,5 +14,6 @@ export async function assignedReplayAppointments(userId, appointmentIds) {
      ORDER BY appointment_id`,
     [userId, appointmentIds],
   );
+  // Convert the returned appointment ID to a number for the client.
   return rows.map(row => Number(row.appointment_id));
 }

@@ -46,7 +46,7 @@ export async function sendPushToUser(userId, { title, body, data = {} }) {
     );
 
     if (rows.length === 0) return;
-    const tokens = rows.map((r) => r.fcm_token);
+    const tokens = rows.map(/* Extract device tokens registered to the target user. */ (r) => r.fcm_token);
     await sendMulticastNotification(tokens, { title, body, data });
   } catch (err) {
     console.error('[FCM] Error sending push to user:', err.message);
@@ -68,7 +68,7 @@ export async function sendPushToRoles(roleCodes = [], { title, body, data = {} }
     );
 
     if (rows.length === 0) return;
-    const tokens = rows.map((r) => r.fcm_token);
+    const tokens = rows.map(/* Extract device tokens found for the requested roles. */ (r) => r.fcm_token);
     await sendMulticastNotification(tokens, { title, body, data });
   } catch (err) {
     console.error('[FCM] Error sending push to roles:', err.message);
@@ -90,6 +90,7 @@ export async function sendSosPush(userIds = [], { alertId, latitude, longitude }
       [userIds]
     );
 
+    // Build and send the SOS payload in batches for one delivery mode.
     await Promise.all(Object.entries(groupSosDevices(rows)).map(async ([mode, tokens]) => {
       const payload = sosPushForMode(mode, { alertId, latitude, longitude });
       for (let offset = 0; offset < tokens.length; offset += 500) {
@@ -101,6 +102,7 @@ export async function sendSosPush(userIds = [], { alertId, latitude, longitude }
   }
 }
 
+// Send one multicast message and remove registrations Firebase reports as invalid.
 async function sendMulticastNotification(tokens, { title, body, data, androidNotification }) {
   if (!isFcmInitialized || !firebaseApp) {
     console.log(`[FCM Simulation] To ${tokens.length} devices`);
@@ -109,7 +111,7 @@ async function sendMulticastNotification(tokens, { title, body, data, androidNot
 
   const message = {
     notification: { title, body },
-    data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])),
+    data: Object.fromEntries(Object.entries(data).map(/* Convert a notification data value to the string Firebase expects. */ ([k, v]) => [k, String(v)])),
     tokens,
     android: {
       priority: 'high',
@@ -126,10 +128,12 @@ async function sendMulticastNotification(tokens, { title, body, data, androidNot
     
     // Clean up invalid or uninstalled tokens automatically
     if (response.failureCount > 0) {
+      // Match invalid Firebase registrations to their submitted device tokens.
       await Promise.all(response.responses.map(async (resp, idx) => {
         if (resp.error?.code === 'messaging/registration-token-not-registered' ||
             resp.error?.code === 'messaging/invalid-registration-token') {
           const badToken = tokens[idx];
+          // Treat deletion of an invalid device token as best-effort cleanup.
           await pool.query('DELETE FROM DEVICE_TOKENS WHERE fcm_token = ?', [badToken]).catch(() => {});
         }
       }));

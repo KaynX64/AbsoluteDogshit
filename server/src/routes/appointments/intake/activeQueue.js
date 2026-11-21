@@ -3,6 +3,7 @@
 export const intakeCounterId = 1;
 
 // Shared guard: active queue ticket check
+// Find the patient's current active queue entry using the intake transaction's connection.
 export async function findActiveQueueEntry(connection, patientUserId, queueDate) {
   const [rows] = await connection.query(
     `SELECT q.queue_id, q.queue_number, q.status, q.appointment_id,

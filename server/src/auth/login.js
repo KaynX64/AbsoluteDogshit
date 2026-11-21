@@ -20,6 +20,7 @@ const DUMMY_HASH = bcrypt.hashSync('timing-equalizer-valetudo-2026', 10);
 // RATE LIMITING (brute-force protection on the login endpoint)
 // Values come from server/src/config/limits.js
 // ─────────────────────────────────────────────────────────────────────────
+// Build the shared Redis key for sign-in attempts by client IP and email.
 function loginRateLimitKey(ip) {
   return `ratelimit:login:${ip}`;
 }
@@ -32,6 +33,7 @@ function loginRateLimitKey(ip) {
 // next();` allowed unlimited credential stuffing during Redis outages.)
 const loginMemoryHits = new Map();
 
+// Count attempts by IP and account identifier before checking credentials.
 export async function loginRateLimit(req, res, next) {
   const { login: LOGIN_LIMIT } = getServerPolicy().limits;
   const ip = req.ip || req.socket?.remoteAddress || 'unknown';
@@ -120,6 +122,7 @@ async function clearLoginAttempts(ip) {
 // ─────────────────────────────────────────────────────────────────────────
 // LOGIN
 // ─────────────────────────────────────────────────────────────────────────
+// Verify credentials, load the account's roles, and issue the session token.
 export async function loginUser(req, res) {
   const { email, password } = req.body;
 
@@ -183,6 +186,7 @@ export async function loginUser(req, res) {
       [user.user_id]
     );
 
+    // Extract role codes for the session token and login response.
     const roleCodes = roles.map((r) => r.code);
 
     // Scenario E: Valid account, but no role linked

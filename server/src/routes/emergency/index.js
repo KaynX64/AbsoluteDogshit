@@ -6,6 +6,7 @@ import { registerAlertRoutes } from './alerts.js';
 import { registerIncidentWorkflowRoutes } from './incidentReports/workflow.js';
 import { registerIncidentArchiveRoutes } from './incidentReports/archive.js';
 
+// Build the emergency router and pass realtime access to handlers that notify responders.
 export default function emergencyRouter(io) {
   const router = express.Router();
   registerSosRoutes(router, io);

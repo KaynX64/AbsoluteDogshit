@@ -1,4 +1,4 @@
-// server/src/routes/interactions.js
+// Checks submitted medicines for interactions and serves the active medicine catalog.
 //
 // Drug-Drug Interaction Checking API
 //
@@ -22,6 +22,7 @@ const router = express.Router();
 // Called by the frontend BEFORE submitting a prescription.
 // Returns all interactions found among the selected medicines.
 // ─────────────────────────────────────────────────────────────────────
+// Validate medicine IDs and return known pairwise interactions.
 router.post(
   '/check',
   authenticateToken,
@@ -34,7 +35,7 @@ router.post(
       return res.status(400).json({ error: 'Include 1 to 20 valid catalog medicine identifiers.' });
     }
 
-    // Validate all IDs are positive integers
+    // Convert validated identifiers to numbers and remove duplicates before comparing pairs.
     const cleanIds = [...new Set(medicine_ids.map(Number))];
 
     if (cleanIds.length < 2) {
@@ -61,7 +62,7 @@ router.post(
         coverage: interactions.length < cleanIds.length * (cleanIds.length - 1) / 2 ? 'partial' : 'local_rules_checked',
         scope: 'Draft medicine pairs in local rules only; not a complete safety assessment.',
         totalInteractions: interactions.length,
-        interactions: interactions.map((i) => ({
+        interactions: interactions.map(/* Return each interaction with its severity, description, and medicine names. */ (i) => ({
           interaction_id: i.interaction_id,
           severity: i.severity,
           interaction_type: i.interaction_type,
@@ -91,6 +92,7 @@ router.post(
 // GET /api/interactions/catalogue
 // Admin view: list all active interaction rules.
 // ─────────────────────────────────────────────────────────────────────
+// Return the medicine catalog used by the interaction checker.
 router.get(
   '/catalogue',
   authenticateToken,

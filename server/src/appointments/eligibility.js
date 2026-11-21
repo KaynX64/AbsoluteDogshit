@@ -5,6 +5,7 @@ import { AppointmentTransitionError } from './transitions.js';
 // Documents may only be issued for a patient who is IN THE QUEUE (triaged:
 // checked_in / serving) and assigned to the signing practitioner.
 // Bookings ('scheduled') are view-only.
+// Verify the appointment is assigned to the supplied patient and clinician and is ready for clinical work.
 export async function assertAppointmentInQueue(conn, appointmentId, patientId, signerId, { lock = false } = {}) {
   const id = Number(appointmentId);
   if (!Number.isInteger(id) || id <= 0) {

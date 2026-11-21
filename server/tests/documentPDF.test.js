@@ -20,6 +20,7 @@ test('prescription rendering preserves structured records and never fills missin
   assert.ok((pdf.toString('latin1').match(/\/Type \/Page\b/g) || []).length >= 5);
 });
 
+// Verify that the prescription and clearance templates render signed-document PDF buffers.
 test('the prescription and clearance templates render signed-document PDF buffers', async () => {
   const fixture = {
     patient: { first_name: 'Fixture', last_name: 'Patient' },
@@ -42,6 +43,7 @@ test('the prescription and clearance templates render signed-document PDF buffer
   }
 });
 
+// Verify that renderIncidentReportPDF generates a valid PDF buffer.
 test('renderIncidentReportPDF generates a valid PDF buffer', async () => {
   const sampleData = {
     report_id: 12,
@@ -95,6 +97,7 @@ test('renderIncidentReportPDF generates a valid PDF buffer', async () => {
   assert.equal(header, '%PDF-', 'Buffer should start with PDF magic header');
 });
 
+// Verify that renderIncidentReportPDF handles sparse and fallback data cleanly without throwing.
 test('renderIncidentReportPDF handles sparse and fallback data cleanly without throwing', async () => {
   const minimalData = {
     report_id: 1,

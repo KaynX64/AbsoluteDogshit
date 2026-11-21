@@ -5,6 +5,7 @@ import { ensureIndex } from './schema.js';
 export default {
   version: 5,
   name: 'pharmacy activity date indexes',
+  // Ensure the stock movement and prescription activity indexes exist.
   async schema(connection) {
     await ensureIndex(connection, 'INVENTORY_LOGS', 'idx_inv_activity_date', ['transaction_type', 'created_at']);
     await ensureIndex(connection, 'PRESCRIPTIONS', 'idx_rx_issued_at', 'issued_at');

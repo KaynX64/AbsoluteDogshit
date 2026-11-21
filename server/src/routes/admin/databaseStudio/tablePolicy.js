@@ -1,4 +1,4 @@
-// server/src/routes/admin/databaseStudio/tablePolicy.js
+// Defines Database Studio table protections and masks sensitive audit fields.
 //
 // Pure helpers for the Admin "Database Studio" (Audit Issue #3).
 // Kept free of DB access so they can be unit-tested (see server/tests/dbStudioGuard.test.js).
@@ -72,12 +72,18 @@ export const PHI_PATIENT_SOURCE = {
 const BCRYPT_RE = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/;
 const CIPHERTEXT_RE = /^enc:v[12]:[0-9a-f]{24}:[0-9a-f]{32}:[0-9a-f]+$/;
 
+// Check whether Database Studio treats the table as read-only.
 export const isReadOnlyTable = (table) => READ_ONLY_TABLES.includes(table.toUpperCase());
+// Check whether table writes require the account-security permission gate.
 export const isSecurityTable = (table) => SECURITY_TABLES.includes(table.toUpperCase());
+// Check whether a column contains encrypted clinical data.
 export const isEncryptedCol = (table, col) => (ENCRYPTED_COLUMNS[table.toUpperCase()] || []).includes(col);
+// Check whether a column's contents must be redacted.
 export const isSecretCol = (table, col) => (SECRET_COLUMNS[table.toUpperCase()] || []).includes(col);
+// Find the patient ownership rule used to audit protected reads from a table.
 export const phiPatientSource = (table) => PHI_PATIENT_SOURCE[table.toUpperCase()] || null;
 
+// Explain the table's read-only status or point to the dedicated editor.
 export function readOnlyMessage(table) {
   if (table.toUpperCase() === 'SERVER_POLICY') return 'Use the Server Policy editor to change server policy.';
   if (table.toUpperCase() === 'QUEUE_TICKET_COUNTERS') return 'Queue ticket counters are managed by clinic intake.';
@@ -86,11 +92,13 @@ export function readOnlyMessage(table) {
   return `Statutory compliance violation: ${table} is an append-only ledger and cannot be modified from DB Studio.`;
 }
 
+// Explain the restrictions for modifying an account-security table.
 export function securityTableMessage(table) {
   return `${table} is an account-security table. Only a Super Admin can modify it from Database Studio — use User Management instead.`;
 }
 
 
+// Validate the ciphertext envelope and confirm the vault can decrypt it.
 export function isValidCiphertext(value) {
   return typeof value === 'string' && CIPHERTEXT_RE.test(value) && decrypt(value) !== DECRYPT_FAILED_MARKER;
 }
@@ -121,6 +129,7 @@ export function maskRowForDisplay(table, row) {
 // The key is domain-separated from the encryption key; set AUDIT_FINGERPRINT_KEY to
 // override it.
 let fingerprintKey = null;
+// Derive and cache the HMAC key used for audit fingerprints.
 function getFingerprintKey() {
   if (!fingerprintKey) {
     const base = process.env.AUDIT_FINGERPRINT_KEY || process.env.ENCRYPTION_KEY;
@@ -130,6 +139,7 @@ function getFingerprintKey() {
   return fingerprintKey;
 }
 
+// Produce a short keyed fingerprint for comparing protected values in audit entries.
 export function fingerprint(plain) {
   return crypto.createHmac('sha256', getFingerprintKey()).update(String(plain)).digest('hex').slice(0, 16);
 }
@@ -147,7 +157,9 @@ export function auditSafe(table, col, value) {
 }
 
 // ─── Request validation ──────────────────────────────────────────────────────
+// Reject request keys that are absent from the verified column list.
 export function assertKnownColumns(keys, names) {
+  // Identify fields absent from the verified column set.
   const unknown = keys.filter((k) => !names.has(k));
   if (unknown.length > 0) throw fail(`Unknown column(s): ${unknown.join(', ')}`);
 }
@@ -157,7 +169,7 @@ export function assertKnownColumns(keys, names) {
 export function assertPrimaryKey(primaryKey, pk) {
   if (pk.length === 0) throw fail('This table has no primary key; row edits are not allowed.');
   const keys = Object.keys(primaryKey);
-  if (keys.length !== pk.length || !pk.every((c) => keys.includes(c))) {
+  if (keys.length !== pk.length || !pk.every(/* Check that the submitted key contains all primary key columns. */ (c) => keys.includes(c))) {
     throw fail(`primaryKey must contain exactly: ${pk.join(', ')}`);
   }
 }

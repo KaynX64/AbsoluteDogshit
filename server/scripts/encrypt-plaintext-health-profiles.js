@@ -1,4 +1,4 @@
-// server/scripts/encrypt-plaintext-health-profiles.js
+// One-off migration that encrypts legacy plaintext health profiles in MySQL.
 //
 // Encrypts HEALTH_PROFILES fields that were stored as plaintext (never encrypted).
 // Dry run by default. Pass --apply to write.

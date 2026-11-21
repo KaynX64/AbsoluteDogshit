@@ -10,10 +10,12 @@ import { getServerPolicy } from '../../config/serverPolicy.js';
 import { redactForTier, getResponderAudience, roleLabelFor } from '../../emergency/responderAccess.js';
 
 // ── Rate Limiter Middleware para sa SOS ─────────────────────────────
+// Build the Redis throttling key for the caller's user ID or IP.
 function sosRateLimitKey(userIdOrIp) {
   return `ratelimit:sos:${userIdOrIp}`;
 }
 
+// Rate-limit SOS submission using the caller's account or IP.
 async function sosRateLimit(req, res, next) {
   const { sos: SOS_LIMIT } = getServerPolicy().limits;
   if (!isRedisActive()) return next();
@@ -49,6 +51,7 @@ async function sosRateLimit(req, res, next) {
 }
 
 // ── Reverse Geocoding Address Resolver ──────────────────────────────
+// Resolve an SOS position to a display address or use the campus fallback.
 async function resolveCampusAddress(lat, lng) {
   // 1. Kung may Google Maps API Key sa environment
   if (process.env.GOOGLE_MAPS_API_KEY) {
@@ -81,10 +84,12 @@ async function resolveCampusAddress(lat, lng) {
   return null;
 }
 
+// Mount the SOS submission endpoint with realtime delivery.
 export function registerSosRoutes(router, io) {
   // ===========================================================================
   // 1. POST /api/emergency/sos - Trigger SOS & Auto-prioritize in Queue
   // ===========================================================================
+  // Record the patient's SOS alert and deliver tier-appropriate details to responders.
   router.post('/sos', authenticateToken, sosRateLimit, async (req, res) => {
     try {
       const userId = req.user.user_id;
@@ -203,7 +208,7 @@ export function registerSosRoutes(router, io) {
       const audience = await getResponderAudience({ excludeUserId: userId });
 
       // Upgraded device registrations receive an incident ID and generic text.
-      void sendSosPush(audience.map((recipient) => recipient.userId), {
+      void sendSosPush(audience.map(/* Collect eligible responder IDs for SOS push delivery. */ (recipient) => recipient.userId), {
         alertId, latitude: lat, longitude: lng,
       });
 

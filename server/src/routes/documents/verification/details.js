@@ -9,6 +9,7 @@ import { logPhiAccess } from '../../../utils/phiLogger.js';
 import { isQualifiedSigner, formatIssuedBy } from '../../../documents/signing/signatory.js';
 import { parseMetadata } from '../signatureMetadata.js';
 
+// Mount the staff-only QR verification detail endpoint.
 export function registerVerificationDetailsRoute(router) {
   // =============================================================================
   // 5. STAFF-ONLY VERIFICATION DETAILS (full view for clinic staff)
@@ -17,6 +18,7 @@ export function registerVerificationDetailsRoute(router) {
   // Returns what the public /verify route deliberately hides: full name, student no.,
   // course, medications, notes, and revocation reason.
   // Every successful lookup is recorded in PHI_ACCESS_LOGS.
+  // Return authorized clinical document details for a verified QR token.
   router.get(
     '/verify/:qrToken/details',
     authenticateToken,
@@ -122,6 +124,7 @@ export function registerVerificationDetailsRoute(router) {
             ipAddress: req.ip,
           });
 
+          // Load the recorded prescription, decrypting the saved instructions for legacy item rows.
           const recorded = hydratePrescription({ ...p, notes: decrypt(p.notes),
             items: items.map(it => ({ ...it, instructions: decrypt(it.instructions) })) });
           const patient = recorded.patient_snapshot || { first_name: p.patient_first_name, last_name: p.patient_last_name,

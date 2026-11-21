@@ -1,4 +1,4 @@
-// server/src/utils/interactionChecker.js
+// Looks up known drug interactions across submitted medicines.
 //
 // Drug-Drug Interaction Checker
 // Queries the DRUG_INTERACTIONS table for known interaction pairs
@@ -22,7 +22,7 @@ export async function checkInteractions(connection, medicineIds, { lock = false 
   if (!medicineIds || medicineIds.length < 2) return [];
 
   // Deduplicate and sort
-  const uniqueIds = [...new Set(medicineIds)].sort((a, b) => a - b);
+  const uniqueIds = [...new Set(medicineIds)].sort(/* Sort deduplicated medicine IDs numerically before building pairs. */ (a, b) => a - b);
   if (uniqueIds.length < 2) return [];
 
   // Generate all pairs (a, b) where a < b
@@ -38,7 +38,7 @@ export async function checkInteractions(connection, medicineIds, { lock = false 
 
   // Build a query that checks all pairs at once
   // Using OR conditions for each pair
-  const conditions = pairs.map(() => '(di.medicine_id_a = ? AND di.medicine_id_b = ?)');
+  const conditions = pairs.map(/* Create a parameterized comparison for each medicine pair. */ () => '(di.medicine_id_a = ? AND di.medicine_id_b = ?)');
   const params = pairs.flat(); // [id_a1, id_b1, id_a2, id_b2, ...]
 
   const sql = `

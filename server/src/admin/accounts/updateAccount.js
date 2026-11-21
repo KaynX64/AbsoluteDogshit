@@ -7,8 +7,10 @@ import { changeAccountRole, lockAccount, readAccountRoleAccess } from './roleCha
 import { saveHealthProfile } from './healthProfile.js';
 import { saveRoleProfile } from './roleProfile.js';
 
+// Apply an administrator's account and profile edits as one audited operation.
 export function updateAccount(targetUserId, fields, { actorId, ipAddress }) {
   const { first_name, last_name, email, phone, is_active, role_code, health_profile } = fields;
+  // Lock the account and save its identity, role, and health-profile changes together.
   return inTransaction(async connection => {
     const account = await lockAccount(connection, targetUserId);
     const nextActive = is_active === undefined ? Number(Boolean(account.is_active)) : Number(Boolean(is_active));

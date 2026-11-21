@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { availabilityForHour, groupBookingsByHour, isRecoveryBlocked, parseBookingTime, scheduleSlotIssue } from '../src/config/appointmentRules.js';
 import { activateServerPolicy, getServerPolicy, makeServerPolicy, validatePolicyOverrides } from '../src/config/serverPolicy.js';
 
+// Verify that policy allows sparse typed overrides and rejects unsupported or unsafe inputs.
 test('policy allows sparse typed overrides and rejects unsupported or unsafe inputs', () => {
   assert.deepEqual(validatePolicyOverrides({ loginMaxAttempts: 8, doctorRecoveryBuffer: false }).errors, {});
   for (const input of [[], { JWT_SECRET: 'x' }, { loginMaxAttempts: '8' }, { loginMaxAttempts: 0 },
@@ -16,6 +17,7 @@ test('policy allows sparse typed overrides and rejects unsupported or unsafe inp
   assert.ok(validatePolicyOverrides({ slotMinutes: 7 }).errors.slotMinutes);
 });
 
+// Verify that saved policy updates limit and appointment readers, and stale activation cannot supersede it.
 test('saved policy updates limit and appointment readers, and stale activation cannot supersede it', () => {
   const previous = getServerPolicy();
   const policy = makeServerPolicy(previous.version + 2, {
@@ -33,6 +35,7 @@ test('saved policy updates limit and appointment readers, and stale activation c
   assert.equal(policy.appointments.DOCTOR.cascadeNextHour, false);
 });
 
+// Verify that booking and availability agree on opening, lunch, closing and slot boundaries.
 test('booking and availability agree on opening, lunch, closing and slot boundaries', () => {
   const { clinic } = makeServerPolicy(1, { openTime: '09:00', closeTime: '16:00', slotMinutes: 20 });
   for (const [time, issue] of Object.entries({
@@ -43,6 +46,7 @@ test('booking and availability agree on opening, lunch, closing and slot boundar
   for (const bad of ['2026-02-29 09:00:00', '2026-11-11 24:00:00', '2026-11-11 09:00:01']) assert.equal(parseBookingTime(bad), null);
 });
 
+// Verify that lower capacity counts grandfathered appointments and drives the recovery buffer.
 test('lower capacity counts grandfathered appointments and drives the recovery buffer', () => {
   const { appointments } = makeServerPolicy(1, { 'doctorCapacity:General consultation': 1, dentistCapacity: 1 });
   const bookings = groupBookingsByHour([{ time_slot: '09:15', appointment_type: 'General consultation' }]);

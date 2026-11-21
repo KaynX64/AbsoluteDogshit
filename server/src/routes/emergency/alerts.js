@@ -7,10 +7,12 @@ import { logAudit } from '../../utils/auditLogger.js';
 import { invalidateCache } from '../../utils/redisClient.js';
 import { requireResponderAccess, resolveResponderAccess, getResponderAudience, roleLabelFor } from '../../emergency/responderAccess.js';
 
+// Mount responder eligibility, active alert reads, and alert status transitions.
 export function registerAlertRoutes(router, io) {
   // ===========================================================================
   // 2. GET /api/emergency/active - Retrieve Active Alerts
   // ===========================================================================
+  // Return the caller's current responder eligibility and tier.
   router.get('/responder-access', authenticateToken, async (req, res) => {
     res.set('Cache-Control', 'no-store');
     try {
@@ -20,6 +22,7 @@ export function registerAlertRoutes(router, io) {
     }
   });
 
+  // Return active SOS alerts with medical details limited by the caller's responder tier.
   router.get('/active', authenticateToken, requireResponderAccess, async (req, res) => {
     res.set('Cache-Control', 'no-store');
     try {
@@ -44,6 +47,7 @@ export function registerAlertRoutes(router, io) {
          ORDER BY a.created_at DESC, a.alert_id DESC`
       );
 
+      // Format each active alert and restrict medical fields to the caller's tier.
       const decryptedAlerts = alerts.map((a) => {
         // Tier the API the same way the socket broadcast is tiered, so the
         // REST path can never bypass the medical-detail redaction.
@@ -80,6 +84,7 @@ export function registerAlertRoutes(router, io) {
   // ===========================================================================
   // 3. PATCH /api/emergency/:alertId/status - Update Status & Sync Queue
   // ===========================================================================
+  // Apply an allowed alert status change and notify eligible clients.
   router.patch('/:alertId/status', authenticateToken, requireResponderAccess, async (req, res) => {
     try {
       const { alertId } = req.params;
@@ -188,7 +193,7 @@ export function registerAlertRoutes(router, io) {
       if (io) {
         // Live audience (flag OR legacy role) — emit to each recipient's own
         // user room so a phone mid-session drops the alert instantly.
-        const audience = await getResponderAudience({}).catch(() => []);
+        const audience = await getResponderAudience({}).catch(/* Fall back to an empty recipient list if the responder audience cannot be loaded. */ () => []);
         for (const recipient of audience) {
           io.to(`user:${recipient.userId}`).emit('emergency:status_change', {
             alertId: Number(alertId),

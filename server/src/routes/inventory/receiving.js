@@ -4,11 +4,13 @@ import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';
 import { receiveStock } from '../../inventory/stockMutations.js';
 
+// Mount the stock receiving endpoint with realtime updates.
 export function registerInventoryReceiving(router, io) {
   // =============================================================================
   // 2. INBOUND & STOCK REPLENISHMENT
   // =============================================================================
 
+  // Validate delivery and batch details and receive the stock through the audited service.
   router.post('/receive', authenticateToken, requireRoles('NURSE', 'ADMIN'), async (req, res) => {
     const { medicine_id, batch_no, manufacture_date, expiry_date, supplier, quantity_received } = req.body;
 

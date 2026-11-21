@@ -25,14 +25,15 @@ export async function validatePermissionCodes(connection, requested) {
   if (!Array.isArray(requested)) {
     throw new Error('admin_permissions must be an array of permission codes.');
   }
+  // Trim each requested permission code before deduplication.
   const codes = [...new Set(requested.map((c) => String(c).trim()).filter(Boolean))];
   if (codes.length === 0) return [];
   const [rows] = await connection.query(
     'SELECT code FROM ADMIN_PERMISSIONS WHERE code IN (?)',
     [codes]
   );
-  const known = new Set(rows.map((r) => r.code));
-  const unknown = codes.filter((c) => !known.has(c));
+  const known = new Set(rows.map(/* Extract the permission codes present in the catalog. */ (r) => r.code));
+  const unknown = codes.filter(/* Identify requested codes missing from the catalog. */ (c) => !known.has(c));
   if (unknown.length > 0) {
     throw new Error(`Unknown admin permission code(s): ${unknown.join(', ')}`);
   }
@@ -82,6 +83,6 @@ export async function getUserRoleCode(connection, userId) {
      WHERE ur.user_id = ?`,
     [userId]
   );
-  if (rows.some((r) => r.code === 'ADMIN')) return 'ADMIN';
+  if (rows.some(/* Give ADMIN precedence when determining the account's primary role. */ (r) => r.code === 'ADMIN')) return 'ADMIN';
   return rows.length > 0 ? rows[0].code : null;
 }

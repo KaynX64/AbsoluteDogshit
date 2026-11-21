@@ -48,6 +48,7 @@ const NONCE_TTL_SECONDS = 15 * 60;
 const NONCE_MEMORY_LIMIT = 10000;
 const usedNonces = new Map(); // nonce -> expiresAtMs
 
+// Claim a QR nonce in memory when Redis is unavailable.
 function claimNonceInProcess(nonce) {
   const now = Date.now();
   if (usedNonces.size >= NONCE_MEMORY_LIMIT) {
@@ -68,6 +69,7 @@ function claimNonceInProcess(nonce) {
 }
 
 // GET /api/health-pass/token
+// Sign a short-lived QR token for the caller's patient ID.
 router.get('/token', authenticateToken, requirePrivacyConsent, (req, res) => {
   try {
     const userId = req.user.user_id;
@@ -86,6 +88,7 @@ router.get('/token', authenticateToken, requirePrivacyConsent, (req, res) => {
 });
 
 // POST /api/health-pass/verify
+// Validate and consume the token and read the patient's current clearance details.
 router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
   const { qrToken } = req.body;
   if (!qrToken) return res.status(400).json({ error: 'QR token required.' });

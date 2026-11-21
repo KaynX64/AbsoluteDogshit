@@ -3,6 +3,7 @@
 import { createPrivateKey } from 'node:crypto';
 import { JWT } from 'google-auth-library';
 
+// Validate service account data and configure a scoped Firebase credential.
 export function createFcmAppOptions(account) {
   if (!account || typeof account !== 'object' || Array.isArray(account)
     || (account.type !== undefined && account.type !== 'service_account')) {
@@ -32,6 +33,7 @@ export function createFcmAppOptions(account) {
   return {
     projectId: projectId.trim(),
     credential: {
+      // Return a nonempty Google access token with its remaining lifetime.
       async getAccessToken() {
         const { token } = await client.getAccessToken();
         const expiresIn = Math.floor((client.credentials.expiry_date - Date.now()) / 1000);

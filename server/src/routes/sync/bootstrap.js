@@ -6,7 +6,9 @@ import { logPhiAccess } from '../../utils/phiLogger.js';
 import { decodeBootstrapCursor, encodeBootstrapCursor } from '../../sync/bootstrapCursor.js';
 import { readBootstrapPage, readLegacyBootstrap, startBootstrapScan } from '../../sync/bootstrapReads.js';
 
+// Mount the workstation cache bootstrap read.
 export function registerSyncBootstrap(router) {
+  // Validate bootstrap parameters and return legacy data or a bounded page.
   router.get('/bootstrap', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'DENTIST', 'ADMIN'), async (req, res) => {
     const { paging, checkpoint, cursor, lastSyncedAt } = req.query;
     const userId = req.user.user_id;

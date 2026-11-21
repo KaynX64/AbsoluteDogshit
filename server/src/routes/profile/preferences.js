@@ -5,8 +5,10 @@ import { authenticateToken } from '../../auth/middleware.js';
 import { isInstallationId, registerPushDevice, sosModes } from '../../emergency/deviceDelivery.js';
 import { THEME_MODES, THEME_PRESETS } from '../../config/themePreferences.js';
 
+// Mount the caller's theme and device registration endpoints.
 export function registerProfilePreferences(router) {
   // Appearance is independent of clinical consent and contains no health data.
+  // Return the caller's normalized account theme.
   router.get('/theme', authenticateToken, async (req, res) => {
     try {
       const [[user]] = await pool.query(
@@ -37,6 +39,7 @@ export function registerProfilePreferences(router) {
   // skipped entirely when the stored values are identical (theme toggles
   // are frequent — no need to bump USERS.updated_at each time).
   // ─────────────────────────────────────────────────────────────────────────
+  // Validate and save the caller's theme mode and preset.
   router.put('/theme', authenticateToken, async (req, res) => {
     const userId = req.user.user_id;
     const { theme_mode, theme_preset } = req.body ?? {};
@@ -81,6 +84,7 @@ export function registerProfilePreferences(router) {
   });
 
   // POST /api/profile/fcm-token - Register device token for background push
+  // Validate and save the caller's push token and installation delivery preferences.
   router.post('/fcm-token', authenticateToken, async (req, res) => {
     const userId = req.user.user_id;
     const { fcm_token, device_type = 'android', installation_id, sos_mode } = req.body ?? {};

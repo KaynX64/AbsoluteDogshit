@@ -24,12 +24,14 @@ const encounterSelect = `
       `;
 const pageSize = 500;
 
+// Decrypt the patient health fields needed by the workstation cache.
 const decryptPatient = row => ({
   ...row,
   allergies: decrypt(row.allergies) || 'None reported',
   chronic_conditions: decrypt(row.chronic_conditions) || 'None reported',
 });
 
+// Decrypt the clinical text fields in a cached encounter row.
 const decryptEncounter = row => ({
   ...row,
   chief_complaint: decrypt(row.chief_complaint) || '',
@@ -38,6 +40,7 @@ const decryptEncounter = row => ({
   notes: decrypt(row.notes) || '',
 });
 
+// Load patient and encounter data for clients using the original bootstrap response.
 export async function readLegacyBootstrap(lastSyncedAt) {
   const [patients] = await pool.query(patientSelect + ' LIMIT 500');
   let emrQuery = encounterSelect;
@@ -60,6 +63,7 @@ export async function readLegacyBootstrap(lastSyncedAt) {
   };
 }
 
+// Capture the patient ID and encounter time bounds for a paged scan.
 export async function startBootstrapScan(since) {
   const [[row]] = await pool.query(
     'SELECT UNIX_TIMESTAMP() AS upperTime, COALESCE(MAX(user_id), 0) AS upperPatientId FROM USERS',
@@ -74,6 +78,7 @@ export async function startBootstrapScan(since) {
   };
 }
 
+// Read bounded roster and encounter pages and return the updated scan position.
 export async function readBootstrapPage(scan) {
   const patients = [];
   const emrRecords = [];

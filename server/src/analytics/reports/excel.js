@@ -3,6 +3,7 @@
 import ExcelJS from 'exceljs';
 import { workflowSections } from './sections.js';
 
+// Build a formatted worksheet for each available analytics section.
 export function renderExcel({ roles, topDiagnoses, deptBreakdown, inventory, surveillance, pharmacy }) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'LeoVital HealthLink - PSU Lingayen Infirmary';
@@ -30,6 +31,7 @@ export function renderExcel({ roles, topDiagnoses, deptBreakdown, inventory, sur
     ];
     sheetRoles.getRow(1).fill = headerFill;
     sheetRoles.getRow(1).font = headerFont;
+    // Write a role and its account count to the Headcount worksheet.
     roles.forEach((r) => sheetRoles.addRow({ name: r.name, count: r.count }));
   }
 
@@ -43,6 +45,7 @@ export function renderExcel({ roles, topDiagnoses, deptBreakdown, inventory, sur
     ];
     sheetDiag.getRow(1).fill = headerFill;
     sheetDiag.getRow(1).font = headerFont;
+    // Add one diagnosis count to the diagnosis worksheet.
     topDiagnoses.forEach((d) => sheetDiag.addRow(d));
   }
 
@@ -55,6 +58,7 @@ export function renderExcel({ roles, topDiagnoses, deptBreakdown, inventory, sur
     ];
     sheetDept.getRow(1).fill = headerFill;
     sheetDept.getRow(1).font = headerFont;
+    // Add one department count to the department worksheet.
     deptBreakdown.forEach((d) => sheetDept.addRow(d));
   }
 
@@ -70,6 +74,7 @@ export function renderExcel({ roles, topDiagnoses, deptBreakdown, inventory, sur
     ];
     sheetInv.getRow(1).fill = headerFill;
     sheetInv.getRow(1).font = headerFont;
+    // Add batch details and expiry information to the inventory worksheet.
     inventory.forEach((i) =>
       sheetInv.addRow({
         name: i.name,
@@ -83,7 +88,7 @@ export function renderExcel({ roles, topDiagnoses, deptBreakdown, inventory, sur
 
   for (const { title, subtitle, columns, rows } of workflowSections({ surveillance, pharmacy })) {
     const sheet = workbook.addWorksheet(title);
-    sheet.columns = columns.map((header, index) => ({ header, width: index === 0 ? 46 : 20 }));
+    sheet.columns = columns.map(/* Give the workflow sheet's label column extra width. */ (header, index) => ({ header, width: index === 0 ? 46 : 20 }));
     sheet.getRow(1).fill = headerFill;
     sheet.getRow(1).font = headerFont;
     for (const row of rows) sheet.addRow(row);

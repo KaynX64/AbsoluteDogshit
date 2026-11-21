@@ -8,12 +8,14 @@ import { reviewStructuredPrescription, issueStructuredPrescription } from '../..
 import { makeReviewToken, enabled } from '../../../documents/prescriptions/structuredContract.js';
 import { issuePrescription } from '../../../documents/prescriptions/issuePrescription.js';
 
+// Parse a submitted medicine quantity as a valid whole number.
 function quantityInt(value, minimum = 1) {
   if (typeof value !== 'number' && (typeof value !== 'string' || !/^\d+$/.test(value.trim()))) return null;
   const number = Number(value);
   return Number.isInteger(number) && number >= minimum && number <= 2147483647 ? number : null;
 }
 
+// Mount the endpoint that validates prescriptions and invokes the issuing service.
 export function registerPrescriptionIssuance(router, io) {
   const roles = [authenticateToken, requireRoles('DOCTOR', 'DENTIST')];
   const structuredError = (res, error) => res.status(error.status || (error.code === 'INSUFFICIENT_STOCK' ? 409 : 503)).json({
@@ -34,6 +36,7 @@ export function registerPrescriptionIssuance(router, io) {
   // 1. PRESCRIPTIONS WITH AUTOMATED FEFO INVENTORY DEDUCTION
   // =============================================================================
 
+  // Validate the recipient, medication directions, and quantities before issuing the prescription.
   router.post('/prescriptions', authenticateToken, requireRoles('DOCTOR', 'DENTIST'), async (req, res) => {
     if (req.body.contract_version === 2) {
       if (!enabled()) return res.status(503).json({ error: 'Structured prescribing is not enabled yet.', code: 'PRESCRIBING_DISABLED' });
@@ -110,6 +113,7 @@ export function registerPrescriptionIssuance(router, io) {
     const result = await issuePrescription({
       doctorUserId, patient_user_id, appointment_id, emr_id, expires_at, notes,
       formularyItems, outsideItems, itemCount: items.length, ipAddress: req.ip,
+      // Notify connected clients after the stock deductions commit.
       onInventoryUpdated: () => io?.emit('inventory:updated'),
     });
     if (result.conflict) return res.status(409).json(result.conflict);

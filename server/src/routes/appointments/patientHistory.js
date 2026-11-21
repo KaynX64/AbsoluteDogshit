@@ -9,11 +9,13 @@ import { logPhiAccess } from '../../utils/phiLogger.js';
 import { isCalendarDate } from '../../config/appointmentRules.js';
 import { stripLegacyOdontogram, readDentalChart } from '../../appointments/clinicalHistory.js';
 
+// Mount protected clinical history, attachment, and patient search reads.
 export function registerPatientHistoryRoutes(router) {
   // ===========================================================================
   // 8. PATIENT EMR HISTORY & SEARCH DIRECTORY
   // ===========================================================================
 
+  // Return encounter history or attachment metadata under the appropriate clinical access checks.
   router.get('/patient/:patientId/history', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), requirePrivacyConsent, async (req, res) => {
     const patientId = Number(req.params.patientId);
     const canViewDental = (req.user.roles || []).includes('DENTIST');
@@ -77,6 +79,7 @@ export function registerPatientHistoryRoutes(router) {
       const hasMore = pageSize !== null && emrs.length > pageSize;
       if (hasMore) emrs.pop();
       const nextCursor = hasMore ? emrs.at(-1).history_cursor : null;
+      // Index encounter rows by EMR ID while decrypting their clinical text.
       const history = new Map(emrs.map(({ chart_data, history_cursor, ...emr }) => [emr.emr_id, {
         ...emr,
         chief_complaint: decrypt(emr.chief_complaint) || '',
@@ -124,6 +127,7 @@ export function registerPatientHistoryRoutes(router) {
     }
   });
 
+  // Search patient accounts for the authorized clinician.
   router.get('/patients/search', authenticateToken, requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN'), async (req, res) => {
     const rawQuery = req.query.query ? String(req.query.query).trim() : '';
     if (!rawQuery) return res.json([]);
@@ -154,6 +158,7 @@ export function registerPatientHistoryRoutes(router) {
         [queryPattern, queryPattern, queryPattern, queryPattern, queryPattern]
       );
 
+      // Decrypt allergies before returning a matched patient to the clinician.
       const decrypted = rows.map((p) => ({
         ...p,
         allergies: decrypt(p.allergies) || 'None reported',

@@ -3,7 +3,9 @@
 import { updateAccount } from '../../../admin/accounts/updateAccount.js';
 import { requirePermission } from '../../../middleware/rbac.js';
 
+// Mount the account and profile editing endpoint.
 export function registerAccountProfileUpdates(router) {
+  // Validate required identity fields and run the shared audited update workflow.
   router.put('/users/:id', requirePermission('USERS_MANAGE'), async (req, res) => {
     const { first_name, last_name, email } = req.body ?? {};
     if (!first_name || !last_name || !email) {

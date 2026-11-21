@@ -14,9 +14,11 @@ import {
 import { AppointmentTransitionError, updateQueueTicketStatus } from '../../appointments/transitions.js';
 import { publishQueueChange } from './queueNotifications.js';
 
+// Mount clinic roster, arrival, and ticket endpoints.
 export function registerDailyQueueRoutes(router, io) {
   const clinicalDesk = requireRoles('DOCTOR', 'DENTIST', 'NURSE', 'ADMIN');
 
+  // Return the requested consultation roster for today's clinic workflow.
   router.get('/today', authenticateToken, clinicalDesk, async (req, res) => {
     const roles = req.user.roles || [];
     const canViewDental = roles.includes('DENTIST');
@@ -34,6 +36,7 @@ export function registerDailyQueueRoutes(router, io) {
     }
   });
 
+  // Return today's expected arrivals.
   router.get('/expected-today', authenticateToken, clinicalDesk, async (_req, res) => {
     try {
       res.json(await listExpectedArrivals());
@@ -43,6 +46,7 @@ export function registerDailyQueueRoutes(router, io) {
     }
   });
 
+  // Return the number of appointments marked as no-shows today.
   router.get('/no-shows-today', authenticateToken, clinicalDesk, async (_req, res) => {
     try {
       res.json({ count: await countTodaysNoShows() });
@@ -52,6 +56,7 @@ export function registerDailyQueueRoutes(router, io) {
     }
   });
 
+  // Return the shared daily ticket list.
   router.get('/queue/today', authenticateToken, clinicalDesk, async (_req, res) => {
     try {
       const cached = await getCache('queue:today');
@@ -65,10 +70,12 @@ export function registerDailyQueueRoutes(router, io) {
     }
   });
 
+  // Change a ticket's status and publish the committed queue update.
   router.patch('/queue/:queueId/status', authenticateToken, clinicalDesk, async (req, res) => {
     const queueId = Number(req.params.queueId);
     const { status } = req.body ?? {};
     try {
+      // Keep ticket and linked appointment status changes in one transaction.
       const changed = await inTransaction(connection => updateQueueTicketStatus(connection, queueId, status));
       if (changed) {
         await publishQueueChange(io, { queue_id: queueId, status }, {
@@ -86,6 +93,7 @@ export function registerDailyQueueRoutes(router, io) {
     }
   });
 
+  // Return the current patient's queue ticket.
   router.get('/queue/my', authenticateToken, async (req, res) => {
     try {
       res.json(await getPersonalTicket(req.user.user_id));

@@ -3,7 +3,9 @@
 import { requirePermission } from '../../middleware/rbac.js';
 import { listConnectedSessions } from '../../realtime/presence.js';
 
+// Mount the connected-user read behind the telemetry permission.
 export function registerPresenceRoutes(router, io) {
+  // Return live sign-in sessions from the current API process without caching the response.
   router.get('/connected-users', requirePermission('TELEMETRY_VIEW'), async (_req, res) => {
     res.set('Cache-Control', 'no-store');
     try {

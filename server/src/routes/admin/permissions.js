@@ -6,8 +6,10 @@ import { logAudit } from '../../utils/auditLogger.js';
 import { fail } from '../../utils/httpError.js';
 import { validatePermissionCodes, setAdminPermissionGrants } from '../../admin/accounts/permissions.js';
 
+// Mount reads for the permission catalog and the caller's effective grants.
 export function registerPermissionReadRoutes(router) {
   // 1a. GET /api/admin/permissions - Admin archetype permission catalog
+  // Return the available administrator permissions.
   router.get('/permissions', async (req, res) => {
     try {
       const [perms] = await pool.query(
@@ -28,6 +30,7 @@ export function registerPermissionReadRoutes(router) {
   });
 
   // 1b. GET /api/admin/my-permissions - Caller's effective admin permission state
+  // Return the current administrator's permission archetype and codes.
   router.get('/my-permissions', async (req, res) => {
     try {
       const state = await resolveAdminPermissions(req.user.user_id);
@@ -44,8 +47,10 @@ export function registerPermissionReadRoutes(router) {
   });
 }
 
+// Mount the route for replacing an administrator's grants.
 export function registerPermissionUpdateRoute(router) {
   // 3.5 PUT /api/admin/users/:id/permissions - Replace an admin's permission set
+  // Validate and replace the target administrator's grants and audit the change.
   router.put('/users/:id/permissions', requirePermission('USERS_MANAGE'), async (req, res) => {
     const targetUserId = Number(req.params.id);
     const { admin_permissions } = req.body;
@@ -84,7 +89,7 @@ export function registerPermissionUpdateRoute(router) {
        WHERE ur.user_id = ?`,
         [targetUserId]
       );
-      if (!targetRoleRows.some((r) => r.code === 'ADMIN')) {
+      if (!targetRoleRows.some(/* Verify that the account receiving administrator grants still holds the Admin role. */ (r) => r.code === 'ADMIN')) {
         throw new Error('Permissions can only be assigned to ADMIN role accounts.');
       }
 

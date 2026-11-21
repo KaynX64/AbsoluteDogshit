@@ -4,8 +4,10 @@ import { cancelPrescription } from '../../../documents/prescriptions/cancelPresc
 import { authenticateToken } from '../../../auth/middleware.js';
 import { requireRoles } from '../../../middleware/rbac.js';
 
+// Mount the prescription cancellation endpoint and pass in realtime access.
 export function registerPrescriptionCancellation(router, io) {
   // ── Cancel Prescription & Restore Stock ─────────────────────────────────────
+  // Cancel the prescription through the stock-restoring service and broadcast committed changes.
   router.patch(
     '/prescriptions/:id/cancel',
     authenticateToken,

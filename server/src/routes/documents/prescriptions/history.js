@@ -8,8 +8,10 @@ import { decrypt } from '../../../utils/cryptoVault.js';
 import { requirePrivacyConsent } from '../../../middleware/consent.js';
 import { logPhiAccess } from '../../../utils/phiLogger.js';
 
+// Mount prescription history for recipients and authorized clinical staff.
 export function registerPrescriptionHistory(router) {
   // GET /api/documents/prescriptions/my (Decrypted for authorized patient)
+  // Return prescriptions relevant to the signed-in patient or issuing clinician.
   router.get('/prescriptions/my', authenticateToken, requirePrivacyConsent, async (req, res) => {
     try {
       const userId = req.user.user_id;
@@ -46,7 +48,9 @@ export function registerPrescriptionHistory(router) {
         [userId]
       );
 
+      // Prepare the prescription and its decrypted medication directions for the response.
       const decryptedRows = rows.map((rx) => {
+        // Decrypt instructions for one saved medication line.
         const items = (rx.items || []).map((it) => ({
           ...it,
           instructions: decrypt(it.instructions),
@@ -67,6 +71,7 @@ export function registerPrescriptionHistory(router) {
   // Prescription history for one patient, limited to what the logged-in
   // doctor/dentist issued themselves. The issuer is taken from the JWT, never
   // from the request, so another clinician's prescriptions cannot be requested.
+  // Return saved prescriptions and medication directions for the requested patient.
   router.get(
     '/prescriptions/patient/:patientId',
     authenticateToken,
@@ -86,6 +91,7 @@ export function registerPrescriptionHistory(router) {
           [patientId, req.user.user_id]
         );
 
+        // Index prescriptions by ID and initialize their item lists for the batched lookup.
         const history = new Map(rows.map(({ pdf_s3_key, ...rx }) => [rx.prescription_id, {
           ...rx, notes: decrypt(rx.notes), pdfAvailable: Boolean(pdf_s3_key), items: [],
         }]));

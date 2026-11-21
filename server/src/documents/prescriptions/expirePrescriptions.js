@@ -4,7 +4,9 @@ import { inTransaction } from '../../db/transaction.js';
 import { logAudit } from '../../utils/auditLogger.js';
 import { today } from './structuredContract.js';
 
+// Mark due active prescriptions as expired and return their IDs after commit.
 export function expireDuePrescriptions() {
+  // Lock the eligible prescriptions, update their status, and write the corresponding audits.
   return inTransaction(async connection => {
     const [expired] = await connection.query(
       `SELECT p.prescription_id
@@ -20,6 +22,7 @@ export function expireDuePrescriptions() {
          FOR UPDATE SKIP LOCKED`,
       [today()],
     );
+    // Collect the prescription IDs selected for expiry.
     const ids = expired.map(row => row.prescription_id);
 
     if (ids.length) {

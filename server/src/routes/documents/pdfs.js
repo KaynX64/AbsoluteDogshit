@@ -11,12 +11,14 @@ import {
 } from '../../documents/documentService.js';
 import { logPhiAccess } from '../../utils/phiLogger.js';
 
+// Mount authenticated downloads for the supported clinical PDFs.
 export function registerPdfRoutes(router) {
   // =============================================================================
   // 7. SIGNED PDF DOWNLOADS
   // =============================================================================
 
   // GET /api/documents/prescriptions/:id/pdf
+  // Authorize access to a prescription and stream its saved PDF.
   router.get('/prescriptions/:id/pdf', authenticateToken, async (req, res) => {
     const prescriptionId = Number(req.params.id);
     if (!prescriptionId) return res.status(400).json({ error: 'Invalid prescription id.' });
@@ -75,6 +77,7 @@ export function registerPdfRoutes(router) {
   });
 
   // GET /api/documents/clearances/:id/pdf
+  // Authorize access to a clearance and stream its saved PDF.
   router.get('/clearances/:id/pdf', authenticateToken, async (req, res) => {
     const clearanceId = Number(req.params.id);
     if (!clearanceId) return res.status(400).json({ error: 'Invalid clearance id.' });
@@ -133,6 +136,7 @@ export function registerPdfRoutes(router) {
   });
 
   // GET /api/documents/incident-reports/:id/pdf
+  // Check the caller's eligibility to view the incident report and stream its saved PDF.
   router.get('/incident-reports/:id/pdf', authenticateToken, requireIncidentRecordsViewForAdmin, async (req, res) => {
     const reportId = Number(req.params.id);
     if (!reportId) return res.status(400).json({ error: 'Invalid incident report id.' });
