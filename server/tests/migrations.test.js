@@ -54,6 +54,19 @@ async function foundationSchema(pool) {
 // Verify that fresh schema is adopted once even when two migration runners start together.
 test('fresh schema is adopted once even when two migration runners start together', { skip }, async t => {
   const pool = await fixture(t);
+  const [responderProfiles] = await pool.query(`
+    SELECT s.admin_no, s.license_no, s.specialty, s.department
+    FROM STAFF_PROFILES s
+    JOIN USER_ROLES ur ON ur.user_id = s.user_id
+    JOIN ROLES r ON r.role_id = ur.role_id
+    WHERE r.code = 'EMERGENCY_RESPONDER'
+  `);
+  assert.deepEqual(responderProfiles, [{
+    admin_no: null,
+    license_no: null,
+    specialty: 'Campus Emergency Response',
+    department: 'PSU Lingayen Quick-Response Unit',
+  }]);
   const applied = await Promise.all([runMigrations(pool), runMigrations(pool)]);
   assert.deepEqual(applied.sort(), [0, 14]);
   assert.equal(await responderFlag(pool), 1);

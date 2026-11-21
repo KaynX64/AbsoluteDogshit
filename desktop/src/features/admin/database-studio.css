@@ -1,3 +1,75 @@
+.db-studio-body {
+  display: grid;
+  grid-template-columns: clamp(156px, 16vw, 260px) minmax(0, 1fr);
+  gap: 20px;
+}
+
+.db-table-picker {
+  display: flex;
+  flex-direction: column;
+  max-height: 72vh;
+}
+
+.db-table-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.db-table-list > button {
+  flex-shrink: 0;
+}
+
+.db-records-table {
+  max-height: 56vh;
+  overflow: auto;
+}
+
+.db-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+  font-size: 12px;
+}
+
+.db-studio-note {
+  margin: 14px 0 0;
+  color: var(--text-sub);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+@media screen and (min-width: 1024px) and (min-height: 700px) {
+  .db-studio-body {
+    flex: 1;
+    grid-template-rows: minmax(0, 1fr);
+    min-height: 0;
+  }
+
+  .db-table-picker, .db-records-table {
+    max-height: none;
+  }
+
+  .db-records > :not(.db-records-table) {
+    flex-shrink: 0;
+  }
+}
+
+@media screen and (max-width: 760px) {
+  .db-studio-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .db-table-picker {
+    max-height: 30vh;
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════════════
    DB STUDIO TOOLBAR
    ═══════════════════════════════════════════════════════════════════ */

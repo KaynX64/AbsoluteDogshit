@@ -26,7 +26,7 @@ Windows uses `src/assets/valetudo_icon.ico` for the executable and the running w
 
 ```powershell
 npm test
-# Check compact Doctor/Dentist layouts using the current renderer build
+# Check clinic layouts and admin workspace scrolling
 npm run build
 npm run test:layout
 npm run test:smoke
@@ -50,9 +50,11 @@ Super Admins can grant **Use server Terminal** when creating or editing a Limite
 
 Student, Faculty and Non-Teaching account creation includes optional sex, date of birth and emergency contact details.
 
+Database Studio, account lists, Privacy & audit, and Incident Records keep their controls visible at desktop window sizes. Scroll within a table, the System tables list, or the incident list to see more records. Database Studio's pagination stays below the table.
+
 The Admin Terminal focuses its command prompt as soon as the tab opens. Press Enter to run a command and keep typing in the prompt. New output stays in view while the terminal is following the latest line. Requests time out without locking the prompt.
 
-Hover over an analytics line graph to highlight the nearest reporting day and see its count. Use **View data** to read the same values with the keyboard.
+Hover over an analytics line graph to highlight the nearest reporting day and see its count. Use **View data** to read the same values with the keyboard. Expanded tables scroll within the workspace.
 
 Use the sidebar and keyboard to navigate. See [keyboard and dialog behavior](docs/COMPACT-CLINIC.md#keyboard-and-dialogs) for tab activation, focus and draft handling.
 

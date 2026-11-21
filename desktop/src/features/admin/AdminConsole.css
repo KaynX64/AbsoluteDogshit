@@ -1,3 +1,47 @@
+.admin-workspace {
+  width: 100%;
+}
+
+@media screen and (min-width: 1024px) and (min-height: 700px) {
+  /* Only the record lists take the remaining height. Page controls keep their
+     natural size so they can wrap without covering the records. */
+  .app-main:has(.admin-bounded-view) > :not(.app-content),
+  .admin-workspace:has(.admin-bounded-view) > .desktop-feedback,
+  .admin-workspace-view:has(.admin-bounded-view) > :is(.vd-page-head, [role="tablist"]),
+  .admin-bounded-view > :not(.admin-panel, .admin-table-card, .admin-scroll-region, .db-studio-body),
+  .admin-panel > :not(.admin-panel, .admin-bounded-view, .admin-table-card),
+  .admin-table-card > :not(.admin-scroll-region) {
+    flex-shrink: 0;
+  }
+
+  .app-content:has(.admin-bounded-view),
+  :is(.admin-workspace, .admin-workspace-view):has(.admin-bounded-view),
+  :is(.admin-bounded-view, .admin-panel:not([hidden]), .admin-table-card) {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .app-content:has(.admin-bounded-view) {
+    padding-block: clamp(14px, 2.5vh, 28px);
+  }
+
+  .admin-scroll-region {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  .admin-scroll-region > .tbl > thead {
+    position: sticky;
+    z-index: 1;
+    top: 0;
+  }
+}
+
 .admin-user-filterbar {
   display: flex;
   align-items: flex-end;
@@ -173,6 +217,12 @@
   background: var(--sage-50);
   border: 1px solid var(--border-soft);
   border-radius: var(--r-lg);
+}
+
+@media screen and (1024px <= width <= 1280px) and (min-height: 700px) {
+  .app-main:has(.admin-bounded-view) .tb-right {
+    max-width: 75%;
+  }
 }
 
 @media (max-width: 900px) {

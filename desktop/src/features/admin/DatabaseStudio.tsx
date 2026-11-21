@@ -42,7 +42,7 @@ export default function DatabaseStudio({
   tableTotalPages,
 }: DatabaseStudioProps) {
   return (
-    <div>
+    <div className="admin-bounded-view db-studio">
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         padding: '14px 20px', background: T.sage100,
@@ -72,15 +72,13 @@ export default function DatabaseStudio({
         )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 20 }}>
+      <div className="db-studio-body">
         {/* Left: table list */}
-        <aside style={{
+        <aside className="db-table-picker" style={{
           background: T.surface,
           border: `1px solid ${T.border}`,
           borderRadius: T.radius.lg,
           padding: 14,
-          maxHeight: '72vh',
-          overflowY: 'auto',
           boxShadow: T.shadow.xs,
         }}>
           <div style={{
@@ -91,14 +89,14 @@ export default function DatabaseStudio({
             System tables ({dbTablesList.length})
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <div className="db-table-list admin-scroll-region" role="region" aria-label="System tables" tabIndex={0}>
             {dbTablesList.map((t) => {
               const isSelected = selectedDbTable === t.tableName;
-              const isAudit = ['AUDIT_LOGS', 'PHI_ACCESS_LOGS'].includes(t.tableName);
               return (
                 <button
                   key={t.tableName}
                   type="button"
+                  aria-pressed={isSelected}
                   onClick={() => {
                     setSelectedDbTable(t.tableName);
                     setDbSearchFilter('');
@@ -106,6 +104,7 @@ export default function DatabaseStudio({
                     fetchTableData(t.tableName, 1, '');
                   }}
                   style={{
+                    minWidth: 0,
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     padding: '9px 12px',
                     borderRadius: T.radius.md,
@@ -121,9 +120,8 @@ export default function DatabaseStudio({
                 >
                   <span style={{
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                  }}>
-                    {isAudit ? '' : ''} {t.tableName}
+                  }} title={t.tableName}>
+                    {t.tableName}
                   </span>
                 </button>
               );
@@ -132,7 +130,7 @@ export default function DatabaseStudio({
         </aside>
 
         {/* Right: data grid */}
-        <div style={{
+        <div className="db-records" style={{
           background: T.surface,
           border: `1px solid ${T.border}`,
           borderRadius: T.radius.lg,
@@ -159,6 +157,7 @@ export default function DatabaseStudio({
               <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                 <input
                   type="text"
+                  aria-label="Search records across table"
                   placeholder="Search records across table…"
                   value={dbSearchFilter}
                   onChange={(e) => setDbSearchFilter(e.target.value)}
@@ -199,6 +198,7 @@ export default function DatabaseStudio({
                 type="button"
                 onClick={() => fetchTableData(selectedDbTable, tablePage, dbSearchFilter)}
                 className="my-toolbar-icon-btn"
+                aria-label="Refresh records"
                 title="Refresh"
               >
                 <I.Refresh />
@@ -227,11 +227,10 @@ export default function DatabaseStudio({
               {dbSearchFilter.trim() ? `No records found matching "${dbSearchFilter}".` : 'Table is empty.'}
             </div>
           ) : (
-            <div style={{
+            <div key={`${selectedDbTable}-${tablePage}`} className="admin-scroll-region db-records-table" role="region"
+              aria-label={`${selectedDbTable} records`} tabIndex={0} style={{
               border: `1px solid ${T.borderSoft}`,
               borderRadius: T.radius.md,
-              overflow: 'auto',
-              maxHeight: '56vh',
             }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead style={{ position: 'sticky', top: 0, background: T.sage100, zIndex: 2 }}>
@@ -325,7 +324,7 @@ export default function DatabaseStudio({
           )}
 
           {/* Pagination */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, fontSize: 12, color: T.textSub }}>
+          <div className="db-pagination" style={{ color: T.textSub }}>
             <span>
               Page <b style={{ color: T.text }}>{tablePage}</b> of <b style={{ color: T.text }}>{Math.max(1, tableTotalPages)}</b>
               {' · '}Showing {tableRows.length} of {tableTotalRows} records{dbSearchFilter.trim() ? ' (matching search)' : ''}
@@ -360,9 +359,7 @@ export default function DatabaseStudio({
         </div>
       </div>
 
-      <p style={{
-        marginTop: 18, fontSize: 12.5, color: T.textSub, lineHeight: 1.6,
-      }}>
+      <p className="db-studio-note">
         New rows receive autogenerated primary keys. Direct edits affect system records;
         audit tables remain read-only.
       </p>

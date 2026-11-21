@@ -6,6 +6,8 @@
 
 Presentation: `HealthProfileEditor.tsx`, `ActiveAccounts.tsx`, `ArchivedAccounts.tsx`, `AuditPanels.tsx`, `DatabaseStudio.tsx`. The controller owns account edits, permissions, and request state. Terminal navigation follows the live admin grant.
 
+The render wrapper at L972 lets the desktop record views share the shell's available height. Database Studio, account lists, audit tables, and the incident list scroll within their own regions.
+
 | # | Lines | Anchor | Entry point |
 |---|---|---|---|
 | 1 | 1-93 | — | Imports and declarations |
