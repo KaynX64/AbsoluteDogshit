@@ -28,7 +28,8 @@ export function registerAlertRoutes(router, io) {
     try {
       const tier = req.responderTier;
       const [alerts] = await pool.query(
-        `SELECT a.alert_id, a.user_id, a.latitude, a.longitude, a.status, a.created_at, a.notes,
+        `SELECT a.alert_id, a.user_id, a.latitude, a.longitude, a.status, a.notes,
+                UNIX_TIMESTAMP(a.created_at) AS created_at_seconds,
                 a.location_label AS formattedAddress,
                 u.first_name, u.last_name, u.phone,
                 COALESCE(r.code, 'STUDENT') AS primary_role,
@@ -48,7 +49,8 @@ export function registerAlertRoutes(router, io) {
       );
 
       // Format each active alert and restrict medical fields to the caller's tier.
-      const decryptedAlerts = alerts.map((a) => {
+      const decryptedAlerts = alerts.map(({ created_at_seconds: createdAtSeconds, ...fields }) => {
+        const a = { ...fields, created_at: new Date(createdAtSeconds * 1000).toISOString() };
         // Tier the API the same way the socket broadcast is tiered, so the
         // REST path can never bypass the medical-detail redaction.
         if (tier === 'community') {

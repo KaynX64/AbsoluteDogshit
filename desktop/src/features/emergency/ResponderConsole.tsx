@@ -1,11 +1,11 @@
 import { useActionFeedback } from '../../shared/ui/feedback';
-// desktop/src/features/emergency/ResponderConsole.tsx
 import { useEffect, useRef, useState } from 'react';
 import { subscribeToDesktopEvents, useDesktopSocket } from '../../platform/realtime/desktopRealtime';
 import { T, btnPrimary, btnGhost } from '../../theme';
 import { API_BASE_URL } from '../../config/api';
 import { CLIENT_INSTANCE_ID } from '../../platform/realtime/clientInstance';
 import Icon from '../../shared/ui/Icon';
+import { formatReportedTime } from './reportedTime';
 
 export default function ResponderConsole() {
   const { notify, notice } = useActionFeedback();
@@ -397,10 +397,10 @@ export default function ResponderConsole() {
                       fontSize: 10, fontWeight: 800, letterSpacing: 1.2,
                       color: T.textMuted, textTransform: 'uppercase', marginBottom: 4,
                     }}>
-                      Reported
+                      Reported (PHT)
                     </div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>
-                      {a.created_at ? new Date(a.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
+                      {formatReportedTime(a.created_at)}
                     </div>
                   </div>
                 </div>

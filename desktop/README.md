@@ -40,6 +40,8 @@ Packaged smoke tests use synthetic data and an isolated profile to check preload
 
 ## Desktop interaction
 
+The dedicated responder console shows when each SOS was reported in Philippine time (PHT).
+
 Doctor/Dentist sections use a [compact, contained layout](docs/COMPACT-CLINIC.md). Prescribing supports multiple medicines with clinic/external fulfillment per item, a retained session draft and explicit review before issue. Server support must be enabled; see [prescribing rollout and checks](../server/PRESCRIBING-ROLLOUT.md).
 
 Choose **Sign out** in the sidebar and confirm to end your session.
