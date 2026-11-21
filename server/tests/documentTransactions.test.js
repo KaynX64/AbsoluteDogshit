@@ -48,7 +48,7 @@ for (const { path, body, idField, pdfTable, service } of [cases[1], { ...cases[0
       // Record when the issuing workflow releases its connection.
       release() { actions.push('release'); },
       // Supply signer, recipient, and document fixtures for the issuance queries.
-      async query(sql) {
+      async query(sql, params) {
         if (sql.includes('sp.license_no')) {
           return [[{ user_id: 21, first_name: 'Fixture', last_name: 'Doctor', is_active: 1,
             role_code: 'DOCTOR', license_no: 'fixture-license' }]];
@@ -59,6 +59,9 @@ for (const { path, body, idField, pdfTable, service } of [cases[1], { ...cases[0
         if (sql.includes('FROM EMR_RECORDS')) return [[{ emr_id: 17 }]];
         if (sql.includes('FROM AUDIT_LOGS')) return [[]];
         if (/^INSERT INTO (PRESCRIPTIONS|PRESCRIPTION_ITEMS|MEDICAL_CLEARANCES|AUDIT_LOGS)\b/.test(sql)) {
+          if (sql.startsWith('INSERT INTO MEDICAL_CLEARANCES')) {
+            assert.equal(JSON.parse(params.at(-1)).appointment_id, 8);
+          }
           return [{ insertId: 53 }];
         }
         throw new Error('Unexpected issuance query');
@@ -111,11 +114,11 @@ for (const { path, body, idField, pdfTable, service } of [cases[1], { ...cases[0
 
 // Verify that issuer history returns saved prescription details and clearance remarks even without PDFs.
 test('issuer history returns saved prescription details and clearance remarks even without PDFs', async (t) => {
-  const rx = { prescription_id: 53, emr_id: 17, status: 'active', notes: encrypt('Fixture notes'), pdf_s3_key: null };
+  const rx = { prescription_id: 53, emr_id: 17, appointment_id: 8, status: 'active', notes: encrypt('Fixture notes'), pdf_s3_key: null };
   const rxItem = { prescription_id: 53, item_id: 2, medicine_name: 'Fixture medicine', dosage: 'Fixture dosage',
     frequency: 'Fixture frequency', route: 'Fixture route', instructions: encrypt('Fixture directions') };
   const clearance = { clearance_id: 54, purpose: 'Fixture clearance', status: 'approved',
-    signature_metadata: JSON.stringify({ clinical_remarks: 'Fixture remarks' }), pdf_s3_key: null };
+    signature_metadata: JSON.stringify({ appointment_id: 8, clinical_remarks: 'Fixture remarks' }), pdf_s3_key: null };
   // Return the prescription, medicine, and clearance fixture rows and accept read audits.
   t.mock.method(pool, 'query', async (sql, params) => {
     if (sql.includes('INSERT INTO PHI_ACCESS_LOGS')) return [{}];
@@ -124,6 +127,10 @@ test('issuer history returns saved prescription details and clearance remarks ev
       return [[rxItem]];
     }
     assert.deepEqual(params, [42, 21]);
+    if (sql.includes('FROM PRESCRIPTIONS')) {
+      assert.match(sql, /LEFT JOIN EMR_RECORDS e ON e.emr_id = p.emr_id AND e.deleted_at IS NULL/);
+      assert.match(sql, /p.patient_user_id = \? AND p.doctor_user_id = \? AND p.deleted_at IS NULL/);
+    }
     return sql.includes('FROM PRESCRIPTIONS') ? [[rx]] : [[clearance]];
   });
 
@@ -146,6 +153,7 @@ test('issuer history returns saved prescription details and clearance remarks ev
     const [record] = res.body;
     assert.equal(record[idField], expectedId);
     assert.equal(record.pdfAvailable, false);
+    assert.equal(record.appointment_id, 8);
     if (idField === 'prescription_id') {
       assert.equal(record.notes, 'Fixture notes');
       assert.equal(record.items[0].instructions, 'Fixture directions');

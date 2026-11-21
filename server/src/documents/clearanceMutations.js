@@ -28,6 +28,7 @@ export async function issueClearance({ user_id, appointment_id, purpose, remarks
     const token = `CLR.${clearanceUuid}.${Date.now()}`;
 
     const signatureMetadata = {
+      appointment_id: Number(appointment_id),
       signer_user_id: issuerId,
       signer_role: signer.role,
       signer_license_no: signer.license_no,

@@ -6,7 +6,7 @@ export function installFixtures({ themeMode = 'dark' } = {}) {
     appointment_id: 10, patient_id: 5, first_name: 'Synthetic', last_name: 'Patient',
     student_no: 'FIXTURE-1', course: 'Fixture program', appointment_type: 'Medical',
     date_time: new Date().toISOString(), time_slot: '09:00 AM', status: 'serving',
-    queue_status: 'in-consultation', past_chief_complaint: 'Fixture complaint', past_diagnosis: 'Fixture diagnosis',
+    queue_status: 'in-consultation', queue_ticket: 'Q-01', past_chief_complaint: 'Fixture complaint', past_diagnosis: 'Fixture diagnosis',
   };
   const calls = [];
   let override = null;
@@ -21,6 +21,7 @@ export function installFixtures({ themeMode = 'dark' } = {}) {
     finishEncounter: null,
     activeSos: [],
     holdSos: false,
+    responderTier: 'clinical',
     showIncidentRecords: true,
     terminalGrant: false,
   };
@@ -34,6 +35,10 @@ export function installFixtures({ themeMode = 'dark' } = {}) {
       token: 'fixture.token.local',
       user: { user_id: 1, first_name: 'Fixture', last_name: 'Staff', email: 'staff@example.invalid', roles, theme_mode: themeMode },
     });
+    if (path.endsWith('/emergency/responder-access')) return Response.json({
+      authorized: state.responderTier !== null, tier: state.responderTier, isQualifiedResponder: true,
+    });
+    if (path.endsWith('/emergency/report-summary')) return Response.json({ pending: 0, overdue: 0, drafts: 0, canViewFiled: true });
     if (path.endsWith('/emergency/active')) {
       if (state.holdSos) {
         return new Promise(resolve => {

@@ -83,8 +83,10 @@ function AppShell() {
     'active' | 'scheduled' | 'history' | 'archive' | 'analytics'
   >('active');
   const [nurseViewMode, setNurseViewMode] = useState<'triage' | 'expected' | 'inventory' | 'analytics'>('triage');
+  const [responseViews, setResponseViews] = useState<Record<string, string>>({});
 
   function destinationFor(role: string) {
+    if (responseViews[role]) return responseViews[role];
     if (role === 'ADMIN') return adminTab === 'archived' ? 'users' : adminTab;
     if (role === 'NURSE') return nurseViewMode;
     return role === 'EMERGENCY_RESPONDER' ? 'dispatch' : doctorViewMode;
@@ -96,6 +98,10 @@ function AppShell() {
   );
   function navigateTo(destination: string) {
     requestWorkspace(activeRoleView, destination);
+    if (destination === 'alertHistory' || destination === 'reports') {
+      setResponseViews(current => ({ ...current, [activeRoleView]: destination })); return;
+    }
+    setResponseViews(current => ({ ...current, [activeRoleView]: '' }));
     if (activeRoleView === 'ADMIN') setAdminTab(destination as AdminTab);
     if (activeRoleView === 'DOCTOR' || activeRoleView === 'DENTIST') setDoctorViewMode(destination as typeof doctorViewMode);
     if (activeRoleView === 'NURSE') setNurseViewMode(destination as typeof nurseViewMode);
@@ -127,6 +133,7 @@ function AppShell() {
 
     // Purge cached credentials and role state from React memory
     setPassword('');
+    setResponseViews({});
     setEmail('');
     setActiveRoleView('');
     setUser(null);
@@ -349,11 +356,13 @@ const handleChangePassword = async (e: React.FormEvent) => {
     );
   }
 
-  const { NurseConsole, DoctorConsole, AdminConsole, ResponderConsole, IncidentReportModal } = consoles;
+  const { NurseConsole, DoctorConsole, AdminConsole, ResponderConsole, IncidentReportModal, ResponderAccessProvider, IncidentReportProvider, ResponderRecords } = consoles;
   return (
     <>
     <TitleBar />
     <DesktopSocketContext.Provider value={desktopSocket}>
+    <ResponderAccessProvider key={user.user_id}>
+    <IncidentReportProvider>
     <div className="app-shell" data-theme-mode={mode} data-theme-preset={preset}>
       <Sidebar
         role={activeRoleView}
@@ -363,7 +372,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
         onSignOut={handleSignOut}
         onChangePassword={() => { setShowPasswordModal(true); setPasswordMsg(null); }}
         activeItem={destination}
-        onItemClick={activeRoleView === 'EMERGENCY_RESPONDER' ? undefined : navigateTo}
+        onItemClick={navigateTo}
       />
 
       <div className="app-main">
@@ -430,10 +439,12 @@ const handleChangePassword = async (e: React.FormEvent) => {
           id="desktop-workspace"
           ref={workspace}
           tabIndex={-1}
-          style={activeRoleView === 'NURSE' && nurseViewMode === 'inventory'
+          style={activeRoleView === 'NURSE' && nurseViewMode === 'inventory' && destination !== 'alertHistory' && destination !== 'reports'
             ? { padding: 0, display: 'flex', minHeight: 0, overflow: 'hidden' }
             : undefined}
         >
+          <div hidden={destination === 'alertHistory' || destination === 'reports'} style={{ display: destination === 'alertHistory' || destination === 'reports' ? 'none' : 'contents' }}>
+          <DesktopSocketContext.Provider value={destination === 'alertHistory' || destination === 'reports' ? null : desktopSocket}>
           {activeRoleView === 'NURSE' && (
             <NurseConsole
               viewMode={nurseViewMode}
@@ -450,13 +461,15 @@ const handleChangePassword = async (e: React.FormEvent) => {
           {activeRoleView === 'ADMIN' && (
             <AdminConsole activeTab={adminTab} onTabChange={setAdminTab} onIncidentAccessChange={setShowIncidentRecords} onTerminalAccessChange={updateTerminalAccess} />
           )}
-          {activeRoleView === 'EMERGENCY_RESPONDER' && <ResponderConsole />}
+          {activeRoleView === 'EMERGENCY_RESPONDER' && destination === 'dispatch' && <ResponderConsole />}
+          </DesktopSocketContext.Provider>
+          </div>
+          {(destination === 'alertHistory' || destination === 'reports') && <ResponderRecords key={destination} history={destination === 'alertHistory'} />}
         </main>
       </div>
 
-      {/* Post-resolution incident documentation popup. Server-driven: it
-          only appears for accounts in the live responder audience, on any
-          console view, whenever ANY responder closes an SOS as resolved. */}
+      {/* Incident documentation opens only in the authorized staff window
+          that resolved the incident, and stays mounted across role switches. */}
       {confirmation}
       <IncidentReportModal />
 
@@ -572,6 +585,8 @@ const handleChangePassword = async (e: React.FormEvent) => {
         </Dialog>
       )}
     </div>
+    </IncidentReportProvider>
+    </ResponderAccessProvider>
     </DesktopSocketContext.Provider>
     </>
   );

@@ -9,13 +9,15 @@ import '../services/emergency_alert_service.dart';
 import '../services/responder_roster.dart';
 import '../screens/incident_reports_screen.dart';
 import 'sos_alert_actions.dart';
+import 'responder_workspace.dart';
 
 class ActiveIncidentBanner extends StatelessWidget {
-  const ActiveIncidentBanner({super.key});
+  const ActiveIncidentBanner({super.key, this.service});
+  final EmergencyAlertService? service;
 
   @override
   Widget build(BuildContext context) {
-    final service = EmergencyAlertService();
+    final service = this.service ?? EmergencyAlertService();
     return ListenableBuilder(
       listenable: service.roster,
       builder: (context, _) {
@@ -43,7 +45,8 @@ class ActiveIncidentBanner extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
-            onTap: () => showResponderIncident(context, alert.id),
+            onTap: () =>
+                showResponderIncident(context, alert.id, service: service),
             trailing: _MuteButton(service: service, incident: alert),
           ),
         );
@@ -70,7 +73,7 @@ class ResponderHubButton extends StatelessWidget {
               MaterialPageRoute<void>(
                 builder: (context) => Scaffold(
                   appBar: AppBar(title: const Text('Responder Hub')),
-                  body: const ResponderHub(),
+                  body: const ResponderWorkspace(),
                 ),
               ),
             ),
@@ -84,11 +87,12 @@ class ResponderHubButton extends StatelessWidget {
 }
 
 class ResponderHub extends StatelessWidget {
-  const ResponderHub({super.key});
+  const ResponderHub({super.key, this.service});
+  final EmergencyAlertService? service;
 
   @override
   Widget build(BuildContext context) {
-    final service = EmergencyAlertService();
+    final service = this.service ?? EmergencyAlertService();
     return ListenableBuilder(
       listenable: Listenable.merge([service.roster, service.delivery]),
       builder: (context, _) {
@@ -125,7 +129,11 @@ class ResponderHub extends StatelessWidget {
                       '${incident.status.label} · ${incident.patientName}',
                     ),
                     trailing: const Icon(Icons.chevron_right),
-                    onTap: () => showResponderIncident(context, incident.id),
+                    onTap: () => showResponderIncident(
+                      context,
+                      incident.id,
+                      service: service,
+                    ),
                   ),
                 );
               }
@@ -179,16 +187,19 @@ class ResponderHub extends StatelessWidget {
                     icon: const Icon(Icons.volume_up_outlined),
                     label: const Text('Test siren for 3 seconds'),
                   ),
-                  const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => IncidentReportsScreen(service: service),
+                  if (roster.canManageIncidents) ...[
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) =>
+                              IncidentReportsScreen(service: service),
+                        ),
                       ),
+                      icon: const Icon(Icons.assignment_outlined),
+                      label: const Text('Pending incident reports'),
                     ),
-                    icon: const Icon(Icons.assignment_outlined),
-                    label: const Text('Pending incident reports'),
-                  ),
+                  ],
                   Text(
                     'Active incidents',
                     style: Theme.of(context).textTheme.titleLarge,
@@ -223,20 +234,23 @@ class ResponderHub extends StatelessWidget {
   }
 }
 
-Future<void> showResponderIncident(BuildContext context, int id) =>
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (_) => FractionallySizedBox(
-        heightFactor: 0.9,
-        child: ResponderIncidentDetail(
-          id: id,
-          service: EmergencyAlertService(),
-        ),
-      ),
-    );
+Future<void> showResponderIncident(
+  BuildContext context,
+  int id, {
+  EmergencyAlertService? service,
+}) => showModalBottomSheet<void>(
+  context: context,
+  isScrollControlled: true,
+  useSafeArea: true,
+  showDragHandle: true,
+  builder: (_) => FractionallySizedBox(
+    heightFactor: 0.9,
+    child: ResponderIncidentDetail(
+      id: id,
+      service: service ?? EmergencyAlertService(),
+    ),
+  ),
+);
 
 class ResponderIncidentDetail extends StatefulWidget {
   const ResponderIncidentDetail({
@@ -402,6 +416,7 @@ class _ResponderIncidentDetailState extends State<ResponderIncidentDetail> {
                   const SizedBox(height: 16),
                   SosAlertActions(
                     incident: incident,
+                    roster: widget.service.roster,
                     onUpdate: service.updateStatus,
                   ),
                 ],

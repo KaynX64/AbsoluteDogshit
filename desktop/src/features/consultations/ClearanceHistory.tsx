@@ -4,6 +4,8 @@ import Icon from '../../shared/ui/Icon';
 
 export interface ClearanceHistoryRow {
   clearance_id: number;
+  appointment_id?: number | string | null;
+  pdfAvailable?: boolean;
   issued_at: string;
   expires_at: string;
   status: string;
@@ -70,6 +72,21 @@ export default function ClearanceHistory({ setShowClrHistoryModal, clrHistoryPat
           </button>
         </div>
 
+        <ClearanceHistoryContent clrHistoryError={clrHistoryError} loadingClrHistory={loadingClrHistory} clrHistory={clrHistory} handleDownloadPdf={handleDownloadPdf} setClrHistoryError={setClrHistoryError} />
+      </div>
+    </Dialog>
+  );
+}
+
+
+type ClearanceHistoryContentProps = Pick<ClearanceHistoryProps, 'clrHistoryError' | 'loadingClrHistory' | 'clrHistory' | 'handleDownloadPdf' | 'setClrHistoryError'> & {
+  emptyMessage?: string;
+  onViewPdf?: (kind: 'prescriptions' | 'clearances', id: number) => void;
+};
+
+export function ClearanceHistoryContent({ clrHistoryError, loadingClrHistory, clrHistory, handleDownloadPdf, setClrHistoryError, onViewPdf,
+  emptyMessage = 'You have not issued any clearances to this patient.' }: ClearanceHistoryContentProps) {
+  return <>
         {clrHistoryError && (
           <div
             style={{
@@ -104,7 +121,7 @@ export default function ClearanceHistory({ setShowClrHistoryModal, clrHistoryPat
               color: T.textMuted,
             }}
           >
-            You have not issued any clearances to this patient.
+            {emptyMessage}
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -191,6 +208,13 @@ export default function ClearanceHistory({ setShowClrHistoryModal, clrHistoryPat
                     </div>
                   )}
 
+                  {onViewPdf && <button type="button" style={btnGhost}
+                    onClick={() => onViewPdf('clearances', c.clearance_id)}>
+                    <Icon name="visibility" size={14} /> View / print PDF
+                  </button>}
+                  {c.pdfAvailable === false && <p style={{ color: T.textSub, fontSize: 12 }}>
+                    PDF is pending. Recorded document details remain available.
+                  </p>}
                   <button
                     type="button"
                     onClick={() =>
@@ -210,7 +234,5 @@ export default function ClearanceHistory({ setShowClrHistoryModal, clrHistoryPat
             })}
           </div>
         )}
-      </div>
-    </Dialog>
-  );
+  </>;
 }

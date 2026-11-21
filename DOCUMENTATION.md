@@ -16,6 +16,7 @@ Use this index to find the current guide for a task. Confirm behavior against so
 - [Desktop README](desktop/README.md) · [Mobile README](mobile/README.md) — module setup and workflows.
 - [Server migration rollout](server/MIGRATION-PLAN.md) · [Server policy](server/src/config/SERVER-POLICY.md).
 - [Structured prescribing API](server/STRUCTURED-PRESCRIBING.md) · [Prescribing rollout and checks](server/PRESCRIBING-ROLLOUT.md).
+- [Responder records](server/RESPONDER-RECORDS.md) — alert history, desktop drafts, read-only mobile reports, permissions and migration 015.
 - [Server route map](server/src/routes/AGENTS.md) · [Server utilities](server/src/utils/AGENTS.md).
 - [Desktop code-slice index](desktop/docs/CODESLICE.md) · [Mobile code-slice index](mobile/lib/screens/CODESLICE.md).
 

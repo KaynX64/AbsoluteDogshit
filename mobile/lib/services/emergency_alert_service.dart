@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -15,6 +16,8 @@ import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
 import 'responder_roster.dart';
 import 'mobile_session_data.dart';
+import '../models/responder_records.dart';
+import 'document_download.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -96,6 +99,9 @@ class EmergencyAlertService {
   final delivery = ValueNotifier(DeliveryStatus.pending);
   final notificationOpen = ValueNotifier<int?>(null);
   final incidentReportChanges = ValueNotifier(0);
+  final reportSummary = ValueNotifier<ReportWorkSummary?>(null);
+  final reportSummaryError = ValueNotifier<String?>(null);
+  Future<void>? _reportSummaryRequest;
   final _storage = const FlutterSecureStorage(
     aOptions: AndroidOptions(storageNamespace: 'responder_device'),
   );
@@ -216,6 +222,9 @@ class EmergencyAlertService {
     if (!preserveNotification) _pendingOpen = null;
     notificationOpen.value = null;
     roster.begin(null);
+    reportSummary.value = null;
+    reportSummaryError.value = null;
+    _reportSummaryRequest = null;
     delivery.value = DeliveryStatus.pending;
   }
 
@@ -315,6 +324,7 @@ class EmergencyAlertService {
     }
     await refreshAccess();
     if (_automatic) await refreshIncidents();
+    if (roster.canManageIncidents) unawaited(refreshReportSummary());
     if (delivery.value != DeliveryStatus.saved) unawaited(_syncRegistration());
     await _openPendingNotification();
   }
@@ -350,12 +360,24 @@ class EmergencyAlertService {
         final status = IncidentStatus.read(value['status']);
         if (id != null && status != null) {
           roster.statusChanged(id, status);
-          if (status == IncidentStatus.resolved) incidentReportChanges.value++;
+          if (status == IncidentStatus.resolved) {
+            incidentReportChanges.value++;
+            unawaited(refreshReportSummary());
+          }
           if (status != IncidentStatus.triggered) _cancelLocalNotification(id);
         }
       });
       socket.on('emergency:incident_reported', (_) {
-        if (_current(session)) incidentReportChanges.value++;
+        if (_current(session)) {
+          incidentReportChanges.value++;
+          unawaited(refreshReportSummary());
+        }
+      });
+      socket.on('emergency:report_work_changed', (_) {
+        if (_current(session)) {
+          incidentReportChanges.value++;
+          unawaited(refreshReportSummary());
+        }
       });
       socket.connect();
     } catch (_) {
@@ -374,6 +396,8 @@ class EmergencyAlertService {
     _testing = false;
     _testTimer?.cancel();
     roster.setAccess(null, false);
+    reportSummary.value = null;
+    _reportSummaryRequest = null;
   }
 
   Future<bool> refreshAccess() {
@@ -417,6 +441,7 @@ class EmergencyAlertService {
         _clearAccess();
       }
       roster.setAccess(tier as String, result['isQualifiedResponder'] == true);
+      if (tier == 'clinical') unawaited(refreshReportSummary());
       return true;
     } catch (error) {
       debugPrint('Unable to check responder access (${error.runtimeType}).');
@@ -486,6 +511,9 @@ class EmergencyAlertService {
     final token = _jwt;
     final session = _session, access = _accessVersion;
     if (token == null || roster[id] == null) return 'Incident unavailable.';
+    if (!roster.canUpdateStatus(status)) {
+      return 'This action is restricted to authorized response staff.';
+    }
     if (!_updating.add(id)) return 'An update is already in progress.';
     try {
       final response = await _http
@@ -498,13 +526,20 @@ class EmergencyAlertService {
       if (!_current(session) || access != _accessVersion) {
         return 'Responder access changed.';
       }
-      if (response.statusCode == 401 || response.statusCode == 403) {
+      if (response.statusCode == 403) {
+        await _refreshAfterActionDenied();
+        return 'Your permissions changed. Community responders may only acknowledge incidents.';
+      }
+      if (response.statusCode == 401) {
         _clearAccess();
         return 'Responder access is unavailable.';
       }
       if (response.statusCode == 200) {
         roster.statusChanged(id, status);
-        if (status == IncidentStatus.resolved) incidentReportChanges.value++;
+        if (status == IncidentStatus.resolved) {
+          incidentReportChanges.value++;
+          unawaited(refreshReportSummary());
+        }
         _cancelLocalNotification(id);
         return null;
       }
@@ -552,45 +587,107 @@ class EmergencyAlertService {
     ];
   }
 
-  Future<bool> fileIncidentReport(int id, String details, String notes) async {
+  /// Report reads only: creating, saving and filing forms belongs to desktop.
+  Future<Map<String, dynamic>> readResponderRecords(
+    String path, {
+    Future<void>? abortTrigger,
+  }) async {
     final response = await _requestIncidentReport(
-      '/$id/incident-report',
-      body: {'incident_details': details, 'treatment_notes': notes},
+      path,
+      abortTrigger: abortTrigger,
     );
-    if (response.statusCode == 201) return true;
-    if (response.statusCode == 409 &&
-        jsonDecode(response.body)['code'] == 'REPORT_ALREADY_FILED') {
-      return false;
+    if (response.statusCode != 200) {
+      String message = 'Responder records are unavailable. Please retry.';
+      try {
+        message =
+            (jsonDecode(response.body) as Map)['error'] as String? ?? message;
+      } catch (_) {}
+      throw StateError(message);
     }
-    throw StateError('Could not file report');
+    final value = jsonDecode(response.body);
+    if (value is! Map<String, dynamic>) {
+      throw StateError('Update the server to use responder history.');
+    }
+    return value;
+  }
+
+  Future<void> refreshReportSummary() {
+    if (!roster.canManageIncidents) return Future.value();
+    final running = _reportSummaryRequest;
+    if (running != null) return running;
+    final session = _session, access = _accessVersion;
+    final request = () async {
+      try {
+        final data = await readResponderRecords('/report-summary');
+        if (_current(session) && access == _accessVersion) {
+          reportSummary.value = ReportWorkSummary.fromJson(data);
+          reportSummaryError.value = null;
+        }
+      } catch (_) {
+        if (_current(session) && access == _accessVersion) {
+          reportSummaryError.value = 'Report counts could not be refreshed.';
+        }
+      } finally {
+        if (_current(session) && access == _accessVersion) {
+          _reportSummaryRequest = null;
+        }
+      }
+    }();
+    _reportSummaryRequest = request;
+    return request;
   }
 
   Future<http.Response> _requestIncidentReport(
     String path, {
-    Map<String, String>? body,
+    Future<void>? abortTrigger,
   }) async {
     final token = _jwt;
     final session = _session, access = _accessVersion;
-    if (token == null || !roster.eligible || _terminating) {
+    if (token == null || !roster.canManageIncidents || _terminating) {
       throw StateError('Responder access unavailable');
     }
-    final uri = _url('/api/emergency$path');
-    final response =
-        await (body == null
-                ? _http.get(uri, headers: _headers(token))
-                : _http.post(
-                    uri,
-                    headers: _headers(token),
-                    body: jsonEncode(body),
-                  ))
-            .timeout(_timeout);
+    final request = http.AbortableRequest(
+      'GET',
+      _url('/api/emergency$path'),
+      abortTrigger: abortTrigger,
+    )..headers.addAll(_headers(token));
+    final response = await http.Response.fromStream(
+      await _http.send(request).timeout(_timeout),
+    ).timeout(_timeout);
     if (!_current(session) || _terminating || access != _accessVersion) {
       throw StateError('Responder access changed');
     }
-    if (response.statusCode == 401 || response.statusCode == 403) {
+    if (response.statusCode == 403) {
+      await _refreshAfterActionDenied();
+    } else if (response.statusCode == 401) {
       _clearAccess();
     }
     return response;
+  }
+
+  Future<void> _refreshAfterActionDenied() async {
+    // Fail closed while looking up a changed role, without discarding a valid
+    // community grant simply because a staff-only action was rejected.
+    _clearAccess();
+    if (await refreshAccess()) await refreshIncidents(manual: true);
+  }
+
+  Future<File> downloadReportPdf(int reportId, File destination) async {
+    final token = _jwt, session = _session, access = _accessVersion;
+    if (token == null || !roster.canManageIncidents) {
+      throw StateError('Responder access unavailable');
+    }
+    final file = await downloadDocument(
+      client: _http,
+      url: _url('/api/emergency/reports/$reportId/pdf'),
+      token: token,
+      destination: destination,
+    );
+    if (!_current(session) || access != _accessVersion) {
+      if (await file.exists()) await file.delete();
+      throw StateError('Responder access changed');
+    }
+    return file;
   }
 
   Future<void> setDutyMode(ResponderDutyMode mode) async {

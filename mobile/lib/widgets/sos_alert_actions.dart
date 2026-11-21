@@ -6,10 +6,12 @@ class SosAlertActions extends StatefulWidget {
   const SosAlertActions({
     super.key,
     required this.incident,
+    required this.roster,
     required this.onUpdate,
   });
 
   final Incident incident;
+  final ResponderRoster roster;
   final Future<String?> Function(int id, IncidentStatus status) onUpdate;
 
   @override
@@ -22,7 +24,7 @@ class _SosAlertActionsState extends State<SosAlertActions> {
   String? _error;
 
   Future<void> _run(IncidentStatus status) async {
-    if (_busy) return;
+    if (_busy || !widget.roster.canUpdateStatus(status)) return;
     final id = widget.incident.id;
     setState(() {
       _busy = true;
@@ -56,7 +58,11 @@ class _SosAlertActionsState extends State<SosAlertActions> {
             ],
           ),
         );
-        if (confirmed != true || !mounted) return;
+        if (confirmed != true ||
+            !mounted ||
+            !widget.roster.canUpdateStatus(status)) {
+          return;
+        }
       }
       setState(() => _submitting = true);
       final error = await widget.onUpdate(id, status);
@@ -75,24 +81,28 @@ class _SosAlertActionsState extends State<SosAlertActions> {
   Widget build(BuildContext context) {
     final status = widget.incident.status;
     const target = Size.fromHeight(48);
-    final secondaryStyle = TextButton.styleFrom(minimumSize: const Size(48, 48));
+    final secondaryStyle = TextButton.styleFrom(
+      minimumSize: const Size(48, 48),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       spacing: 12,
       children: [
-        if (status == IncidentStatus.triggered)
+        if (status == IncidentStatus.triggered &&
+            widget.roster.canUpdateStatus(IncidentStatus.acknowledged))
           FilledButton(
             style: FilledButton.styleFrom(minimumSize: target),
             onPressed: _busy ? null : () => _run(IncidentStatus.acknowledged),
             child: const Text('Acknowledge'),
           ),
-        if (status.index < IncidentStatus.dispatched.index)
+        if (widget.roster.canManageIncidents &&
+            status.index < IncidentStatus.dispatched.index)
           OutlinedButton(
             style: OutlinedButton.styleFrom(minimumSize: target),
             onPressed: _busy ? null : () => _run(IncidentStatus.dispatched),
             child: const Text('Dispatch to location'),
           ),
-        if (!status.isClosed)
+        if (widget.roster.canManageIncidents && !status.isClosed)
           Wrap(
             spacing: 12,
             runSpacing: 8,

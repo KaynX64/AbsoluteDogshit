@@ -15,7 +15,7 @@ export class IncidentReportError extends Error {
 // File the report and audit entry for a resolved alert, handling attempts to file it twice.
 export async function fileIncidentReport({ alertId, responderId, incidentDetails, treatmentNotes, resolution, ipAddress }) {
   try {
-    // Lock the alert, verify it is ready for documentation, and save the encrypted report and audit entry.
+    // Lock the alert, verify it is ready for documentation, and save the report and audit entry.
     return await inTransaction(async connection => {
       const [[alert]] = await connection.query(
         'SELECT user_id, status, created_at, resolved_at FROM EMERGENCY_ALERTS WHERE alert_id = ? FOR UPDATE',
@@ -46,6 +46,7 @@ export async function fileIncidentReport({ alertId, responderId, incidentDetails
         [alertId, alert.user_id, resolvedAt, incidentDetails, treatmentNotes, responderId],
       );
       const reportId = Number(insertResult.insertId);
+      await connection.query('DELETE FROM INCIDENT_REPORT_DRAFTS WHERE alert_id = ?', [alertId]);
       await logAudit(connection, {
         userId: responderId,
         action: 'CREATE',

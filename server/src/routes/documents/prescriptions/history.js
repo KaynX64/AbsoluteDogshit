@@ -86,10 +86,12 @@ export function registerPrescriptionHistory(router) {
 
       try {
         const [rows] = await pool.query(
-          `SELECT prescription_id, emr_id, issued_at, expires_at, status, notes, pdf_s3_key, contract_version, clinical_snapshot, signature_metadata
-           FROM PRESCRIPTIONS
-           WHERE patient_user_id = ? AND doctor_user_id = ? AND deleted_at IS NULL
-           ORDER BY issued_at DESC, prescription_id DESC`,
+          `SELECT p.prescription_id, p.emr_id, p.issued_at, p.expires_at, p.status, p.notes,
+                  p.pdf_s3_key, p.contract_version, p.clinical_snapshot, p.signature_metadata, e.appointment_id
+           FROM PRESCRIPTIONS p
+           LEFT JOIN EMR_RECORDS e ON e.emr_id = p.emr_id AND e.deleted_at IS NULL
+           WHERE p.patient_user_id = ? AND p.doctor_user_id = ? AND p.deleted_at IS NULL
+           ORDER BY p.issued_at DESC, p.prescription_id DESC`,
           [patientId, req.user.user_id]
         );
 

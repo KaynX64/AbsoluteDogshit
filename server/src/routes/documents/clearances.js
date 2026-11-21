@@ -115,6 +115,7 @@ export function registerClearanceRoutes(router, io) {
           const meta = parseMetadata(row.signature_metadata);
           return {
             clearance_id: row.clearance_id,
+            appointment_id: meta.appointment_id || null,
             purpose: row.purpose,
             status: row.status,
             issued_at: row.issued_at,
