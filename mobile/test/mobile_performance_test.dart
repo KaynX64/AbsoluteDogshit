@@ -15,6 +15,7 @@ import 'package:mobile/services/document_download.dart';
 import 'package:mobile/services/mobile_session_data.dart';
 import 'package:mobile/theme/account_theme_controller.dart';
 import 'package:mobile/widgets/lazy_card_columns.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import 'mobile_appearance_test.dart' show bookingFixtureClient;
 
@@ -294,6 +295,7 @@ void main() {
       final data = MobileSessionData.instance..clear();
       final first = Completer<http.Response>();
       var queueCalls = 0;
+      var passCalls = 0;
       final client = MockClient((request) async {
         if (request.url.path.endsWith('/queue/my')) {
           queueCalls++;
@@ -304,7 +306,9 @@ void main() {
           return http.Response('{"hasConsented":true}', 200);
         }
         if (request.url.path.endsWith('/token')) {
-          return http.Response('{"qrToken":"fixture"}', 200);
+          return ++passCalls == 1
+              ? http.Response('{"qrToken":"fixture","expiresInSeconds":15}', 200)
+              : http.Response('{}', 503);
         }
         return http.Response('{}', 200);
       });
@@ -347,12 +351,15 @@ void main() {
       first.complete(http.Response('{"hasActiveTicket":false}', 200));
       await tester.pumpAndSettle();
       expect(queueCalls, 2);
+      expect(find.byType(QrImageView), findsOneWidget);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       await tester.pump(const Duration(seconds: 31));
       expect(queueCalls, 2);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pumpAndSettle();
       expect(queueCalls, 3);
+      expect(passCalls, 2);
+      expect(find.byType(QrImageView), findsNothing);
       await tester.pumpWidget(const SizedBox());
       expect(tester.takeException(), isNull);
     },

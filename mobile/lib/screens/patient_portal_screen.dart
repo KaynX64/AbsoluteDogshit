@@ -17,7 +17,6 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
-import 'package:url_launcher/url_launcher.dart';
 
 import '../config/api_config.dart';
 import '../utils/responsive.dart';
@@ -165,6 +164,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
   final _data = MobileSessionData.instance;
   late final int _generation;
   bool _foreground = true;
+  bool get _sessionCurrent => mounted && _data.isCurrent(_generation);
+  String? get _account => widget.user['user_id']?.toString();
   Future<void>? _queueRequest;
   bool _queueRefreshQueued = false;
   Future<Map<String, dynamic>?>? _emergencyInfo;
@@ -175,6 +176,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
 
   String _qrToken = '';
   bool _loadingQR = false;
+  DateTime? _qrExpiresAt;
+  Timer? _qrTimer;
 
   Map<String, dynamic>? _profileData;
   bool _loadingProfile = false;
@@ -192,6 +195,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
     0.0,
   );
   Timer? _holdTimer;
+  Timer? _sosRetry;
   bool _isDispatchingSOS = false;
   String _sosStatusMessage = '';
 
@@ -226,6 +230,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
     ]).then((_) => _schedulePreload());
     _initQueueSocket();
     ConnectivityService().addListener(_onConnectivityChanged);
+    unawaited(_replayQueuedSosEvents());
 
     _updateQueuePolling();
   }
@@ -235,6 +240,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
     WidgetsBinding.instance.removeObserver(this);
     ConnectivityService().removeListener(_onConnectivityChanged);
     _queuePollingTimer?.cancel();
+    _qrTimer?.cancel();
+    _sosRetry?.cancel();
     _holdTimer?.cancel();
     _holdProgressNotifier.dispose();
     _socket?.dispose();
@@ -247,12 +254,11 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
 
   void _onConnectivityChanged() {
     _updateQueuePolling();
-    if (ConnectivityService().isOnline) {
-      _replayQueuedSosEvents();
-      if (_foreground) {
-        _fetchActiveQueueTicket(silent: true);
-        unawaited(_dashboardReady.then((_) => _schedulePreload()));
-      }
+    if (_foreground && ConnectivityService().isOnline) {
+      unawaited(_replayQueuedSosEvents());
+      unawaited(_fetchActiveQueueTicket(silent: true));
+      unawaited(_dashboardReady.then((_) => _schedulePreload()));
+      _refreshPassIfNeeded();
     }
     if (mounted) setState(() {});
   }
@@ -274,6 +280,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
     if (_foreground) {
       _fetchActiveQueueTicket(silent: true);
       unawaited(_dashboardReady.then((_) => _schedulePreload()));
+      unawaited(_replayQueuedSosEvents());
+      _refreshPassIfNeeded();
+    } else {
+      _sosRetry?.cancel();
     }
   }
 
@@ -303,44 +313,45 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
   }
 
   Future<void> _replayQueuedSosEvents() async {
-    final pending = await OfflineSosService().pendingSosEvents();
-    if (pending.isEmpty) return;
-
-    final token = await _storage.read(key: 'jwt_token');
-    if (token == null) return;
-
-    final List<Map<String, dynamic>> stillFailing = [];
-    for (final event in pending) {
-      try {
-        final res = await _client.post(
-          Uri.parse('${ApiConfig.baseUrl}/api/emergency/sos'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $token',
-          },
-          body: jsonEncode({
-            'latitude': event['latitude'],
-            'longitude': event['longitude'],
-            'notes': event['notes'],
-          }),
-        );
-        if (res.statusCode >= 500) stillFailing.add(event);
-      } catch (_) {
-        stillFailing.add(event);
-      }
-    }
-
-    await OfflineSosService().savePendingQueue(stillFailing);
-
-    if (stillFailing.isEmpty && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text(
-            '✅ Queued SOS alert delivered to campus responders.',
-          ),
-          backgroundColor: AppPalette.of(context).background(0xFF15803D),
-        ),
+    final account = _account;
+    if (!_sessionCurrent || !_foreground || account == null) return;
+    try {
+      final token = await _storage.read(key: 'jwt_token');
+      if (!_sessionCurrent || token == null) return;
+      final online = ConnectivityService().isOnline;
+      final result = await OfflineSosService().sync(
+        account: account,
+        token: token,
+        client: _client,
+        online: online,
+        isCurrent: () => _sessionCurrent && _foreground && !_signOutInProgress,
       );
+      if (!mounted || !_data.isCurrent(_generation) || _signOutInProgress) {
+        return;
+      }
+      if (result.message case final message?) {
+        setState(() => _sosStatusMessage = message);
+        if (result.accepted + result.unsent > 0 && _currentIndex != 2) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(message)));
+        }
+      }
+      _sosRetry?.cancel();
+      if (_foreground &&
+          online &&
+          !result.reauthenticate &&
+          result.pending > 0) {
+        _sosRetry = Timer(
+          result.retryIn ?? const Duration(seconds: 1),
+          _replayQueuedSosEvents,
+        );
+      }
+    } catch (_) {
+      if (_sessionCurrent) {
+        setState(
+          () => _sosStatusMessage = 'Could not read the SOS queue. Use the call buttons if you need help now.',
+        );
+      }
     }
   }
 
@@ -416,17 +427,14 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
           'Authorization': 'Bearer $token',
         },
       );
-      if (res.statusCode == 200) {
-        await EmergencyAlertService().signOut(token);
-        if (mounted) AccountThemeScope.of(context).reset();
-        await _storage.deleteAll();
-        if (mounted) {
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(builder: (_) => const LoginScreen()),
-            (route) => false,
-          );
+      if (res.statusCode == 200 && _sessionCurrent) {
+        final account = _account;
+        if (account != null) {
+          await OfflineSosService()
+              .cacheEmergencyInfo(account)
+              .catchError((Object _) {});
         }
+        if (_sessionCurrent) await _signOut();
       }
     } catch (_) {}
   }
@@ -490,20 +498,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
         actions: [
           if (isMandatory)
             TextButton(
-              onPressed: () async {
-                await EmergencyAlertService().signOut(
-                  await _storage.read(key: 'jwt_token'),
-                );
-                if (mounted) AccountThemeScope.of(context).reset();
-                await _storage.deleteAll();
-                if (mounted) {
-                  Navigator.pushAndRemoveUntil(
-                    context,
-                    MaterialPageRoute(builder: (_) => const LoginScreen()),
-                    (route) => false,
-                  );
-                }
-              },
+              onPressed: _signOut,
               child: const Text(
                 'Decline (Exit)',
                 style: TextStyle(color: Colors.red),
@@ -595,7 +590,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
             .build(),
       );
       void invalidateAppointments(dynamic _) {
-        if (_data.isCurrent(_generation)) _data.invalidateAppointments();
+        if (_data.isCurrent(_generation)) {
+          _data.invalidateAppointments(notifyHistory: true);
+        }
       }
 
       _socket?.on('appointment:booked', invalidateAppointments);
@@ -603,7 +600,14 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
       _socket?.on('appointment:status_changed', invalidateAppointments);
       _socket?.on('prescription:status_changed', (_) {
         if (_data.isCurrent(_generation)) {
-          _data.invalidate('/api/documents/prescriptions/my');
+          _data.invalidate('/api/documents/prescriptions/my', notify: true);
+        }
+      });
+      _socket?.on('documents:updated', (event) {
+        if (!_sessionCurrent || event is! Map) return;
+        final kind = event['kind'];
+        if (kind == 'prescriptions' || kind == 'clearances') {
+          _data.invalidate('/api/documents/$kind/my', notify: true);
         }
       });
       _socket?.onConnect((_) => _fetchActiveQueueTicket(silent: true));
@@ -676,22 +680,63 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
         _data.isCurrent(_generation));
   }
 
+  bool get _hasValidPass =>
+      _qrToken.isNotEmpty && (_qrExpiresAt?.isAfter(DateTime.now()) ?? false);
+
+  void _selectTab(int index) {
+    setState(() => _currentIndex = index);
+    _refreshPassIfNeeded();
+  }
+
+  void _refreshPassIfNeeded() {
+    if (_sessionCurrent &&
+        _foreground &&
+        _currentIndex == 0 &&
+        _hasConsented &&
+        !_hasValidPass &&
+        ConnectivityService().isOnline) {
+      unawaited(_fetchQRPass());
+    }
+  }
+
   Future<void> _fetchQRPass() async {
+    if (!_sessionCurrent || _loadingQR) return;
     setState(() => _loadingQR = true);
     try {
       final token = await _storage.read(key: 'jwt_token');
       if (!mounted || token == null) return;
+      final requestedAt = DateTime.now();
       final res = await _client
           .get(
             Uri.parse('${ApiConfig.baseUrl}/api/health-pass/token'),
             headers: {'Authorization': 'Bearer $token'},
           )
           .timeout(const Duration(seconds: 10));
-      if (mounted && _data.isCurrent(_generation) && res.statusCode == 200) {
-        setState(() => _qrToken = jsonDecode(res.body)['qrToken']);
+      if (_sessionCurrent && res.statusCode == 200) {
+        final pass = jsonDecode(res.body) as Map<String, dynamic>;
+        final token = pass['qrToken'];
+        final lifetime = pass['expiresInSeconds'];
+        if (token is! String ||
+            token.isEmpty ||
+            lifetime is! int ||
+            lifetime < 1) {
+          return;
+        }
+        final expiresAt = requestedAt.add(Duration(seconds: lifetime));
+        _qrTimer?.cancel();
+        if (!expiresAt.isAfter(DateTime.now())) return;
+        setState(() {
+          _qrToken = token;
+          _qrExpiresAt = expiresAt;
+        });
+        _qrTimer = Timer(expiresAt.difference(DateTime.now()), () {
+          if (!_sessionCurrent) return;
+          setState(() => _qrToken = '');
+          _refreshPassIfNeeded();
+        });
       }
     } catch (_) {
-      // Keep the last displayed pass when the refresh fails.
+      // An existing pass can still be displayed until its expiry.
     } finally {
       if (mounted) setState(() => _loadingQR = false);
     }
@@ -721,19 +766,14 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
   }
 
   Future<void> _cacheEmergencyInfo(Map<String, dynamic> profile) async {
+    final account = _account;
+    if (!_sessionCurrent || account == null) return;
     try {
       final hp = profile['healthProfile'];
-      if (hp is! Map ||
-          hp['emergency_contact_name'] == null ||
-          hp['emergency_contact_phone'] == null) {
-        return;
-      }
       await OfflineSosService().cacheEmergencyInfo(
-        contactName: hp['emergency_contact_name'],
-        contactPhone: hp['emergency_contact_phone'],
-        bloodType: hp['blood_type'],
-        allergies: hp['allergies'],
-        chronicConditions: hp['chronic_conditions'],
+        account,
+        name: hp is Map ? hp['emergency_contact_name']?.toString() : null,
+        phone: hp is Map ? hp['emergency_contact_phone']?.toString() : null,
       );
       _emergencyInfo = null;
       if (mounted) setState(() {});
@@ -745,15 +785,14 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
   // ===========================================================================
 
   Future<void> _launchDialer(String number) async {
-    final Uri uri = Uri(scheme: 'tel', path: number);
-    try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        await launchUrl(uri);
-      }
-    } catch (e) {
-      debugPrint('[Dialer Error]: $e');
+    if (!await OfflineSosService().dialNumber(number) && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not open the dialer. Call $number from your phone.',
+          ),
+        ),
+      );
     }
   }
 
@@ -773,7 +812,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
 
     _isHolding = true;
     _holdProgressNotifier.value = 0.0;
-    setState(() => _sosStatusMessage = 'Broadcasting location...');
+    setState(() => _sosStatusMessage = 'Keep holding to send SOS.');
 
     const step = 50;
     const totalDuration = 2500;
@@ -800,6 +839,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
   }
 
   Future<void> _triggerEmergencySOS() async {
+    final account = _account;
+    if (!_sessionCurrent || account == null) return;
     setState(() {
       _isDispatchingSOS = true;
       _sosStatusMessage = 'Acquiring GPS location...';
@@ -809,120 +850,43 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          setState(() {
-            _isDispatchingSOS = false;
-            _sosStatusMessage = 'Location permission denied.';
-          });
-          return;
-        }
       }
-
-      Position position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
-      );
-
-      if (!ConnectivityService().isOnline) {
-        await OfflineSosService().queueOfflineSos(
-          latitude: position.latitude,
-          longitude: position.longitude,
-          notes: 'Offline SOS triggered via mobile panic button',
-        );
-        if (mounted) {
-          setState(() {
-            _sosStatusMessage = 'OFFLINE: SOS queued. Use the call buttons above to contact help now.';
-          });
-        }
-        await OfflineSosService().dialNumber('911');
-        if (mounted) setState(() => _isDispatchingSOS = false);
+      if (!_sessionCurrent || _signOutInProgress) return;
+      if (permission != LocationPermission.whileInUse &&
+          permission != LocationPermission.always) {
+        setState(() {
+          _sosStatusMessage = 'Location access denied. Use the call buttons to contact help now.';
+        });
         return;
       }
 
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 10),
+        ),
+      );
+      if (!_sessionCurrent || _signOutInProgress) return;
+      await OfflineSosService().queueSos(
+        account,
+        latitude: position.latitude,
+        longitude: position.longitude,
+      );
+      if (!_sessionCurrent) return;
       setState(
-        () => _sosStatusMessage = 'Broadcasting alert to clinic responders...',
+        () => _sosStatusMessage =
+            'SOS queued. Use the call buttons if you need help now.',
       );
-      final token = await _storage.read(key: 'jwt_token');
-      final res = await _client.post(
-        Uri.parse('${ApiConfig.baseUrl}/api/emergency/sos'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({
-          'latitude': position.latitude,
-          'longitude': position.longitude,
-          'notes': 'Urgent incident triggered via Mobile Panic Button',
-        }),
-      );
-
-      final data = jsonDecode(res.body);
-      if (res.statusCode == 201) {
-        setState(() {
-          _sosStatusMessage =
-              'EMERGENCY DISPATCHED!\nCampus response team alerted.';
-        });
-        EmergencyAlertService().showStudentSosSentNotification();
-        if (mounted) _showEmergencyConfirmationDialog();
-      } else {
+      await _replayQueuedSosEvents();
+    } catch (_) {
+      if (_sessionCurrent) {
         setState(
-          () =>
-              _sosStatusMessage = 'Failed: ${data['error'] ?? 'Server error'}',
+          () => _sosStatusMessage = 'Could not prepare the SOS alert. Use the call buttons to contact help now.',
         );
       }
-    } catch (e) {
-      setState(() => _sosStatusMessage = 'SOS Network Error: $e');
     } finally {
       if (mounted) setState(() => _isDispatchingSOS = false);
     }
-  }
-
-  void _showEmergencyConfirmationDialog() {
-    final rs = Rs.of(context);
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppPalette.of(context).surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(rs.r(20)),
-        ),
-        icon: Icon(
-          Icons.check_circle_outline,
-          color: AppPalette.of(context).color(0xFF284E3A),
-          size: 54,
-        ),
-        title: Text(
-          'SOS Alert Active',
-          style: TextStyle(
-            fontWeight: FontWeight.w800,
-            color: AppPalette.of(context).color(0xFF284E3A),
-            fontSize: rs.sp(17),
-          ),
-        ),
-        content: Text(
-          'Your live GPS coordinates and medical profile have been securely transmitted to the PSU Infirmary and campus quick-response unit.',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: rs.sp(13.5),
-            color: AppPalette.of(context).color(0xFF5A635B),
-            height: 1.4,
-          ),
-        ),
-        actions: [
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppPalette.of(context).background(0xFF284E3A),
-              foregroundColor: AppPalette.of(context).onPrimary,
-              shape: const StadiumBorder(),
-            ),
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('I Understand'),
-          ),
-        ],
-      ),
-    );
   }
 
   bool _signOutInProgress = false;
@@ -1197,7 +1161,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
     final pillHeight = rs.h(30).clamp(24.0, 34.0);
 
     return InkWell(
-      onTap: () => setState(() => _currentIndex = index),
+      onTap: () => _selectTab(index),
       borderRadius: BorderRadius.circular(rs.r(18)),
       splashColor: Colors.transparent,
       highlightColor: Colors.transparent,
@@ -1250,7 +1214,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
     final pillHeight = rs.h(30).clamp(24.0, 34.0);
 
     return InkWell(
-      onTap: () => setState(() => _currentIndex = index),
+      onTap: () => _selectTab(index),
       borderRadius: BorderRadius.circular(rs.r(18)),
       splashColor: Colors.transparent,
       highlightColor: Colors.transparent,
@@ -1435,7 +1399,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                                 ),
                               ),
                             )
-                          : _qrToken.isNotEmpty
+                          : _hasValidPass
                           ? RepaintBoundary(
                               child: QrImageView(
                                 data: _qrToken,
@@ -1447,7 +1411,12 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                           : SizedBox(
                               height: qrSize,
                               width: qrSize,
-                              child: const Center(child: Text('Pass offline')),
+                              child: Center(
+                                child: TextButton(
+                                  onPressed: _fetchQRPass,
+                                  child: const Text('Refresh pass'),
+                                ),
+                              ),
                             ),
                     ),
                     SizedBox(height: rs.h(14)),
@@ -2281,84 +2250,83 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                 ),
                 SizedBox(height: rs.h(18)),
 
-                if (isOffline) ...[
-                  Container(
-                    margin: EdgeInsets.only(bottom: rs.h(16)),
-                    padding: EdgeInsets.all(rs.w(16)),
-                    decoration: BoxDecoration(
-                      color: AppPalette.of(context).color(0xFFFDE8E8),
-                      border: Border.all(
-                        color: AppPalette.of(context).color(0xFFF8B4B4),
-                      ),
-                      borderRadius: BorderRadius.circular(rs.r(16)),
+                Container(
+                  margin: EdgeInsets.only(bottom: rs.h(16)),
+                  padding: EdgeInsets.all(rs.w(16)),
+                  decoration: BoxDecoration(
+                    color: AppPalette.of(context).color(0xFFFDE8E8),
+                    border: Border.all(
+                      color: AppPalette.of(context).color(0xFFF8B4B4),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.wifi_off_rounded,
-                              color: AppPalette.of(context).color(0xFF7A2E26),
-                              size: rs.w(20),
-                            ),
-                            SizedBox(width: rs.w(8)),
-                            Expanded(
-                              child: Text(
-                                'You are currently offline',
-                                style: TextStyle(
-                                  fontSize: rs.sp(14),
-                                  fontWeight: FontWeight.w800,
-                                  color: AppPalette.of(context)
-                                      .color(0xFF7A2E26),
-                                ),
+                    borderRadius: BorderRadius.circular(rs.r(16)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.wifi_off_rounded,
+                            color: AppPalette.of(context).color(0xFF7A2E26),
+                            size: rs.w(20),
+                          ),
+                          SizedBox(width: rs.w(8)),
+                          Expanded(
+                            child: Text(
+                              isOffline
+                                  ? 'You are currently offline'
+                                  : 'Emergency calls',
+                              style: TextStyle(
+                                fontSize: rs.sp(14),
+                                fontWeight: FontWeight.w800,
+                                color: AppPalette.of(context).color(0xFF7A2E26),
                               ),
                             ),
-                          ],
-                        ),
-                        SizedBox(height: rs.h(8)),
-                        Text(
-                          "In-app SOS can't reach the campus server without internet. But these buttons work with no data connection:",
-                          style: TextStyle(
-                            fontSize: rs.sp(12.5),
-                            color: AppPalette.of(context).color(0xFF7A2E26),
-                            height: 1.4,
                           ),
+                        ],
+                      ),
+                      SizedBox(height: rs.h(8)),
+                      Text(
+                        "Use these buttons to contact help directly. Calls and texts depend on your phone service.",
+                        style: TextStyle(
+                          fontSize: rs.sp(12.5),
+                          color: AppPalette.of(context).color(0xFF7A2E26),
+                          height: 1.4,
                         ),
-                        SizedBox(height: rs.h(14)),
-                        _buildOfflineCallButton(rs, '📞  Call 911', '911'),
-                        SizedBox(height: rs.h(8)),
-                        FutureBuilder<Map<String, dynamic>?>(
-                          future: _emergencyInfo ??= OfflineSosService()
-                              .readCachedEmergencyInfo(),
-                          builder: (ctx, snap) {
-                            final info = snap.data;
-                            final name =
-                                info?['contact_name'] ?? 'Emergency contact';
-                            final phone = info?['contact_phone'];
-                            if (phone == null) return const SizedBox.shrink();
-                            return Column(
-                              children: [
-                                _buildOfflineCallButton(
-                                  rs,
-                                  '📞  Call $name',
-                                  phone,
-                                ),
-                                SizedBox(height: rs.h(8)),
-                                _buildOfflineSmsButton(
-                                  rs,
-                                  name,
-                                  phone,
-                                  'EMERGENCY: I need help. This is an automated alert from LeoVital HealthLink.',
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                      ],
-                    ),
+                      ),
+                      SizedBox(height: rs.h(14)),
+                      _buildOfflineCallButton(rs, '📞  Call 911', '911'),
+                      SizedBox(height: rs.h(8)),
+                      FutureBuilder<Map<String, dynamic>?>(
+                        future: _emergencyInfo ??= OfflineSosService()
+                            .readCachedEmergencyInfo(_account),
+                        builder: (ctx, snap) {
+                          final info = snap.data;
+                          final name =
+                              info?['contact_name'] ?? 'Emergency contact';
+                          final phone = info?['contact_phone'];
+                          if (phone == null) return const SizedBox.shrink();
+                          return Column(
+                            children: [
+                              _buildOfflineCallButton(
+                                rs,
+                                '📞  Call $name',
+                                phone,
+                              ),
+                              SizedBox(height: rs.h(8)),
+                              _buildOfflineSmsButton(
+                                rs,
+                                name,
+                                phone,
+                                'EMERGENCY: I need help. This is an automated alert from LeoVital HealthLink.',
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ],
                   ),
-                ],
+                ),
 
                 Container(
                   width: double.infinity,
@@ -2595,14 +2563,17 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                       SizedBox(height: rs.h(18)),
 
                       Text(
-                        _sosStatusMessage.isNotEmpty ? _sosStatusMessage : 'No location is collected or shared in this preview.',
+                        _sosStatusMessage.isNotEmpty ? _sosStatusMessage : 'Hold to send your current location to campus responders.',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: rs.sp(12),
                           fontWeight: _sosStatusMessage.isNotEmpty
                               ? FontWeight.w700
                               : FontWeight.w500,
-                          color: _sosStatusMessage.contains('DISPATCHED')
+                          color:
+                              _sosStatusMessage.startsWith(
+                                'Campus server accepted',
+                              )
                               ? primaryGreen
                               : _sosStatusMessage.isNotEmpty
                               ? activeCrimson
@@ -2614,61 +2585,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                 ),
                 SizedBox(height: rs.h(20)),
 
-                Container(
-                  width: double.infinity,
-                  padding: EdgeInsets.symmetric(
-                    horizontal: rs.w(20),
-                    vertical: rs.h(18),
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppPalette.of(context).surface,
-                    borderRadius: BorderRadius.circular(rs.r(22)),
-                    border: Border.all(
-                      color: AppPalette.of(context).color(0xFFE2EBE2),
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Text(
-                        'For an out of campus emergency, call emergency services now.',
-                        style: TextStyle(
-                          fontSize: rs.sp(13),
-                          color: textSub,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      SizedBox(height: rs.h(14)),
-                      SizedBox(
-                        width: double.infinity,
-                        height: rs.h(48).clamp(44.0, 54.0),
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppPalette.of(context)
-                                .background(0xFFE2EBE1),
-                            foregroundColor: primaryGreen,
-                            elevation: 0,
-                            shape: const StadiumBorder(),
-                          ),
-                          onPressed: () => _launchDialer('911'),
-                          icon: Icon(
-                            Icons.phone_outlined,
-                            size: 18,
-                            color: primaryGreen,
-                          ),
-                          label: Text(
-                            'Call 911',
-                            style: TextStyle(
-                              fontSize: rs.sp(14),
-                              fontWeight: FontWeight.w700,
-                              color: primaryGreen,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
                 SizedBox(height: rs.h(24)),
               ],
             ),
@@ -2689,7 +2605,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
           shape: const StadiumBorder(),
           elevation: 0,
         ),
-        onPressed: () => OfflineSosService().dialNumber(number),
+        onPressed: () => _launchDialer(number),
         child: Text(
           label,
           style: TextStyle(fontSize: rs.sp(14), fontWeight: FontWeight.w700),
@@ -2946,7 +2862,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                           elevation: 0,
                           shape: const StadiumBorder(),
                         ),
-                        onPressed: () => setState(() => _currentIndex = 0),
+                        onPressed: () => _selectTab(0),
                         icon: const Icon(Icons.qr_code_2_rounded, size: 18),
                         label: Text(
                           'View health pass',

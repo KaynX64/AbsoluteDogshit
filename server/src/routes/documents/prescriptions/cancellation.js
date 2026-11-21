@@ -31,7 +31,9 @@ export function registerPrescriptionCancellation(router, io) {
         return res.status(500).json({ error: 'Failed to cancel prescription.' });
       }
       io?.emit('inventory:updated');
-      return res.json(result);
+      const { patientId, ...response } = result;
+      io?.to(`user:${patientId}`).emit('documents:updated', { kind: 'prescriptions' });
+      return res.json(response);
     }
   );
 }

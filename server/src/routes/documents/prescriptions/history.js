@@ -7,6 +7,7 @@ import { requireRoles } from '../../../middleware/rbac.js';
 import { decrypt } from '../../../utils/cryptoVault.js';
 import { requirePrivacyConsent } from '../../../middleware/consent.js';
 import { logPhiAccess } from '../../../utils/phiLogger.js';
+import { verificationUrl } from '../../../documents/publicLinks.js';
 
 // Mount prescription history for recipients and authorized clinical staff.
 export function registerPrescriptionHistory(router) {
@@ -57,6 +58,7 @@ export function registerPrescriptionHistory(router) {
         }));
         return hydratePrescription({
           ...rx, notes: decrypt(rx.notes), pdfAvailable: Boolean(rx.pdf_s3_key), items,
+          verification_url: rx.qr_token ? verificationUrl(rx.qr_token) : null,
         });
       });
 

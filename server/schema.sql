@@ -536,6 +536,11 @@ CREATE TABLE `EMERGENCY_ALERTS` (
   `response_time_seconds` INT NULL DEFAULT NULL,
   `location_label` VARCHAR(512) NULL,
   `notes` TEXT NULL,
+  `client_sos_id` CHAR(32) NULL,
+  `request_hash` CHAR(64) NULL,
+  `dispatch_after` DATETIME(3) NULL,
+  UNIQUE KEY `uq_sos_request` (`user_id`, `client_sos_id`),
+  INDEX `idx_sos_dispatch` (`dispatch_after`, `alert_id`),
   SPATIAL INDEX `sp_idx_alert_location` (`location`),
   CONSTRAINT `fk_ea_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`),
   CONSTRAINT `fk_ea_responder` FOREIGN KEY (`assigned_responder_id`) REFERENCES `USERS` (`user_id`) ON DELETE SET NULL

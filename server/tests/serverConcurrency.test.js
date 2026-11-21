@@ -95,6 +95,34 @@ async function insertCheckedInAppointments(db) {
     VALUES (1, 5, 1, CURDATE(), 1), (2, 7, 2, CURDATE(), 2)`);
 }
 
+test('concurrent SOS retries share one audited alert and one dispatch lease', { skip }, async t => {
+  const db = await fixture(t);
+  const { request } = await mountedApi(t);
+  const { dispatchPendingSos } = await import('../src/emergency/sosDispatch.js');
+  const payload = { client_sos_id: '9'.repeat(32), latitude: 16.0298, longitude: 120.2285 };
+  const submit = (json, userId = 5) => request('/emergency/sos/requests', { userId, roles: ['STUDENT'], method: 'POST', json });
+  const responses = await Promise.all([submit(payload), submit(payload)]);
+  assert.deepEqual(responses.map(response => response.status).sort(), [200, 201]);
+  const receipts = await Promise.all(responses.map(response => response.json()));
+  assert.equal(receipts[0].alertId, receipts[1].alertId);
+  assert.equal((await submit({ ...payload, latitude: 16.03 })).status, 409);
+  const [[audit]] = await db.query("SELECT COUNT(*) AS n FROM AUDIT_LOGS WHERE table_affected = 'EMERGENCY_ALERTS'");
+  assert.equal(Number(audit.n), 1);
+
+  const packets = [];
+  const io = { to: room => ({ emit: (event, data) => packets.push({ room, event, data }) }) };
+  await Promise.all([dispatchPendingSos(io), dispatchPendingSos(io)]);
+  assert.ok(packets.length > 0);
+  assert.equal(new Set(packets.map(packet => packet.room)).size, packets.length);
+  assert.ok(packets.every(packet => packet.event === 'emergency:new_alert' && packet.data.alertId === receipts[0].alertId));
+  const [[alert]] = await db.query('SELECT dispatch_after FROM EMERGENCY_ALERTS WHERE alert_id = ?', [receipts[0].alertId]);
+  assert.equal(alert.dispatch_after, null);
+
+  const otherAccount = await submit(payload, 7);
+  assert.equal(otherAccount.status, 201);
+  assert.notEqual((await otherAccount.json()).alertId, receipts[0].alertId);
+});
+
 // Verify that shutdown waits for both HTTP and workers before closing shared dependencies.
 test('shutdown waits for both HTTP and workers before closing shared dependencies', async () => {
   const workers = Promise.withResolvers();
@@ -923,6 +951,10 @@ test('concurrent incident filing publishes a single report after commit', { skip
   });
   const { request, emit } = await mountedApi(t);
   const options = { userId: 4, roles: ['EMERGENCY_RESPONDER'], method: 'POST', json: { incident_details: 'Fixture incident report' } };
+  const pendingPath = '/emergency/incident-reports/pending?summary=1';
+  const [pending] = await (await request(pendingPath, { userId: 4, roles: options.roles })).json();
+  assert.equal(pending.alertId, 1);
+  assert.deepEqual(Object.keys(pending).sort(), ['alertId', 'resolvedAt']);
   const responses = await Promise.all([
     request('/emergency/1/incident-report', options),
     request('/emergency/1/incident-report', options),
@@ -933,6 +965,7 @@ test('concurrent incident filing publishes a single report after commit', { skip
   assert.equal((await duplicate.json()).code, 'REPORT_ALREADY_FILED');
   // Locate the successful incident report creation response.
   await responses.find(response => response.status === 201).json();
+  assert.deepEqual(await (await request(pendingPath, { userId: 4, roles: options.roles })).json(), []);
   assert.ok(emit.mock.calls.some(/* Confirm realtime delivery of the incident report filing event. */ call => call.arguments[0] === 'emergency:incident_reported'));
   const [[audit]] = await db.query("SELECT COUNT(*) AS count FROM AUDIT_LOGS WHERE table_affected = 'INCIDENT_REPORTS'");
   assert.equal(audit.count, 1);

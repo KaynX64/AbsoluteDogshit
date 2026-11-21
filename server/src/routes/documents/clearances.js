@@ -8,6 +8,7 @@ import { logPhiAccess } from '../../utils/phiLogger.js';
 import { isCalendarDate } from '../../config/appointmentRules.js';
 import { issueClearance, revokeClearance } from '../../documents/clearanceMutations.js';
 import { parseMetadata } from './signatureMetadata.js';
+import { verificationUrl } from '../../documents/publicLinks.js';
 
 // Translate expected clearance errors into HTTP responses and handle unexpected failures.
 function respondToClearanceError(res, error, message) {
@@ -19,7 +20,7 @@ function respondToClearanceError(res, error, message) {
 }
 
 // Mount clearance issuance, history, and revocation endpoints.
-export function registerClearanceRoutes(router) {
+export function registerClearanceRoutes(router, io) {
   // =============================================================================
   // 2. MEDICAL CLEARANCES
   // =============================================================================
@@ -43,6 +44,7 @@ export function registerClearanceRoutes(router) {
 
     try {
       const issued = await issueClearance({ user_id, appointment_id, purpose, remarks, expires_at, issuerId, ipAddress: req.ip });
+      io?.to(`user:${Number(user_id)}`).emit('documents:updated', { kind: 'clearances' });
       return res.status(201).json(issued);
     } catch (error) {
       return respondToClearanceError(res, error, 'Failed to issue medical clearance.');
@@ -68,7 +70,14 @@ export function registerClearanceRoutes(router) {
         [userId]
       );
 
-      res.json(clearances.map(/* Add a PDF availability flag to each clearance. */ (row) => ({ ...row, pdfAvailable: Boolean(row.pdf_s3_key) })));
+      const now = Date.now();
+      res.json(clearances.map(row => ({
+        ...row,
+        status: row.status === 'approved' && row.expires_at && new Date(row.expires_at).getTime() < now ? 'expired' : row.status,
+        remarks: parseMetadata(row.signature_metadata).clinical_remarks ?? null,
+        verification_url: row.qr_token ? verificationUrl(row.qr_token) : null,
+        pdfAvailable: Boolean(row.pdf_s3_key),
+      })));
     } catch (error) {
       console.error('[Documents] Error fetching clearances:', error);
       res.status(500).json({ error: 'Failed to retrieve medical clearances.' });
@@ -148,7 +157,9 @@ export function registerClearanceRoutes(router) {
       }
 
       try {
-        return res.json(await revokeClearance({ clearanceId, reason, user: req.user, ipAddress: req.ip }));
+        const { patientId, ...result } = await revokeClearance({ clearanceId, reason, user: req.user, ipAddress: req.ip });
+        io?.to(`user:${patientId}`).emit('documents:updated', { kind: 'clearances' });
+        return res.json(result);
       } catch (error) {
         return respondToClearanceError(res, error, 'Failed to revoke clearance.');
       }

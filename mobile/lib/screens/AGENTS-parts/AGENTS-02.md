@@ -14,11 +14,12 @@
 - `_fetchPrescriptions`, `_fetchClearances` and `_fetchDiagnostics` read `GET /api/documents/{prescriptions,clearances,attachments}/my`.
 - Document categories load on selection through the session cache; lists and independent variable-height grid columns build lazily.
 - `_downloadAndOpenPdf` streams a protected PDF through `services/document_download.dart` to a partial file, renames only on success and opens it through `open_filex`. `_openDiagnosticDocument` handles attachment downloads.
-- The prescription and clearance previews encode a public `/api/documents/verify/:qrToken` link in the QR seal.
+- The prescription and clearance previews use the server's `verification_url`. Clearance status comes from the server and fetch errors have their own retry state. The visible category reloads on its invalidation signal, resume, or reconnect.
 - V2 prescription items use issue-time snapshots. `models/prescription_item.dart` presents recorded units, dose/route, schedules, review dates and directions; missing legacy clinical fields display **Not recorded**. Never infer clinical fields from old notes or add fallback dosing. [Contract](../../../../server/STRUCTURED-PRESCRIBING.md).
 
 ### responder_screen.dart — dedicated responder route
 - [Slice map](../codeslice/MB-04-ResponderScreen.md). The screen hosts the shared `ResponderHub` and retains account settings and sign-out. The authenticated alert session serves both responder routes and reconciles incidents independently of screen lifetime.
+- `incident_reports_screen.dart` lists pending report IDs and resolution times behind live responder access, and files through the existing single-report endpoint. Duplicate filing converges on the existing report.
 
 ### change_password_screen.dart
 - [Slice map](../codeslice/MB-05-ChangePasswordScreen.md).

@@ -56,6 +56,16 @@ Dedicated responder accounts open the hub after sign-in. Other eligible accounts
 
 Allow Android notifications for background delivery. The hub shows when delivery settings are still syncing and offers **Retry delivery settings** after a failed save. Use **Test siren for 3 seconds** to check the in-app sound. For the server rollout, see [migration 012](../server/MIGRATION-PLAN.md#fresh-and-existing-databases).
 
+Open **Pending incident reports** to document a resolved incident from the last 24 hours. The list uses the incident number and resolution time. If another responder files the report first, the app confirms it was already filed and removes it from the list.
+
+## Emergency SOS and health pass
+
+SOS call and text actions are available independently of GPS and internet access. A submitted SOS is queued for its signed-in account and retried when the app opens, resumes, or reconnects. **Accepted by server** confirms that the server saved the request. Pending requests that reach 15 minutes expire instead of sending old coordinates. Previous device-wide queues have no reliable account owner and are excluded from replay. Deploy [migration 014](../server/MIGRATION-PLAN.md#fresh-and-existing-databases) before releasing this app.
+
+The health pass refreshes when the Overview is visible and its current QR expires. A pass can be scanned once. Use **Refresh pass** when the front desk needs to scan it again.
+
 ## Recorded prescriptions
 
 Documents previews show recorded preparation, dose/route, schedule, course or review date, supply units and directions. External items are not dispensed by the infirmary. Missing historical details display **Not recorded**. The downloaded PDF remains the issued document. See the [prescribing rollout](../server/PRESCRIBING-ROLLOUT.md).
+
+Documents show the current server status and use the same public verification URLs as the issued PDFs. If a list fails to load, choose **Retry**. The active Documents category and **My appointments** refresh on relevant server updates and reconnect or resume.

@@ -89,7 +89,7 @@ export function revokeClearance({ clearanceId, reason, user, ipAddress }) {
   // Lock the clearance and save the revocation and audit entry together.
   return inTransaction(async connection => {
     const [rows] = await connection.query(
-      'SELECT status, signature_metadata FROM MEDICAL_CLEARANCES WHERE clearance_id = ? AND deleted_at IS NULL FOR UPDATE',
+      'SELECT user_id, status, signature_metadata FROM MEDICAL_CLEARANCES WHERE clearance_id = ? AND deleted_at IS NULL FOR UPDATE',
       [clearanceId]
     );
 
@@ -141,6 +141,6 @@ export function revokeClearance({ clearanceId, reason, user, ipAddress }) {
       },
       ipAddress,
     });
-    return { message: 'Medical clearance revoked successfully.', clearanceId, status: 'revoked', revokedAt };
+    return { message: 'Medical clearance revoked successfully.', clearanceId, status: 'revoked', revokedAt, patientId: clearance.user_id };
   });
 }

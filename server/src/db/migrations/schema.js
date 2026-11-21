@@ -50,18 +50,18 @@ export async function ensureEnum(connection, table, column, values, defaultValue
 }
 
 // Create an index when absent and validate the column order when it already exists.
-export async function ensureIndex(connection, table, index, column) {
+export async function ensureIndex(connection, table, index, column, { unique = false } = {}) {
   const columns = Array.isArray(column) ? column : [column];
   const [rows] = await connection.query(
-    `SELECT COLUMN_NAME FROM information_schema.STATISTICS
+    `SELECT COLUMN_NAME, NON_UNIQUE FROM information_schema.STATISTICS
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?
      ORDER BY SEQ_IN_INDEX`,
     [table, index],
   );
   if (!rows.length) {
     // Add one identifier placeholder for each column in the index.
-    await connection.query(`ALTER TABLE ?? ADD INDEX ?? (${columns.map(() => '??').join(', ')})`, [table, index, ...columns]);
-  } else if (rows.length !== columns.length || rows.some(/* Compare each indexed column with its expected position. */ (row, i) => row.COLUMN_NAME !== columns[i])) {
+    await connection.query(`ALTER TABLE ?? ADD ${unique ? 'UNIQUE ' : ''}INDEX ?? (${columns.map(() => '??').join(', ')})`, [table, index, ...columns]);
+  } else if (rows.length !== columns.length || rows.some((row, i) => row.COLUMN_NAME !== columns[i] || (unique && row.NON_UNIQUE !== 0))) {
     throw new Error('Unexpected definition for ' + table + '.' + index + '.');
   }
 }

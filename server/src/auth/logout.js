@@ -31,9 +31,11 @@ export async function logoutUser(req, res, io) {
     // older clients simply keep their push registration). Deleting the row
     // stops push delivery to a device the user has signed out of; without
     // it a handed-down phone would keep receiving SOS pushes forever.
+    let deviceReleased = true;
     try {
       await removePushDevice(pool, user.user_id, req.body ?? {});
     } catch (tokErr) {
+      deviceReleased = false;
       console.error('[Logout Token Cleanup Warning]:', tokErr.code ?? tokErr.name);
     }
 
@@ -55,7 +57,7 @@ export async function logoutUser(req, res, io) {
       connection.release();
     }
 
-    res.json({ message: 'Session terminated and token invalidated successfully.' });
+    res.json({ message: 'Session terminated and token invalidated successfully.', deviceReleased });
   } catch (error) {
     console.error('[Logout Error]:', error);
     res.status(500).json({ error: 'Failed to process session logout.' });

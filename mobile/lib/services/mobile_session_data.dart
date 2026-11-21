@@ -24,6 +24,8 @@ class MobileSessionData with WidgetsBindingObserver {
   final _cache = <String, ({Object? value, DateTime at})>{};
   final _running = <String, Future<Object?>>{};
   final _versions = <String, Object>{};
+  final _changes = StreamController<String>.broadcast();
+  Stream<String> get changes => _changes.stream;
   String? _slotPath;
   final schedulerState = <String, dynamic>{};
   final documentsState = <String, dynamic>{};
@@ -59,14 +61,15 @@ class MobileSessionData with WidgetsBindingObserver {
     }
   }
 
-  void invalidate(String path) {
+  void invalidate(String path, {bool notify = false}) {
     _cache.remove(path);
     _versions[path] = Object();
     _running.remove(path);
+    if (notify) _changes.add(path);
   }
 
-  void invalidateAppointments() {
-    invalidate('/api/appointments/my');
+  void invalidateAppointments({bool notifyHistory = false}) {
+    invalidate('/api/appointments/my', notify: notifyHistory);
     for (final key in {
       ..._cache.keys,
       ..._running.keys,

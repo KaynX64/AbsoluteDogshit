@@ -1,10 +1,12 @@
 // mobile/lib/screens/documents_viewer_screen.dart
+import 'dart:async';
 import 'dart:convert';
 
 import '../models/prescription_item.dart';
 
 import '../services/mobile_session_data.dart';
 import '../services/document_download.dart';
+import '../services/connectivity_service.dart';
 import '../widgets/lazy_card_columns.dart';
 
 import 'dart:io';
@@ -31,22 +33,36 @@ class DocumentsViewerScreen extends StatefulWidget {
   State<DocumentsViewerScreen> createState() => _DocumentsViewerScreenState();
 }
 
-class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
+enum _DocumentTab {
+  prescriptions,
+  clearances,
+  attachments;
+
+  String get path => '/api/documents/$name/my';
+}
+
+class _DocumentsViewerScreenState extends State<DocumentsViewerScreen>
+    with WidgetsBindingObserver {
   final _storage = const FlutterSecureStorage();
   http.Client get _client => widget.client ?? ApiConfig.client;
 
   int _selectedSubTab = 0;
   bool _isGridView = false;
 
-  List<dynamic> _prescriptions = [];
-  bool _loadingPrescriptions = false;
-
-  List<dynamic> _clearances = [];
-  bool _loadingClearances = false;
-
-  List<dynamic> _diagnosticAttachments = [];
-  bool _loadingDiagnostics = false;
+  final _records = <_DocumentTab, List<dynamic>>{};
+  final _pending = <_DocumentTab, Object>{};
+  final _failed = <_DocumentTab>{};
+  List<dynamic> get _prescriptions =>
+      _records[_DocumentTab.prescriptions] ?? [];
+  List<dynamic> get _clearances => _records[_DocumentTab.clearances] ?? [];
+  List<dynamic> get _diagnosticAttachments =>
+      _records[_DocumentTab.attachments] ?? [];
+  _DocumentTab get _tab => _DocumentTab.values[_selectedSubTab];
+  late final StreamSubscription<String> _changes;
+  Timer? _refresh;
+  late bool _online;
   int? _downloadingId;
+  final _previewChanges = ValueNotifier(0);
 
   Color get primaryGreen => AppPalette.of(context).color(0xFF284E3A);
   Color get softSage => AppPalette.of(context).color(0xFFE5EDE4);
@@ -63,11 +79,22 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     _generation = _data.generation;
     _selectedSubTab = _data.documentsState['tab'] as int? ?? 0;
     _isGridView = _data.documentsState['grid'] as bool? ?? false;
+    WidgetsBinding.instance.addObserver(this);
+    _online = ConnectivityService().isOnline;
+    ConnectivityService().addListener(_connectivityChanged);
+    _changes = _data.changes
+        .where((path) => path == _tab.path)
+        .listen((_) => _refreshVisible());
     _loadSelected();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    ConnectivityService().removeListener(_connectivityChanged);
+    unawaited(_changes.cancel());
+    _refresh?.cancel();
+    _previewChanges.dispose();
     if (_data.isCurrent(_generation)) {
       _data.documentsState.addAll({
         'tab': _selectedSubTab,
@@ -77,93 +104,82 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     super.dispose();
   }
 
-  void _loadSelected() {
-    switch (_selectedSubTab) {
-      case 1:
-        _fetchClearances(force: false);
-      case 2:
-        _fetchDiagnostics(force: false);
-      default:
-        _fetchPrescriptions(force: false);
-    }
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshVisible();
   }
 
-  Future<void> _fetchPrescriptions({bool force = true}) async {
-    if (!mounted) return;
-    final cached = force ? null : _data.peek('/api/documents/prescriptions/my');
-    if (cached is List && _data.isCurrent(_generation)) {
-      setState(() => _prescriptions = cached);
-      return;
-    }
-    setState(() => _loadingPrescriptions = true);
+  void _connectivityChanged() {
+    final online = ConnectivityService().isOnline;
+    if (online && !_online) _refreshVisible();
+    _online = online;
+  }
+
+  void _refreshVisible() {
+    _refresh?.cancel();
+    _refresh = Timer(const Duration(milliseconds: 150), () => _fetch(_tab));
+  }
+
+  void _loadSelected() => unawaited(_fetch(_tab, force: false));
+  Future<void> _fetchPrescriptions() => _fetch(_DocumentTab.prescriptions);
+  Future<void> _fetchClearances() => _fetch(_DocumentTab.clearances);
+  Future<void> _fetchDiagnostics() => _fetch(_DocumentTab.attachments);
+
+  Future<void> _fetch(_DocumentTab tab, {bool force = true}) async {
+    if (!mounted || !_data.isCurrent(_generation)) return;
+    final request = Object();
+    bool current() =>
+        mounted &&
+        _data.isCurrent(_generation) &&
+        identical(_pending[tab], request);
+    setState(() {
+      _pending[tab] = request;
+      _failed.remove(tab);
+    });
     try {
       final token = await _storage.read(key: 'jwt_token');
-      if (!mounted || !_data.isCurrent(_generation)) return;
+      if (!current()) return;
+      if (token == null) throw StateError('Session unavailable');
       final value = await _data.get(
-        '/api/documents/prescriptions/my',
+        tab.path,
         token,
         force: force,
         client: _client,
       );
-      if (mounted && _data.isCurrent(_generation)) {
-        setState(() => _prescriptions = value as List<dynamic>);
+      if (current()) {
+        setState(() => _records[tab] = value as List<dynamic>);
+        _previewChanges.value++;
       }
     } catch (_) {
+      if (current()) setState(() => _failed.add(tab));
     } finally {
-      if (mounted) setState(() => _loadingPrescriptions = false);
+      if (current()) setState(() => _pending.remove(tab));
     }
   }
 
-  Future<void> _fetchClearances({bool force = true}) async {
-    if (!mounted) return;
-    final cached = force ? null : _data.peek('/api/documents/clearances/my');
-    if (cached is List && _data.isCurrent(_generation)) {
-      setState(() => _clearances = cached);
-      return;
-    }
-    setState(() => _loadingClearances = true);
-    try {
-      final token = await _storage.read(key: 'jwt_token');
-      if (!mounted || !_data.isCurrent(_generation)) return;
-      final value = await _data.get(
-        '/api/documents/clearances/my',
-        token,
-        force: force,
-        client: _client,
-      );
-      if (mounted && _data.isCurrent(_generation)) {
-        setState(() => _clearances = value as List<dynamic>);
-      }
-    } catch (_) {
-    } finally {
-      if (mounted) setState(() => _loadingClearances = false);
-    }
+  String _recordStatus(Map<dynamic, dynamic> record) {
+    final status = record['status']?.toString().trim();
+    return status == null || status.isEmpty
+        ? 'STATUS UNAVAILABLE'
+        : status.toUpperCase();
   }
 
-  Future<void> _fetchDiagnostics({bool force = true}) async {
-    if (!mounted) return;
-    final cached = force ? null : _data.peek('/api/documents/attachments/my');
-    if (cached is List && _data.isCurrent(_generation)) {
-      setState(() => _diagnosticAttachments = cached);
-      return;
+  String _previewStatus(_DocumentTab tab, String idKey, Object? id) {
+    for (final item in _records[tab] ?? const []) {
+      if (item is Map && item[idKey] == id) return _recordStatus(item);
     }
-    setState(() => _loadingDiagnostics = true);
-    try {
-      final token = await _storage.read(key: 'jwt_token');
-      if (!mounted || !_data.isCurrent(_generation)) return;
-      final value = await _data.get(
-        '/api/documents/attachments/my',
-        token,
-        force: force,
-        client: _client,
-      );
-      if (mounted && _data.isCurrent(_generation)) {
-        setState(() => _diagnosticAttachments = value as List<dynamic>);
-      }
-    } catch (_) {
-    } finally {
-      if (mounted) setState(() => _loadingDiagnostics = false);
-    }
+    return 'STATUS UNAVAILABLE';
+  }
+
+  String? _verificationUrl(Map<String, dynamic> record) {
+    final value = record['verification_url'];
+    if (value is! String) return null;
+    final uri = Uri.tryParse(value);
+    return uri != null &&
+            uri.host.isNotEmpty &&
+            (uri.scheme == 'https' || uri.scheme == 'http')
+        ? value
+        : null;
   }
 
   String _formatDate(String? rawDate, {bool compact = false}) {
@@ -202,6 +218,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
     if (_downloadingId != null) return;
 
     setState(() => _downloadingId = documentId);
+    _previewChanges.value++;
 
     try {
       final token = await _storage.read(key: 'jwt_token');
@@ -209,11 +226,11 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
         '${ApiConfig.baseUrl}/api/documents/$kind/$documentId/pdf',
       );
 
-      final dir = await getApplicationDocumentsDirectory();
+      final dir = await getTemporaryDirectory();
       final fileName = kind == 'prescriptions'
           ? 'prescription-$documentId.pdf'
           : 'clearance-$documentId.pdf';
-      final file = File('${dir.path}/$fileName');
+      final file = File('${dir.path}/healthlink-$_generation-$fileName');
       await downloadDocument(
         client: _client,
         url: url,
@@ -221,14 +238,17 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
         destination: file,
       );
 
-      if (!mounted || !_data.isCurrent(_generation)) return;
+      if (!mounted || !_data.isCurrent(_generation)) {
+        if (await file.exists()) await file.delete();
+        return;
+      }
 
       final result = await OpenFilex.open(file.path);
       if (result.type != ResultType.done && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Saved to ${file.path}\nCould not open automatically.',
+              'Could not open the PDF. Check that a PDF viewer is installed.',
             ),
             backgroundColor: primaryGreen,
             duration: const Duration(seconds: 5),
@@ -252,16 +272,17 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _downloadingId = null);
+      if (mounted) {
+        setState(() => _downloadingId = null);
+        _previewChanges.value++;
+      }
     }
   }
 
   // ── MODAL 1: PRESCRIPTION ─────────────────────────────────
   void _showPrescriptionDocumentModal(Map<String, dynamic> rx) {
     final rs = Rs.of(context);
-    final qrToken = rx['qr_token'] ?? '';
-    final verificationUrl =
-        '${ApiConfig.baseUrl}/api/documents/verify/$qrToken';
+    final verificationUrl = _verificationUrl(rx);
     final items = rx['items'] as List<dynamic>? ?? [];
     final prescriptionId = rx['prescription_id'] as int?;
 
@@ -271,8 +292,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => DraggableScrollableSheet(
+      builder: (ctx) => ListenableBuilder(
+        listenable: _previewChanges,
+        builder: (ctx, _) => DraggableScrollableSheet(
           initialChildSize: 0.9,
           maxChildSize: 0.95,
           minChildSize: 0.5,
@@ -492,20 +514,21 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                   ),
                   child: Row(
                     children: [
-                      Container(
-                        padding: EdgeInsets.all(rs.w(8)),
-                        decoration: BoxDecoration(
-                          color: AppPalette.of(context).surface,
-                          borderRadius: BorderRadius.circular(rs.r(12)),
+                      if (verificationUrl != null)
+                        Container(
+                          padding: EdgeInsets.all(rs.w(8)),
+                          decoration: BoxDecoration(
+                            color: AppPalette.of(context).surface,
+                            borderRadius: BorderRadius.circular(rs.r(12)),
+                          ),
+                          child: QrImageView(
+                            data: verificationUrl,
+                            version: QrVersions.auto,
+                            size: qrSealSize,
+                            backgroundColor: Colors.white,
+                          ),
                         ),
-                        child: QrImageView(
-                          data: verificationUrl,
-                          version: QrVersions.auto,
-                          size: qrSealSize,
-                          backgroundColor: Colors.white,
-                        ),
-                      ),
-                      SizedBox(width: rs.w(14)),
+                      if (verificationUrl != null) SizedBox(width: rs.w(14)),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -519,6 +542,17 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                                 color: primaryGreen,
                               ),
                             ),
+                            Text(
+                              _previewStatus(
+                                _DocumentTab.prescriptions,
+                                'prescription_id',
+                                prescriptionId,
+                              ),
+                            ),
+                            if (verificationUrl == null)
+                              const Text(
+                                'Public verification link unavailable.',
+                              ),
                             SizedBox(height: rs.h(4)),
                             Text(
                               "Dr. ${rx['doctor_first_name']} ${rx['doctor_last_name']}",
@@ -642,9 +676,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
   // ── MODAL 2: CLEARANCE ─────────────────────────────────────
   void _showClearanceCertificateModal(Map<String, dynamic> c) {
     final rs = Rs.of(context);
-    final qrToken = c['qr_token'] ?? '';
-    final verificationUrl =
-        '${ApiConfig.baseUrl}/api/documents/verify/$qrToken';
+    final verificationUrl = _verificationUrl(c);
     final clearanceId = c['clearance_id'] as int?;
 
     final qrSealSize = rs.w(90).clamp(76.0, 110.0);
@@ -653,8 +685,9 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => DraggableScrollableSheet(
+      builder: (ctx) => ListenableBuilder(
+        listenable: _previewChanges,
+        builder: (ctx, _) => DraggableScrollableSheet(
           initialChildSize: 0.9,
           maxChildSize: 0.95,
           minChildSize: 0.5,
@@ -742,7 +775,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'TO WHOM IT MAY CONCERN:',
+                        'Recorded clinical statement',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: rs.sp(13),
@@ -751,7 +784,8 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                       ),
                       SizedBox(height: rs.h(8)),
                       Text(
-                        "This certifies that ${c['patient_first_name'] ?? 'the student'} ${c['patient_last_name'] ?? ''} (${c['student_no'] ?? 'PSU Student'}), enrolled in ${c['course'] ?? 'PSU Lingayen'}, has undergone physical medical evaluation at the University Infirmary and is determined to be:",
+                        c['remarks']?.toString() ??
+                            'See the issued PDF for the clinical statement.',
                         style: TextStyle(
                           fontSize: rs.sp(13),
                           color: textMain,
@@ -767,7 +801,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                           borderRadius: BorderRadius.circular(rs.r(12)),
                         ),
                         child: Text(
-                          "PURPOSE: ${c['purpose'] ?? 'General Medical Clearance'}\nSTATUS: PHYSICALLY FIT",
+                          "PURPOSE: ${c['purpose'] ?? 'Not recorded'}\nSTATUS: ${_previewStatus(_DocumentTab.clearances, 'clearance_id', clearanceId)}",
                           style: TextStyle(
                             fontWeight: FontWeight.w900,
                             fontSize: rs.sp(13),
@@ -798,26 +832,27 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                   ),
                   child: Row(
                     children: [
-                      Container(
-                        padding: EdgeInsets.all(rs.w(8)),
-                        decoration: BoxDecoration(
-                          color: AppPalette.of(context).surface,
-                          borderRadius: BorderRadius.circular(rs.r(12)),
+                      if (verificationUrl != null)
+                        Container(
+                          padding: EdgeInsets.all(rs.w(8)),
+                          decoration: BoxDecoration(
+                            color: AppPalette.of(context).surface,
+                            borderRadius: BorderRadius.circular(rs.r(12)),
+                          ),
+                          child: QrImageView(
+                            data: verificationUrl,
+                            version: QrVersions.auto,
+                            size: qrSealSize,
+                            backgroundColor: Colors.white,
+                          ),
                         ),
-                        child: QrImageView(
-                          data: verificationUrl,
-                          version: QrVersions.auto,
-                          size: qrSealSize,
-                          backgroundColor: Colors.white,
-                        ),
-                      ),
-                      SizedBox(width: rs.w(14)),
+                      if (verificationUrl != null) SizedBox(width: rs.w(14)),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'R.A. 10173 DIGITAL SEAL',
+                              'CLEARANCE RECORD VERIFICATION',
                               style: TextStyle(
                                 fontSize: rs.sp(9.5),
                                 fontWeight: FontWeight.w800,
@@ -825,6 +860,10 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                                 color: primaryGreen,
                               ),
                             ),
+                            if (verificationUrl == null)
+                              const Text(
+                                'Public verification link unavailable.',
+                              ),
                             SizedBox(height: rs.h(4)),
                             Text(
                               "Dr. ${c['doctor_first_name']} ${c['doctor_last_name']}",
@@ -1012,6 +1051,17 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
               ),
             ),
 
+            if (_failed.contains(_tab))
+              ListTile(
+                leading: const Icon(Icons.error_outline),
+                title: const Text('Could not load these documents.'),
+                trailing: TextButton(
+                  onPressed: () => _fetch(_tab),
+                  child: const Text('Retry'),
+                ),
+              ),
+            if (_records.containsKey(_tab) && _pending.containsKey(_tab))
+              const LinearProgressIndicator(),
             Expanded(
               child: _selectedSubTab == 0
                   ? _buildPrescriptionsList(rs)
@@ -1172,7 +1222,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
 
   Widget _buildPrescriptionGridCard(dynamic rx, Rs rs) {
     final items = rx['items'] as List<dynamic>? ?? [];
-    final status = (rx['status'] ?? 'active').toString().toLowerCase();
+    final status = _recordStatus(rx);
     final firstMed = items.isNotEmpty ? items[0] : null;
     final medName = (firstMed?['medicine_name'] ?? 'Prescribed medication')
         .toString();
@@ -1187,8 +1237,8 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
       icon: Icons.medication_liquid_outlined,
       iconColor: AppPalette.of(context).color(0xFF5B4EA1),
       iconBackground: AppPalette.of(context).color(0xFFEDEBF7),
-      status: status.toUpperCase(),
-      statusColor: primaryGreen,
+      status: status,
+      statusColor: status == 'ACTIVE' ? primaryGreen : textSub,
       title: medName,
       subtitle: medStrength,
       details: [
@@ -1203,21 +1253,15 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
   }
 
   Widget _buildClearanceGridCard(dynamic clearance, Rs rs) {
-    final rawExpiry = clearance['expires_at'];
-    var isExpired = false;
-    if (rawExpiry != null) {
-      try {
-        isExpired = DateTime.parse(rawExpiry).isBefore(DateTime.now());
-      } catch (_) {}
-    }
+    final status = _recordStatus(clearance);
 
     return _buildDocumentGridCard(
       rs: rs,
       icon: Icons.description_outlined,
       iconColor: AppPalette.of(context).color(0xFF8C6826),
       iconBackground: AppPalette.of(context).color(0xFFF7F1E6),
-      status: isExpired ? 'EXPIRED' : 'APPROVED',
-      statusColor: isExpired
+      status: status,
+      statusColor: status != 'APPROVED'
           ? AppPalette.of(context).color(0xFF9B1C1C)
           : primaryGreen,
       title: (clearance['purpose'] ?? 'Medical clearance').toString(),
@@ -1352,8 +1396,13 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
   }
 
   Widget _buildPrescriptionsList(Rs rs) {
-    if (_loadingPrescriptions) {
+    if (!_records.containsKey(_DocumentTab.prescriptions) &&
+        _pending.containsKey(_DocumentTab.prescriptions)) {
       return Center(child: CircularProgressIndicator(color: primaryGreen));
+    }
+    if (_prescriptions.isEmpty &&
+        _failed.contains(_DocumentTab.prescriptions)) {
+      return const SizedBox.shrink();
     }
 
     if (_prescriptions.isEmpty) {
@@ -1408,7 +1457,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
           if (index > _prescriptions.length) return SizedBox(height: rs.h(20));
           final rx = _prescriptions[index];
           final items = rx['items'] as List<dynamic>? ?? [];
-          final status = (rx['status'] ?? 'active').toString().toLowerCase();
+          final status = _recordStatus(rx).toLowerCase();
 
           final firstMed = items.isNotEmpty ? items[0] : null;
           final isFirstOutside = firstMed?['is_outside'] == true;
@@ -1568,8 +1617,12 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
   }
 
   Widget _buildClearancesList(Rs rs) {
-    if (_loadingClearances) {
+    if (!_records.containsKey(_DocumentTab.clearances) &&
+        _pending.containsKey(_DocumentTab.clearances)) {
       return Center(child: CircularProgressIndicator(color: primaryGreen));
+    }
+    if (_clearances.isEmpty && _failed.contains(_DocumentTab.clearances)) {
+      return const SizedBox.shrink();
     }
 
     if (_clearances.isEmpty) {
@@ -1623,13 +1676,8 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
           if (index == _clearances.length) return _buildSampleDisclaimer(rs);
           if (index > _clearances.length) return SizedBox(height: rs.h(20));
           final c = _clearances[index];
-          final rawExpiry = c['expires_at'];
-          bool isExpired = false;
-          if (rawExpiry != null) {
-            try {
-              isExpired = DateTime.parse(rawExpiry).isBefore(DateTime.now());
-            } catch (_) {}
-          }
+          final status = _recordStatus(c);
+          final approved = status == 'APPROVED';
 
           return Container(
             margin: EdgeInsets.only(bottom: rs.h(14)),
@@ -1663,17 +1711,17 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
                         vertical: rs.h(4),
                       ),
                       decoration: BoxDecoration(
-                        color: isExpired
+                        color: !approved
                             ? AppPalette.of(context).color(0xFFFDE8E8)
                             : AppPalette.of(context).color(0xFFE2EBE1),
                         borderRadius: BorderRadius.circular(rs.r(12)),
                       ),
                       child: Text(
-                        isExpired ? 'EXPIRED' : 'APPROVED',
+                        status,
                         style: TextStyle(
                           fontSize: rs.sp(10.5),
                           fontWeight: FontWeight.w700,
-                          color: isExpired
+                          color: !approved
                               ? AppPalette.of(context).color(0xFF9B1C1C)
                               : AppPalette.of(context).color(0xFF15803D),
                         ),
@@ -1777,8 +1825,13 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
   }
 
   Widget _buildDiagnosticsList(Rs rs) {
-    if (_loadingDiagnostics) {
+    if (!_records.containsKey(_DocumentTab.attachments) &&
+        _pending.containsKey(_DocumentTab.attachments)) {
       return Center(child: CircularProgressIndicator(color: primaryGreen));
+    }
+    if (_diagnosticAttachments.isEmpty &&
+        _failed.contains(_DocumentTab.attachments)) {
+      return const SizedBox.shrink();
     }
 
     if (_diagnosticAttachments.isEmpty) {
@@ -2058,16 +2111,20 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
   }
 
   Future<void> _openDiagnosticDocument(String downloadUrl) async {
-    final token = await _storage.read(key: 'jwt_token');
     // Keep the session JWT out of URLs; the download token is short-lived.
     try {
-      final res = await _client.post(
-        Uri.parse('$downloadUrl-token'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
+      final token = await _storage.read(key: 'jwt_token');
+      if (!mounted || !_data.isCurrent(_generation) || token == null) return;
+      final res = await _client
+          .post(
+            Uri.parse('$downloadUrl-token'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 10));
+      if (!mounted || !_data.isCurrent(_generation)) return;
 
       if (res.statusCode != 200) {
         if (mounted) {
@@ -2095,15 +2152,16 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen> {
         return;
       }
 
-      await launchUrl(
+      final opened = await launchUrl(
         Uri.parse('$downloadUrl?dlToken=$dlToken'),
         mode: LaunchMode.externalApplication,
       );
-    } catch (e) {
-      if (mounted) {
+      if (!opened) throw StateError('No file handler');
+    } catch (_) {
+      if (mounted && _data.isCurrent(_generation)) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Network error: $e'),
+            content: const Text('Could not open file. Please try again.'),
             backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
           ),
         );

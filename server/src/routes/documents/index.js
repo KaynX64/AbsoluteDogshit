@@ -17,7 +17,7 @@ export default function documentRoutes(io) {
   registerPrescriptionIssuance(router, io);
   registerPrescriptionHistory(router);
   registerPrescriptionCancellation(router, io);
-  registerClearanceRoutes(router);
+  registerClearanceRoutes(router, io);
   registerPublicVerificationRoutes(router);
   registerVerificationDetailsRoute(router);
   registerAttachmentRoutes(router);

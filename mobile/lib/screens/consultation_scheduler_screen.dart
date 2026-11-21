@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:async';
 
 import '../services/mobile_session_data.dart';
+import '../services/connectivity_service.dart';
 import '../widgets/lazy_card_columns.dart';
 
 import 'package:flutter/material.dart';
@@ -37,6 +38,11 @@ class _ConsultationSchedulerScreenState
   final _data = MobileSessionData.instance;
   late final int _generation;
   int _activeSubTab = 0;
+  late final StreamSubscription<String> _historyChanges;
+  late bool _online;
+  Timer? _historyRefresh;
+  int _historyRequest = 0;
+  bool _historyFailed = false;
 
   io.Socket? _socket;
 
@@ -126,6 +132,11 @@ class _ConsultationSchedulerScreenState
     _generation = _data.generation;
     final saved = _data.schedulerState;
     _activeSubTab = saved['tab'] as int? ?? 0;
+    _online = ConnectivityService().isOnline;
+    ConnectivityService().addListener(_connectivityChanged);
+    _historyChanges = _data.changes
+        .where((path) => path == '/api/appointments/my')
+        .listen((_) => _refreshVisibleHistory());
     _selectedDoctorId = saved['doctor'] as int?;
     _selectedDate = saved['date'] as DateTime? ?? _selectedDate;
     _selectedPurpose = saved['purpose'] as String? ?? '';
@@ -155,6 +166,9 @@ class _ConsultationSchedulerScreenState
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    ConnectivityService().removeListener(_connectivityChanged);
+    _historyRefresh?.cancel();
+    unawaited(_historyChanges.cancel());
     if (_data.isCurrent(_generation)) {
       _data.schedulerState.addAll({
         'tab': _activeSubTab,
@@ -177,9 +191,26 @@ class _ConsultationSchedulerScreenState
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && _selectedDoctorId != null) {
-      _fetchAvailableSlots();
+    if (state == AppLifecycleState.resumed) {
+      if (_activeSubTab == 0 && _selectedDoctorId != null) {
+        _fetchAvailableSlots();
+      }
+      _refreshVisibleHistory();
     }
+  }
+
+  void _connectivityChanged() {
+    final online = ConnectivityService().isOnline;
+    if (online && !_online) _refreshVisibleHistory();
+    _online = online;
+  }
+
+  void _refreshVisibleHistory() {
+    if (_activeSubTab != 1) return;
+    _historyRefresh?.cancel();
+    _historyRefresh = Timer(const Duration(milliseconds: 150), () {
+      if (mounted && _activeSubTab == 1) unawaited(_fetchMyAppointments());
+    });
   }
 
   Future<void> _initSlotSocket() async {
@@ -572,29 +603,39 @@ class _ConsultationSchedulerScreenState
   }
 
   Future<void> _fetchMyAppointments({bool force = true}) async {
-    if (!mounted) return;
+    if (!mounted || !_data.isCurrent(_generation)) return;
+    final request = ++_historyRequest;
+    bool current() =>
+        mounted && request == _historyRequest && _data.isCurrent(_generation);
     final cached = force ? null : _data.peek('/api/appointments/my');
-    if (cached is List && _data.isCurrent(_generation)) {
-      setState(() => _myAppointments = cached);
+    if (cached is List) {
+      setState(() {
+        _myAppointments = cached;
+        _historyFailed = false;
+        _loadingHistory = false;
+      });
       return;
     }
-    setState(() => _loadingHistory = true);
-    final token = await _storage.read(key: 'jwt_token');
-    if (!mounted || !_data.isCurrent(_generation)) return;
+    setState(() {
+      _loadingHistory = true;
+      _historyFailed = false;
+    });
     try {
+      final token = await _storage.read(key: 'jwt_token');
+      if (!current()) return;
       final data = await _data.get(
         '/api/appointments/my',
         token,
         force: force,
         client: _client,
       );
-      if (mounted && _data.isCurrent(_generation)) {
+      if (current()) {
         setState(() => _myAppointments = data as List<dynamic>);
       }
-    } catch (e) {
-      _showToast('Failed to load history: $e', isError: true);
+    } catch (_) {
+      if (current()) setState(() => _historyFailed = true);
     } finally {
-      if (mounted) setState(() => _loadingHistory = false);
+      if (current()) setState(() => _loadingHistory = false);
     }
   }
 
@@ -1083,6 +1124,16 @@ class _ConsultationSchedulerScreenState
               alignment: Alignment.centerRight,
               child: _buildHistoryLayoutSelector(rs),
             ),
+            if (_historyFailed)
+              ListTile(
+                title: const Text('Could not load appointments.'),
+                trailing: TextButton(
+                  onPressed: _fetchMyAppointments,
+                  child: const Text('Retry'),
+                ),
+              ),
+            if (_loadingHistory && _myAppointments.isNotEmpty)
+              const LinearProgressIndicator(),
           ],
         ],
       ),
@@ -1773,11 +1824,12 @@ class _ConsultationSchedulerScreenState
   }
 
   Widget _buildHistoryTab(Rs rs) {
-    if (_loadingHistory) {
+    if (_loadingHistory && _myAppointments.isEmpty) {
       return Center(child: CircularProgressIndicator(color: primaryGreen));
     }
 
     if (_myAppointments.isEmpty) {
+      if (_historyFailed) return const SizedBox.shrink();
       return RefreshIndicator(
         color: primaryGreen,
         onRefresh: _fetchMyAppointments,

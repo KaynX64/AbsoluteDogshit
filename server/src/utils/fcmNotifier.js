@@ -83,27 +83,25 @@ export async function sendPushToRoles(roleCodes = [], { title, body, data = {} }
  * every token past the 500th.
  */
 export async function sendSosPush(userIds = [], { alertId, latitude, longitude }) {
-  try {
-    if (!Array.isArray(userIds) || userIds.length === 0) return;
-    const [rows] = await pool.query(
-      'SELECT fcm_token, installation_id, sos_mode, device_type FROM DEVICE_TOKENS WHERE user_id IN (?)',
-      [userIds]
-    );
+  if (userIds.length === 0) return;
+  const [rows] = await pool.query(
+    'SELECT fcm_token, installation_id, sos_mode, device_type FROM DEVICE_TOKENS WHERE user_id IN (?)',
+    [userIds],
+  );
 
-    // Build and send the SOS payload in batches for one delivery mode.
-    await Promise.all(Object.entries(groupSosDevices(rows)).map(async ([mode, tokens]) => {
-      const payload = sosPushForMode(mode, { alertId, latitude, longitude });
-      for (let offset = 0; offset < tokens.length; offset += 500) {
-        await sendMulticastNotification(tokens.slice(offset, offset + 500), payload);
-      }
-    }));
-  } catch (err) {
-    console.error('[FCM] Error sending SOS push:', err.code ?? err.name);
-  }
+  // Propagate provider transport failures to the durable SOS worker.
+  const results = await Promise.allSettled(Object.entries(groupSosDevices(rows)).map(async ([mode, tokens]) => {
+    const payload = sosPushForMode(mode, { alertId, latitude, longitude });
+    for (let offset = 0; offset < tokens.length; offset += 500) {
+      await sendMulticastNotification(tokens.slice(offset, offset + 500), payload, { retry: true });
+    }
+  }));
+  const failure = results.find(result => result.status === 'rejected');
+  if (failure) throw failure.reason;
 }
 
 // Send one multicast message and remove registrations Firebase reports as invalid.
-async function sendMulticastNotification(tokens, { title, body, data, androidNotification }) {
+async function sendMulticastNotification(tokens, { title, body, data, androidNotification }, { retry = false } = {}) {
   if (!isFcmInitialized || !firebaseApp) {
     console.log(`[FCM Simulation] To ${tokens.length} devices`);
     return;
@@ -115,6 +113,7 @@ async function sendMulticastNotification(tokens, { title, body, data, androidNot
     tokens,
     android: {
       priority: 'high',
+      ...(data.type === 'EMERGENCY_SOS' ? { ttl: 60_000 } : {}),
       notification: androidNotification ?? {
         sound: 'default',
         channelId: data.type === 'QUEUE_TURN' ? 'clinic_queue_channel' : 'appointment_channel',
@@ -139,6 +138,7 @@ async function sendMulticastNotification(tokens, { title, body, data, androidNot
       }));
     }
   } catch (err) {
+    if (retry) throw err;
     console.error('[FCM Multicast Error]:', err.code ?? err.name);
   }
 }

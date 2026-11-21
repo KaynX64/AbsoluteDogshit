@@ -192,6 +192,7 @@ test('v2 issuance, concurrent retry, rollback, cancellation and snapshot readers
   assert.equal(renders, 1);
   await t.test('patient history, clinician history and protected verification return the same immutable ordered items', async () => {
     const { default: routes } = await import('../src/routes/documents/index.js');
+    const { verificationUrl } = await import('../src/documents/publicLinks.js');
     const router = routes();
     for (const [path, userId, params] of [['/prescriptions/my', 5, {}], ['/prescriptions/patient/:patientId', 2, { patientId: '5' }], ['/verify/:qrToken/details', 2, { qrToken: header.qr_token }]]) {
       const route = router.stack.find(it => it.route?.path === path).route;
@@ -203,6 +204,7 @@ test('v2 issuance, concurrent retry, rollback, cancellation and snapshot readers
       assert.equal(record.notes, body.notes);
       assert.equal(record.clinical_snapshot, undefined);
       assert.equal(record.items[0].generic_name, 'Generic B');
+      if (path === '/prescriptions/my') assert.equal(record.verification_url, verificationUrl(header.qr_token));
     }
   });
   await t.test('PDF recovery renders recorded content and publishes a key after an initial failure', async () => {

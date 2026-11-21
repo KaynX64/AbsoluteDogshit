@@ -8,6 +8,7 @@ import 'package:http/testing.dart';
 import 'package:mobile/models/prescription_item.dart';
 import 'package:mobile/screens/documents_viewer_screen.dart';
 import 'package:mobile/services/mobile_session_data.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 void main() {
   test('missing legacy clinical fields remain Not recorded', () {
@@ -65,6 +66,7 @@ void main() {
               'doctor_license': 'FIXTURE',
               'status': 'active',
               'qr_token': 'fixture-token',
+              'verification_url': 'https://verification.example.test/api/documents/verify/fixture-token',
               'items': [recorded],
               'notes': 'Fixture patient advice',
             },
@@ -108,6 +110,7 @@ void main() {
         scrollable: scrollable,
       );
       expect(find.text('PRESCRIPTION RECORD VERIFICATION'), findsOneWidget);
+      expect(find.byType(QrImageView), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },

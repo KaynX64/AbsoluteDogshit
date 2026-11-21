@@ -44,6 +44,7 @@ export function registerPrescriptionIssuance(router, io) {
         const result = await issueStructuredPrescription(req.body, req.user.user_id, {
           ipAddress: req.ip, onInventoryUpdated: () => io?.emit('inventory:updated'),
         });
+        if (!result.replayed) io?.to(`user:${Number(req.body.patient_user_id)}`).emit('documents:updated', { kind: 'prescriptions' });
         return res.status(result.replayed ? 200 : 201).json(result);
       } catch (error) { return structuredError(res, error); }
     }
@@ -117,7 +118,10 @@ export function registerPrescriptionIssuance(router, io) {
       onInventoryUpdated: () => io?.emit('inventory:updated'),
     });
     if (result.conflict) return res.status(409).json(result.conflict);
-    if (result.issued) return res.status(201).json(result.issued);
+    if (result.issued) {
+      io?.to(`user:${Number(patient_user_id)}`).emit('documents:updated', { kind: 'prescriptions' });
+      return res.status(201).json(result.issued);
+    }
     const error = result.failure;
     if (error instanceof SignerError) {
       return res.status(error.status).json({ error: error.message, code: error.code });

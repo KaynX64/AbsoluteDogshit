@@ -4,7 +4,7 @@
 
 `MobileSessionData` holds memory-only data for the authenticated session. The alert session begins and clears it on authentication and termination, including password changes and consent-revocation sign-out. Request generations prevent a late response from populating another session's cache. Screen responses and saved tab state also check that generation.
 
-Doctor metadata stays fresh for five minutes. Document lists and appointment history stay fresh for 60 seconds. There is only one cached clinician/date availability result; opening Appointments and confirming a reviewed booking always recheck availability. The server remains the authority for booking conflicts. Successful booking/cancellation and appointment realtime events invalidate appointment data; prescription status events invalidate prescription data.
+Doctor metadata stays fresh for five minutes. Document lists and appointment history stay fresh for 60 seconds. There is only one cached clinician/date availability result; opening Appointments and confirming a reviewed booking always recheck availability. The server remains the authority for booking conflicts. Realtime invalidation schedules a debounced refresh for the visible document or appointment list. Resume and reconnect also refresh visible lists. Previously loaded rows stay mounted during a refresh.
 
 After consent and initial dashboard loading, the portal speculatively loads doctors, then prescriptions, sequentially. It does not preload hidden widget trees, history, other document categories, PDFs, attachments or audio. Backgrounding, connectivity loss, account changes and memory pressure stop subsequent speculative work. Memory pressure drops datasets without deleting the booking draft.
 

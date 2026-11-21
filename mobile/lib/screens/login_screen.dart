@@ -331,7 +331,21 @@ class _LoginScreenState extends State<LoginScreen> {
                         ],
                       ),
                       TextButton(
-                        onPressed: () {},
+                        onPressed: () => showDialog<void>(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text('Reset your password'),
+                            content: const Text(
+                              'Contact your campus clinic administrator to request a password reset.',
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context),
+                                child: const Text('Done'),
+                              ),
+                            ],
+                          ),
+                        ),
                         style: TextButton.styleFrom(padding: EdgeInsets.zero),
                         child: Text(
                           'Forgot password?',

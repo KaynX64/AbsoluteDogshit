@@ -16,7 +16,16 @@ export function registerIncidentWorkflowRoutes(router, io) {
   // ===========================================================================
   // List resolved alerts that still require an incident report.
   router.get('/incident-reports/pending', authenticateToken, requireResponderAccess, async (req, res) => {
+    res.set('Cache-Control', 'no-store');
     try {
+      if (req.query.summary === '1') {
+        const [pending] = await pool.query(`SELECT a.alert_id AS alertId, a.resolved_at AS resolvedAt
+          FROM EMERGENCY_ALERTS a
+          WHERE a.status = 'resolved' AND a.resolved_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+            AND NOT EXISTS (SELECT 1 FROM INCIDENT_REPORTS ir WHERE ir.alert_id = a.alert_id)
+          ORDER BY a.resolved_at DESC, a.alert_id DESC`);
+        return res.json(pending);
+      }
       const [pending] = await pool.query(
         `SELECT a.alert_id, a.status, a.created_at, a.resolved_at, a.notes,
                 CONCAT(u.first_name, ' ', u.last_name) AS patient_name,

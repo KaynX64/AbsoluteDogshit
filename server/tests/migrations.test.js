@@ -55,7 +55,7 @@ async function foundationSchema(pool) {
 test('fresh schema is adopted once even when two migration runners start together', { skip }, async t => {
   const pool = await fixture(t);
   const applied = await Promise.all([runMigrations(pool), runMigrations(pool)]);
-  assert.deepEqual(applied.sort(), [0, 13]);
+  assert.deepEqual(applied.sort(), [0, 14]);
   assert.equal(await responderFlag(pool), 1);
   const readOnlyPool = {
     // Wrap a fixture connection so completed migrations can only make read queries.
@@ -88,7 +88,7 @@ test('replay migration removes legacy payloads and retains duplicate outcomes', 
     VALUES ('old-mutation', 2, 'desktop', 'EMR_RECORDS', 'old-record', 'CREATE',
             JSON_OBJECT('notes', 'fixture private text'), 1, 42, 'synced', 'legacy error')
   `);
-  assert.equal(await runMigrations(pool), 13);
+  assert.equal(await runMigrations(pool), 14);
   const [columns] = await pool.query('SHOW COLUMNS FROM LOCAL_SYNC_LOGS');
   assert.ok(columns.every(/* Check the remaining ledger columns for removed payload and error fields. */ column => !['payload', 'error_message'].includes(column.Field)));
   const [[row]] = await pool.query(`
@@ -110,7 +110,7 @@ test('an existing schema keeps revoked responders, admin grants and saved policy
   await pool.query("DELETE FROM ADMIN_PERMISSIONS WHERE code IN ('INCIDENT_RECORDS_VIEW', 'TERMINAL_VIEW')");
   await pool.query('UPDATE SERVER_POLICY SET revision = 4 WHERE policy_id = 1');
   await pool.query('DROP TABLE STAFF_ANALYTICS_PERMISSIONS');
-  assert.equal(await runMigrations(pool), 13);
+  assert.equal(await runMigrations(pool), 14);
   const [[terminal]] = await pool.query("SELECT code FROM ADMIN_PERMISSIONS WHERE code = 'TERMINAL_VIEW'");
   assert.equal(terminal.code, 'TERMINAL_VIEW');
   const [[staffSettings]] = await pool.query('SELECT COUNT(*) AS total FROM STAFF_ANALYTICS_PERMISSIONS');
@@ -159,7 +159,7 @@ test('legacy tables and columns are rebuilt additively and the responder backfil
   await pool.query(`INSERT INTO PRESCRIPTION_ITEMS
     (prescription_id, outside_name, dosage, frequency, duration_days, quantity_dispensed)
     VALUES (1, 'fixture', 'fixture', 'fixture', 1, 4)`);
-  assert.equal(await runMigrations(pool), 13);
+  assert.equal(await runMigrations(pool), 14);
   const [[legacyDevice]] = await pool.query("SELECT installation_id, sos_mode FROM DEVICE_TOKENS WHERE fcm_token = 'legacy-token'");
   assert.deepEqual(legacyDevice, { installation_id: null, sos_mode: 'on_duty' });
   const [dayIndex] = await pool.query("SHOW INDEX FROM APPOINTMENTS WHERE Key_name = 'idx_app_status_datetime'");
@@ -205,7 +205,7 @@ test('an interrupted responder schema change resumes with its original backfill 
   assert.equal(await responderFlag(pool), 0);
   const [[{ applied_at }]] = await pool.query('SELECT applied_at FROM SCHEMA_MIGRATIONS WHERE version = 3');
   assert.equal(applied_at, null);
-  assert.equal(await runMigrations(pool), 11);
+  assert.equal(await runMigrations(pool), 12);
   assert.equal(await responderFlag(pool), 1);
 });
 
@@ -215,6 +215,18 @@ test('an unprovisioned database fails before writing a migration ledger', { skip
   await assert.rejects(runMigrations(pool), /Missing or incompatible base tables/);
   const [tables] = await pool.query('SHOW TABLES');
   assert.deepEqual(tables, []);
+});
+
+test('migration 014 adds the SOS scheduler without replaying existing alerts', { skip }, async t => {
+  const pool = await fixture(t);
+  await pool.query(`ALTER TABLE EMERGENCY_ALERTS ADD INDEX idx_ea_legacy_user (user_id),
+    DROP INDEX uq_sos_request, DROP INDEX idx_sos_dispatch,
+    DROP COLUMN client_sos_id, DROP COLUMN request_hash, DROP COLUMN dispatch_after`);
+  await pool.query("INSERT INTO EMERGENCY_ALERTS (user_id, location) VALUES (5, ST_SRID(POINT(120, 16), 4326))");
+  assert.equal(await runMigrations(pool), 14);
+  const [[alert]] = await pool.query('SELECT client_sos_id, request_hash, dispatch_after FROM EMERGENCY_ALERTS');
+  assert.deepEqual(alert, { client_sos_id: null, request_hash: null, dispatch_after: null });
+  assert.equal(await runMigrations(pool), 0);
 });
 
 test('migration 013 upgrades a v12 prescription schema to fresh-install parity without rewriting legacy content', { skip }, async t => {
