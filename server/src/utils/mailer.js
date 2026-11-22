@@ -3,6 +3,7 @@
 import 'dotenv/config';
 import nodemailer from 'nodemailer';
 
+// Read a required SMTP setting and fail startup when it is missing.
 function requiredEnv(name) {
   const val = process.env[name];
   if (!val) {
@@ -29,11 +30,13 @@ const transporter = nodemailer.createTransport({
 // delivered to students and clinical staff (audit SEC-07, CVSS 6.1).
 // Every dynamic interpolation below now passes through this escaper.
 function escapeHtml(str) {
+  // Replace each matched character with the corresponding HTML entity.
   return String(str || '').replace(/[&<>"']/g, (m) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   })[m]);
 }
 
+// Build and send the appointment confirmation or reminder email.
 export async function sendAppointmentEmail({ toEmail, patientName, doctorName, specialty, dateTime, purpose, type }) {
   let subject = '';
   let html = '';

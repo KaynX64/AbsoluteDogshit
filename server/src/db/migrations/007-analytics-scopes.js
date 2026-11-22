@@ -3,7 +3,9 @@
 export default {
   version: 7,
   name: 'scoped analytics permissions',
+  // Leave the table structure as-is for this analytics grant migration.
   async schema() {},
+  // Seed analytics scope codes and grant Headcount to eligible existing administrators.
   async data(connection) {
     await connection.query(`
       INSERT INTO ADMIN_PERMISSIONS (code, name, description, sort_order) VALUES

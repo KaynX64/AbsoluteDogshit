@@ -10,6 +10,7 @@ const adminSections = [
 const sections = [...adminSections, 'ANALYTICS_SURVEILLANCE', 'ANALYTICS_DISPENSING'];
 const adminScopes = [...adminSections, 'ANALYTICS_EXPORT'];
 
+// Read the current roles, admin grant codes, and staff override for an account.
 export async function readAnalyticsAccount(userId, connection = pool) {
     // Role changes can remove permissions in the same transaction.
     const [rows] = await connection.query(`
@@ -20,15 +21,18 @@ export async function readAnalyticsAccount(userId, connection = pool) {
       LEFT JOIN STAFF_ANALYTICS_PERMISSIONS staff ON staff.user_id = ur.user_id AND r.code <> 'ADMIN'
       WHERE ur.user_id = ?
     `, [userId]);
+    // Extract current role codes from the joined account rows.
     const roles = rows.map(row => row.role_code);
+    // Find the row carrying an explicit staff analytics override.
     const stored = defaultStaffAnalyticsScopes(roles) && rows.find(row => row.staff_scopes != null)?.staff_scopes;
     return {
       roles,
-      adminCodes: rows.map(row => row.permission_code).filter(Boolean),
+      adminCodes: rows.map(/* Extract the administrator grant code from each joined row. */ row => row.permission_code).filter(Boolean),
       staffScopes: stored == null ? null : validateStaffAnalyticsScopes(typeof stored === 'string' ? JSON.parse(stored) : stored),
     };
 }
 
+// Attach the caller's effective analytics scopes to the request.
 export async function resolveAnalyticsAccess(req, res, next) {
   res.set('Cache-Control', 'no-store');
   try {
@@ -46,7 +50,7 @@ export async function resolveAnalyticsAccess(req, res, next) {
       if (scopes.has('ANALYTICS_PHARMACY')) scopes.add('ANALYTICS_DISPENSING');
     } else {
       const defaults = defaultStaffAnalyticsScopes(roles);
-      if (!defaults || !(staffScopes ?? defaults).some(scope => sections.includes(scope))) {
+      if (!defaults || !(staffScopes ?? defaults).some(/* Check whether the staff scope list includes a report section. */ scope => sections.includes(scope))) {
         return res.status(403).json({ error: 'Analytics access is required.' });
       }
       for (const scope of staffScopes ?? defaults) scopes.add(scope);
@@ -59,9 +63,10 @@ export async function resolveAnalyticsAccess(req, res, next) {
   }
 }
 
+// Require export permission and access to at least one report section.
 export function requireAnalyticsExport(req, res, next) {
   const scopes = req.analyticsScopes;
-  if (!scopes.has('ANALYTICS_EXPORT') || !sections.some(scope => scopes.has(scope))) {
+  if (!scopes.has('ANALYTICS_EXPORT') || !sections.some(/* Check whether the caller can see any exportable section. */ scope => scopes.has(scope))) {
     return res.status(403).json({ error: 'Export and at least one analytics section are required.', requiredPermission: 'ANALYTICS_EXPORT' });
   }
   next();

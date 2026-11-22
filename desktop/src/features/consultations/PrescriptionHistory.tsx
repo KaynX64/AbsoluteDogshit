@@ -4,14 +4,15 @@ import Icon from '../../shared/ui/Icon';
 
 export interface PrescriptionHistoryRow {
   prescription_id: number;
+  contract_version?: number;
   issued_at: string;
   expires_at?: string | null;
   status: string;
   notes?: string | null;
   items: {
-    item_id: number; medicine_name: string; generic_name?: string | null;
+    item_id: number | string; contract_version?: number; strength?: string; form?: string; quantity_unit?: string; pack_size?: string; review_on?: string; medicine_name: string; generic_name?: string | null;
     is_outside?: boolean | number; dosage: string; frequency: string; route: string;
-    duration_days: number; quantity_prescribed: number; quantity_dispensed: number;
+    duration_days: number | null; quantity_prescribed: number; quantity_dispensed: number;
     instructions?: string | null;
   }[];
 }
@@ -175,7 +176,7 @@ export default function PrescriptionHistory({ setShowRxHistoryModal, rxHistoryPa
                       }}
                     >
                       <b>{it.medicine_name}</b>
-                      {it.generic_name ? ` (${it.generic_name})` : ''}
+                      {it.contract_version !== 2 && it.generic_name ? ` (${it.generic_name})` : ''}
                       {it.is_outside && (
                         <span
                           style={{
@@ -197,13 +198,14 @@ export default function PrescriptionHistory({ setShowRxHistoryModal, rxHistoryPa
                         </span>
                       )}
                       <div style={{ color: T.textSub, marginTop: 2 }}>
-                        {it.dosage} · {it.frequency} · {it.route} · {it.duration_days}{' '}
-                        day(s) · qty: {it.quantity_prescribed ?? it.quantity_dispensed}
+                        {it.contract_version === 2 && <div>Strength: {it.strength} · Form: {it.form}</div>}
+                        Dose: {it.dosage || 'Not recorded'} · {it.frequency || 'Not recorded'} · {it.route || 'Not recorded'}
+                        <div>{[it.duration_days == null ? '' : `Duration: ${it.duration_days} days`, it.review_on ? `Review on: ${it.review_on}` : ''].filter(Boolean).join(' · ') || 'Duration: Not recorded'} · Supply: {it.quantity_prescribed ?? it.quantity_dispensed ?? 'Not recorded'} {it.quantity_unit || '(unit not recorded)'} {it.pack_size || ''}</div>
                         {it.is_outside ? ' (prescribed)' : it.quantity_dispensed ? ` (dispensed: ${it.quantity_dispensed})` : ''}
                       </div>
-                      {it.instructions && (
+                      {(
                         <div style={{ color: T.textSub, marginTop: 2 }}>
-                          <b>Instructions:</b> {it.instructions}
+                          <b>Instructions:</b> {it.instructions || 'Not recorded'}
                         </div>
                       )}
                     </div>
@@ -218,7 +220,7 @@ export default function PrescriptionHistory({ setShowRxHistoryModal, rxHistoryPa
                         marginBottom: 10,
                       }}
                     >
-                      <b>Notes:</b> {rx.notes}
+                      <b>{rx.contract_version === 2 ? 'Patient advice—printed on prescription:' : 'Recorded prescription notes:'}</b> {rx.notes}
                     </div>
                   )}
 

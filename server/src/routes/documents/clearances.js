@@ -8,7 +8,9 @@ import { logPhiAccess } from '../../utils/phiLogger.js';
 import { isCalendarDate } from '../../config/appointmentRules.js';
 import { issueClearance, revokeClearance } from '../../documents/clearanceMutations.js';
 import { parseMetadata } from './signatureMetadata.js';
+import { verificationUrl } from '../../documents/publicLinks.js';
 
+// Translate expected clearance errors into HTTP responses and handle unexpected failures.
 function respondToClearanceError(res, error, message) {
   if (error.status) {
     return res.status(error.status).json({ error: error.message, code: error.code });
@@ -17,11 +19,13 @@ function respondToClearanceError(res, error, message) {
   return res.status(500).json({ error: message });
 }
 
-export function registerClearanceRoutes(router) {
+// Mount clearance issuance, history, and revocation endpoints.
+export function registerClearanceRoutes(router, io) {
   // =============================================================================
   // 2. MEDICAL CLEARANCES
   // =============================================================================
 
+  // Validate a medical clearance request and delegate issuance to the document service.
   router.post('/clearances', authenticateToken, requireRoles('DOCTOR', 'DENTIST'), async (req, res) => {
     const { user_id, purpose: rawPurpose, expires_at, remarks: rawRemarks, appointment_id } = req.body;
     const purpose = typeof rawPurpose === 'string' ? rawPurpose.trim() : '';
@@ -40,12 +44,14 @@ export function registerClearanceRoutes(router) {
 
     try {
       const issued = await issueClearance({ user_id, appointment_id, purpose, remarks, expires_at, issuerId, ipAddress: req.ip });
+      io?.to(`user:${Number(user_id)}`).emit('documents:updated', { kind: 'clearances' });
       return res.status(201).json(issued);
     } catch (error) {
       return respondToClearanceError(res, error, 'Failed to issue medical clearance.');
     }
   });
 
+  // Return the current account's applicable clearance history.
   router.get('/clearances/my', authenticateToken, requirePrivacyConsent, async (req, res) => {
     try {
       const userId = req.user.user_id;
@@ -64,7 +70,14 @@ export function registerClearanceRoutes(router) {
         [userId]
       );
 
-      res.json(clearances.map((row) => ({ ...row, pdfAvailable: Boolean(row.pdf_s3_key) })));
+      const now = Date.now();
+      res.json(clearances.map(row => ({
+        ...row,
+        status: row.status === 'approved' && row.expires_at && new Date(row.expires_at).getTime() < now ? 'expired' : row.status,
+        remarks: parseMetadata(row.signature_metadata).clinical_remarks ?? null,
+        verification_url: row.qr_token ? verificationUrl(row.qr_token) : null,
+        pdfAvailable: Boolean(row.pdf_s3_key),
+      })));
     } catch (error) {
       console.error('[Documents] Error fetching clearances:', error);
       res.status(500).json({ error: 'Failed to retrieve medical clearances.' });
@@ -74,6 +87,7 @@ export function registerClearanceRoutes(router) {
   // GET /api/documents/clearances/patient/:patientId
   // Clearances for one patient, limited to those issued by the logged-in
   // doctor/dentist. The issuer comes from the JWT, never from the request.
+  // Return the requested patient's clearances to an authorized clinician.
   router.get(
     '/clearances/patient/:patientId',
     authenticateToken,
@@ -96,6 +110,7 @@ export function registerClearanceRoutes(router) {
           [patientId, req.user.user_id]
         );
 
+        // Format the clearance and parsed signature fields for clinical history.
         const history = rows.map((row) => {
           const meta = parseMetadata(row.signature_metadata);
           return {
@@ -128,6 +143,7 @@ export function registerClearanceRoutes(router) {
     }
   );
 
+  // Validate the request and revoke the clearance through the audited mutation service.
   router.patch(
     '/clearances/:id/revoke',
     authenticateToken,
@@ -141,7 +157,9 @@ export function registerClearanceRoutes(router) {
       }
 
       try {
-        return res.json(await revokeClearance({ clearanceId, reason, user: req.user, ipAddress: req.ip }));
+        const { patientId, ...result } = await revokeClearance({ clearanceId, reason, user: req.user, ipAddress: req.ip });
+        io?.to(`user:${patientId}`).emit('documents:updated', { kind: 'clearances' });
+        return res.json(result);
       } catch (error) {
         return respondToClearanceError(res, error, 'Failed to revoke clearance.');
       }

@@ -8,6 +8,7 @@ import { storeDocumentPdf } from './storage.js';
 
 // ─── MEDICAL CLEARANCES ───────────────────────────────────────────────────
 
+// Load the clearance and its signatory details and render and store the PDF.
 export async function generateAndStoreClearancePDF(clearanceId, database = pool) {
   try {
     const [rows] = await database.query(
@@ -58,6 +59,7 @@ export async function generateAndStoreClearancePDF(clearanceId, database = pool)
       },
     });
 
+    // Record the object key if the clearance still needs a PDF.
     const key = await storeDocumentPdf('clearances/clr', clearanceId, buffer, storageKey =>
       database.query('UPDATE MEDICAL_CLEARANCES SET pdf_s3_key = ?, pdf_retry_at = NULL WHERE clearance_id = ? AND pdf_s3_key IS NULL AND deleted_at IS NULL', [storageKey, clearanceId]),
     );

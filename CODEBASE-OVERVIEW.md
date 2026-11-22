@@ -60,7 +60,7 @@ SOS captures a location and notifies eligible recipients through realtime and pu
 
 Desktop offline support caches patient/encounter data and queues supported clinical changes in encrypted SQLite. Reconnection replays the signed-in account's changes through server transactions with duplicate detection and conflict handling. It does not make every feature available offline; attachment uploads require connectivity.
 
-Mobile offline support caches emergency information, offers native call/SMS actions and queues SOS events for reconnection. A queued SOS has not reached server responders until delivery succeeds. Calls and SMS still depend on cellular service.
+Mobile offline support caches emergency contacts per account and keeps call/SMS actions available. Keyed SOS requests can retry on reconnect without creating a second alert. The server acknowledges the saved alert and schedules dispatch separately. Mobile responders can file pending reports from the Responder Hub. Calls and SMS depend on phone service.
 
 ## Assessment and verification
 

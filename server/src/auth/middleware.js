@@ -8,6 +8,7 @@ import { isSessionAccountActive, sessionBlocklistKey } from './session.js';
 // ─────────────────────────────────────────────────────────────────────────
 // TOKEN MIDDLEWARE
 // ─────────────────────────────────────────────────────────────────────────
+// Verify a bearer session and require a currently active account before protected HTTP handling.
 export function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   // ── SEC-06 Remediation ──
@@ -23,6 +24,7 @@ export function authenticateToken(req, res, next) {
     return res.status(401).json({ error: 'Access token required.' });
   }
 
+  // Check the verified session for revocation and attach the active user to the request.
   jwt.verify(token, JWT_SECRET, async (err, user) => {
     if (err) return res.status(403).json({ error: 'Token expired or invalid.' });
 

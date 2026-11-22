@@ -46,7 +46,7 @@ export async function sendPushToUser(userId, { title, body, data = {} }) {
     );
 
     if (rows.length === 0) return;
-    const tokens = rows.map((r) => r.fcm_token);
+    const tokens = rows.map(/* Extract device tokens registered to the target user. */ (r) => r.fcm_token);
     await sendMulticastNotification(tokens, { title, body, data });
   } catch (err) {
     console.error('[FCM] Error sending push to user:', err.message);
@@ -68,7 +68,7 @@ export async function sendPushToRoles(roleCodes = [], { title, body, data = {} }
     );
 
     if (rows.length === 0) return;
-    const tokens = rows.map((r) => r.fcm_token);
+    const tokens = rows.map(/* Extract device tokens found for the requested roles. */ (r) => r.fcm_token);
     await sendMulticastNotification(tokens, { title, body, data });
   } catch (err) {
     console.error('[FCM] Error sending push to roles:', err.message);
@@ -83,25 +83,25 @@ export async function sendPushToRoles(roleCodes = [], { title, body, data = {} }
  * every token past the 500th.
  */
 export async function sendSosPush(userIds = [], { alertId, latitude, longitude }) {
-  try {
-    if (!Array.isArray(userIds) || userIds.length === 0) return;
-    const [rows] = await pool.query(
-      'SELECT fcm_token, installation_id, sos_mode, device_type FROM DEVICE_TOKENS WHERE user_id IN (?)',
-      [userIds]
-    );
+  if (userIds.length === 0) return;
+  const [rows] = await pool.query(
+    'SELECT fcm_token, installation_id, sos_mode, device_type FROM DEVICE_TOKENS WHERE user_id IN (?)',
+    [userIds],
+  );
 
-    await Promise.all(Object.entries(groupSosDevices(rows)).map(async ([mode, tokens]) => {
-      const payload = sosPushForMode(mode, { alertId, latitude, longitude });
-      for (let offset = 0; offset < tokens.length; offset += 500) {
-        await sendMulticastNotification(tokens.slice(offset, offset + 500), payload);
-      }
-    }));
-  } catch (err) {
-    console.error('[FCM] Error sending SOS push:', err.code ?? err.name);
-  }
+  // Propagate provider transport failures to the durable SOS worker.
+  const results = await Promise.allSettled(Object.entries(groupSosDevices(rows)).map(async ([mode, tokens]) => {
+    const payload = sosPushForMode(mode, { alertId, latitude, longitude });
+    for (let offset = 0; offset < tokens.length; offset += 500) {
+      await sendMulticastNotification(tokens.slice(offset, offset + 500), payload, { retry: true });
+    }
+  }));
+  const failure = results.find(result => result.status === 'rejected');
+  if (failure) throw failure.reason;
 }
 
-async function sendMulticastNotification(tokens, { title, body, data, androidNotification }) {
+// Send one multicast message and remove registrations Firebase reports as invalid.
+async function sendMulticastNotification(tokens, { title, body, data, androidNotification }, { retry = false } = {}) {
   if (!isFcmInitialized || !firebaseApp) {
     console.log(`[FCM Simulation] To ${tokens.length} devices`);
     return;
@@ -109,10 +109,11 @@ async function sendMulticastNotification(tokens, { title, body, data, androidNot
 
   const message = {
     notification: { title, body },
-    data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])),
+    data: Object.fromEntries(Object.entries(data).map(/* Convert a notification data value to the string Firebase expects. */ ([k, v]) => [k, String(v)])),
     tokens,
     android: {
       priority: 'high',
+      ...(data.type === 'EMERGENCY_SOS' ? { ttl: 60_000 } : {}),
       notification: androidNotification ?? {
         sound: 'default',
         channelId: data.type === 'QUEUE_TURN' ? 'clinic_queue_channel' : 'appointment_channel',
@@ -126,15 +127,18 @@ async function sendMulticastNotification(tokens, { title, body, data, androidNot
     
     // Clean up invalid or uninstalled tokens automatically
     if (response.failureCount > 0) {
+      // Match invalid Firebase registrations to their submitted device tokens.
       await Promise.all(response.responses.map(async (resp, idx) => {
         if (resp.error?.code === 'messaging/registration-token-not-registered' ||
             resp.error?.code === 'messaging/invalid-registration-token') {
           const badToken = tokens[idx];
+          // Treat deletion of an invalid device token as best-effort cleanup.
           await pool.query('DELETE FROM DEVICE_TOKENS WHERE fcm_token = ?', [badToken]).catch(() => {});
         }
       }));
     }
   } catch (err) {
+    if (retry) throw err;
     console.error('[FCM Multicast Error]:', err.code ?? err.name);
   }
 }

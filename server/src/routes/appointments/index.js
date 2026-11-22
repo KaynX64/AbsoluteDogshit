@@ -11,6 +11,7 @@ import { registerWalkIn } from './intake/walkIn.js';
 import { registerConsultationRoutes } from './consultations.js';
 import { registerPatientHistoryRoutes } from './patientHistory.js';
 
+// Build the appointment router and pass realtime access to handlers that publish changes.
 export default function appointmentRoutes(io) {
   const router = express.Router();
 

@@ -21,6 +21,7 @@ import {
 // ─── MEDICAL CLEARANCE PDF ────────────────────────────────────────────────
 // (unchanged — no layout bugs in this path)
 
+// Render the clearance statement, signatory, dates, and verification QR code as a PDF.
 export async function renderClearancePDF(clearance) {
   const {
     clearance_id,

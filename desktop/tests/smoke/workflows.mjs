@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-export function installFixtures() {
+export function installFixtures({ themeMode = 'dark' } = {}) {
   const roles = ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN', 'EMERGENCY_RESPONDER'];
   const patient = {
     appointment_id: 10, patient_id: 5, first_name: 'Synthetic', last_name: 'Patient',
@@ -32,7 +32,7 @@ export function installFixtures() {
     calls.push([path, method, options.body]);
     if (path.endsWith('/auth/login')) return Response.json({
       token: 'fixture.token.local',
-      user: { user_id: 1, first_name: 'Fixture', last_name: 'Staff', email: 'staff@example.invalid', roles, theme_mode: 'dark' },
+      user: { user_id: 1, first_name: 'Fixture', last_name: 'Staff', email: 'staff@example.invalid', roles, theme_mode: themeMode },
     });
     if (path.endsWith('/emergency/active')) {
       if (state.holdSos) {
@@ -47,6 +47,7 @@ export function installFixtures() {
       expiry_date: '2099-11-10', quantity_on_hand: 20,
     })));
     if (path.endsWith('/signature/me/status')) return Response.json({ enrolled: true });
+    if (path.endsWith('/documents/prescription-capabilities')) return Response.json({ contract_versions: [1, 2], structured_issuance_enabled: true, max_items: 20 });
     if (path.endsWith('/appointments/today')) return Response.json([patient]);
     if (path.endsWith('/appointments/patient/5/history')) return Response.json({
       records: Array.from({ length: 12 }, (_, index) => ({
@@ -163,11 +164,12 @@ export async function verifyWorkflows(run, wait, press, send, { offlineOnly = fa
     }
     const main = document.querySelector('.app-main');
     const workspace = document.getElementById('desktop-workspace');
-    const filler = document.createElement('div');
+    const list = document.querySelector('.doctor-queue-grid');
+    const filler = document.createElement('li');
     filler.style.height = '150vh';
-    workspace.append(filler);
+    list.append(filler);
     try {
-      workspace.scrollTop = 500;
+      list.scrollTop = 500;
       window.scrollTo(0, 500);
       const bounds = title.getBoundingClientRect();
       return {
@@ -175,7 +177,7 @@ export async function verifyWorkflows(run, wait, press, send, { offlineOnly = fa
         sidebarFits: document.querySelector('.sb').getBoundingClientRect().bottom <= innerHeight + 1,
         mainFits: main.getBoundingClientRect().bottom <= innerHeight + 1,
         documentFits: root.scrollHeight <= innerHeight + 1 && window.scrollY === 0,
-        workspaceScrolls: workspace.scrollTop > 0,
+        componentScrolls: list.scrollTop > 0,
       };
     } finally {
       filler.remove();
@@ -186,8 +188,8 @@ export async function verifyWorkflows(run, wait, press, send, { offlineOnly = fa
       }
     }
   })()`), {
-    titlePinned: true, sidebarFits: true, mainFits: true, documentFits: true, workspaceScrolls: true,
-  }, 'Doctor content scrolls inside the workspace below the window controls');
+    titlePinned: true, sidebarFits: true, mainFits: true, documentFits: true, componentScrolls: true,
+  }, 'Doctor patient lists scroll internally while the section stays below the window controls');
   if (offlineOnly) return;
 
   const queue = await run(`(() => {

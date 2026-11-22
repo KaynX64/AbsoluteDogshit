@@ -6,6 +6,7 @@ import { JWT_SECRET } from '../utils/secrets.js';
 import { redis, isRedisActive } from '../utils/redisClient.js';
 import { isSessionAccountActive, sessionBlocklistKey } from '../auth/session.js';
 
+// Attach Socket.IO to the HTTP server and register authentication and connection handlers.
 export function attachRealtime(server, { isHttps, isOriginAllowed }) {
   // Mount Secure WebSockets (WSS over HTTPS)
   // ── SEC-10: the same origin allow-list as the HTTP API. Engine.IO
@@ -14,6 +15,7 @@ export function attachRealtime(server, { isHttps, isOriginAllowed }) {
   // either (non-browser clients send no Origin header and pass).
   const io = new Server(server, {
     cors: {
+      // Apply the same CORS origin check used by the HTTP API.
       origin(origin, callback) {
         if (!origin || isOriginAllowed(origin)) return callback(null, true);
         console.warn(`⚠️ [Socket.IO CORS] Handshake from unauthorized origin rejected: ${origin}`);
@@ -24,12 +26,14 @@ export function attachRealtime(server, { isHttps, isOriginAllowed }) {
   });
 
   // Socket.IO authentication middleware (asynchronous token validation)
+  // Authenticate the socket handshake before the connection is accepted.
   io.use(async (socket, next) => {
     const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.split(' ')[1];
     if (!token) {
       return next(new Error('Authentication required for WebSocket connection.'));
     }
 
+    // Reject invalid tokens, revoked sessions, and inactive accounts.
     jwt.verify(token, JWT_SECRET, async (err, user) => {
       if (err || !user) {
         return next(new Error('Invalid or expired WebSocket authentication token.'));
@@ -62,6 +66,7 @@ export function attachRealtime(server, { isHttps, isOriginAllowed }) {
     });
   });
 
+  // Join the authenticated user and applicable desktop window rooms and record connection time.
   io.on('connection', (socket) => {
     socket.data.connectedAt = Date.now();
     const userEmail = socket.user?.email || 'Authenticated User';
@@ -98,6 +103,7 @@ export function attachRealtime(server, { isHttps, isOriginAllowed }) {
       );
     });
 
+    // Record the socket disconnection and its reason in the server log.
     socket.on('disconnect', (reason) => {
       console.log(`🔌 [Socket.IO] Client disconnected: ${socket.id} (${reason})`);
     });

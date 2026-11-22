@@ -13,6 +13,7 @@ import { removePushDevice } from '../emergency/deviceDelivery.js';
 // ─────────────────────────────────────────────────────────────────────────
 // CHANGE PASSWORD
 // ─────────────────────────────────────────────────────────────────────────
+// Verify the current password and apply the credential change and current session cleanup.
 export async function changePassword(req, res, io) {
   const userId = req.user.user_id;
   const { currentPassword, newPassword } = req.body;
@@ -79,6 +80,7 @@ export async function changePassword(req, res, io) {
     }
 
     const newHash = await bcrypt.hash(newPassword, 10);
+    // Update the password, remove the matching push registration, and audit the change together.
     const changed = await inTransaction(async connection => {
       const [update] = await connection.query(
         `UPDATE USERS SET password_hash = ?
@@ -114,6 +116,7 @@ export async function changePassword(req, res, io) {
       const now = Math.floor(Date.now() / 1000);
       const remainingSeconds = req.user.exp ? Math.max(req.user.exp - now, 60) : 86400;
       const blacklistKey = sessionBlocklistKey(req.user, req.token);
+      // Continue with session socket cleanup when Redis revocation fails.
       await redis
         .set(blacklistKey, 'revoked_password_change', 'EX', remainingSeconds)
         .catch(() => {});

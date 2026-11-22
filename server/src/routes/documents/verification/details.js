@@ -1,5 +1,6 @@
 // Returns detailed QR verification data to authorized clinical staff.
 
+import { hydratePrescription, isPrescriptionExpired } from '../../../documents/prescriptions/structuredRead.js';
 import { pool } from '../../../db/pool.js';
 import { authenticateToken } from '../../../auth/middleware.js';
 import { requireRoles } from '../../../middleware/rbac.js';
@@ -8,6 +9,7 @@ import { logPhiAccess } from '../../../utils/phiLogger.js';
 import { isQualifiedSigner, formatIssuedBy } from '../../../documents/signing/signatory.js';
 import { parseMetadata } from '../signatureMetadata.js';
 
+// Mount the staff-only QR verification detail endpoint.
 export function registerVerificationDetailsRoute(router) {
   // =============================================================================
   // 5. STAFF-ONLY VERIFICATION DETAILS (full view for clinic staff)
@@ -16,6 +18,7 @@ export function registerVerificationDetailsRoute(router) {
   // Returns what the public /verify route deliberately hides: full name, student no.,
   // course, medications, notes, and revocation reason.
   // Every successful lookup is recorded in PHI_ACCESS_LOGS.
+  // Return authorized clinical document details for a verified QR token.
   router.get(
     '/verify/:qrToken/details',
     authenticateToken,
@@ -77,7 +80,7 @@ export function registerVerificationDetailsRoute(router) {
         // 2. Prescription
         const [prescriptions] = await pool.query(
           `SELECT p.prescription_id, p.patient_user_id, p.status, p.issued_at, p.expires_at, p.notes,
-                  p.signature_metadata,
+                  p.signature_metadata, p.contract_version, p.clinical_snapshot,
                   u.first_name AS patient_first_name, u.last_name AS patient_last_name,
                   hp.sex, hp.date_of_birth,
                   TIMESTAMPDIFF(YEAR, hp.date_of_birth, CURDATE()) AS age,
@@ -97,7 +100,7 @@ export function registerVerificationDetailsRoute(router) {
         if (prescriptions.length > 0) {
           const p = prescriptions[0];
           const isCancelled = p.status === 'cancelled';
-          const isExpired = p.status === 'expired' || (p.expires_at && new Date(p.expires_at) < new Date());
+          const isExpired = isPrescriptionExpired(p);
           const isValid = !isCancelled && !isExpired && (p.status === 'active' || p.status === 'dispensed');
 
           const [items] = await pool.query(
@@ -121,21 +124,29 @@ export function registerVerificationDetailsRoute(router) {
             ipAddress: req.ip,
           });
 
+          // Load the recorded prescription, decrypting the saved instructions for legacy item rows.
+          const recorded = hydratePrescription({ ...p, notes: decrypt(p.notes),
+            items: items.map(it => ({ ...it, instructions: decrypt(it.instructions) })) });
+          const patient = recorded.patient_snapshot || { first_name: p.patient_first_name, last_name: p.patient_last_name,
+            date_of_birth: p.date_of_birth, age: p.age, sex: p.sex, student_no: p.student_no, course: p.course };
+          const doctor = recorded.prescriber_snapshot || { first_name: p.doc_first_name, last_name: p.doc_last_name,
+            license_no: p.doc_license, role: parseMetadata(p.signature_metadata).signer_role };
           return res.json({
             valid: isValid,
             type: 'PRESCRIPTION',
             status: isCancelled ? 'cancelled' : isExpired ? 'expired' : p.status,
-            patient: `${p.patient_first_name} ${p.patient_last_name}`,
-            dateOfBirth: p.date_of_birth,
-            age: p.age,
-            sex: p.sex,
-            studentNo: p.student_no || 'N/A',
-            course: p.course || 'N/A',
-            issuedBy: formatIssuedBy(p.doc_first_name, p.doc_last_name, p.doc_license, parseMetadata(p.signature_metadata).signer_role),
-            issuedAt: p.issued_at,
-            expiresAt: p.expires_at,
-            notes: decrypt(p.notes),
-            items: items.map((it) => ({ ...it, instructions: decrypt(it.instructions) })),
+            patient: `${patient.first_name} ${patient.last_name}`,
+            dateOfBirth: patient.date_of_birth,
+            age: patient.age,
+            sex: patient.sex,
+            studentNo: patient.student_no || 'Not recorded',
+            course: patient.course || 'Not recorded',
+            issuedBy: formatIssuedBy(doctor.first_name, doctor.last_name, doctor.license_no, doctor.role),
+            issuedAt: recorded.issued_at,
+            expiresAt: recorded.expires_at,
+            notes: recorded.notes,
+            items: recorded.items,
+            contract_version: recorded.contract_version,
             metadata: parseMetadata(p.signature_metadata),
           });
         }

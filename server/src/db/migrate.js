@@ -16,19 +16,24 @@ import terminalPermission from './migrations/010-terminal-permission.js';
 
 import replayOutcomes from './migrations/011-replay-outcomes.js';
 import responderDelivery from './migrations/012-responder-delivery.js';
+import structuredPrescriptions from './migrations/013-structured-prescriptions.js';
+import sosDelivery from './migrations/014-sos-delivery.js';
 
-const migrations = [foundation, clinicalDocuments, responders, appointmentDayIndex, pharmacyActivityIndexes, incidentRecordsPermission, analyticsScopes, staffAnalyticsPermissions, pdfRetry, terminalPermission, replayOutcomes, responderDelivery];
+const migrations = [foundation, clinicalDocuments, responders, appointmentDayIndex, pharmacyActivityIndexes, incidentRecordsPermission, analyticsScopes, staffAnalyticsPermissions, pdfRetry, terminalPermission, replayOutcomes, responderDelivery, structuredPrescriptions, sosDelivery];
 const requiredTables = [
   'USERS', 'ROLES', 'USER_ROLES', 'STAFF_PROFILES', 'HEALTH_PROFILES', 'EMERGENCY_ALERTS',
   'PRESCRIPTIONS', 'PRESCRIPTION_ITEMS', 'INVENTORY_LOGS', 'MEDICAL_CLEARANCES', 'AUDIT_LOGS', 'APPOINTMENTS',
 ];
 
+// Verify the base schema and ensure the migration ledger exists.
 async function initializeLedger(connection) {
   const [tables] = await connection.query(
     'SELECT TABLE_NAME, ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (?)',
     [[...requiredTables, 'SCHEMA_MIGRATIONS']],
   );
+  // Index the inspected database tables by name and storage engine.
   const engines = new Map(tables.map(row => [row.TABLE_NAME, row.ENGINE]));
+  // Identify required tables that are missing or lack the expected storage engine.
   const invalid = requiredTables.filter(table => engines.get(table) !== 'InnoDB');
   if (invalid.length) {
     throw new Error('Missing or incompatible base tables: ' + invalid.join(', ') +
@@ -49,6 +54,7 @@ async function initializeLedger(connection) {
   `);
 }
 
+// Apply a migration's schema and data phases and record its completion.
 async function applyMigration(connection, migration, entry) {
   let context;
   if (entry) {
@@ -78,6 +84,7 @@ async function applyMigration(connection, migration, entry) {
   }
 }
 
+// Run pending upgrades in order while holding the database migration lock.
 export async function runMigrations(pool) {
   const connection = await pool.getConnection();
   let lockName;
@@ -98,6 +105,7 @@ export async function runMigrations(pool) {
     const [entries] = await connection.query(
       'SELECT version, name, context, applied_at FROM SCHEMA_MIGRATIONS ORDER BY version',
     );
+    // Verify each ledger entry matches the expected migration and ordering.
     entries.forEach((entry, index) => {
       const expected = migrations[index];
       if (!expected || entry.version !== expected.version || entry.name !== expected.name ||

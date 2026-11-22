@@ -9,6 +9,7 @@ import { defaultStaffAnalyticsScopes, staffAnalyticsPermissions, validateStaffAn
 import { logAudit } from '../../utils/auditLogger.js';
 import { fail } from '../../utils/httpError.js';
 
+// Require current Super Admin access using the supplied database connection.
 async function requireLiveSuperAdmin(connection, userId) {
   const { roles, adminCodes } = await readAnalyticsAccount(userId, connection);
   if (!roles.includes('ADMIN') || !classifyAdminPermissions(adminCodes).isSuper) {
@@ -16,6 +17,7 @@ async function requireLiveSuperAdmin(connection, userId) {
   }
 }
 
+// Return the target's role defaults and saved analytics override.
 async function readPermissions(connection, userId) {
   const { roles, staffScopes } = await readAnalyticsAccount(userId, connection);
   const defaults = defaultStaffAnalyticsScopes(roles);
@@ -23,9 +25,11 @@ async function readPermissions(connection, userId) {
   return { permissions: staffAnalyticsPermissions, defaults, override: staffScopes };
 }
 
+// Mount administrator reads and writes for staff analytics scopes.
 export function registerStaffAnalyticsRoutes(router) {
   const route = '/users/:id/analytics-permissions';
-  const handle = action => async (req, res) => {
+  // Wrap a staff analytics action in shared request validation and error handling.
+  const handle = action => /* Validate the account ID and dispatch the staff analytics action. */ async (req, res) => {
     res.set('Cache-Control', 'no-store');
     const userId = Number(req.params.id);
     if (!Number.isSafeInteger(userId) || userId < 1) return res.status(400).json({ error: 'Invalid account ID.' });
@@ -36,11 +40,13 @@ export function registerStaffAnalyticsRoutes(router) {
       res.status(error.status || 500).json({ error: error.status ? error.message : 'Could not manage staff analytics permissions.' });
     }
   };
+  // Check Super Admin access and read the target's analytics settings.
   router.get(route, handle(async (req, userId) => {
     await requireLiveSuperAdmin(pool, req.user.user_id);
     return readPermissions(pool, userId);
   }));
-  router.put(route, handle((req, userId) => inTransaction(async connection => {
+  // Save the target account's analytics scope override.
+  router.put(route, handle((req, userId) => inTransaction(/* Write the override and audit in one transaction. */ async connection => {
     await requireLiveSuperAdmin(connection, req.user.user_id);
     await lockAccount(connection, userId);
     const current = await readPermissions(connection, userId);

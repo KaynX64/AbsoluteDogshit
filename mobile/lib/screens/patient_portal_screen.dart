@@ -1,16 +1,22 @@
 // mobile/lib/screens/patient_portal_screen.dart
 import 'dart:async';
+
+import '../services/mobile_session_data.dart';
+
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
 import '../theme/app_palette.dart';
 import '../theme/account_theme_controller.dart';
 import '../widgets/account_settings_button.dart';
 import '../widgets/sign_out_confirmation.dart';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
-import 'package:url_launcher/url_launcher.dart';
 
 import '../config/api_config.dart';
 import '../utils/responsive.dart';
@@ -35,9 +41,9 @@ import 'change_password_screen.dart';
 /// This helper reads the primary_role and produces the right three
 /// display strings for whichever role is logged in.
 class _PatientIdentity {
-  final String roleWord;      // "Student" | "Faculty" | "Doctor" | ...
-  final String identifier;    // student_no | faculty_no | employee_no | admin_no | license_no | ''
-  final String affiliation;   // "BS Info Tech · Year 3" | "Dept · Position" | ...
+  final String roleWord; // "Student" | "Faculty" | "Doctor" | ...
+  final String identifier; // student_no | faculty_no | employee_no | admin_no | license_no | ''
+  final String affiliation; // "BS Info Tech · Year 3" | "Dept · Position" | ...
 
   const _PatientIdentity({
     required this.roleWord,
@@ -141,18 +147,37 @@ class _PatientIdentity {
 class PatientPortalScreen extends StatefulWidget {
   final Map<String, dynamic> user;
   final Map<String, dynamic>? initialProfile;
-  const PatientPortalScreen({super.key, required this.user, this.initialProfile});
+  const PatientPortalScreen({
+    super.key,
+    required this.user,
+    this.initialProfile,
+    this.client,
+  });
+  final http.Client? client;
 
   @override
   State<PatientPortalScreen> createState() => _PatientPortalScreenState();
 }
 
-class _PatientPortalScreenState extends State<PatientPortalScreen> {
+class _PatientPortalScreenState extends State<PatientPortalScreen>
+    with WidgetsBindingObserver {
+  final _data = MobileSessionData.instance;
+  late final int _generation;
+  bool _foreground = true;
+  bool get _sessionCurrent => mounted && _data.isCurrent(_generation);
+  String? get _account => widget.user['user_id']?.toString();
+  Future<void>? _queueRequest;
+  bool _queueRefreshQueued = false;
+  Future<Map<String, dynamic>?>? _emergencyInfo;
+  late final Future<void> _dashboardReady;
   int _currentIndex = 0;
   final _storage = const FlutterSecureStorage();
+  http.Client get _client => widget.client ?? ApiConfig.client;
 
   String _qrToken = '';
   bool _loadingQR = false;
+  DateTime? _qrExpiresAt;
+  Timer? _qrTimer;
 
   Map<String, dynamic>? _profileData;
   bool _loadingProfile = false;
@@ -166,8 +191,11 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
 
   bool _sosConsent = false;
   bool _isHolding = false;
-  final ValueNotifier<double> _holdProgressNotifier = ValueNotifier<double>(0.0);
+  final ValueNotifier<double> _holdProgressNotifier = ValueNotifier<double>(
+    0.0,
+  );
   Timer? _holdTimer;
+  Timer? _sosRetry;
   bool _isDispatchingSOS = false;
   String _sosStatusMessage = '';
 
@@ -179,32 +207,44 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   @override
   void initState() {
     super.initState();
-    _checkPrivacyConsent();
-    _fetchQRPass();
+    WidgetsBinding.instance.addObserver(this);
+    _generation = _data.generation;
+    _foreground =
+        WidgetsBinding.instance.lifecycleState == null ||
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+    final consent = _checkPrivacyConsent();
+    final qr = _fetchQRPass();
     final initialProfile = widget.initialProfile;
     if (initialProfile != null) {
       _profileData = initialProfile;
       unawaited(_cacheEmergencyInfo(initialProfile));
-    } else {
-      _fetchProfile();
     }
-    _fetchActiveQueueTicket();
+    final profile = initialProfile == null
+        ? _fetchProfile()
+        : Future<void>.value();
+    _dashboardReady = Future.wait([
+      consent,
+      qr,
+      profile,
+      _fetchActiveQueueTicket(),
+    ]).then((_) => _schedulePreload());
     _initQueueSocket();
     ConnectivityService().addListener(_onConnectivityChanged);
+    unawaited(_replayQueuedSosEvents());
 
-    _queuePollingTimer = Timer.periodic(
-      const Duration(seconds: 30),
-      (_) => _fetchActiveQueueTicket(silent: true),
-    );
+    _updateQueuePolling();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     ConnectivityService().removeListener(_onConnectivityChanged);
     _queuePollingTimer?.cancel();
+    _qrTimer?.cancel();
+    _sosRetry?.cancel();
     _holdTimer?.cancel();
     _holdProgressNotifier.dispose();
-    _socket?.disconnect();
+    _socket?.dispose();
     super.dispose();
   }
 
@@ -213,47 +253,105 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   // ===========================================================================
 
   void _onConnectivityChanged() {
-    if (ConnectivityService().isOnline) _replayQueuedSosEvents();
+    _updateQueuePolling();
+    if (_foreground && ConnectivityService().isOnline) {
+      unawaited(_replayQueuedSosEvents());
+      unawaited(_fetchActiveQueueTicket(silent: true));
+      unawaited(_dashboardReady.then((_) => _schedulePreload()));
+      _refreshPassIfNeeded();
+    }
     if (mounted) setState(() {});
   }
 
-  Future<void> _replayQueuedSosEvents() async {
-    final pending = await OfflineSosService().pendingSosEvents();
-    if (pending.isEmpty) return;
+  void _updateQueuePolling() {
+    _queuePollingTimer?.cancel();
+    _queuePollingTimer = null;
+    if (!_foreground || !ConnectivityService().isOnline) return;
+    _queuePollingTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _fetchActiveQueueTicket(silent: true),
+    );
+  }
 
-    final token = await _storage.read(key: 'jwt_token');
-    if (token == null) return;
-
-    final List<Map<String, dynamic>> stillFailing = [];
-    for (final event in pending) {
-      try {
-        final res = await ApiConfig.client.post(
-          Uri.parse('${ApiConfig.baseUrl}/api/emergency/sos'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $token',
-          },
-          body: jsonEncode({
-            'latitude': event['latitude'],
-            'longitude': event['longitude'],
-            'notes': event['notes'],
-          }),
-        );
-        if (res.statusCode >= 500) stillFailing.add(event);
-      } catch (_) {
-        stillFailing.add(event);
-      }
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    _updateQueuePolling();
+    if (_foreground) {
+      _fetchActiveQueueTicket(silent: true);
+      unawaited(_dashboardReady.then((_) => _schedulePreload()));
+      unawaited(_replayQueuedSosEvents());
+      _refreshPassIfNeeded();
+    } else {
+      _sosRetry?.cancel();
     }
+  }
 
-    await OfflineSosService().savePendingQueue(stillFailing);
+  void _schedulePreload() {
+    if (!mounted ||
+        !_data.isCurrent(_generation) ||
+        !_hasConsented ||
+        !_foreground ||
+        !ConnectivityService().isOnline) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted &&
+          _data.isCurrent(_generation) &&
+          _hasConsented &&
+          _foreground &&
+          ConnectivityService().isOnline) {
+        unawaited(
+          _data.preload(
+            canContinue: () =>
+                mounted && _foreground && ConnectivityService().isOnline,
+          ),
+        );
+      }
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
 
-    if (stillFailing.isEmpty && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('✅ Queued SOS alert delivered to campus responders.'),
-          backgroundColor: AppPalette.of(context).background(0xFF15803D),
-        ),
+  Future<void> _replayQueuedSosEvents() async {
+    final account = _account;
+    if (!_sessionCurrent || !_foreground || account == null) return;
+    try {
+      final token = await _storage.read(key: 'jwt_token');
+      if (!_sessionCurrent || token == null) return;
+      final online = ConnectivityService().isOnline;
+      final result = await OfflineSosService().sync(
+        account: account,
+        token: token,
+        client: _client,
+        online: online,
+        isCurrent: () => _sessionCurrent && _foreground && !_signOutInProgress,
       );
+      if (!mounted || !_data.isCurrent(_generation) || _signOutInProgress) {
+        return;
+      }
+      if (result.message case final message?) {
+        setState(() => _sosStatusMessage = message);
+        if (result.accepted + result.unsent > 0 && _currentIndex != 2) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(message)));
+        }
+      }
+      _sosRetry?.cancel();
+      if (_foreground &&
+          online &&
+          !result.reauthenticate &&
+          result.pending > 0) {
+        _sosRetry = Timer(
+          result.retryIn ?? const Duration(seconds: 1),
+          _replayQueuedSosEvents,
+        );
+      }
+    } catch (_) {
+      if (_sessionCurrent) {
+        setState(
+          () => _sosStatusMessage = 'Could not read the SOS queue. Use the call buttons if you need help now.',
+        );
+      }
     }
   }
 
@@ -264,15 +362,18 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   Future<void> _checkPrivacyConsent() async {
     final token = await _storage.read(key: 'jwt_token');
     try {
-      final res = await ApiConfig.client.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/privacy/status'),
-        headers: {'Authorization': 'Bearer $token'},
-      );
+      final res = await _client
+          .get(
+            Uri.parse('${ApiConfig.baseUrl}/api/privacy/status'),
+            headers: {'Authorization': 'Bearer $token'},
+          )
+          .timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final consented = data['hasConsented'] == true;
-        if (mounted) {
+        if (mounted && _data.isCurrent(_generation)) {
           setState(() => _hasConsented = consented);
+          _data.consented = consented;
           if (!consented) _showConsentModal(isMandatory: true);
         }
       }
@@ -282,7 +383,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   Future<void> _recordConsent() async {
     final token = await _storage.read(key: 'jwt_token');
     try {
-      final res = await ApiConfig.client.post(
+      final res = await _client.post(
         Uri.parse('${ApiConfig.baseUrl}/api/privacy/consent'),
         headers: {
           'Content-Type': 'application/json',
@@ -294,14 +395,20 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         }),
       );
       if (res.statusCode == 200) {
+        if (!mounted || !_data.isCurrent(_generation)) return;
         setState(() => _hasConsented = true);
+        _data.consented = true;
         await _fetchQRPass();
         await _fetchProfile();
         await _fetchActiveQueueTicket();
+        await _dashboardReady;
+        _schedulePreload();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: const Text('Privacy consent recorded under R.A. 10173. Access restored.'),
+              content: const Text(
+                'Privacy consent recorded under R.A. 10173. Access restored.',
+              ),
               backgroundColor: AppPalette.of(context).background(0xFF284E3A),
             ),
           );
@@ -313,24 +420,21 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   Future<void> _revokeConsent() async {
     final token = await _storage.read(key: 'jwt_token');
     try {
-      final res = await ApiConfig.client.post(
+      final res = await _client.post(
         Uri.parse('${ApiConfig.baseUrl}/api/privacy/revoke'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
       );
-      if (res.statusCode == 200) {
-        await EmergencyAlertService().signOut(token);
-        if (mounted) AccountThemeScope.of(context).reset();
-        await _storage.deleteAll();
-        if (mounted) {
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(builder: (_) => const LoginScreen()),
-            (route) => false,
-          );
+      if (res.statusCode == 200 && _sessionCurrent) {
+        final account = _account;
+        if (account != null) {
+          await OfflineSosService()
+              .cacheEmergencyInfo(account)
+              .catchError((Object _) {});
         }
+        if (_sessionCurrent) await _signOut();
       }
     } catch (_) {}
   }
@@ -341,16 +445,24 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
       context: context,
       barrierDismissible: !isMandatory,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(rs.r(20))),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(rs.r(20)),
+        ),
         backgroundColor: AppPalette.of(context).surface,
         title: Row(
           children: [
-            Icon(Icons.privacy_tip_outlined, color: AppPalette.of(context).color(0xFF284E3A)),
+            Icon(
+              Icons.privacy_tip_outlined,
+              color: AppPalette.of(context).color(0xFF284E3A),
+            ),
             SizedBox(width: rs.w(8)),
             Expanded(
               child: Text(
                 'Data Privacy Notice',
-                style: TextStyle(fontSize: rs.sp(16), fontWeight: FontWeight.w800),
+                style: TextStyle(
+                  fontSize: rs.sp(16),
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
           ],
@@ -374,7 +486,11 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                 '• All clinical data is encrypted with AES-256-GCM.\n'
                 '• Stored under statutory 5-year retention lifecycle.\n'
                 '• Access monitored with immutable SHA-256 hash chains.',
-                style: TextStyle(fontSize: 13.5, height: 1.5, color: AppPalette.of(context).color(0xFF5A635B)),
+                style: TextStyle(
+                  fontSize: 13.5,
+                  height: 1.5,
+                  color: AppPalette.of(context).color(0xFF5A635B),
+                ),
               ),
             ],
           ),
@@ -382,19 +498,11 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         actions: [
           if (isMandatory)
             TextButton(
-              onPressed: () async {
-                await EmergencyAlertService().signOut(await _storage.read(key: 'jwt_token'));
-                if (mounted) AccountThemeScope.of(context).reset();
-                await _storage.deleteAll();
-                if (mounted) {
-                  Navigator.pushAndRemoveUntil(
-                    context,
-                    MaterialPageRoute(builder: (_) => const LoginScreen()),
-                    (route) => false,
-                  );
-                }
-              },
-              child: const Text('Decline (Exit)', style: TextStyle(color: Colors.red)),
+              onPressed: _signOut,
+              child: const Text(
+                'Decline (Exit)',
+                style: TextStyle(color: Colors.red),
+              ),
             )
           else
             TextButton(
@@ -423,7 +531,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(rs.r(20))),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(rs.r(20)),
+        ),
         backgroundColor: AppPalette.of(context).surface,
         title: Text(
           'Revoke Consent?',
@@ -435,10 +545,16 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         ),
         content: Text(
           'Under R.A. 10173, revoking consent will suspend your access to digital health passes, prescriptions, and online scheduling.',
-          style: TextStyle(fontSize: rs.sp(13), color: AppPalette.of(context).color(0xFF5A635B)),
+          style: TextStyle(
+            fontSize: rs.sp(13),
+            color: AppPalette.of(context).color(0xFF5A635B),
+          ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
@@ -469,60 +585,158 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         io.OptionBuilder()
             .setTransports(['websocket', 'polling'])
             .setAuth({'token': token})
+            .enableForceNew()
             .enableAutoConnect()
             .build(),
       );
+      void invalidateAppointments(dynamic _) {
+        if (_data.isCurrent(_generation)) {
+          _data.invalidateAppointments(notifyHistory: true);
+        }
+      }
+
+      _socket?.on('appointment:booked', invalidateAppointments);
+      _socket?.on('appointment:cancelled', invalidateAppointments);
+      _socket?.on('appointment:status_changed', invalidateAppointments);
+      _socket?.on('prescription:status_changed', (_) {
+        if (_data.isCurrent(_generation)) {
+          _data.invalidate('/api/documents/prescriptions/my', notify: true);
+        }
+      });
+      _socket?.on('documents:updated', (event) {
+        if (!_sessionCurrent || event is! Map) return;
+        final kind = event['kind'];
+        if (kind == 'prescriptions' || kind == 'clearances') {
+          _data.invalidate('/api/documents/$kind/my', notify: true);
+        }
+      });
+      _socket?.onConnect((_) => _fetchActiveQueueTicket(silent: true));
       _socket?.on('queue:updated', (_) {
         _fetchActiveQueueTicket(silent: true);
       });
     } catch (_) {}
   }
 
-  Future<void> _fetchActiveQueueTicket({bool silent = false}) async {
-    final token = await _storage.read(key: 'jwt_token');
-    try {
-      final res = await ApiConfig.client.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/appointments/queue/my'),
-        headers: {'Authorization': 'Bearer $token'},
-      );
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        if (mounted) {
-          setState(() {
-            if (data['hasActiveTicket'] == true) {
-              _activeQueueTicket = data['ticket'];
-              final newStatus = _activeQueueTicket?['status'] ?? '';
-              if (newStatus == 'in-consultation' && _previousQueueStatus == 'waiting') {
-                EmergencyAlertService().showQueueTurnNotification(
-                  ticketNo: _activeQueueTicket?['ticket_no'] ?? 'Your Ticket',
-                  doctorName: _activeQueueTicket?['doctor_name'] ?? 'Attending Doctor',
-                );
-              }
-              _previousQueueStatus = newStatus;
-            } else {
-              _activeQueueTicket = null;
-              _previousQueueStatus = '';
-            }
-          });
+  Future<void> _fetchActiveQueueTicket({bool silent = false}) {
+    if (!mounted ||
+        !_foreground ||
+        !ConnectivityService().isOnline ||
+        !_data.isCurrent(_generation)) {
+      return Future.value();
+    }
+    final running = _queueRequest;
+    if (running != null) {
+      _queueRefreshQueued = true;
+      return running;
+    }
+    return _queueRequest = _refreshQueue().whenComplete(
+      () => _queueRequest = null,
+    );
+  }
+
+  Future<void> _refreshQueue() async {
+    do {
+      _queueRefreshQueued = false;
+      try {
+        final token = await _storage.read(key: 'jwt_token');
+        if (!mounted ||
+            !_data.isCurrent(_generation) ||
+            !_foreground ||
+            !ConnectivityService().isOnline) {
+          return;
         }
-      }
-    } catch (_) {}
+        final res = await _client
+            .get(
+              Uri.parse('${ApiConfig.baseUrl}/api/appointments/queue/my'),
+              headers: {'Authorization': 'Bearer $token'},
+            )
+            .timeout(const Duration(seconds: 10));
+        if (!mounted ||
+            !_data.isCurrent(_generation) ||
+            res.statusCode != 200) {
+          return;
+        }
+        final data = jsonDecode(res.body);
+        final ticket = data['hasActiveTicket'] == true
+            ? data['ticket'] as Map<String, dynamic>?
+            : null;
+        final newStatus = ticket?['status'] ?? '';
+        if (newStatus == 'in-consultation' &&
+            _previousQueueStatus == 'waiting') {
+          EmergencyAlertService().showQueueTurnNotification(
+            ticketNo: ticket?['ticket_no'] ?? 'Your Ticket',
+            doctorName: ticket?['doctor_name'] ?? 'Attending Doctor',
+          );
+        }
+        _previousQueueStatus = newStatus;
+        if (jsonEncode(ticket) != jsonEncode(_activeQueueTicket)) {
+          setState(() => _activeQueueTicket = ticket);
+        }
+      } catch (_) {}
+    } while (_queueRefreshQueued &&
+        mounted &&
+        _foreground &&
+        ConnectivityService().isOnline &&
+        _data.isCurrent(_generation));
+  }
+
+  bool get _hasValidPass =>
+      _qrToken.isNotEmpty && (_qrExpiresAt?.isAfter(DateTime.now()) ?? false);
+
+  void _selectTab(int index) {
+    setState(() => _currentIndex = index);
+    _refreshPassIfNeeded();
+  }
+
+  void _refreshPassIfNeeded() {
+    if (_sessionCurrent &&
+        _foreground &&
+        _currentIndex == 0 &&
+        _hasConsented &&
+        !_hasValidPass &&
+        ConnectivityService().isOnline) {
+      unawaited(_fetchQRPass());
+    }
   }
 
   Future<void> _fetchQRPass() async {
+    if (!_sessionCurrent || _loadingQR) return;
     setState(() => _loadingQR = true);
     try {
       final token = await _storage.read(key: 'jwt_token');
       if (!mounted || token == null) return;
-      final res = await ApiConfig.client.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/health-pass/token'),
-        headers: {'Authorization': 'Bearer $token'},
-      );
-      if (mounted && res.statusCode == 200) {
-        setState(() => _qrToken = jsonDecode(res.body)['qrToken']);
+      final requestedAt = DateTime.now();
+      final res = await _client
+          .get(
+            Uri.parse('${ApiConfig.baseUrl}/api/health-pass/token'),
+            headers: {'Authorization': 'Bearer $token'},
+          )
+          .timeout(const Duration(seconds: 10));
+      if (_sessionCurrent && res.statusCode == 200) {
+        final pass = jsonDecode(res.body) as Map<String, dynamic>;
+        final token = pass['qrToken'];
+        final lifetime = pass['expiresInSeconds'];
+        if (token is! String ||
+            token.isEmpty ||
+            lifetime is! int ||
+            lifetime < 1) {
+          return;
+        }
+        final expiresAt = requestedAt.add(Duration(seconds: lifetime));
+        _qrTimer?.cancel();
+        if (!expiresAt.isAfter(DateTime.now())) return;
+        setState(() {
+          _qrToken = token;
+          _qrExpiresAt = expiresAt;
+        });
+        _qrTimer = Timer(expiresAt.difference(DateTime.now()), () {
+          if (!_sessionCurrent) return;
+          setState(() => _qrToken = '');
+          _refreshPassIfNeeded();
+        });
       }
     } catch (_) {
-      // Keep the last displayed pass when the refresh fails.
+      // An existing pass can still be displayed until its expiry.
     } finally {
       if (mounted) setState(() => _loadingQR = false);
     }
@@ -533,11 +747,13 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     try {
       final token = await _storage.read(key: 'jwt_token');
       if (!mounted || token == null) return;
-      final res = await ApiConfig.client.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/profile/me'),
-        headers: {'Authorization': 'Bearer $token'},
-      );
-      if (mounted && res.statusCode == 200) {
+      final res = await _client
+          .get(
+            Uri.parse('${ApiConfig.baseUrl}/api/profile/me'),
+            headers: {'Authorization': 'Bearer $token'},
+          )
+          .timeout(const Duration(seconds: 10));
+      if (mounted && _data.isCurrent(_generation) && res.statusCode == 200) {
         final decoded = jsonDecode(res.body) as Map<String, dynamic>;
         setState(() => _profileData = decoded);
         await _cacheEmergencyInfo(decoded);
@@ -550,20 +766,17 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   Future<void> _cacheEmergencyInfo(Map<String, dynamic> profile) async {
+    final account = _account;
+    if (!_sessionCurrent || account == null) return;
     try {
       final hp = profile['healthProfile'];
-      if (hp is! Map ||
-          hp['emergency_contact_name'] == null ||
-          hp['emergency_contact_phone'] == null) {
-        return;
-      }
       await OfflineSosService().cacheEmergencyInfo(
-        contactName: hp['emergency_contact_name'],
-        contactPhone: hp['emergency_contact_phone'],
-        bloodType: hp['blood_type'],
-        allergies: hp['allergies'],
-        chronicConditions: hp['chronic_conditions'],
+        account,
+        name: hp is Map ? hp['emergency_contact_name']?.toString() : null,
+        phone: hp is Map ? hp['emergency_contact_phone']?.toString() : null,
       );
+      _emergencyInfo = null;
+      if (mounted) setState(() {});
     } catch (_) {}
   }
 
@@ -572,15 +785,14 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   // ===========================================================================
 
   Future<void> _launchDialer(String number) async {
-    final Uri uri = Uri(scheme: 'tel', path: number);
-    try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        await launchUrl(uri);
-      }
-    } catch (e) {
-      debugPrint('[Dialer Error]: $e');
+    if (!await OfflineSosService().dialNumber(number) && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not open the dialer. Call $number from your phone.',
+          ),
+        ),
+      );
     }
   }
 
@@ -589,7 +801,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     if (!_sosConsent) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Please check the consent box before triggering SOS.'),
+          content: const Text(
+            'Please check the consent box before triggering SOS.',
+          ),
           backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
         ),
       );
@@ -598,7 +812,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
 
     _isHolding = true;
     _holdProgressNotifier.value = 0.0;
-    setState(() => _sosStatusMessage = 'Broadcasting location...');
+    setState(() => _sosStatusMessage = 'Keep holding to send SOS.');
 
     const step = 50;
     const totalDuration = 2500;
@@ -625,6 +839,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   }
 
   Future<void> _triggerEmergencySOS() async {
+    final account = _account;
+    if (!_sessionCurrent || account == null) return;
     setState(() {
       _isDispatchingSOS = true;
       _sosStatusMessage = 'Acquiring GPS location...';
@@ -634,107 +850,43 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          setState(() {
-            _isDispatchingSOS = false;
-            _sosStatusMessage = 'Location permission denied.';
-          });
-          return;
-        }
       }
-
-      Position position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-      );
-
-      if (!ConnectivityService().isOnline) {
-        await OfflineSosService().queueOfflineSos(
-          latitude: position.latitude,
-          longitude: position.longitude,
-          notes: 'Offline SOS triggered via mobile panic button',
-        );
-        if (mounted) {
-          setState(() {
-            _sosStatusMessage =
-                'OFFLINE: SOS queued. Use the call buttons above to contact help now.';
-          });
-        }
-        await OfflineSosService().dialNumber('911');
-        if (mounted) setState(() => _isDispatchingSOS = false);
+      if (!_sessionCurrent || _signOutInProgress) return;
+      if (permission != LocationPermission.whileInUse &&
+          permission != LocationPermission.always) {
+        setState(() {
+          _sosStatusMessage = 'Location access denied. Use the call buttons to contact help now.';
+        });
         return;
       }
 
-      setState(() => _sosStatusMessage = 'Broadcasting alert to clinic responders...');
-      final token = await _storage.read(key: 'jwt_token');
-      final res = await ApiConfig.client.post(
-        Uri.parse('${ApiConfig.baseUrl}/api/emergency/sos'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({
-          'latitude': position.latitude,
-          'longitude': position.longitude,
-          'notes': 'Urgent incident triggered via Mobile Panic Button',
-        }),
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 10),
+        ),
       );
-
-      final data = jsonDecode(res.body);
-      if (res.statusCode == 201) {
-        setState(() {
-          _sosStatusMessage = 'EMERGENCY DISPATCHED!\nCampus response team alerted.';
-        });
-        EmergencyAlertService().showStudentSosSentNotification();
-        if (mounted) _showEmergencyConfirmationDialog();
-      } else {
-        setState(() => _sosStatusMessage = 'Failed: ${data['error'] ?? 'Server error'}');
+      if (!_sessionCurrent || _signOutInProgress) return;
+      await OfflineSosService().queueSos(
+        account,
+        latitude: position.latitude,
+        longitude: position.longitude,
+      );
+      if (!_sessionCurrent) return;
+      setState(
+        () => _sosStatusMessage =
+            'SOS queued. Use the call buttons if you need help now.',
+      );
+      await _replayQueuedSosEvents();
+    } catch (_) {
+      if (_sessionCurrent) {
+        setState(
+          () => _sosStatusMessage = 'Could not prepare the SOS alert. Use the call buttons to contact help now.',
+        );
       }
-    } catch (e) {
-      setState(() => _sosStatusMessage = 'SOS Network Error: $e');
     } finally {
       if (mounted) setState(() => _isDispatchingSOS = false);
     }
-  }
-
-  void _showEmergencyConfirmationDialog() {
-    final rs = Rs.of(context);
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppPalette.of(context).surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(rs.r(20))),
-        icon: Icon(Icons.check_circle_outline, color: AppPalette.of(context).color(0xFF284E3A), size: 54),
-        title: Text(
-          'SOS Alert Active',
-          style: TextStyle(
-            fontWeight: FontWeight.w800,
-            color: AppPalette.of(context).color(0xFF284E3A),
-            fontSize: rs.sp(17),
-          ),
-        ),
-        content: Text(
-          'Your live GPS coordinates and medical profile have been securely transmitted to the PSU Infirmary and campus quick-response unit.',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: rs.sp(13.5),
-            color: AppPalette.of(context).color(0xFF5A635B),
-            height: 1.4,
-          ),
-        ),
-        actions: [
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppPalette.of(context).background(0xFF284E3A),
-              foregroundColor: AppPalette.of(context).onPrimary,
-              shape: const StadiumBorder(),
-            ),
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('I Understand'),
-          ),
-        ],
-      ),
-    );
   }
 
   bool _signOutInProgress = false;
@@ -779,7 +931,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
           '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
       if (diff.inDays < 1) return 'Today ($dateStr)';
       if (diff.inDays < 7) return '${diff.inDays}d ago ($dateStr)';
-      if (diff.inDays < 365) return '${(diff.inDays / 30).floor()}mo ago ($dateStr)';
+      if (diff.inDays < 365) {
+        return '${(diff.inDays / 30).floor()}mo ago ($dateStr)';
+      }
       return '${(diff.inDays / 365).toStringAsFixed(1)}y ago ($dateStr)';
     } catch (_) {
       return raw;
@@ -867,7 +1021,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
           children: [
             const ActiveIncidentBanner(),
             if (!ConnectivityService().isOnline) _buildOfflineBanner(rs),
-            Expanded(child: tab),
+            Expanded(
+              child: PageStorage(bucket: _data.bucket, child: tab),
+            ),
           ],
         ),
         bottomNavigationBar: _buildCustomBottomNav(rs),
@@ -882,12 +1038,19 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
       decoration: BoxDecoration(
         color: AppPalette.of(context).color(0xFFFDE8E8),
         border: Border(
-          bottom: BorderSide(color: AppPalette.of(context).color(0xFFF8B4B4), width: 1),
+          bottom: BorderSide(
+            color: AppPalette.of(context).color(0xFFF8B4B4),
+            width: 1,
+          ),
         ),
       ),
       child: Row(
         children: [
-          Icon(Icons.wifi_off_rounded, size: 16, color: AppPalette.of(context).color(0xFF7A2E26)),
+          Icon(
+            Icons.wifi_off_rounded,
+            size: 16,
+            color: AppPalette.of(context).color(0xFF7A2E26),
+          ),
           SizedBox(width: rs.w(8)),
           Expanded(
             child: Text(
@@ -914,7 +1077,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
       decoration: BoxDecoration(
         color: AppPalette.of(context).color(0xFFF7F9F6),
         border: Border(
-          top: BorderSide(color: AppPalette.of(context).color(0xFFE5EDE4), width: 1.0),
+          top: BorderSide(
+            color: AppPalette.of(context).color(0xFFE5EDE4),
+            width: 1.0,
+          ),
         ),
       ),
       child: SafeArea(
@@ -995,7 +1161,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     final pillHeight = rs.h(30).clamp(24.0, 34.0);
 
     return InkWell(
-      onTap: () => setState(() => _currentIndex = index),
+      onTap: () => _selectTab(index),
       borderRadius: BorderRadius.circular(rs.r(18)),
       splashColor: Colors.transparent,
       highlightColor: Colors.transparent,
@@ -1048,7 +1214,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     final pillHeight = rs.h(30).clamp(24.0, 34.0);
 
     return InkWell(
-      onTap: () => setState(() => _currentIndex = index),
+      onTap: () => _selectTab(index),
       borderRadius: BorderRadius.circular(rs.r(18)),
       splashColor: Colors.transparent,
       highlightColor: Colors.transparent,
@@ -1092,11 +1258,17 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
   // TAB 0: OVERVIEW
   // ===========================================================================
 
-  Widget _qualifiedResponderBadge({required double top, required Widget child}) {
+  Widget _qualifiedResponderBadge({
+    required double top,
+    required Widget child,
+  }) {
     final roster = EmergencyAlertService().roster;
     return ListenableBuilder(
       listenable: roster,
-      child: Padding(padding: EdgeInsets.only(top: top), child: child),
+      child: Padding(
+        padding: EdgeInsets.only(top: top),
+        child: child,
+      ),
       builder: (context, badge) =>
           roster.qualified ? badge! : const SizedBox.shrink(),
     );
@@ -1120,11 +1292,14 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         child: RefreshIndicator(
           color: primaryGreen,
           onRefresh: () async {
-            await _fetchQRPass();
-            await _fetchProfile();
-            await _fetchActiveQueueTicket();
+            await Future.wait([
+              _fetchQRPass(),
+              _fetchProfile(),
+              _fetchActiveQueueTicket(),
+            ]);
           },
           child: ListView(
+            key: const PageStorageKey('overview'),
             padding: EdgeInsets.symmetric(
               horizontal: rs.w(20),
               vertical: rs.h(12),
@@ -1175,7 +1350,11 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                       children: [
                         Row(
                           children: [
-                            Icon(Icons.qr_code_2_rounded, size: rs.w(20), color: primaryGreen),
+                            Icon(
+                              Icons.qr_code_2_rounded,
+                              size: rs.w(20),
+                              color: primaryGreen,
+                            ),
                             SizedBox(width: rs.w(8)),
                             Text(
                               'Campus health pass',
@@ -1187,7 +1366,11 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                             ),
                           ],
                         ),
-                        Icon(Icons.verified_outlined, size: rs.w(18), color: primaryGreen),
+                        Icon(
+                          Icons.verified_outlined,
+                          size: rs.w(18),
+                          color: primaryGreen,
+                        ),
                       ],
                     ),
                     SizedBox(height: rs.h(18)),
@@ -1216,20 +1399,25 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                 ),
                               ),
                             )
-                          : _qrToken.isNotEmpty
-                              ? RepaintBoundary(
-                                  child: QrImageView(
-                                    data: _qrToken,
-                                    version: QrVersions.auto,
-                                    size: qrSize,
-                                    backgroundColor: Colors.white,
-                                  ),
-                                )
-                              : SizedBox(
-                                  height: qrSize,
-                                  width: qrSize,
-                                  child: const Center(child: Text('Pass offline')),
+                          : _hasValidPass
+                          ? RepaintBoundary(
+                              child: QrImageView(
+                                data: _qrToken,
+                                version: QrVersions.auto,
+                                size: qrSize,
+                                backgroundColor: Colors.white,
+                              ),
+                            )
+                          : SizedBox(
+                              height: qrSize,
+                              width: qrSize,
+                              child: Center(
+                                child: TextButton(
+                                  onPressed: _fetchQRPass,
+                                  child: const Text('Refresh pass'),
                                 ),
+                              ),
+                            ),
                     ),
                     SizedBox(height: rs.h(14)),
 
@@ -1283,7 +1471,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                         ),
                         decoration: BoxDecoration(
                           color: AppPalette.of(context).color(0xFFF2F7F1),
-                          border: Border.all(color: AppPalette.of(context).color(0xFFDCE8DB)),
+                          border: Border.all(
+                            color: AppPalette.of(context).color(0xFFDCE8DB),
+                          ),
                           borderRadius: BorderRadius.circular(rs.r(999)),
                         ),
                         child: Row(
@@ -1328,7 +1518,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                     foregroundColor: primaryGreen,
                                     side: BorderSide(color: primaryGreen),
                                     shape: const StadiumBorder(),
-                                    padding: EdgeInsets.symmetric(vertical: rs.h(10)),
+                                    padding: EdgeInsets.symmetric(
+                                      vertical: rs.h(10),
+                                    ),
                                   ),
                                   child: Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
@@ -1341,7 +1533,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                         ),
                                       ),
                                       SizedBox(width: rs.w(4)),
-                                      const Icon(Icons.north_east_rounded, size: 14),
+                                      const Icon(
+                                        Icons.north_east_rounded,
+                                        size: 14,
+                                      ),
                                     ],
                                   ),
                                 ),
@@ -1352,12 +1547,16 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                 child: ElevatedButton(
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: primaryGreen,
-                                    foregroundColor: AppPalette.of(context).onPrimary,
+                                    foregroundColor: AppPalette.of(context)
+                                        .onPrimary,
                                     elevation: 0,
                                     shape: const StadiumBorder(),
-                                    padding: EdgeInsets.symmetric(vertical: rs.h(12)),
+                                    padding: EdgeInsets.symmetric(
+                                      vertical: rs.h(12),
+                                    ),
                                   ),
-                                  onPressed: () => setState(() => _currentIndex = 1),
+                                  onPressed: () =>
+                                      setState(() => _currentIndex = 1),
                                   child: Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
@@ -1369,7 +1568,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                         ),
                                       ),
                                       SizedBox(width: rs.w(4)),
-                                      const Icon(Icons.arrow_forward_rounded, size: 14),
+                                      const Icon(
+                                        Icons.arrow_forward_rounded,
+                                        size: 14,
+                                      ),
                                     ],
                                   ),
                                 ),
@@ -1407,7 +1609,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                               ElevatedButton(
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: primaryGreen,
-                                  foregroundColor: AppPalette.of(context).onPrimary,
+                                  foregroundColor: AppPalette.of(context)
+                                      .onPrimary,
                                   elevation: 0,
                                   shape: const StadiumBorder(),
                                   padding: EdgeInsets.symmetric(
@@ -1415,7 +1618,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                     vertical: rs.h(10),
                                   ),
                                 ),
-                                onPressed: () => setState(() => _currentIndex = 1),
+                                onPressed: () =>
+                                    setState(() => _currentIndex = 1),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
@@ -1427,7 +1631,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                       ),
                                     ),
                                     SizedBox(width: rs.w(4)),
-                                    const Icon(Icons.arrow_forward_rounded, size: 14),
+                                    const Icon(
+                                      Icons.arrow_forward_rounded,
+                                      size: 14,
+                                    ),
                                   ],
                                 ),
                               ),
@@ -1468,12 +1675,14 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                 Icon(
                                   Icons.medication_outlined,
                                   size: rs.w(24),
-                                  color: AppPalette.of(context).color(0xFF5B4EA1),
+                                  color: AppPalette.of(context)
+                                      .color(0xFF5B4EA1),
                                 ),
                                 Icon(
                                   Icons.north_east_rounded,
                                   size: 16,
-                                  color: AppPalette.of(context).color(0xFF5B4EA1),
+                                  color: AppPalette.of(context)
+                                      .color(0xFF5B4EA1),
                                 ),
                               ],
                             ),
@@ -1518,12 +1727,14 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                 Icon(
                                   Icons.description_outlined,
                                   size: rs.w(24),
-                                  color: AppPalette.of(context).color(0xFF8C6826),
+                                  color: AppPalette.of(context)
+                                      .color(0xFF8C6826),
                                 ),
                                 Icon(
                                   Icons.north_east_rounded,
                                   size: 16,
-                                  color: AppPalette.of(context).color(0xFF8C6826),
+                                  color: AppPalette.of(context)
+                                      .color(0xFF8C6826),
                                 ),
                               ],
                             ),
@@ -1586,7 +1797,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                           ],
                         ),
                         IconButton(
-                          icon: const Icon(Icons.more_horiz, color: Colors.white),
+                          icon: const Icon(
+                            Icons.more_horiz,
+                            color: Colors.white,
+                          ),
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
                           onPressed: () => setState(() => _currentIndex = 4),
@@ -1599,12 +1813,16 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                           width: rs.w(44),
                           height: rs.w(44),
                           decoration: BoxDecoration(
-                            color: AppPalette.of(context).surface.withValues(alpha: 0.15),
+                            color: AppPalette.of(context).surface
+                                .withValues(alpha: 0.15),
                             shape: BoxShape.circle,
                           ),
                           alignment: Alignment.center,
                           child: Text(
-                            _getInitials(u['first_name'] ?? 'P', u['last_name'] ?? 'S'),
+                            _getInitials(
+                              u['first_name'] ?? 'P',
+                              u['last_name'] ?? 'S',
+                            ),
                             style: TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
@@ -1736,7 +1954,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                 decoration: BoxDecoration(
                   color: AppPalette.of(context).surface,
                   borderRadius: BorderRadius.circular(rs.r(20)),
-                  border: Border.all(color: AppPalette.of(context).color(0xFFE2EBE2)),
+                  border: Border.all(
+                    color: AppPalette.of(context).color(0xFFE2EBE2),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1759,7 +1979,11 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.location_on_outlined, size: rs.w(16), color: textSub),
+                        Icon(
+                          Icons.location_on_outlined,
+                          size: rs.w(16),
+                          color: textSub,
+                        ),
                         SizedBox(width: rs.w(8)),
                         Expanded(
                           child: Text(
@@ -1776,7 +2000,11 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                     SizedBox(height: rs.h(10)),
                     Row(
                       children: [
-                        Icon(Icons.access_time_rounded, size: rs.w(16), color: textSub),
+                        Icon(
+                          Icons.access_time_rounded,
+                          size: rs.w(16),
+                          color: textSub,
+                        ),
                         SizedBox(width: rs.w(8)),
                         Text(
                           'Monday–Friday · 8:00 AM – 5:00 PM',
@@ -1795,12 +2023,18 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                 decoration: BoxDecoration(
                   color: AppPalette.of(context).surface,
                   borderRadius: BorderRadius.circular(rs.r(20)),
-                  border: Border.all(color: AppPalette.of(context).color(0xFFE2EBE2)),
+                  border: Border.all(
+                    color: AppPalette.of(context).color(0xFFE2EBE2),
+                  ),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.eco_outlined, size: rs.w(20), color: primaryGreen),
+                    Icon(
+                      Icons.eco_outlined,
+                      size: rs.w(20),
+                      color: primaryGreen,
+                    ),
                     SizedBox(width: rs.w(12)),
                     Expanded(
                       child: Column(
@@ -1849,10 +2083,14 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
       width: double.infinity,
       padding: EdgeInsets.all(rs.w(18)),
       decoration: BoxDecoration(
-        color: isServing ? AppPalette.of(context).color(0xFFFEF3C7) : AppPalette.of(context).color(0xFFE5EDE4),
+        color: isServing
+            ? AppPalette.of(context).color(0xFFFEF3C7)
+            : AppPalette.of(context).color(0xFFE5EDE4),
         borderRadius: BorderRadius.circular(rs.r(22)),
         border: Border.all(
-          color: isServing ? Colors.amber.shade700 : AppPalette.of(context).color(0xFF284E3A),
+          color: isServing
+              ? Colors.amber.shade700
+              : AppPalette.of(context).color(0xFF284E3A),
           width: 1.5,
         ),
       ),
@@ -1864,25 +2102,36 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
             children: [
               Expanded(
                 child: Text(
-                  isServing ? 'NOW SERVING YOUR TICKET!' : 'ACTIVE CLINIC QUEUE',
+                  isServing
+                      ? 'NOW SERVING YOUR TICKET!'
+                      : 'ACTIVE CLINIC QUEUE',
                   style: TextStyle(
                     fontWeight: FontWeight.w900,
                     fontSize: rs.sp(11),
                     letterSpacing: 1.5,
-                    color: isServing ? Colors.amber.shade900 : AppPalette.of(context).color(0xFF284E3A),
+                    color: isServing
+                        ? Colors.amber.shade900
+                        : AppPalette.of(context).color(0xFF284E3A),
                   ),
                 ),
               ),
               Container(
-                padding: EdgeInsets.symmetric(horizontal: rs.w(10), vertical: rs.h(4)),
+                padding: EdgeInsets.symmetric(
+                  horizontal: rs.w(10),
+                  vertical: rs.h(4),
+                ),
                 decoration: BoxDecoration(
-                  color: isServing ? Colors.amber.shade800 : AppPalette.of(context).color(0xFF284E3A),
+                  color: isServing
+                      ? Colors.amber.shade800
+                      : AppPalette.of(context).color(0xFF284E3A),
                   borderRadius: BorderRadius.circular(rs.r(16)),
                 ),
                 child: Text(
                   isServing ? 'YOUR TURN' : 'WAITING',
                   style: TextStyle(
-                    color: isServing ? Colors.white : AppPalette.of(context).onPrimary,
+                    color: isServing
+                        ? Colors.white
+                        : AppPalette.of(context).onPrimary,
                     fontSize: rs.sp(9.5),
                     fontWeight: FontWeight.bold,
                   ),
@@ -1899,7 +2148,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                 style: TextStyle(
                   fontSize: rs.sp(36),
                   fontWeight: FontWeight.w900,
-                  color: isServing ? Colors.amber.shade900 : AppPalette.of(context).color(0xFF284E3A),
+                  color: isServing
+                      ? Colors.amber.shade900
+                      : AppPalette.of(context).color(0xFF284E3A),
                 ),
               ),
               Column(
@@ -1913,7 +2164,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                     ),
                   ),
                   Text(
-                    isServing ? (ticket['clinic_room'] ?? 'Clinic Room 1') : '$patientsAhead',
+                    isServing
+                        ? (ticket['clinic_room'] ?? 'Clinic Room 1')
+                        : '$patientsAhead',
                     style: TextStyle(
                       fontSize: rs.sp(isServing ? 14 : 20),
                       fontWeight: FontWeight.bold,
@@ -1927,7 +2180,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
           SizedBox(height: rs.h(6)),
           Text(
             'Practitioner: ${ticket['doctor_name']} • Est: ~${waitMins > 0 ? waitMins : 5} mins',
-            style: TextStyle(fontSize: rs.sp(12), color: AppPalette.of(context).color(0xFF5A635B)),
+            style: TextStyle(
+              fontSize: rs.sp(12),
+              color: AppPalette.of(context).color(0xFF5A635B),
+            ),
           ),
         ],
       ),
@@ -1965,6 +2221,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: maxContentWidth),
           child: SingleChildScrollView(
+            key: const PageStorageKey('sos'),
             padding: EdgeInsets.symmetric(
               horizontal: rs.w(20),
               vertical: rs.h(12),
@@ -1993,75 +2250,83 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                 ),
                 SizedBox(height: rs.h(18)),
 
-                if (isOffline) ...[
-                  Container(
-                    margin: EdgeInsets.only(bottom: rs.h(16)),
-                    padding: EdgeInsets.all(rs.w(16)),
-                    decoration: BoxDecoration(
-                      color: AppPalette.of(context).color(0xFFFDE8E8),
-                      border: Border.all(color: AppPalette.of(context).color(0xFFF8B4B4)),
-                      borderRadius: BorderRadius.circular(rs.r(16)),
+                Container(
+                  margin: EdgeInsets.only(bottom: rs.h(16)),
+                  padding: EdgeInsets.all(rs.w(16)),
+                  decoration: BoxDecoration(
+                    color: AppPalette.of(context).color(0xFFFDE8E8),
+                    border: Border.all(
+                      color: AppPalette.of(context).color(0xFFF8B4B4),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.wifi_off_rounded,
-                              color: AppPalette.of(context).color(0xFF7A2E26),
-                              size: rs.w(20),
-                            ),
-                            SizedBox(width: rs.w(8)),
-                            Expanded(
-                              child: Text(
-                                'You are currently offline',
-                                style: TextStyle(
-                                  fontSize: rs.sp(14),
-                                  fontWeight: FontWeight.w800,
-                                  color: AppPalette.of(context).color(0xFF7A2E26),
-                                ),
+                    borderRadius: BorderRadius.circular(rs.r(16)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.wifi_off_rounded,
+                            color: AppPalette.of(context).color(0xFF7A2E26),
+                            size: rs.w(20),
+                          ),
+                          SizedBox(width: rs.w(8)),
+                          Expanded(
+                            child: Text(
+                              isOffline
+                                  ? 'You are currently offline'
+                                  : 'Emergency calls',
+                              style: TextStyle(
+                                fontSize: rs.sp(14),
+                                fontWeight: FontWeight.w800,
+                                color: AppPalette.of(context).color(0xFF7A2E26),
                               ),
                             ),
-                          ],
-                        ),
-                        SizedBox(height: rs.h(8)),
-                        Text(
-                          "In-app SOS can't reach the campus server without internet. But these buttons work with no data connection:",
-                          style: TextStyle(
-                            fontSize: rs.sp(12.5),
-                            color: AppPalette.of(context).color(0xFF7A2E26),
-                            height: 1.4,
                           ),
+                        ],
+                      ),
+                      SizedBox(height: rs.h(8)),
+                      Text(
+                        "Use these buttons to contact help directly. Calls and texts depend on your phone service.",
+                        style: TextStyle(
+                          fontSize: rs.sp(12.5),
+                          color: AppPalette.of(context).color(0xFF7A2E26),
+                          height: 1.4,
                         ),
-                        SizedBox(height: rs.h(14)),
-                        _buildOfflineCallButton(rs, '📞  Call 911', '911'),
-                        SizedBox(height: rs.h(8)),
-                        FutureBuilder<Map<String, dynamic>?>(
-                          future: OfflineSosService().readCachedEmergencyInfo(),
-                          builder: (ctx, snap) {
-                            final info = snap.data;
-                            final name = info?['contact_name'] ?? 'Emergency contact';
-                            final phone = info?['contact_phone'];
-                            if (phone == null) return const SizedBox.shrink();
-                            return Column(
-                              children: [
-                                _buildOfflineCallButton(rs, '📞  Call $name', phone),
-                                SizedBox(height: rs.h(8)),
-                                _buildOfflineSmsButton(
-                                  rs,
-                                  name,
-                                  phone,
-                                  'EMERGENCY: I need help. This is an automated alert from LeoVital HealthLink.',
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                      ],
-                    ),
+                      ),
+                      SizedBox(height: rs.h(14)),
+                      _buildOfflineCallButton(rs, '📞  Call 911', '911'),
+                      SizedBox(height: rs.h(8)),
+                      FutureBuilder<Map<String, dynamic>?>(
+                        future: _emergencyInfo ??= OfflineSosService()
+                            .readCachedEmergencyInfo(_account),
+                        builder: (ctx, snap) {
+                          final info = snap.data;
+                          final name =
+                              info?['contact_name'] ?? 'Emergency contact';
+                          final phone = info?['contact_phone'];
+                          if (phone == null) return const SizedBox.shrink();
+                          return Column(
+                            children: [
+                              _buildOfflineCallButton(
+                                rs,
+                                '📞  Call $name',
+                                phone,
+                              ),
+                              SizedBox(height: rs.h(8)),
+                              _buildOfflineSmsButton(
+                                rs,
+                                name,
+                                phone,
+                                'EMERGENCY: I need help. This is an automated alert from LeoVital HealthLink.',
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ],
                   ),
-                ],
+                ),
 
                 Container(
                   width: double.infinity,
@@ -2159,7 +2424,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                 side: BorderSide(
                                   color: _sosConsent
                                       ? activeCrimson
-                                      : AppPalette.of(context).color(0xFFC7AAA0),
+                                      : AppPalette.of(context)
+                                            .color(0xFFC7AAA0),
                                   width: 1.8,
                                 ),
                                 onChanged: (val) =>
@@ -2210,9 +2476,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                       return CircularProgressIndicator(
                                         value: progress,
                                         strokeWidth: 5,
-                                        valueColor: const AlwaysStoppedAnimation<Color>(
-                                          Colors.white,
-                                        ),
+                                        valueColor:
+                                            const AlwaysStoppedAnimation<Color>(
+                                              Colors.white,
+                                            ),
                                         backgroundColor: Colors.transparent,
                                       );
                                     },
@@ -2223,12 +2490,16 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                 width: innerSize,
                                 height: innerSize,
                                 decoration: BoxDecoration(
-                                  color: _sosConsent ? activeCrimson : inactiveCircle,
+                                  color: _sosConsent
+                                      ? activeCrimson
+                                      : inactiveCircle,
                                   shape: BoxShape.circle,
                                   boxShadow: _isHolding
                                       ? [
                                           BoxShadow(
-                                            color: activeCrimson.withValues(alpha: 0.45),
+                                            color: activeCrimson.withValues(
+                                              alpha: 0.45,
+                                            ),
                                             blurRadius: 20,
                                             spreadRadius: 4,
                                           ),
@@ -2267,14 +2538,18 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                       style: TextStyle(
                                         fontSize: rs.sp(11),
                                         fontWeight: FontWeight.w500,
-                                        color: Colors.white.withValues(alpha: 0.85),
+                                        color: Colors.white.withValues(
+                                          alpha: 0.85,
+                                        ),
                                       ),
                                       child: _isHolding
                                           ? ValueListenableBuilder<double>(
-                                              valueListenable: _holdProgressNotifier,
-                                              builder: (context, progress, _) => Text(
-                                                '${((1.0 - progress) * 2.5).toStringAsFixed(1)}s remaining',
-                                              ),
+                                              valueListenable:
+                                                  _holdProgressNotifier,
+                                              builder: (context, progress, _) =>
+                                                  Text(
+                                                    '${((1.0 - progress) * 2.5).toStringAsFixed(1)}s remaining',
+                                                  ),
                                             )
                                           : const Text('for 2.5 seconds'),
                                     ),
@@ -2288,20 +2563,21 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                       SizedBox(height: rs.h(18)),
 
                       Text(
-                        _sosStatusMessage.isNotEmpty
-                            ? _sosStatusMessage
-                            : 'No location is collected or shared in this preview.',
+                        _sosStatusMessage.isNotEmpty ? _sosStatusMessage : 'Hold to send your current location to campus responders.',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: rs.sp(12),
                           fontWeight: _sosStatusMessage.isNotEmpty
                               ? FontWeight.w700
                               : FontWeight.w500,
-                          color: _sosStatusMessage.contains('DISPATCHED')
+                          color:
+                              _sosStatusMessage.startsWith(
+                                'Campus server accepted',
+                              )
                               ? primaryGreen
                               : _sosStatusMessage.isNotEmpty
-                                  ? activeCrimson
-                                  : textSub,
+                              ? activeCrimson
+                              : textSub,
                         ),
                       ),
                     ],
@@ -2309,58 +2585,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                 ),
                 SizedBox(height: rs.h(20)),
 
-                Container(
-                  width: double.infinity,
-                  padding: EdgeInsets.symmetric(
-                    horizontal: rs.w(20),
-                    vertical: rs.h(18),
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppPalette.of(context).surface,
-                    borderRadius: BorderRadius.circular(rs.r(22)),
-                    border: Border.all(color: AppPalette.of(context).color(0xFFE2EBE2)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Text(
-                        'For an out of campus emergency, call emergency services now.',
-                        style: TextStyle(
-                          fontSize: rs.sp(13),
-                          color: textSub,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      SizedBox(height: rs.h(14)),
-                      SizedBox(
-                        width: double.infinity,
-                        height: rs.h(48).clamp(44.0, 54.0),
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppPalette.of(context).background(0xFFE2EBE1),
-                            foregroundColor: primaryGreen,
-                            elevation: 0,
-                            shape: const StadiumBorder(),
-                          ),
-                          onPressed: () => _launchDialer('911'),
-                          icon: Icon(
-                            Icons.phone_outlined,
-                            size: 18,
-                            color: primaryGreen,
-                          ),
-                          label: Text(
-                            'Call 911',
-                            style: TextStyle(
-                              fontSize: rs.sp(14),
-                              fontWeight: FontWeight.w700,
-                              color: primaryGreen,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
                 SizedBox(height: rs.h(24)),
               ],
             ),
@@ -2381,7 +2605,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
           shape: const StadiumBorder(),
           elevation: 0,
         ),
-        onPressed: () => OfflineSosService().dialNumber(number),
+        onPressed: () => _launchDialer(number),
         child: Text(
           label,
           style: TextStyle(fontSize: rs.sp(14), fontWeight: FontWeight.w700),
@@ -2390,7 +2614,12 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
     );
   }
 
-  Widget _buildOfflineSmsButton(Rs rs, String recipientLabel, String phone, String body) {
+  Widget _buildOfflineSmsButton(
+    Rs rs,
+    String recipientLabel,
+    String phone,
+    String body,
+  ) {
     return SizedBox(
       width: double.infinity,
       height: rs.h(44).clamp(40.0, 50.0),
@@ -2400,7 +2629,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
           side: BorderSide(color: AppPalette.of(context).color(0xFF7A2E26)),
           shape: const StadiumBorder(),
         ),
-        onPressed: () => OfflineSosService().composeEmergencySms(phone, body: body),
+        onPressed: () =>
+            OfflineSosService().composeEmergencySms(phone, body: body),
         child: Text(
           '💬  Text $recipientLabel',
           style: TextStyle(fontSize: rs.sp(13), fontWeight: FontWeight.w700),
@@ -2455,6 +2685,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
             await _checkPrivacyConsent();
           },
           child: ListView(
+            key: const PageStorageKey('profile'),
             padding: EdgeInsets.symmetric(
               horizontal: rs.w(20),
               vertical: rs.h(12),
@@ -2492,7 +2723,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                 decoration: BoxDecoration(
                   color: AppPalette.of(context).surface,
                   borderRadius: BorderRadius.circular(rs.r(24)),
-                  border: Border.all(color: AppPalette.of(context).color(0xFFE2EBE2)),
+                  border: Border.all(
+                    color: AppPalette.of(context).color(0xFFE2EBE2),
+                  ),
                 ),
                 child: Column(
                   children: [
@@ -2525,7 +2758,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                 style: TextStyle(
                                   fontSize: rs.sp(18),
                                   fontWeight: FontWeight.w800,
-                                  color: AppPalette.of(context).color(0xFF191C1A),
+                                  color: AppPalette.of(context)
+                                      .color(0xFF191C1A),
                                 ),
                               ),
                               SizedBox(height: rs.h(2)),
@@ -2563,7 +2797,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                         ),
                         decoration: BoxDecoration(
                           color: AppPalette.of(context).color(0xFFF2F7F1),
-                          border: Border.all(color: AppPalette.of(context).color(0xFFDCE8DB)),
+                          border: Border.all(
+                            color: AppPalette.of(context).color(0xFFDCE8DB),
+                          ),
                           borderRadius: BorderRadius.circular(rs.r(14)),
                         ),
                         child: Row(
@@ -2626,7 +2862,7 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                           elevation: 0,
                           shape: const StadiumBorder(),
                         ),
-                        onPressed: () => setState(() => _currentIndex = 0),
+                        onPressed: () => _selectTab(0),
                         icon: const Icon(Icons.qr_code_2_rounded, size: 18),
                         label: Text(
                           'View health pass',
@@ -2648,7 +2884,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                 decoration: BoxDecoration(
                   color: AppPalette.of(context).surface,
                   borderRadius: BorderRadius.circular(rs.r(24)),
-                  border: Border.all(color: AppPalette.of(context).color(0xFFE2EBE2)),
+                  border: Border.all(
+                    color: AppPalette.of(context).color(0xFFE2EBE2),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2670,7 +2908,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                             children: [
                               Text(
                                 'Date of Birth / Age',
-                                style: TextStyle(fontSize: rs.sp(11.5), color: textSub),
+                                style: TextStyle(
+                                  fontSize: rs.sp(11.5),
+                                  color: textSub,
+                                ),
                               ),
                               SizedBox(height: rs.h(4)),
                               Text(
@@ -2680,7 +2921,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                 style: TextStyle(
                                   fontSize: rs.sp(14),
                                   fontWeight: FontWeight.w600,
-                                  color: AppPalette.of(context).color(0xFF191C1A),
+                                  color: AppPalette.of(context)
+                                      .color(0xFF191C1A),
                                 ),
                               ),
                             ],
@@ -2697,7 +2939,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                             children: [
                               Text(
                                 'Sex',
-                                style: TextStyle(fontSize: rs.sp(11.5), color: textSub),
+                                style: TextStyle(
+                                  fontSize: rs.sp(11.5),
+                                  color: textSub,
+                                ),
                               ),
                               SizedBox(height: rs.h(4)),
                               Text(
@@ -2705,7 +2950,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                 style: TextStyle(
                                   fontSize: rs.sp(14),
                                   fontWeight: FontWeight.w600,
-                                  color: AppPalette.of(context).color(0xFF191C1A),
+                                  color: AppPalette.of(context)
+                                      .color(0xFF191C1A),
                                 ),
                               ),
                             ],
@@ -2717,7 +2963,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                             children: [
                               Text(
                                 'BMI',
-                                style: TextStyle(fontSize: rs.sp(11.5), color: textSub),
+                                style: TextStyle(
+                                  fontSize: rs.sp(11.5),
+                                  color: textSub,
+                                ),
                               ),
                               SizedBox(height: rs.h(4)),
                               Text(
@@ -2727,7 +2976,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                 style: TextStyle(
                                   fontSize: rs.sp(14),
                                   fontWeight: FontWeight.w600,
-                                  color: AppPalette.of(context).color(0xFF191C1A),
+                                  color: AppPalette.of(context)
+                                      .color(0xFF191C1A),
                                 ),
                               ),
                             ],
@@ -2749,7 +2999,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                             children: [
                               Text(
                                 'Blood type',
-                                style: TextStyle(fontSize: rs.sp(11.5), color: textSub),
+                                style: TextStyle(
+                                  fontSize: rs.sp(11.5),
+                                  color: textSub,
+                                ),
                               ),
                               SizedBox(height: rs.h(4)),
                               Text(
@@ -2757,7 +3010,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                 style: TextStyle(
                                   fontSize: rs.sp(17),
                                   fontWeight: FontWeight.w800,
-                                  color: AppPalette.of(context).color(0xFF191C1A),
+                                  color: AppPalette.of(context)
+                                      .color(0xFF191C1A),
                                 ),
                               ),
                             ],
@@ -2769,7 +3023,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                             children: [
                               Text(
                                 'Known allergy',
-                                style: TextStyle(fontSize: rs.sp(11.5), color: textSub),
+                                style: TextStyle(
+                                  fontSize: rs.sp(11.5),
+                                  color: textSub,
+                                ),
                               ),
                               SizedBox(height: rs.h(4)),
                               Text(
@@ -2780,7 +3037,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                 style: TextStyle(
                                   fontSize: rs.sp(15),
                                   fontWeight: FontWeight.w700,
-                                  color: AppPalette.of(context).color(0xFF7A2E26),
+                                  color: AppPalette.of(context)
+                                      .color(0xFF7A2E26),
                                 ),
                               ),
                             ],
@@ -2797,7 +3055,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                             children: [
                               Text(
                                 'Condition',
-                                style: TextStyle(fontSize: rs.sp(11.5), color: textSub),
+                                style: TextStyle(
+                                  fontSize: rs.sp(11.5),
+                                  color: textSub,
+                                ),
                               ),
                               SizedBox(height: rs.h(4)),
                               Text(
@@ -2805,7 +3066,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                 style: TextStyle(
                                   fontSize: rs.sp(14),
                                   fontWeight: FontWeight.w600,
-                                  color: AppPalette.of(context).color(0xFF191C1A),
+                                  color: AppPalette.of(context)
+                                      .color(0xFF191C1A),
                                 ),
                               ),
                             ],
@@ -2817,15 +3079,21 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                             children: [
                               Text(
                                 'Height',
-                                style: TextStyle(fontSize: rs.sp(11.5), color: textSub),
+                                style: TextStyle(
+                                  fontSize: rs.sp(11.5),
+                                  color: textSub,
+                                ),
                               ),
                               SizedBox(height: rs.h(4)),
                               Text(
-                                hp['height'] != null ? '${hp['height']} cm' : '—',
+                                hp['height'] != null
+                                    ? '${hp['height']} cm'
+                                    : '—',
                                 style: TextStyle(
                                   fontSize: rs.sp(14),
                                   fontWeight: FontWeight.w600,
-                                  color: AppPalette.of(context).color(0xFF191C1A),
+                                  color: AppPalette.of(context)
+                                      .color(0xFF191C1A),
                                 ),
                               ),
                             ],
@@ -2839,7 +3107,10 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                       children: [
                         Text(
                           'Weight',
-                          style: TextStyle(fontSize: rs.sp(11.5), color: textSub),
+                          style: TextStyle(
+                            fontSize: rs.sp(11.5),
+                            color: textSub,
+                          ),
                         ),
                         SizedBox(height: rs.h(4)),
                         Text(
@@ -2881,8 +3152,11 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.verified_outlined,
-                              size: rs.w(16), color: primaryGreen),
+                          Icon(
+                            Icons.verified_outlined,
+                            size: rs.w(16),
+                            color: primaryGreen,
+                          ),
                           SizedBox(width: rs.w(8)),
                           Expanded(
                             child: Text(
@@ -2909,7 +3183,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                 decoration: BoxDecoration(
                   color: AppPalette.of(context).surface,
                   borderRadius: BorderRadius.circular(rs.r(24)),
-                  border: Border.all(color: AppPalette.of(context).color(0xFFE2EBE2)),
+                  border: Border.all(
+                    color: AppPalette.of(context).color(0xFFE2EBE2),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2953,7 +3229,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                                   style: TextStyle(
                                     fontSize: rs.sp(13.5),
                                     fontWeight: FontWeight.w600,
-                                    color: AppPalette.of(context).color(0xFF191C1A),
+                                    color: AppPalette.of(context)
+                                        .color(0xFF191C1A),
                                   ),
                                 ),
                               ),
@@ -2972,7 +3249,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                 decoration: BoxDecoration(
                   color: AppPalette.of(context).surface,
                   borderRadius: BorderRadius.circular(rs.r(24)),
-                  border: Border.all(color: AppPalette.of(context).color(0xFFE2EBE2)),
+                  border: Border.all(
+                    color: AppPalette.of(context).color(0xFFE2EBE2),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -3064,7 +3343,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                 color: AppPalette.of(context).surface,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(rs.r(24)),
-                  side: BorderSide(color: AppPalette.of(context).color(0xFFE2EBE2)),
+                  side: BorderSide(
+                    color: AppPalette.of(context).color(0xFFE2EBE2),
+                  ),
                 ),
                 clipBehavior: Clip.antiAlias,
                 child: Column(
@@ -3089,7 +3370,9 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                       ),
                       onTap: () => Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const ChangePasswordScreen()),
+                        MaterialPageRoute(
+                          builder: (_) => const ChangePasswordScreen(),
+                        ),
                       ),
                     ),
                     const Divider(height: 1, indent: 52),
@@ -3127,7 +3410,8 @@ class _PatientPortalScreenState extends State<PatientPortalScreen> {
                               child: Text(
                                 'Revoke',
                                 style: TextStyle(
-                                  color: AppPalette.of(context).color(0xFF7A2E26),
+                                  color: AppPalette.of(context)
+                                      .color(0xFF7A2E26),
                                   fontSize: rs.sp(12),
                                   fontWeight: FontWeight.w600,
                                 ),

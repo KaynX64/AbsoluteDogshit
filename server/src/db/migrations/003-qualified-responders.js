@@ -5,9 +5,11 @@ import { ensureColumns, ensureIndex, readColumn } from './schema.js';
 export default {
   version: 3,
   name: 'qualified responder eligibility',
+  // Check whether the Qualified Responder flag already exists.
   async prepare(connection) {
     return { backfill: !(await readColumn(connection, 'USERS', 'is_qualified_responder')) };
   },
+  // Ensure accounts can store the Qualified Responder designation.
   async schema(connection) {
     await ensureColumns(connection, [
       { table: 'USERS', column: 'is_qualified_responder', type: 'TINYINT(1) NOT NULL DEFAULT 0' },
@@ -16,6 +18,7 @@ export default {
     ]);
     await ensureIndex(connection, 'USERS', 'idx_users_qualified_responder', 'is_qualified_responder');
   },
+  // Backfill the new designation for accounts with the legacy emergency responder role.
   async data(connection, { backfill }) {
     if (typeof backfill !== 'boolean') throw new Error('Missing responder backfill decision.');
     if (!backfill) return;

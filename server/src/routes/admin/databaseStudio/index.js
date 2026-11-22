@@ -7,6 +7,7 @@ import { registerDatabaseStudioWrites } from './writes.js';
 
 const requireDatabaseAccess = requirePermission('DATABASE_MANAGE');
 
+// Enforce the table write restrictions before a Database Studio mutation.
 async function requireWritableTable(req, res, next) {
   const table = req.params.table;
   if (isReadOnlyTable(table)) {
@@ -19,6 +20,7 @@ async function requireWritableTable(req, res, next) {
   next();
 }
 
+// Attach Database Studio read and write handlers with their shared access gates.
 export function registerDatabaseStudioRoutes(router) {
   registerDatabaseStudioReads(router, requireDatabaseAccess);
   registerDatabaseStudioWrites(router, requireDatabaseAccess, requireWritableTable);

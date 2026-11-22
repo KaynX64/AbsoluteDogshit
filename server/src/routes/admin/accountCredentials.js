@@ -8,8 +8,10 @@ import { evaluatePasswordStrength } from '../../utils/passwordPolicy.js';
 import bcrypt from 'bcryptjs';
 import { validatePermissionCodes, setAdminPermissionGrants } from '../../admin/accounts/permissions.js';
 
+// Mount account creation and administrator password reset handlers.
 export function registerAccountCredentialRoutes(router) {
   // 3.2 POST /api/admin/users/:id/reset-password - Admin Password Reset
+  // Validate the requested password and reset credentials for an authorized target.
   router.post('/users/:id/reset-password', requirePermission('USERS_MANAGE'), async (req, res) => {
     const targetUserId = Number(req.params.id);
     const { newPassword } = req.body;
@@ -49,7 +51,7 @@ export function registerAccountCredentialRoutes(router) {
       const callerPerms = await resolveAdminPermissions(req.user.user_id);
       // Multi-role safe: ANY held ADMIN role makes the target an administrator
       // (previously only the first joined role row was inspected).
-      const targetIsAdmin = targetRows.some((row) => row.role_code === 'ADMIN');
+      const targetIsAdmin = targetRows.some(/* Check whether the password reset target has the Admin role. */ (row) => row.role_code === 'ADMIN');
       if (targetIsAdmin && !callerPerms.isSuper) {
         return res.status(403).json({
           error: 'Only a Super Admin can override an administrator password.',
@@ -83,6 +85,7 @@ export function registerAccountCredentialRoutes(router) {
   });
 
   // 3.3 POST /api/admin/users - Create a brand new user account
+  // Create an account, its role and profiles, and any applicable administrator grants.
   router.post('/users', requirePermission('USERS_MANAGE'), async (req, res) => {
     const {
       first_name,
@@ -140,7 +143,7 @@ export function registerAccountCredentialRoutes(router) {
     const creationProfileFields = ['sex', 'date_of_birth', 'emergency_contact_name', 'emergency_contact_phone'];
     if (health_profile !== undefined && (
       !isCampusRole || health_profile === null || typeof health_profile !== 'object' || Array.isArray(health_profile) ||
-      Object.entries(health_profile).some(([field, value]) =>
+      Object.entries(health_profile).some(/* Detect fields or value types that the creation-time health profile cannot accept. */ ([field, value]) =>
         !creationProfileFields.includes(field) || (value !== null && typeof value !== 'string'))
     )) {
       return res.status(400).json({
@@ -273,7 +276,7 @@ export function registerAccountCredentialRoutes(router) {
         );
       }
 
-      if (health_profile !== undefined && Object.values(health_profile).some(value => value?.trim())) {
+      if (health_profile !== undefined && Object.values(health_profile).some(/* Check whether any submitted health profile field has text to save. */ value => value?.trim())) {
         await saveHealthProfile(connection, newUserId, health_profile, {
           actorId: req.user.user_id, ipAddress: req.ip, operation: 'ADMIN_CREATE_HEALTH_PROFILE',
         });

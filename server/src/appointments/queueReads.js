@@ -11,6 +11,7 @@ const rosterStatuses = {
   history: "a.status IN ('completed', 'cancelled', 'no_show')",
 };
 
+// Decrypt the health fields returned with an intake or roster record.
 function withDecryptedHealth(row) {
   return {
     ...row,
@@ -19,6 +20,7 @@ function withDecryptedHealth(row) {
   };
 }
 
+// Read consultations by roster filter and include dental data when allowed.
 export async function listRoster({ filter, doctorId, canViewDental }) {
   const statusCondition = Object.hasOwn(rosterStatuses, filter) ? rosterStatuses[filter] : rosterStatuses.active;
   const doctorCondition = doctorId == null ? '' : 'AND a.doctor_user_id = ?';
@@ -75,6 +77,7 @@ export async function listRoster({ filter, doctorId, canViewDental }) {
          ORDER BY a.date_time ASC, a.appointment_id ASC`,
     doctorId == null ? [] : [doctorId],
   );
+  // Decrypt the clinical fields and add the BMI category for this consultation row.
   return rows.map(row => ({
     ...withDecryptedHealth(row),
     bmi_category: getBmiCategory(row.bmi),
@@ -87,6 +90,7 @@ export async function listRoster({ filter, doctorId, canViewDental }) {
   }));
 }
 
+// Read today's scheduled arrivals and their intake details.
 export async function listExpectedArrivals() {
   const [rows] = await pool.query(`SELECT a.appointment_id,
                 a.patient_user_id AS patient_id,
@@ -119,6 +123,7 @@ export async function listExpectedArrivals() {
   return rows.map(withDecryptedHealth);
 }
 
+// Count appointments marked as no-shows for the current clinic day.
 export async function countTodaysNoShows() {
   const [[row]] = await pool.query(`SELECT COUNT(*) AS count
          FROM APPOINTMENTS
@@ -128,6 +133,7 @@ export async function countTodaysNoShows() {
   return row?.count || 0;
 }
 
+// Read the clinic day's queue tickets and associated patient and appointment details.
 export async function listDailyTickets() {
   const [rows] = await pool.query(`SELECT q.queue_id,
                 CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS ticket_no,
@@ -150,6 +156,7 @@ export async function listDailyTickets() {
   return rows;
 }
 
+// Read the caller's own current ticket and position in the queue.
 export async function getPersonalTicket(userId) {
   const [[ticket]] = await pool.query(`SELECT q.queue_id,
                 CONCAT('Q-', LPAD(q.queue_number, 2, '0')) AS ticket_no,

@@ -2,6 +2,7 @@
 
 import { logAudit } from '../utils/auditLogger.js';
 
+// Lock usable lots and plan deductions in first-expiry-first-out order.
 export async function planStock(connection, requestedByMedicine) {
   // ── FEFO Verification & Batch Allocation ────────────────────────────────
   const plannedDeductions = [];
@@ -37,6 +38,7 @@ export async function planStock(connection, requestedByMedicine) {
       [medId]
     );
 
+    // Total the quantities available from the locked lots.
     const totalAvailable = batches.reduce((sum, b) => sum + Number(b.quantity_on_hand), 0);
 
     if (totalAvailable < qtyNeeded) {
@@ -73,6 +75,7 @@ export async function planStock(connection, requestedByMedicine) {
   return plannedDeductions;
 }
 
+// Deduct the planned quantities and write their prescription-linked movement entries.
 export async function applyStockDeductions(connection, { plannedDeductions, formularyDispenseLines, prescriptionId, doctorUserId, ipAddress }) {
   // ── Execute planned FEFO stock deductions & write inventory logs ────────
   for (const d of plannedDeductions) {
@@ -93,7 +96,7 @@ export async function applyStockDeductions(connection, { plannedDeductions, form
       }
       if (qtyToLink === 0) break;
     }
-    if (qtyToLink !== 0 || itemAllocations.some((allocation) => !allocation.prescription_item_id)) {
+    if (qtyToLink !== 0 || itemAllocations.some(/* Detect an allocation missing its saved prescription item ID. */ (allocation) => !allocation.prescription_item_id)) {
       throw new Error('Unable to link inventory deduction to its prescription item.');
     }
 
@@ -127,11 +130,12 @@ export async function applyStockDeductions(connection, { plannedDeductions, form
       ipAddress,
     });
   }
-  if (formularyDispenseLines.some((line) => line.quantity_to_link !== 0)) {
+  if (formularyDispenseLines.some(/* Check whether any formulary line still has unlinked deductions. */ (line) => line.quantity_to_link !== 0)) {
     throw new Error('Prescription item quantities do not match the planned inventory deductions.');
   }
 }
 
+// Restore the lots referenced by a cancelled prescription and append return entries.
 export async function restorePrescriptionStock(connection, { prescriptionId, userId, ipAddress }) {
   // ── Trace & restore deducted stock batches ───────────────────────────
   const [dispenseLogs] = await connection.query(

@@ -3,6 +3,7 @@
 import { updateAppointmentStatus } from '../appointments/transitions.js';
 import { fail } from '../utils/httpError.js';
 
+// Check the clinician's assignment when required, then replay the appointment transition.
 export async function updateAppointment(connection, { payload }, user) {
   const { appointment_id, status } = payload;
   if (!appointment_id) throw fail('appointment_id is required');

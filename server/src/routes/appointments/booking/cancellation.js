@@ -5,7 +5,9 @@ import { authenticateToken } from '../../../auth/middleware.js';
 import { logAudit } from '../../../utils/auditLogger.js';
 import { invalidateCache } from '../../../utils/redisClient.js';
 
+// Mount the appointment cancellation endpoint.
 export function registerBookingCancellation(router, io) {
+  // Let the patient, assigned clinician, or administrator cancel the booking and publish the committed update.
   router.patch('/:id/cancel', authenticateToken, async (req, res) => {
     const appointmentId = Number(req.params.id);
     const { cancelled_reason } = req.body;

@@ -13,7 +13,9 @@ import {
   resolveExpiryDate,
 } from './signing/signatory.js';
 
+// Issue and audit a clearance, then attempt to generate its PDF after commit.
 export async function issueClearance({ user_id, appointment_id, purpose, remarks, expires_at, issuerId, ipAddress }) {
+  // Validate the clinician and recipient, prepare the signed clearance, and save its audit entry.
   const issued = await inTransaction(async connection => {
     // Re-verify signer, recipient and expiry against the database
     const signer = await assertValidSigner(connection, issuerId);
@@ -82,10 +84,12 @@ export async function issueClearance({ user_id, appointment_id, purpose, remarks
   return { ...issued, pdfAvailable: Boolean(pdfKey) };
 }
 
+// Revoke a clearance with an audit entry under the caller's signing authority.
 export function revokeClearance({ clearanceId, reason, user, ipAddress }) {
+  // Lock the clearance and save the revocation and audit entry together.
   return inTransaction(async connection => {
     const [rows] = await connection.query(
-      'SELECT status, signature_metadata FROM MEDICAL_CLEARANCES WHERE clearance_id = ? AND deleted_at IS NULL FOR UPDATE',
+      'SELECT user_id, status, signature_metadata FROM MEDICAL_CLEARANCES WHERE clearance_id = ? AND deleted_at IS NULL FOR UPDATE',
       [clearanceId]
     );
 
@@ -137,6 +141,6 @@ export function revokeClearance({ clearanceId, reason, user, ipAddress }) {
       },
       ipAddress,
     });
-    return { message: 'Medical clearance revoked successfully.', clearanceId, status: 'revoked', revokedAt };
+    return { message: 'Medical clearance revoked successfully.', clearanceId, status: 'revoked', revokedAt, patientId: clearance.user_id };
   });
 }

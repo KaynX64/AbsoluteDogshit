@@ -4,8 +4,10 @@ import { cancelPrescription } from '../../../documents/prescriptions/cancelPresc
 import { authenticateToken } from '../../../auth/middleware.js';
 import { requireRoles } from '../../../middleware/rbac.js';
 
+// Mount the prescription cancellation endpoint and pass in realtime access.
 export function registerPrescriptionCancellation(router, io) {
   // ── Cancel Prescription & Restore Stock ─────────────────────────────────────
+  // Cancel the prescription through the stock-restoring service and broadcast committed changes.
   router.patch(
     '/prescriptions/:id/cancel',
     authenticateToken,
@@ -29,7 +31,9 @@ export function registerPrescriptionCancellation(router, io) {
         return res.status(500).json({ error: 'Failed to cancel prescription.' });
       }
       io?.emit('inventory:updated');
-      return res.json(result);
+      const { patientId, ...response } = result;
+      io?.to(`user:${patientId}`).emit('documents:updated', { kind: 'prescriptions' });
+      return res.json(response);
     }
   );
 }

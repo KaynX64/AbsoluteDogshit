@@ -4,9 +4,11 @@ import { once } from 'node:events';
 import PDFDocument from 'pdfkit';
 import { workflowSections } from './sections.js';
 
+// Draw authorized analytics sections and return the completed PDF buffer.
 export async function renderPdf({ roles, topDiagnoses: topDiag, deptBreakdown: deptRows, inventory: medRows, surveillance, pharmacy }) {
   const doc = new PDFDocument({ size: 'A4', margin: 45 });
   const chunks = [];
+  // Collect a PDF stream chunk for the final response.
   doc.on('data', (c) => chunks.push(c));
 
   // Letterhead
@@ -53,6 +55,7 @@ export async function renderPdf({ roles, topDiagnoses: topDiag, deptBreakdown: d
     doc.fillColor('#1F4A34').font('Helvetica-Bold').fontSize(11).text(`${++section}. TOP CLINICAL DIAGNOSES`);
     doc.moveDown(0.4);
 
+    // Draw a diagnosis ranking entry and its count.
     topDiag.forEach((d, idx) => {
       doc
         .font('Helvetica')
@@ -73,6 +76,7 @@ export async function renderPdf({ roles, topDiagnoses: topDiag, deptBreakdown: d
     doc.fillColor('#1F4A34').font('Helvetica-Bold').fontSize(11).text(`${++section}. CONSULTATION VOLUME BY DEPARTMENT / PROGRAM`);
     doc.moveDown(0.4);
 
+    // Draw one department's consultation count.
     deptRows.forEach((dp, idx) => {
       doc
         .font('Helvetica')
@@ -96,6 +100,7 @@ export async function renderPdf({ roles, topDiagnoses: topDiag, deptBreakdown: d
     if (medRows.length === 0) {
       doc.font('Helvetica-Oblique').fontSize(9).fillColor('#5A635B').text('All formulary stocks have adequate buffer margins.', 55);
     } else {
+      // Draw a medicine lot's stock and expiry information.
       medRows.forEach((m) => {
         doc
           .font('Helvetica')
@@ -114,6 +119,7 @@ export async function renderPdf({ roles, topDiagnoses: topDiag, deptBreakdown: d
     if (subtitle) doc.text(subtitle);
     if (rows.length === 0) doc.text('No entries.');
     for (const [label, ...values] of rows) {
+      // Pair each workflow table value with its display label.
       const detail = values.length === 1 ? values[0] : values.map((value, index) => `${columns[index + 1]}: ${value}`).join(' · ');
       doc.text(`${label}: ${detail}`);
     }

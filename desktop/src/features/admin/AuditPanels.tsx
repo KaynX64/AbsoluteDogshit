@@ -64,7 +64,7 @@ export default function AuditPanels({
 }: AuditPanelsProps) {
   useTabMotion(auditSubTab, ['phi', 'mutations'], tab => `admin-audit-panel-${tab}`);
   return (
-    <div>
+    <div className="admin-bounded-view">
       {/* Sub-tabs — clean pill toggle */}
       <div className="vd-subtabs" role="tablist" aria-label="Audit views" onKeyDown={event => navigateTabs(event, true)} style={{ marginBottom: 20 }}>
         <button
@@ -88,10 +88,10 @@ export default function AuditPanels({
       </div>
 
       {/* PHI */}
-      <div id="admin-audit-panel-phi" role="tabpanel"
+      <div className="admin-panel" id="admin-audit-panel-phi" role="tabpanel"
         aria-labelledby="admin-audit-tab-phi" tabIndex={0} hidden={auditSubTab !== 'phi'}>
       {auditSubTab === 'phi' && (
-        <div>
+        <div className="admin-panel">
           <div style={{
             padding: '16px 20px',
             background: T.sage100,
@@ -166,7 +166,7 @@ export default function AuditPanels({
             </div>
           </div>
 
-          <div style={{
+          <div className="admin-table-card" style={{
             background: T.surface, border: `1px solid ${T.border}`,
             borderRadius: T.radius.lg, overflow: 'hidden', boxShadow: T.shadow.xs,
           }}>
@@ -179,7 +179,7 @@ export default function AuditPanels({
                 No PHI read access events matched your filter.
               </div>
             ) : (
-              <div className="vd-table-wrap" style={{ overflowX: "auto" }}>
+              <div className="vd-table-wrap admin-scroll-region" role="region" aria-label="PHI access records" tabIndex={0}>
                 <table className="tbl" style={{ minWidth: 900 }}>
                   <thead>
                     <tr>
@@ -236,10 +236,10 @@ export default function AuditPanels({
       </div>
 
       {/* MUTATIONS */}
-      <div id="admin-audit-panel-mutations" role="tabpanel"
+      <div className="admin-panel" id="admin-audit-panel-mutations" role="tabpanel"
         aria-labelledby="admin-audit-tab-mutations" tabIndex={0} hidden={auditSubTab !== 'mutations'}>
       {auditSubTab === 'mutations' && (
-        <div>
+        <div className="admin-panel">
           <div style={{
             padding: '16px 20px',
             background: T.sage100,
@@ -301,7 +301,7 @@ export default function AuditPanels({
             })}
           </div>
 
-          <div style={{
+          <div className="admin-table-card" style={{
             background: T.surface, border: `1px solid ${T.border}`,
             borderRadius: T.radius.lg, overflow: 'hidden', boxShadow: T.shadow.xs,
           }}>
@@ -310,7 +310,7 @@ export default function AuditPanels({
                 No mutation audit logs matched your filter.
               </div>
             ) : (
-              <div className="vd-table-wrap" style={{ overflowX: "auto" }}>
+              <div className="vd-table-wrap admin-scroll-region" role="region" aria-label="Mutation audit records" tabIndex={0}>
                 <table className="tbl" style={{ minWidth: 820 }}>
                   <thead>
                     <tr>

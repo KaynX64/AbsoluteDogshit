@@ -4,11 +4,13 @@ import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';
 import { deductStock, adjustStock } from '../../inventory/stockMutations.js';
 
+// Mount approved manual stock deductions and adjustments.
 export function registerInventoryStock(router, io) {
   // =============================================================================
   // 4. MANUAL DEDUCTION & STOCK ADJUSTMENT
   // =============================================================================
 
+  // Validate the requested deduction and apply it to an eligible batch.
   router.post('/deduct', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
     const { batch_id, quantity_deducted, reason } = req.body;
 
@@ -31,6 +33,7 @@ export function registerInventoryStock(router, io) {
     }
   });
 
+  // Adjust the batch quantity through the audited service and broadcast the inventory change.
   router.post('/adjust', authenticateToken, requireRoles('NURSE', 'ADMIN'), async (req, res) => {
     const { batch_id, quantity_removed, transaction_type, reason } = req.body;
     const validTypes = ['dispose', 'adjust', 'recall', 'return'];

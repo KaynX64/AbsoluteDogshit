@@ -4,7 +4,7 @@ Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172`
 
 ## DT-08 · desktop/src/features/emergency/IncidentRecords.tsx
 **LOC:** 994 · **Anchor commit:** working tree · **Role:** Admin view of documented SOS incidents: searchable list, server PDF preview, save and print (MinIO archive)
-**Mounted by:** AdminConsole.tsx L1684 (activeTab === 'incidents')
+**Mounted by:** AdminConsole.tsx L1371 (activeTab === 'incidents')
 **API surface:** GET /api/emergency/incident-reports?search= (L66, L68) · GET /api/emergency/incident-reports/:reportId/pdf (L109)
 **Socket events:** on emergency:incident_reported -> refetch records (L97)
 **State / key fields:** list (records, loading, error, search) · modal (selectedRecord, activeModalTab preview/details, previewPdfUrl, loadingPdf, pdfError) · actions (actionInProgressId, printIframeRef) · derived (stats useMemo: total, archivedMinIO, withTreatment, avgRespSec)
@@ -24,7 +24,7 @@ Desktop component slice map · [index](../CODESLICE.md) · base commit `93b4172`
 | 11 | 263-324 | Emergency Incident Records | page header: title, MinIO archive subtitle, Refresh button (fetchRecords) |
 | 12 | 325-375 | Total Incidents Documented | stats ribbon tiles: Total Incidents Documented, Archived in MinIO, Clinical Intervention, Avg Response |
 | 13 | 376-447 | Search Records | search bar: Enter-to-search input, clear button, Search Records button; passes search to fetchRecords |
-| 14 | 448-520 | No Incident Records Found | body states: loading spinner, error card + Try Again, empty state + Clear Search |
+| 14 | 448-520 | No Incident Records Found | independently scrollable report list with loading, error, and empty states |
 | 15 | 521-593 | Archived in MinIO | record card top row: IR-#### and SOS-#### badges, MinIO archive chip, resolved timestamp |
 | 16 | 594-660 | Save PDF | card actions: View (handleView), Save PDF (handleSavePdf), Print (handlePrintPdf); isWorking disable |
 | 17 | 661-736 | Incident Narrative | card details grid: patient col (name, ID, affiliation, phone), incident narrative clamp, responder meta |

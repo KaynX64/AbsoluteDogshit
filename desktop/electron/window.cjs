@@ -1,6 +1,6 @@
 const { app, BrowserWindow, Menu, shell, session, nativeTheme, ipcMain } = require('electron');
 const path = require('node:path');
-const { VITE_URL, WINDOW_TITLE, TITLEBAR_HEIGHT, CUSTOM_TITLE_BAR } = require('./config.cjs');
+const { VITE_URL, WINDOW_TITLE, TITLEBAR_HEIGHT, CUSTOM_TITLE_BAR, getWindowsAppId } = require('./config.cjs');
 const { setupAutoUpdater } = require('./updates.cjs');
 
 /** Caption glyph color for the native window buttons, per Windows theme. */
@@ -31,6 +31,9 @@ const customTitleBarOptions = CUSTOM_TITLE_BAR
 
 function createWindow() {
   const isDev = !app.isPackaged;
+  const windowsIcon = process.platform === 'win32'
+    ? path.resolve(isDev ? path.join(__dirname, '../src/assets') : process.resourcesPath, 'valetudo_icon.ico')
+    : undefined;
 
   // The renderer needs the window chrome (title text + app-drawn title bar?)
   // before its first paint, so answer synchronously from the preload.
@@ -44,11 +47,7 @@ function createWindow() {
 
   const win = new BrowserWindow({
     title: WINDOW_TITLE,
-    ...(process.platform === 'win32' && {
-      icon: isDev
-        ? path.join(__dirname, '../src/assets/valetudo_icon.ico')
-        : path.join(process.resourcesPath, 'valetudo_icon.ico'),
-    }),
+    ...(windowsIcon && { icon: windowsIcon }),
     width: 1300,
     height: 880,
     minWidth: 1024,
@@ -63,6 +62,16 @@ function createWindow() {
       devTools: isDev,
     },
   });
+
+  if (windowsIcon) {
+    const executable = `"${process.execPath}"`;
+    win.setAppDetails({
+      appId: getWindowsAppId(app.isPackaged),
+      appIconPath: windowsIcon,
+      relaunchCommand: isDev ? `${executable} "${app.getAppPath()}"` : executable,
+      relaunchDisplayName: isDev ? `${app.getName()} (Development)` : app.getName(),
+    });
+  }
 
   win.removeMenu();
   Menu.setApplicationMenu(null);

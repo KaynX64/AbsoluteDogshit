@@ -4,6 +4,7 @@ import { ensureColumns } from './schema.js';
 export default {
   version: 12,
   name: 'responder device delivery',
+  // Add push installation and duty mode fields plus a formatted address for emergency alerts.
   async schema(connection) {
     await ensureColumns(connection, [
       { table: 'DEVICE_TOKENS', column: 'installation_id', type: 'CHAR(32) NULL' },

@@ -2,9 +2,11 @@
 import { inTransaction } from '../db/transaction.js';
 import { pool } from '../db/pool.js';
 
+// Validate the installation identifier accepted for upgraded push registrations.
 export const isInstallationId = value => typeof value === 'string' && /^[a-f0-9]{32}$/.test(value);
 export const sosModes = ['on_duty', 'quiet', 'off_duty'];
 
+// Register a legacy push token or update the token and mode for an installation.
 export async function registerPushDevice(userId, { fcm_token: token, device_type: type, installation_id: id, sos_mode: mode }) {
   if (!id) {
     await pool.query(
@@ -18,6 +20,7 @@ export async function registerPushDevice(userId, { fcm_token: token, device_type
     return;
   }
 
+  // Replace the installation's previous token and save the new registration atomically.
   await inTransaction(async connection => {
     // The incoming token can already have a legacy registration on upgrade.
     await connection.query(
@@ -35,6 +38,7 @@ export async function registerPushDevice(userId, { fcm_token: token, device_type
   });
 }
 
+// Remove the matching push registration owned by the caller.
 export async function removePushDevice(connection, userId, { fcm_token: rawToken, installation_id: id }) {
   const token = typeof rawToken === 'string' ? rawToken.trim() : '';
   if (isInstallationId(id)) {
@@ -44,6 +48,7 @@ export async function removePushDevice(connection, userId, { fcm_token: rawToken
   }
 }
 
+// Group SOS destinations by delivery mode and omit off-duty Android installations.
 export function groupSosDevices(rows) {
   const groups = { legacy: [], on_duty: [], quiet: [] };
   for (const row of rows) {
@@ -53,6 +58,7 @@ export function groupSosDevices(rows) {
   return groups;
 }
 
+// Build the Android notification channel and SOS data for the selected delivery mode.
 export function sosPushForMode(mode, { alertId, latitude, longitude }) {
   const channelId = mode === 'legacy' ? 'emergency_sos_channel_v4'
     : mode === 'quiet' ? 'responder_sos_quiet_v1' : 'responder_sos_audible_v1';

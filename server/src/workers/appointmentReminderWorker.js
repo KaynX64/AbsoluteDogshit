@@ -8,6 +8,7 @@ import { sendPushToUser } from '../utils/fcmNotifier.js';
 const reminderBatchSize = 50;
 let nextAfter = null;
 
+// Hold a database-scoped lock while processing one reminder batch.
 export async function sendDueAppointmentReminders(io) {
   const connection = await pool.getConnection();
   let lockName;
@@ -38,6 +39,7 @@ export async function sendDueAppointmentReminders(io) {
   }
 }
 
+// Deliver due reminders, persist SMTP acceptance, and send optional push and realtime updates.
 async function deliverReminders(connection, io) {
   let [upcoming] = await loadReminderBatch(connection, nextAfter);
   if (!upcoming.length && nextAfter) [upcoming] = await loadReminderBatch(connection, null);
@@ -64,6 +66,7 @@ async function deliverReminders(connection, io) {
     if (result.affectedRows !== 1) continue;
     deliveredCount++;
 
+    // Log a push failure without changing the already recorded email delivery.
     await sendPushToUser(app.patient_user_id, {
       title: '⏰ Consultation Reminder',
       body: `Upcoming consultation with Dr. ${app.doc_last_name} (${app.doc_specialty}) scheduled for ${app.date_time}.`,
@@ -81,6 +84,7 @@ async function deliverReminders(connection, io) {
   return { metrics: { attempted: upcoming.length, delivered: deliveredCount }, degraded: deliveredCount < upcoming.length };
 }
 
+// Read the next batch of upcoming appointments after the saved cursor.
 function loadReminderBatch(connection, after) {
   return connection.query(
     `SELECT a.appointment_id, a.patient_user_id, a.date_time, CAST(a.date_time AS CHAR) AS cursor_date_time, a.appointment_type,

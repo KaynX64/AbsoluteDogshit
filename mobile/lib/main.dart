@@ -135,7 +135,7 @@ class _ValetudoMobileAppState extends State<ValetudoMobileApp>
     return AccountThemeScope(
       controller: controller,
       child: ListenableBuilder(
-        listenable: controller,
+        listenable: controller.appearance,
         builder: (context, _) => MaterialApp(
           navigatorKey: navigatorKey,
           title: 'LeoVital HealthLink',

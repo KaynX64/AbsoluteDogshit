@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "test": "node --test tests/*.test.*",
     "test:smoke": "node tests/smoke/packaged.mjs",
+    "test:layout": "node tests/smoke/compact-clinic.mjs",
     "preview": "vite preview",
     "dist": "npm run build && electron-builder --win --x64"
   },

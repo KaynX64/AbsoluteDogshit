@@ -152,52 +152,6 @@
   list-style: none;
 }
 
-/* Keep the top bar above one scroll area shared by the entire patient workspace. */
-@media (min-height: 620px) {
-  .app-main:has(.doctor-clinic-layout) > :is(.tb, .update-banner) {
-    flex-shrink: 0;
-  }
-
-  .app-content:has(.doctor-clinic-layout) {
-    min-height: 0;
-    overflow-y: auto;
-    scrollbar-gutter: stable;
-    scroll-padding-block: 80px 12px;
-  }
-
-  .doctor-console .doctor-workspace-switch {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    background: var(--sage-100);
-  }
-
-  @container doctor-clinic (width > 740px) {
-    .doctor-console .doctor-queue-grid:has(> li:nth-child(3)) {
-      max-height: clamp(125px, calc(100dvh - 605px), 300px);
-      overflow-y: auto;
-      scrollbar-width: thin;
-    }
-
-    .doctor-console .doctor-encounter-actions {
-      position: sticky;
-      bottom: 0;
-      z-index: 1;
-    }
-  }
-
-  .app-content:has(.doctor-clinic-layout) {
-    scroll-padding-bottom: 76px;
-  }
-}
-
-/* A short window needs the space normally occupied by the pinned top bar. */
-@media (height < 620px) {
-  .app-main:has(.doctor-clinic-layout) > .tb {
-    position: relative;
-  }
-}
-
 .doctor-console .doctor-queue-item {
   display: flex;
   flex-direction: column;
@@ -890,5 +844,268 @@
 
   .doctor-console .doctor-prescription-generator > button {
     padding-block: 8px !important;
+  }
+}
+
+/* Desktop clinic: keep the section and its actions in the available shell height.
+   Long notes, patient lists and expanded details own their scrolling. Short or
+   narrow/zoomed windows retain the accessible flowing layout above. */
+@media screen and (min-width: 1024px) and (min-height: 700px) {
+  .app-main:has(.doctor-clinic-layout) {
+    overflow: hidden;
+  }
+
+  .app-main:has(.doctor-clinic-layout) > :is(.tb, .update-banner) {
+    flex-shrink: 0;
+  }
+
+  .app-content:has(.doctor-clinic-layout) {
+    display: flex;
+    flex: 1 1 0;
+    min-height: 0;
+    padding: 8px 20px 12px;
+    overflow: hidden;
+  }
+
+  .doctor-console[data-clinic-workspace='true'] {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .doctor-console[data-clinic-workspace='true'] .doctor-header {
+    flex: none;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+  }
+
+  .doctor-console[data-clinic-workspace='true'] .doctor-header p {
+    display: none;
+  }
+
+  .doctor-console .doctor-clinic-layout {
+    flex: 1;
+    min-height: 0;
+    grid-template-rows: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .doctor-console .doctor-context {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .doctor-console .doctor-patient-card {
+    flex: 0 0 auto;
+    max-height: calc(100% - 100px);
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .doctor-console .doctor-roster {
+    display: flex;
+    flex: 0 1 auto;
+    flex-direction: column;
+    min-height: 90px;
+    overflow: hidden;
+  }
+
+  .doctor-console .doctor-roster-heading {
+    flex: none;
+  }
+
+  .doctor-console #doctor-roster-list {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .doctor-console .doctor-queue-grid {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .doctor-console .doctor-patient-workspace,
+  .doctor-console .doctor-workspace,
+  .doctor-console .doctor-panel:not([hidden]),
+  .doctor-console .doctor-document-panel > [role='tabpanel']:not([hidden]),
+  .doctor-console .doctor-encounter-form {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .doctor-console .doctor-workspace:not(:has(> .doctor-panel:not([hidden]))) {
+    display: none;
+  }
+
+  .doctor-console .doctor-workspace-switch {
+    flex: none;
+    margin-bottom: 6px;
+  }
+
+  .doctor-console .doctor-panel {
+    padding: 12px 16px;
+  }
+
+  .doctor-console .doctor-panel-header {
+    flex: none;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+  }
+
+  .doctor-console .doctor-prescription-generator {
+    flex: 1;
+    min-height: min-content;
+    gap: 6px;
+  }
+
+  .doctor-console .doctor-prescription-generator > * {
+    flex-shrink: 0;
+  }
+
+  .doctor-console .doctor-prescription-generator .doctor-prescription-field:has(textarea) {
+    display: flex;
+    flex: 1 1 52px;
+    flex-direction: column;
+    min-height: 52px;
+    max-height: 160px;
+  }
+
+  .doctor-console .doctor-prescription-field > label {
+    margin-bottom: 3px !important;
+  }
+
+  .doctor-console .doctor-prescription-fields .doctor-prescription-field {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .doctor-console .doctor-prescription-fields .doctor-prescription-field :is(input, select) {
+    margin-top: auto;
+  }
+
+  .doctor-console .doctor-prescription-fields {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .doctor-console .doctor-formulary-fields {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  }
+
+  .doctor-console .doctor-prescription-fields:not(.doctor-formulary-fields):has(#rx-dosage) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .doctor-console .doctor-formulary-details {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .doctor-console .doctor-prescription-generator :is(input, select, #rx-formulary) {
+    min-height: 32px;
+    padding-block: 5px !important;
+  }
+
+  .doctor-console .doctor-document-panel > [role='tabpanel']:not([hidden]) {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .doctor-console .doctor-prescription-generator > button {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    margin-top: auto;
+    padding-block: 9px !important;
+  }
+
+  .doctor-console .doctor-writing-grid {
+    flex: 1;
+    min-height: 0;
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    gap: 10px 14px;
+  }
+
+  .doctor-console .doctor-writing-field {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .doctor-console :is(.doctor-writing-field, .doctor-prescription-field) textarea {
+    flex: 1;
+    min-height: 40px;
+    height: 0;
+    resize: none !important;
+    overflow-y: auto;
+  }
+
+  .doctor-console #doctor-document-clearance > div:has(#clearance-remarks) {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 80px;
+  }
+
+  .doctor-console #clearance-remarks {
+    flex: 1;
+    min-height: 56px;
+    height: 0;
+    resize: none !important;
+    overflow-y: auto;
+  }
+
+  .doctor-console .doctor-encounter-actions {
+    flex: none;
+    position: static;
+    margin-top: 8px;
+  }
+
+  .doctor-console .doctor-prior-attachments {
+    flex: none;
+    max-height: 90px;
+    overflow-y: auto;
+  }
+
+  .doctor-console #doctor-dental-panel:not([hidden]) {
+    flex: 1;
+    min-height: 0;
+    margin-bottom: 0 !important;
+    overflow-y: auto;
+  }
+}
+
+@media screen and (1024px <= width <= 1100px) and (min-height: 700px) {
+  .doctor-console .doctor-prescription-generator { gap: 3px; }
+  .doctor-console .doctor-panel { padding: 10px 12px; }
+  .doctor-console .doctor-panel-header { padding-bottom: 6px; margin-bottom: 6px; }
+  .doctor-console .doctor-formulary-details > div { padding: 6px; }
+  .doctor-console .doctor-formulary-details dt { font-size: 10.5px; }
+}
+
+@media screen and (min-width: 1101px) and (700px <= height <= 800px) {
+  .doctor-console .doctor-prescription-generator { gap: 4px; }
+  .doctor-console .doctor-formulary-details > div { padding: 6px 8px; }
+}
+
+@media screen and (min-width: 1024px) and (700px <= height <= 800px) {
+  .doctor-console[data-clinic-workspace='true'] .doctor-header {
+    margin-bottom: 4px;
+    padding-bottom: 4px;
+  }
+  .doctor-console[data-clinic-workspace='true'] .doctor-heading-icon { width: 28px; }
+  .doctor-console[data-clinic-workspace='true'] .doctor-header h1 { font-size: 20px; }
+  .doctor-console[data-clinic-workspace='true'] .doctor-signature-button {
+    min-height: 28px;
+    padding-block: 4px;
   }
 }

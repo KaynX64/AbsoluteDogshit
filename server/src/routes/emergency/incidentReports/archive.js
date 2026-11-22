@@ -8,11 +8,13 @@ import { generateAndStoreIncidentReportPDF } from '../../../documents/documentSe
 import { getBufferFromS3 } from '../../../utils/s3Vault.js';
 import { roleLabelFor } from '../../../emergency/responderAccess.js';
 
+// Mount the protected incident archive and report PDF download.
 export function registerIncidentArchiveRoutes(router) {
   // ===========================================================================
   // 3d. GET /api/emergency/incident-reports
   // Returns documented incident reports for administrators with archive access.
   // ===========================================================================
+  // List filed incident reports available to authorized callers.
   router.get('/incident-reports', authenticateToken, requireIncidentRecordsView, async (req, res) => {
     try {
       const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
@@ -70,7 +72,7 @@ export function registerIncidentArchiveRoutes(router) {
       const [rows] = await pool.query(query, params);
 
       res.json(
-        rows.map((row) => ({
+        rows.map(/* Format archived report identifiers, timestamps, and summary fields for the client. */ (row) => ({
           reportId: Number(row.report_id),
           alertId: Number(row.alert_id),
           resolvedAt: new Date(row.resolved_at).toISOString(),
@@ -110,6 +112,7 @@ export function registerIncidentArchiveRoutes(router) {
   // 3e. GET /api/emergency/incident-reports/:reportId/pdf
   // Serves the official incident report PDF to administrators with archive access.
   // ===========================================================================
+  // Stream the archived report PDF after checking permission and storage availability.
   router.get('/incident-reports/:reportId/pdf', authenticateToken, requireIncidentRecordsView, async (req, res) => {
     const reportId = Number(req.params.reportId);
     if (!reportId) return res.status(400).json({ error: 'Invalid report id.' });

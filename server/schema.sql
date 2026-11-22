@@ -448,6 +448,11 @@ CREATE TABLE `PRESCRIPTIONS` (
   `status` ENUM('active', 'dispensed', 'expired', 'cancelled') NOT NULL DEFAULT 'active',
   `notes` TEXT NULL,
   `qr_token` VARCHAR(255) NOT NULL UNIQUE COMMENT 'Signed reference: UUID + HMAC',
+  `contract_version` SMALLINT NOT NULL DEFAULT 1,
+  `issuance_request_id` CHAR(36) NULL,
+  `request_hash` CHAR(64) NULL,
+  `clinical_snapshot` LONGTEXT NULL,
+  UNIQUE INDEX `uq_rx_request` (`doctor_user_id`, `issuance_request_id`),
   `signature_metadata` JSON NULL COMMENT 'Signer ID, role, timestamp, document SHA-256',
   `pdf_s3_key` VARCHAR(500) NULL COMMENT 'MinIO S3 key for signed PDF',
   `pdf_retry_at` DATETIME NULL,
@@ -468,12 +473,15 @@ CREATE TABLE `PRESCRIPTION_ITEMS` (
   `item_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `prescription_id` BIGINT NOT NULL,
   `medicine_id` BIGINT NULL COMMENT 'NULL for outside (non-formulary) drugs purchased at an external pharmacy',
+  `catalog_medicine_id` BIGINT NULL,
+  `item_sequence` INT NULL,
+  `structured_details` TEXT NULL,
   `outside_name` VARCHAR(200) NULL COMMENT 'Free-text drug name for outside (non-formulary) items',
   `dosage` VARCHAR(100) NOT NULL,
   `frequency` VARCHAR(100) NOT NULL,
   `route` VARCHAR(50) NOT NULL DEFAULT 'Oral',
-  `duration_days` INT NOT NULL,
-  `quantity_prescribed` INT NOT NULL DEFAULT 1 COMMENT 'Quantity prescribed by clinician',
+  `duration_days` INT NULL,
+  `quantity_prescribed` DECIMAL(12,3) NOT NULL DEFAULT 1 COMMENT 'Quantity prescribed by clinician',
   `quantity_dispensed` INT NOT NULL DEFAULT 0 COMMENT 'Quantity actually dispensed by the infirmary (0 for outside drugs)',
   `instructions` TEXT NULL,
   `version` INT NOT NULL DEFAULT 1,
@@ -528,6 +536,11 @@ CREATE TABLE `EMERGENCY_ALERTS` (
   `response_time_seconds` INT NULL DEFAULT NULL,
   `location_label` VARCHAR(512) NULL,
   `notes` TEXT NULL,
+  `client_sos_id` CHAR(32) NULL,
+  `request_hash` CHAR(64) NULL,
+  `dispatch_after` DATETIME(3) NULL,
+  UNIQUE KEY `uq_sos_request` (`user_id`, `client_sos_id`),
+  INDEX `idx_sos_dispatch` (`dispatch_after`, `alert_id`),
   SPATIAL INDEX `sp_idx_alert_location` (`location`),
   CONSTRAINT `fk_ea_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`),
   CONSTRAINT `fk_ea_responder` FOREIGN KEY (`assigned_responder_id`) REFERENCES `USERS` (`user_id`) ON DELETE SET NULL
@@ -711,13 +724,14 @@ UPDATE `USERS` SET `is_qualified_responder` = 1,
        `qualified_responder_note` = 'Trained volunteer responder — seed demo (student)'
  WHERE `user_id` = 5;
 
--- STAFF_PROFILES (clinical + admin)
+-- STAFF_PROFILES (clinical, emergency response, and admin)
 -- admin_no is populated ONLY for the ADMIN role; NULL for the rest.
--- license_no is populated for DOCTOR / NURSE / DENTIST; NULL for ADMIN.
+-- license_no is populated for the seeded DOCTOR / NURSE / DENTIST accounts.
 INSERT INTO `STAFF_PROFILES` (`user_id`, `admin_no`, `license_no`, `specialty`, `department`) VALUES
 (1, 'PSU-ADM-2024-0001', NULL,             'System Administration',      'PSU Lingayen Clinic'),
 (2, NULL,                'PRC-MD-098765',  'General Medicine',           'PSU Lingayen Clinic'),
 (3, NULL,                'PRC-RN-054321',  'Emergency & Triage Nursing', 'PSU Lingayen Clinic'),
+(4, NULL,                NULL,             'Campus Emergency Response', 'PSU Lingayen Quick-Response Unit'),
 (6, NULL,                'PRC-DDS-045678', 'Dentistry & Oral Health',    'PSU Lingayen Clinic');
 
 -- HEALTH_PROFILES — minimal for the demo patient-side accounts

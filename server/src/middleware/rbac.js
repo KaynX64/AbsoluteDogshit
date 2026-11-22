@@ -2,11 +2,13 @@
 // server/src/middleware/rbac.js
 import { pool } from '../db/pool.js';
 
+// Build middleware that requires one of the supplied roles.
 export function requireRoles(...allowedRoles) {
-  return (req, res, next) => {
+  return /* Permit the request when at least one of the caller's roles is allowed. */ (req, res, next) => {
     if (!req.user || !req.user.roles) {
       return res.status(403).json({ error: 'Access forbidden: No roles assigned.' });
     }
+    // Check each assigned role against the allowed-role list.
     const hasRole = req.user.roles.some((role) => allowedRoles.includes(role));
     if (!hasRole) {
       return res.status(403).json({ error: 'Access forbidden: Insufficient permissions.' });
@@ -39,6 +41,7 @@ export async function getAdminPermissionCodes(userId, connection = pool) {
      WHERE uap.user_id = ?`,
     [userId]
   );
+  // Extract the administrator permission codes from the query result.
   return rows.map((r) => r.code);
 }
 
@@ -52,8 +55,10 @@ export async function resolveAdminPermissions(userId, connection = pool) {
   return classifyAdminPermissions(await getAdminPermissionCodes(userId, connection));
 }
 
+// Interpret stored administrator codes as Super Admin access or explicit grants.
 export function classifyAdminPermissions(codes) {
   const isSuper = codes.length === 0 || codes.includes('SUPER_ADMIN');
+  // Keep individual grants apart from the Super Admin marker.
   return { isSuper, codes: isSuper ? ['SUPER_ADMIN'] : codes.filter((c) => c !== 'SUPER_ADMIN') };
 }
 
@@ -67,6 +72,7 @@ export function classifyAdminPermissions(codes) {
  *   • Limited admins must hold the requested code.
  */
 export function requirePermission(code, { nonAdminRoles = [] } = {}) {
+  // Enforce the required permission using the caller's current roles and effective admin grants.
   return async (req, res, next) => {
     try {
       const roles = req.user?.roles;
@@ -74,7 +80,7 @@ export function requirePermission(code, { nonAdminRoles = [] } = {}) {
         return res.status(403).json({ error: 'Access forbidden: No roles assigned.' });
       }
       if (!roles.includes('ADMIN')) {
-        if (roles.some((role) => nonAdminRoles.includes(role))) return next();
+        if (roles.some(/* Check whether a non-admin role is allowed by the permission gate. */ (role) => nonAdminRoles.includes(role))) return next();
         return res.status(403).json({ error: 'Access forbidden: Insufficient permissions.' });
       }
 

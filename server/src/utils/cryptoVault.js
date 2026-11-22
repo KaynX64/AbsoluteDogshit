@@ -1,4 +1,4 @@
-// server/src/utils/cryptoVault.js
+// Encrypts and decrypts protected fields using versioned AES-GCM envelopes.
 //
 // AES-256-GCM field encryption for PHI.
 //

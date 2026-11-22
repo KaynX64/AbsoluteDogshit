@@ -15,11 +15,13 @@ import {
 } from '../../../config/appointmentRules.js';
 import { getServerPolicy } from '../../../config/serverPolicy.js';
 
+// Mount clinician, slot availability, and personal booking reads.
 export function registerBookingReads(router) {
   // ===========================================================================
   // 1. DOCTOR & PRACTITIONER ROSTER
   // ===========================================================================
 
+  // List eligible clinicians and their booking details.
   router.get('/doctors', authenticateToken, async (req, res) => {
     try {
       const [doctors] = await pool.query(
@@ -47,6 +49,7 @@ export function registerBookingReads(router) {
   // ===========================================================================
   // 2. TIME SLOT AVAILABILITY
   // ===========================================================================
+  // Compute available slots for the requested clinician and clinic day.
   router.get('/slots', authenticateToken, async (req, res) => {
     const { doctorId, date } = req.query;
 
@@ -90,7 +93,7 @@ export function registerBookingReads(router) {
         const availabilityByType = availabilityForHour(hourBlock, bookingsByHour, rules, isLunchBreak || isPast || isCascadeBlocked);
         slots.push({
           time, hourBlock, isPast, isLunchBreak, isCascadeBlocked, availabilityByType,
-          isAvailable: Object.values(availabilityByType).some((entry) => entry.available),
+          isAvailable: Object.values(availabilityByType).some(/* Check whether the hour is still bookable for any appointment type. */ (entry) => entry.available),
         });
       }
 
@@ -117,6 +120,7 @@ export function registerBookingReads(router) {
   // 3. PATIENT APPOINTMENT BOOKING & HISTORY
   // ===========================================================================
 
+  // Read the signed-in patient's appointments.
   router.get('/my', authenticateToken, requirePrivacyConsent, async (req, res) => {
     try {
       const [rows] = await pool.query(

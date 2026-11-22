@@ -20,12 +20,15 @@ npm run dist
 
 `npm run build` checks both TypeScript projects before building the renderer. `npm run dist` creates the Windows installer and unpacked app under `release/`. Do not edit or commit generated `dist/` or `release/` output.
 
-Windows uses `src/assets/valetudo_icon.ico` for the executable and the running window's taskbar icon. The packaged app also copies the icon into its resources folder for Electron to load at startup. Keep executable resource editing enabled and use the same application ID for Electron and the installer shortcuts. If an existing pin still shows the old icon after updating, unpin it, open the updated app, then pin it again.
+Windows uses `src/assets/valetudo_icon.ico` for the executable, the running window, and new taskbar pins. The installed app and its Start Menu shortcut share a Windows application ID. Development uses a separate ID so a shortcut to Electron cannot share the installed app's taskbar button. If an existing pin still shows the old icon, unpin it and pin the updated app from the Start Menu.
 
 ## Verification
 
 ```powershell
 npm test
+# Check clinic layouts and admin workspace scrolling
+npm run build
+npm run test:layout
 npm run test:smoke
 # To test a different unpacked Windows build
 npm run test:smoke -- 'release/alternate/win-unpacked/Valetudo HealthLink.exe'
@@ -33,9 +36,13 @@ npm run test:smoke -- 'release/alternate/win-unpacked/Valetudo HealthLink.exe'
 npm run test:smoke -- 'release/alternate/win-unpacked/Valetudo HealthLink.exe' --offline-only
 ```
 
-The packaged smoke test launches the unpacked app with a temporary profile, uses synthetic renderer fixtures, and reports login, fixture sign-in, role-switch timings, and renderer JavaScript heap snapshots. It checks the preload bridge, local assets, SQLite replay, encounter submission, role switching, profile saves, and staff analytics permissions. Use a recent Node.js release with native WebSocket and SQLite support.
+Packaged smoke tests use synthetic data and an isolated profile to check preload, assets, SQLite replay, encounters, roles, profiles and permissions. They report startup timings and heap snapshots. Use Node.js with native WebSocket and SQLite support.
 
 ## Desktop interaction
+
+The dedicated responder console shows when each SOS was reported in Philippine time (PHT).
+
+Doctor/Dentist sections use a [compact, contained layout](docs/COMPACT-CLINIC.md). Prescribing supports multiple medicines with clinic/external fulfillment per item, a retained session draft and explicit review before issue. Server support must be enabled; see [prescribing rollout and checks](../server/PRESCRIBING-ROLLOUT.md).
 
 Choose **Sign out** in the sidebar and confirm to end your session.
 
@@ -43,13 +50,13 @@ Super Admins can grant **Use server Terminal** when creating or editing a Limite
 
 Student, Faculty and Non-Teaching account creation includes optional sex, date of birth and emergency contact details.
 
+Database Studio, account lists, Privacy & audit, and Incident Records keep their controls visible at desktop window sizes. Scroll within a table, the System tables list, or the incident list to see more records. Database Studio's pagination stays below the table.
+
 The Admin Terminal focuses its command prompt as soon as the tab opens. Press Enter to run a command and keep typing in the prompt. New output stays in view while the terminal is following the latest line. Requests time out without locking the prompt.
 
-Hover over an analytics line graph to highlight the nearest reporting day and see its count. Use **View data** to read the same values with the keyboard.
+Hover over an analytics line graph to highlight the nearest reporting day and see its count. Use **View data** to read the same values with the keyboard. Expanded tables scroll within the workspace.
 
-Use the sidebar to change workspaces. In tab groups, use Left and Right Arrow to move, and Home or End to jump to the first or last tab. Doctor/Dentist and Analytics activate local panels as focus moves. Account and Inventory views activate with Enter or Space.
-
-Modal dialogs keep the keyboard inside and return focus when dismissed. Read-only previews support clicking outside. Editable dialogs use their Close, Cancel, or Return to form actions. During a save, wait for the result. For a failed save, use the action again after reviewing the error. SOS incident documentation still supports **Skip for now**.
+Use the sidebar and keyboard to navigate. See [keyboard and dialog behavior](docs/COMPACT-CLINIC.md#keyboard-and-dialogs) for tab activation, focus and draft handling.
 
 Controls lift or press by 1 px, with 90 ms press feedback and a 140 ms release. Tabs enter in 220 ms and slide 4 px in the direction of selection. Main sidebar views slide 8 px and fade in over 240 ms. Later destinations enter from the right and earlier ones from the left. Switching roles uses a fade. SOS messages and analytics access changes appear immediately. Windows reduced-motion settings and print disable these effects.
 
@@ -59,7 +66,7 @@ The sign-in screen loads first. The renderer starts loading a single shared staf
 
 Offline storage opens on the first signed-in account. The first sign-in after upgrading may need to migrate the legacy SQLite database before offline actions become available.
 
-In three alternating packaged smoke runs with temporary profiles, initial JavaScript fell from 770 KB to 336 KB and median time to the sign-in form went from 731 ms to 675 ms. Individual startup times varied.
+Three alternating packaged runs reduced initial JavaScript from 770 KB to 336 KB and median sign-in form paint from 731 ms to 675 ms; timings varied.
 
 ## Offline storage
 

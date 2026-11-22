@@ -14,6 +14,7 @@ import { renderExcel } from '../../analytics/reports/excel.js';
 import { renderPdf } from '../../analytics/reports/pdf.js';
 import { requireAnalyticsExport } from '../../analytics/access.js';
 
+// Load the report data allowed by the caller's analytics scopes.
 async function loadReport(scopes, { orderByExpiry = false, diagnosisLimit, compact = false } = {}) {
   const canViewInventory = scopes.has('ANALYTICS_PHARMACY');
   const canViewDispensing = scopes.has('ANALYTICS_DISPENSING');
@@ -28,12 +29,15 @@ async function loadReport(scopes, { orderByExpiry = false, diagnosisLimit, compa
   return { roles, topDiagnoses: diagnoses?.slice(0, diagnosisLimit), deptBreakdown, inventory, surveillance, pharmacy };
 }
 
+// Set the media type and suggested filename for a report download.
 function attachment(res, type, filename) {
   res.setHeader('Content-Type', type);
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 }
 
+// Mount CSV, Excel, and PDF downloads behind the shared export gate.
 export function registerAnalyticsExports(router) {
+  // Render the authorized report data as a CSV attachment.
   router.get('/export/csv', requireAnalyticsExport, async (req, res) => {
     try {
       const csv = renderCsv(await loadReport(req.analyticsScopes, { diagnosisLimit: 10 }));
@@ -45,6 +49,7 @@ export function registerAnalyticsExports(router) {
     }
   });
 
+  // Render the authorized report data as an Excel workbook attachment.
   router.get('/export/excel', requireAnalyticsExport, async (req, res) => {
     try {
       const workbook = renderExcel(await loadReport(req.analyticsScopes, { orderByExpiry: true }));
@@ -58,6 +63,7 @@ export function registerAnalyticsExports(router) {
     }
   });
 
+  // Render the authorized report data as a PDF attachment.
   router.get('/export/pdf', requireAnalyticsExport, async (req, res) => {
     try {
       const pdf = await renderPdf(await loadReport(req.analyticsScopes, { compact: true, diagnosisLimit: 8 }));

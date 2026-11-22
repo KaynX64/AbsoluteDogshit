@@ -14,6 +14,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/api_config.dart';
 import 'responder_roster.dart';
+import 'mobile_session_data.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -94,6 +95,7 @@ class EmergencyAlertService {
   final roster = ResponderRoster();
   final delivery = ValueNotifier(DeliveryStatus.pending);
   final notificationOpen = ValueNotifier<int?>(null);
+  final incidentReportChanges = ValueNotifier(0);
   final _storage = const FlutterSecureStorage(
     aOptions: AndroidOptions(storageNamespace: 'responder_device'),
   );
@@ -101,6 +103,7 @@ class EmergencyAlertService {
 
   static const _installationKey = 'responder_installation_id';
   static const _modeKey = 'responder_duty_mode';
+  static const _retireTokenKey = 'retire_previous_fcm_token';
   static const _audibleChannel = 'responder_sos_audible_v1';
   static const _quietChannel = 'responder_sos_quiet_v1';
   static const _foregroundChannel = 'responder_sos_foreground_v1';
@@ -123,6 +126,7 @@ class EmergencyAlertService {
   Future<bool>? _channels;
   Future<void>? _permission;
   Future<void>? _registration;
+  Future<bool>? _retiringPushToken;
   Future<void> _modeWrites = Future.value();
   final _announced = <int>{};
   final _updating = <int>{};
@@ -151,6 +155,7 @@ class EmergencyAlertService {
   void beginSession(String token, Object? userId) {
     endSession(preserveNotification: _jwt == null && !_terminating);
     _jwt = token;
+    MobileSessionData.instance.begin(token);
     _terminating = false;
     roster.begin(Incident.readId(userId));
     final session = _session;
@@ -191,6 +196,7 @@ class EmergencyAlertService {
   }
 
   void endSession({bool preserveNotification = false}) {
+    MobileSessionData.instance.clear();
     _session++;
     _accessVersion++;
     _jwt = null;
@@ -245,34 +251,68 @@ class EmergencyAlertService {
   }
 
   Future<void> signOut(String? token) async {
+    var released = token == null;
     try {
       if (token != null) {
         final device = await terminationDevice();
-        await _http
+        final response = await _http
             .post(
               _url('/api/auth/logout'),
               headers: _headers(token),
               body: jsonEncode(device),
             )
             .timeout(_timeout);
+        if (response.statusCode == 200) {
+          final body = jsonDecode(response.body);
+          released = body is Map && body['deviceReleased'] != false;
+        }
       }
     } catch (_) {
       debugPrint('Remote sign-out could not be confirmed.');
-    } finally {
-      _terminating = true;
-      endSession();
+    }
+    _terminating = true;
+    endSession();
+    if (!released && _android) {
+      try {
+        await _storage.write(key: _retireTokenKey, value: '1');
+        await _retirePushTokenIfNeeded();
+      } catch (_) {
+        debugPrint('Push token retirement could not be saved.');
+      }
+    }
+  }
+
+  Future<bool> _retirePushTokenIfNeeded() => _retiringPushToken ??=
+      _retirePushToken().whenComplete(() => _retiringPushToken = null);
+
+  Future<bool> _retirePushToken() async {
+    if (!_android) return true;
+    try {
+      if (await _storage.read(key: _retireTokenKey) == null) return true;
+      if (!await initializeFirebase().timeout(_timeout)) return false;
+      await FirebaseMessaging.instance.deleteToken().timeout(
+        const Duration(seconds: 2),
+      );
+      _fcmToken = null;
+      await _storage.delete(key: _retireTokenKey);
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
   void setForeground(bool value) {
     _foreground = value;
     _updateAlarm();
-    if (!value || !_requestInitialized) return;
+    if (!value) return;
     unawaited(recover());
   }
 
   Future<void> recover() async {
-    if (!_requestInitialized) return;
+    if (!_requestInitialized) {
+      if (_jwt == null) await _retirePushTokenIfNeeded();
+      return;
+    }
     await refreshAccess();
     if (_automatic) await refreshIncidents();
     if (delivery.value != DeliveryStatus.saved) unawaited(_syncRegistration());
@@ -310,8 +350,12 @@ class EmergencyAlertService {
         final status = IncidentStatus.read(value['status']);
         if (id != null && status != null) {
           roster.statusChanged(id, status);
+          if (status == IncidentStatus.resolved) incidentReportChanges.value++;
           if (status != IncidentStatus.triggered) _cancelLocalNotification(id);
         }
+      });
+      socket.on('emergency:incident_reported', (_) {
+        if (_current(session)) incidentReportChanges.value++;
       });
       socket.connect();
     } catch (_) {
@@ -460,6 +504,7 @@ class EmergencyAlertService {
       }
       if (response.statusCode == 200) {
         roster.statusChanged(id, status);
+        if (status == IncidentStatus.resolved) incidentReportChanges.value++;
         _cancelLocalNotification(id);
         return null;
       }
@@ -485,6 +530,67 @@ class EmergencyAlertService {
     } finally {
       if (_current(session) && access == _accessVersion) _updating.remove(id);
     }
+  }
+
+  Future<List<({int id, DateTime? resolvedAt})>>
+  pendingIncidentReports() async {
+    final response = await _requestIncidentReport(
+      '/incident-reports/pending?summary=1',
+    );
+    if (response.statusCode != 200) {
+      throw StateError('Pending reports unavailable');
+    }
+    final rows = jsonDecode(response.body) as List;
+    return [
+      for (final row in rows.whereType<Map>())
+        if (Incident.readId(row['alertId']) case final id?)
+          (
+            id: id,
+            resolvedAt: DateTime.tryParse(row['resolvedAt']?.toString() ?? '')
+                ?.toLocal(),
+          ),
+    ];
+  }
+
+  Future<bool> fileIncidentReport(int id, String details, String notes) async {
+    final response = await _requestIncidentReport(
+      '/$id/incident-report',
+      body: {'incident_details': details, 'treatment_notes': notes},
+    );
+    if (response.statusCode == 201) return true;
+    if (response.statusCode == 409 &&
+        jsonDecode(response.body)['code'] == 'REPORT_ALREADY_FILED') {
+      return false;
+    }
+    throw StateError('Could not file report');
+  }
+
+  Future<http.Response> _requestIncidentReport(
+    String path, {
+    Map<String, String>? body,
+  }) async {
+    final token = _jwt;
+    final session = _session, access = _accessVersion;
+    if (token == null || !roster.eligible || _terminating) {
+      throw StateError('Responder access unavailable');
+    }
+    final uri = _url('/api/emergency$path');
+    final response =
+        await (body == null
+                ? _http.get(uri, headers: _headers(token))
+                : _http.post(
+                    uri,
+                    headers: _headers(token),
+                    body: jsonEncode(body),
+                  ))
+            .timeout(_timeout);
+    if (!_current(session) || _terminating || access != _accessVersion) {
+      throw StateError('Responder access changed');
+    }
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      _clearAccess();
+    }
+    return response;
   }
 
   Future<void> setDutyMode(ResponderDutyMode mode) async {
@@ -657,6 +763,10 @@ class EmergencyAlertService {
   Future<void> _register(String token, int session) async {
     delivery.value = DeliveryStatus.pending;
     try {
+      if (!await _retirePushTokenIfNeeded()) {
+        throw StateError('Push token retirement pending');
+      }
+      if (!_current(session) || _terminating) return;
       if (_android && !await (_channels ??= _initializeNotifications())) {
         throw StateError('SOS channels unavailable');
       }
@@ -749,11 +859,6 @@ class EmergencyAlertService {
           importance: Importance.high,
           playSound: false,
           enableVibration: false,
-        ),
-        AndroidNotificationChannel(
-          'student_sos_confirmation_channel',
-          'SOS Dispatch Confirmation',
-          importance: Importance.high,
         ),
         AndroidNotificationChannel(
           'clinic_queue_channel',
@@ -932,32 +1037,6 @@ class EmergencyAlertService {
         debugPrint('Alarm playback is unavailable.');
       }
     });
-  }
-
-  Future<void> showStudentSosSentNotification() async {
-    const AndroidNotificationDetails androidDetails =
-        AndroidNotificationDetails(
-          'student_sos_confirmation_channel',
-          'SOS Dispatch Confirmation',
-          channelDescription: 'Emergency dispatch confirmation',
-          importance: Importance.high,
-          priority: Priority.high,
-          ticker: 'SOS Dispatched',
-          playSound: true,
-          enableVibration: true,
-          fullScreenIntent: false,
-        );
-
-    const NotificationDetails platformDetails = NotificationDetails(
-      android: androidDetails,
-    );
-
-    await _showNotification(
-      101,
-      '🚨 SOS Alert Dispatched',
-      'Your SOS has been broadcasted. Responders have your GPS coordinates and medical profile.',
-      platformDetails,
-    );
   }
 
   Future<void> showAppointmentConfirmedNotification([

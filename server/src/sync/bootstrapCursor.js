@@ -3,15 +3,18 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { JWT_SECRET } from '../utils/secrets.js';
 
+// Sign the encoded cursor payload using the offline bootstrap HMAC namespace.
 function signature(payload) {
   return createHmac('sha256', JWT_SECRET).update('offline-bootstrap-v1:').update(payload).digest();
 }
 
+// Encode and sign the current scan position for the requesting user.
 export function encodeBootstrapCursor(scan, userId) {
   const payload = Buffer.from(JSON.stringify({ scan, userId: String(userId) })).toString('base64url');
   return payload + '.' + signature(payload).toString('base64url');
 }
 
+// Verify the cursor signature, user binding, and payload shape before returning the scan position.
 export function decodeBootstrapCursor(token, userId) {
   if (typeof token !== 'string' || token.length > 1024) return null;
   const [payload, digest, extra] = token.split('.');

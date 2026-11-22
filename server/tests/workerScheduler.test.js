@@ -5,9 +5,11 @@ import { setImmediate } from 'node:timers/promises';
 import { test } from 'node:test';
 import { getWorkerStats, startScheduler } from '../src/workers/scheduler.js';
 
+// Verify that each job skips its own busy ticks and stopping drains pending work.
 test('each job skips its own busy ticks and stopping drains pending work', async t => {
   t.mock.timers.enable({ apis: ['setInterval'] });
   const { promise, resolve } = Promise.withResolvers();
+  // Return pending work so the test can exercise overlapping job ticks.
   const slow = t.mock.fn(() => promise);
   const fast = t.mock.fn();
   const stop = startScheduler([
@@ -36,10 +38,13 @@ test('each job skips its own busy ticks and stopping drains pending work', async
   assert.equal(fast.mock.callCount(), 2);
 });
 
+// Verify that a worker failure is logged and the job runs again on the next tick.
 test('a worker failure is logged and the job runs again on the next tick', async t => {
   t.mock.timers.enable({ apis: ['setInterval'] });
+  // Capture worker error logs without printing the expected failure.
   const log = t.mock.method(console, 'error', () => {});
   const run = t.mock.fn();
+  // Simulate a single failed run before allowing the next scheduled tick.
   run.mock.mockImplementationOnce(() => {
     throw new Error('fixture failure');
   });
@@ -47,22 +52,25 @@ test('a worker failure is logged and the job runs again on the next tick', async
 
   t.mock.timers.tick(10);
   await setImmediate();
-  assert.deepEqual(log.mock.calls.map(call => call.arguments), [
+  assert.deepEqual(log.mock.calls.map(/* Extract the recorded console call arguments for the failure assertion. */ call => call.arguments), [
     ['[Retrying job Error]:', 'Error'],
   ]);
 
   t.mock.timers.tick(10);
   await stop();
   assert.equal(run.mock.callCount(), 2);
+  // Find the tested worker's telemetry after it resumes.
   const stats = getWorkerStats().find(job => job.name === 'Retrying job');
   assert.equal(stats.failures, 1);
   assert.equal(stats.outcome, 'success');
   assert.ok(stats.lastSuccessAt);
 });
 
+// Verify that only opted-in jobs run at startup and a busy startup run skips the next tick.
 test('only opted-in jobs run at startup and a busy startup run skips the next tick', async t => {
   t.mock.timers.enable({ apis: ['setInterval'] });
   const { promise, resolve } = Promise.withResolvers();
+  // Hold the immediate startup run open to check that the next tick skips it.
   const immediate = t.mock.fn(() => promise);
   const deferred = t.mock.fn();
   const stop = startScheduler([

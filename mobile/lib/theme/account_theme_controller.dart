@@ -33,6 +33,13 @@ class AccountThemeSelection {
         ),
       );
 
+  @override
+  bool operator ==(Object other) =>
+      other is AccountThemeSelection &&
+      other.dark == dark &&
+      other.preset == preset;
+  @override
+  int get hashCode => Object.hash(dark, preset);
   final bool dark;
   final ThemePreset preset;
 
@@ -57,6 +64,15 @@ class AccountThemeController extends ChangeNotifier {
   final http.Client _client;
   AccountThemeSelection _selection = const AccountThemeSelection();
   AccountThemeSelection get selection => _selection;
+  final appearance = ValueNotifier(const AccountThemeSelection());
+  String? _lastPersisted;
+  Future<void>? _refreshing;
+  @override
+  void notifyListeners() {
+    appearance.value = _selection;
+    super.notifyListeners();
+  }
+
   ThemeSaveState _state = ThemeSaveState.idle;
   ThemeSaveState get state => _state;
   String? _accountId;
@@ -75,11 +91,13 @@ class AccountThemeController extends ChangeNotifier {
     bool fromCache = false,
   }) async {
     final session = ++_session;
+    _refreshing = null;
     _accountId = user['user_id']?.toString();
     _token = _accountId == null ? null : token;
     _revision++;
     _pending = false;
     _storageFailed = false;
+    _lastPersisted = null;
     _selection = AccountThemeSelection.fromJson(user);
     _state = isBound ? ThemeSaveState.saved : ThemeSaveState.idle;
     notifyListeners();
@@ -90,6 +108,10 @@ class AccountThemeController extends ChangeNotifier {
       if (session != _session) return;
       if (raw != null) {
         final cached = jsonDecode(raw) as Map<String, dynamic>;
+        _lastPersisted = jsonEncode({
+          ...AccountThemeSelection.fromJson(cached).toJson(),
+          'pending': cached['pending'] == true,
+        });
         // Pending local edits win until uploaded. Otherwise fresh account data wins.
         if (fromCache ||
             cached['pending'] == true ||
@@ -105,8 +127,11 @@ class AccountThemeController extends ChangeNotifier {
     if (session != _session) return;
     _state = _pending ? ThemeSaveState.pending : ThemeSaveState.saved;
     notifyListeners();
-    await _persist(session);
-    if (session == _session && _pending) unawaited(retry());
+    unawaited(
+      _persist(session).then((_) {
+        if (session == _session && _pending) unawaited(retry());
+      }),
+    );
   }
 
   String get _cacheKey => 'account_theme_$_accountId';
@@ -131,10 +156,13 @@ class AccountThemeController extends ChangeNotifier {
     final key = _cacheKey;
     final value = jsonEncode({..._selection.toJson(), 'pending': _pending});
     _cacheWrites = _cacheWrites.catchError((Object _) {}).then((_) async {
-      if (session != _session) return;
+      if (session != _session || value == _lastPersisted) return;
       try {
         await storage.write(key: key, value: value);
-        if (session == _session) _storageFailed = false;
+        if (session == _session) {
+          _lastPersisted = value;
+          _storageFailed = false;
+        }
       } catch (_) {
         if (session == _session) {
           _storageFailed = true;
@@ -156,7 +184,9 @@ class AccountThemeController extends ChangeNotifier {
         _state = ThemeSaveState.saving;
         notifyListeners();
         await _persist(session);
-        if (session != _session || revision != _revision || _storageFailed) return;
+        if (session != _session || revision != _revision || _storageFailed) {
+          return;
+        }
         _state = ThemeSaveState.saved;
         notifyListeners();
         return;
@@ -194,7 +224,16 @@ class AccountThemeController extends ChangeNotifier {
   }
 
   /// Called on reconnect/resume. Never replace unsaved local work with an older read.
-  Future<void> refresh() async {
+  Future<void> refresh() {
+    final running = _refreshing;
+    if (running != null) return running;
+    final session = _session;
+    return _refreshing = _refresh().whenComplete(() {
+      if (session == _session) _refreshing = null;
+    });
+  }
+
+  Future<void> _refresh() async {
     if (!isBound) return;
     final session = _session;
     if (_pending) {
@@ -214,9 +253,15 @@ class AccountThemeController extends ChangeNotifier {
           response.statusCode != 200) {
         return;
       }
-      _selection = AccountThemeSelection.fromJson(
+      final next = AccountThemeSelection.fromJson(
         jsonDecode(response.body) as Map<String, dynamic>,
       );
+      if (next == _selection &&
+          _state == ThemeSaveState.saved &&
+          !_storageFailed) {
+        return;
+      }
+      _selection = next;
       _state = ThemeSaveState.saved;
       notifyListeners();
       await _persist(session);
@@ -227,6 +272,8 @@ class AccountThemeController extends ChangeNotifier {
 
   void reset() {
     _session++;
+    _refreshing = null;
+    _lastPersisted = null;
     _revision++;
     _accountId = null;
     _token = null;
@@ -239,6 +286,7 @@ class AccountThemeController extends ChangeNotifier {
   @override
   void dispose() {
     _session++;
+    appearance.dispose();
     super.dispose();
   }
 }

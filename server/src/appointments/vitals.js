@@ -10,6 +10,7 @@ export const VITAL_RULES = {
   weight: { label: 'Weight', unit: 'kg', min: 1, max: 500, integer: false },
 };
 
+// Validate structured measurements and normalize the supplied values.
 export function validateVitals(input) {
   const values = {};
   const errors = {};
@@ -45,6 +46,7 @@ export function validateVitals(input) {
   return { values, errors };
 }
 
+// Validate intake draft values and split blood pressure into its component readings.
 export function validateTriageVitals({ blood_pressure, temperature, pulse, spo2, resp_rate, height, weight }) {
   const pressure = typeof blood_pressure === 'string' ? blood_pressure.trim() : blood_pressure;
   const parts = typeof pressure === 'string' ? /^(\d{1,3})[ \t]*\/[ \t]*(\d{1,3})$/.exec(pressure) : null;
@@ -84,6 +86,7 @@ export function triageDraftError(field, draft) {
   return Number(text) > max ? `Edit rejected. The maximum is ${max} ${unit}.` : undefined;
 }
 
+// Format the measurements actually recorded at intake as a note.
 export function formatTriageNote(vitals) {
   const { systolic_bp, diastolic_bp, temperature, pulse, spo2, resp_rate, height, weight } = vitals;
   const readings = [

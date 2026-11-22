@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Create the HTTPS server with local certificates or use the explicitly enabled HTTP fallback.
 export function createHttpServer(app) {
   const certPath = path.join(__dirname, '../certs/cert.pem');
   const keyPath = path.join(__dirname, '../certs/key.pem');

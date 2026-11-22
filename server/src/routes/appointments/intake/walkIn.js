@@ -9,10 +9,12 @@ import { reserveQueueTicket } from '../../../appointments/queueTickets.js';
 import { validateVitals } from '../../../appointments/vitals.js';
 import { intakeCounterId, findActiveQueueEntry } from './activeQueue.js';
 
+// Mount the walk-in registration endpoint.
 export function registerWalkIn(router, io) {
   // ===========================================================================
   // 6.1 POST /api/appointments/walk-in
   // ===========================================================================
+  // Record walk-in intake and provisional clinical details and assign a queue ticket.
   router.post('/walk-in', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
     const { patient_user_id, visit_type, notes, vitals, sex, date_of_birth } = req.body;
 
