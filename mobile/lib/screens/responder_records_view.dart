@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../models/responder_records.dart';
 import '../services/emergency_alert_service.dart';
+import '../widgets/responder_record_card.dart';
+import '../widgets/responder_record_filters.dart';
+import '../widgets/responder_style.dart';
 import 'responder_record_detail.dart';
 
 class ResponderRecordsView extends StatefulWidget {
@@ -11,9 +14,11 @@ class ResponderRecordsView extends StatefulWidget {
     super.key,
     required this.service,
     this.history = false,
+    this.active = true,
   });
   final EmergencyAlertService service;
   final bool history;
+  final bool active;
   @override
   State<ResponderRecordsView> createState() => _ResponderRecordsViewState();
 }
@@ -22,6 +27,19 @@ class _ResponderRecordsViewState extends State<ResponderRecordsView>
     with WidgetsBindingObserver {
   final _search = TextEditingController();
   final _records = <ResponderRecord>[];
+  final _cache =
+      <
+        String,
+        ({
+          List<ResponderRecord> records,
+          String? cursor,
+          DateTime at,
+          int revision,
+        })
+      >{};
+  String? _loadedKey;
+  int _revision = 0;
+  bool _dirty = false;
   Completer<void>? _abort;
   Timer? _debounce;
   String _tab = 'pending', _period = 'all', _outcome = 'all';
@@ -38,7 +56,9 @@ class _ResponderRecordsViewState extends State<ResponderRecordsView>
     widget.service.incidentReportChanges.addListener(_refresh);
     widget.service.roster.addListener(_accessChanged);
     widget.service.reportSummary.addListener(_summaryChanged);
-    unawaited(widget.service.refreshReportSummary());
+    if (widget.service.reportSummary.value == null) {
+      unawaited(widget.service.refreshReportSummary());
+    }
     unawaited(_load());
   }
 
@@ -54,6 +74,21 @@ class _ResponderRecordsViewState extends State<ResponderRecordsView>
     super.dispose();
   }
 
+  @override
+  void didUpdateWidget(covariant ResponderRecordsView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.active && oldWidget.active) {
+      _dirty = _dirty || _loading;
+      _debounce?.cancel();
+      _cancel();
+      _loading = false;
+    }
+    if (widget.active && !oldWidget.active) {
+      unawaited(_load(force: _dirty));
+      _dirty = false;
+    }
+  }
+
   void _cancel() {
     if (_abort?.isCompleted == false) _abort!.complete();
   }
@@ -65,6 +100,7 @@ class _ResponderRecordsViewState extends State<ResponderRecordsView>
     _cancel();
     if (!mounted) return;
     setState(() {
+      _cache.clear();
       _records.clear();
       _cursor = null;
     });
@@ -72,10 +108,16 @@ class _ResponderRecordsViewState extends State<ResponderRecordsView>
   }
 
   void _summaryChanged() {
+    if (widget.service.reportSummary.value?.canViewFiled != true) {
+      _cache.removeWhere((key, _) => key.startsWith('/reports?'));
+    }
     if (!widget.history &&
         _tab == 'filed' &&
         widget.service.reportSummary.value?.canViewFiled != true) {
+      _cancel();
       setState(() {
+        _records.clear();
+        _loadedKey = null;
         _tab = 'pending';
         _period = 'all';
       });
@@ -89,28 +131,27 @@ class _ResponderRecordsViewState extends State<ResponderRecordsView>
   }
 
   void _refresh() {
+    _revision++;
+    _cancel();
+    if (!widget.active) {
+      _dirty = true;
+      return;
+    }
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 200), () {
-      unawaited(_load());
+      unawaited(_load(force: true));
       unawaited(widget.service.refreshReportSummary());
     });
   }
 
   String _date(DateTime value) =>
       '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
-  Future<void> _load({bool more = false}) async {
+  Future<void> _load({bool more = false, bool force = false}) async {
+    _debounce?.cancel();
     _cancel();
     final abort = Completer<void>();
     _abort = abort;
     if (!widget.service.roster.canManageIncidents) return;
-    setState(() {
-      _loading = true;
-      _error = null;
-      if (!more) {
-        _records.clear();
-        _cursor = null;
-      }
-    });
     final query = <String, String>{
       'limit': '25',
       'search': _search.text.trim(),
@@ -118,13 +159,31 @@ class _ResponderRecordsViewState extends State<ResponderRecordsView>
       'status': _outcome,
       if (_range != null && _period == 'custom') 'from': _date(_range!.start),
       if (_range != null && _period == 'custom') 'to': _date(_range!.end),
-      if (more && _cursor != null) 'before': _cursor!,
     };
     final path = widget.history
         ? '/history'
         : _tab == 'filed'
         ? '/reports'
         : '/report-worklist';
+    final key = '$path?${Uri(queryParameters: query).query}';
+    final saved = _cache[key];
+    final fresh =
+        saved != null &&
+        saved.revision == _revision &&
+        DateTime.now().difference(saved.at) < const Duration(seconds: 15);
+    setState(() {
+      _error = null;
+      if (!more && _loadedKey != key) {
+        _records
+          ..clear()
+          ..addAll(saved?.records ?? []);
+        _cursor = saved?.cursor;
+      }
+      _loadedKey = key;
+      _loading = more || force || !fresh;
+    });
+    if (!more && !force && fresh) return;
+    if (more && _cursor != null) query['before'] = _cursor!;
     try {
       final page = await widget.service.readResponderRecords(
         '$path?${Uri(queryParameters: query).query}',
@@ -136,13 +195,23 @@ class _ResponderRecordsViewState extends State<ResponderRecordsView>
         throw StateError('Update the server to use responder history.');
       }
       setState(() {
+        if (!more) _records.clear();
+        final ids = _records.map((row) => row.id).toSet();
         for (final data in rows.cast<Map<String, dynamic>>()) {
           final row = ResponderRecord(data);
-          if (!_records.any((existing) => existing.id == row.id)) {
+          if (ids.add(row.id)) {
             _records.add(row);
           }
         }
         _cursor = page['nextCursor'] as String?;
+        _cache.remove(key);
+        _cache[key] = (
+          records: List.of(_records),
+          cursor: _cursor,
+          at: DateTime.now(),
+          revision: _revision,
+        );
+        if (_cache.length > 6) _cache.remove(_cache.keys.first);
       });
     } catch (error) {
       if (mounted && !abort.isCompleted) {
@@ -155,8 +224,18 @@ class _ResponderRecordsViewState extends State<ResponderRecordsView>
     }
   }
 
+  void _selectTab(String value) {
+    if (_tab == value) return;
+    setState(() {
+      _tab = value;
+      _period = value == 'filed' ? '30' : 'all';
+    });
+    unawaited(_load());
+  }
+
   Future<void> _choosePeriod(String? value) async {
     if (value == null) return;
+    if (value == _period && value != 'custom') return;
     if (value == 'custom') {
       final range = await showDateRangePicker(
         context: context,
@@ -191,47 +270,77 @@ class _ResponderRecordsViewState extends State<ResponderRecordsView>
           child: Text('History and reports are restricted to response staff.'),
         );
       }
+      final theme = Theme.of(context), colors = theme.colorScheme;
       final summary = widget.service.reportSummary.value;
       return RefreshIndicator(
         onRefresh: () async {
           await widget.service.refreshAccess();
-          await _load();
+          _revision++;
+          await _load(force: true);
           await widget.service.refreshReportSummary();
         },
         child: CustomScrollView(
+          key: PageStorageKey(
+            widget.history ? 'responder-history' : 'responder-reports',
+          ),
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      widget.history ? 'Alert history' : 'Incident reports',
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                    Text(
-                      widget.history
-                          ? 'Closed incidents and recorded activity'
-                          : 'Read-only on mobile · complete reports on desktop',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    if (!widget.history && summary != null)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 4,
-                          children: [
-                            Chip(label: Text('${summary.pending} pending')),
-                            Chip(
-                              avatar: const Icon(Icons.schedule, size: 18),
-                              label: Text('${summary.overdue} over 24 hours'),
-                            ),
-                          ],
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                widget.history
+                                    ? 'Alert history'
+                                    : 'Incident reports',
+                                style: theme.textTheme.headlineSmall,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                widget.history
+                                    ? 'Closed incidents and recorded activity'
+                                    : 'Read-only on mobile · complete reports on desktop',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: colors.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
+                        IconButton.filledTonal(
+                          tooltip: 'Refresh records',
+                          onPressed: _loading ? null : _refresh,
+                          icon: const Icon(Icons.refresh_rounded, size: 22),
+                        ),
+                      ],
+                    ),
+                    if (!widget.history && summary != null) ...[
+                      const SizedBox(height: 16),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          ResponderBadge(
+                            label: '${summary.pending} pending',
+                            icon: Icons.assignment_late_outlined,
+                          ),
+                          ResponderBadge(
+                            label: '${summary.overdue} over 24 hours',
+                            icon: Icons.schedule_rounded,
+                            attention: true,
+                          ),
+                        ],
                       ),
+                    ],
                     if (widget.service.reportSummaryError.value
                         case final error?)
                       TextButton.icon(
@@ -239,52 +348,43 @@ class _ResponderRecordsViewState extends State<ResponderRecordsView>
                         icon: const Icon(Icons.refresh),
                         label: Text(error),
                       ),
-                    if (!widget.history)
+                    if (!widget.history) ...[
+                      const SizedBox(height: 16),
                       Wrap(
                         spacing: 8,
+                        runSpacing: 8,
                         children: [
-                          ChoiceChip(
-                            label: const Text('Pending'),
-                            selected: _tab == 'pending',
-                            onSelected: (_) {
-                              setState(() {
-                                _tab = 'pending';
-                                _period = 'all';
-                              });
-                              unawaited(_load());
-                            },
+                          _tabButton(
+                            'pending',
+                            'Pending',
+                            Icons.pending_actions_rounded,
                           ),
                           if (summary?.canViewFiled == true)
-                            ChoiceChip(
-                              label: const Text('Filed'),
-                              selected: _tab == 'filed',
-                              onSelected: (_) {
-                                setState(() {
-                                  _tab = 'filed';
-                                  _period = '30';
-                                });
-                                unawaited(_load());
-                              },
+                            _tabButton(
+                              'filed',
+                              'Filed',
+                              Icons.task_alt_rounded,
                             ),
                         ],
                       ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _search,
-                      decoration: InputDecoration(
-                        labelText: 'Search records',
-                        hintText: 'Incident, report, name, ID or location',
-                        prefixIcon: const Icon(Icons.search),
-                        suffixIcon: IconButton(
-                          tooltip: 'Clear search',
-                          icon: const Icon(Icons.clear),
-                          onPressed: () {
-                            _search.clear();
-                            unawaited(_load());
-                          },
-                        ),
-                      ),
-                      onChanged: (_) {
+                    ],
+                    const SizedBox(height: 16),
+                    ResponderRecordFilters(
+                      search: _search,
+                      period: _period,
+                      outcome: _outcome,
+                      history: widget.history,
+                      onPeriod: (value) => unawaited(_choosePeriod(value)),
+                      onOutcome: (value) {
+                        if (value == _outcome) return;
+                        setState(() => _outcome = value);
+                        unawaited(_load());
+                      },
+                      onClear: () {
+                        _search.clear();
+                        unawaited(_load());
+                      },
+                      onSearch: (_) {
                         _cancel();
                         _debounce?.cancel();
                         _debounce = Timer(
@@ -293,75 +393,27 @@ class _ResponderRecordsViewState extends State<ResponderRecordsView>
                         );
                       },
                     ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 4,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        DropdownButton<String>(
-                          isExpanded: true,
-                          value: _period,
-                          items: const [
-                            DropdownMenuItem(
-                              value: 'all',
-                              child: Text('All time'),
-                            ),
-                            DropdownMenuItem(
-                              value: '30',
-                              child: Text('Last 30 days'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'custom',
-                              child: Text('Choose dates'),
-                            ),
-                          ],
-                          onChanged: _choosePeriod,
-                        ),
-                        if (widget.history)
-                          DropdownButton<String>(
-                            isExpanded: true,
-                            value: _outcome,
-                            items: const [
-                              DropdownMenuItem(
-                                value: 'all',
-                                child: Text('All outcomes'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'resolved',
-                                child: Text('Resolved'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'false_alarm',
-                                child: Text('False alarms'),
-                              ),
-                            ],
-                            onChanged: (value) {
-                              setState(() => _outcome = value!);
-                              unawaited(_load());
-                            },
-                          ),
-                        IconButton(
-                          tooltip: 'Refresh records',
-                          icon: const Icon(Icons.refresh),
-                          onPressed: () {
-                            _refresh();
-                          },
-                        ),
-                      ],
-                    ),
                     if (_period == 'custom' && _range != null)
-                      Text(
-                        '${_date(_range!.start)} to ${_date(_range!.end)} · Philippine dates',
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          '${_date(_range!.start)} to ${_date(_range!.end)} · Philippine dates',
+                          style: theme.textTheme.bodySmall,
+                        ),
                       ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      height: 2,
+                      child: _loading
+                          ? const LinearProgressIndicator(minHeight: 2)
+                          : null,
+                    ),
                   ],
                 ),
               ),
             ),
-            if (_loading)
-              const SliverToBoxAdapter(child: LinearProgressIndicator()),
             SliverPadding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
               sliver: SliverList(
                 delegate: SliverChildBuilderDelegate((context, index) {
                   if (index == _records.length) {
@@ -370,33 +422,45 @@ class _ResponderRecordsViewState extends State<ResponderRecordsView>
                         padding: const EdgeInsets.all(16),
                         child: Column(
                           children: [
+                            const Icon(Icons.cloud_off_outlined),
+                            const SizedBox(height: 8),
                             Text(_error!, textAlign: TextAlign.center),
-                            TextButton(
-                              onPressed: () => _load(),
-                              child: const Text('Retry'),
+                            TextButton.icon(
+                              onPressed: () => _load(force: true),
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Retry'),
                             ),
                           ],
                         ),
                       );
                     }
                     if (_cursor != null) {
-                      return TextButton(
+                      return TextButton.icon(
                         onPressed: _loading ? null : () => _load(more: true),
-                        child: const Text('Load more records'),
+                        icon: const Icon(Icons.expand_more),
+                        label: const Text('Load more records'),
                       );
                     }
                     if (_records.isEmpty && !_loading) {
                       return Padding(
-                        padding: const EdgeInsets.all(24),
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 32,
+                          horizontal: 16,
+                        ),
                         child: Column(
                           children: [
-                            const Icon(Icons.fact_check_outlined, size: 40),
+                            Icon(
+                              Icons.fact_check_outlined,
+                              size: 40,
+                              color: colors.primary,
+                            ),
                             const SizedBox(height: 12),
                             Text(
                               _search.text.isNotEmpty
                                   ? 'No matching records. Try another search or date range.'
                                   : 'No records in this view.',
                               textAlign: TextAlign.center,
+                              style: theme.textTheme.bodyMedium,
                             ),
                           ],
                         ),
@@ -405,82 +469,27 @@ class _ResponderRecordsViewState extends State<ResponderRecordsView>
                     return const SizedBox.shrink();
                   }
                   final row = _records[index];
-                  return Card(
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute<void>(
-                          builder: (_) => ResponderRecordDetail(
+                  return ResponderRecordCard(
+                    key: ValueKey(row.id),
+                    record: row,
+                    time: _stamp(
+                      row,
+                      _tab == 'filed' && !widget.history
+                          ? 'filedAt'
+                          : 'resolvedAt',
+                    ),
+                    deferredTime: row.data['deferredAt'] == null
+                        ? null
+                        : _stamp(row, 'deferredAt'),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => ResponderStyle(
+                          child: ResponderRecordDetail(
                             service: widget.service,
                             record: row,
                             filed: !widget.history && _tab == 'filed',
                           ),
-                        ),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Icon(
-                                  row.pending
-                                      ? Icons.assignment_late_outlined
-                                      : Icons.history,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    'SOS-${row.id}${row.reportId == null ? '' : ' · IR-${row.reportId}'}',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium,
-                                  ),
-                                ),
-                                const Icon(Icons.chevron_right),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              row.name,
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                            Text(row.identifier),
-                            Text(row.location),
-                            const SizedBox(height: 8),
-                            Text(
-                              _stamp(
-                                row,
-                                _tab == 'filed' && !widget.history
-                                    ? 'filedAt'
-                                    : 'resolvedAt',
-                              ),
-                            ),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 4,
-                              children: [
-                                Chip(label: Text(responderOutcome(row.status))),
-                                if (row.needsAttention)
-                                  const Chip(
-                                    avatar: Icon(Icons.schedule, size: 18),
-                                    label: Text('Over 24 hours'),
-                                  ),
-                              ],
-                            ),
-                            if (row.pending)
-                              const Text(
-                                'Complete this report in the desktop app.',
-                              ),
-                            if (row.hasDraft)
-                              const Text('Draft saved on desktop'),
-                            if (row.data['deferredAt'] != null)
-                              Text(
-                                'Last deferred ${_stamp(row, 'deferredAt')}',
-                              ),
-                          ],
                         ),
                       ),
                     ),
@@ -493,4 +502,31 @@ class _ResponderRecordsViewState extends State<ResponderRecordsView>
       );
     },
   );
+
+  Widget _tabButton(String value, String label, IconData icon) {
+    final colors = Theme.of(context).colorScheme;
+    final selected = _tab == value;
+    return Semantics(
+      selected: selected,
+      child: OutlinedButton.icon(
+        onPressed: () => _selectTab(value),
+        icon: Icon(icon, size: 18),
+        label: Text(label),
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(0, 48),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          backgroundColor: selected
+              ? colors.primary
+              : colors.surfaceContainerLowest,
+          foregroundColor: selected ? colors.onPrimary : colors.onSurface,
+          side: BorderSide(
+            color: selected ? colors.primary : colors.outlineVariant,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+    );
+  }
 }

@@ -195,7 +195,7 @@ export default function EmergencyAlertBanner() {
   };
 
   // Display alerts only after live responder access has been confirmed.
-  if (!tier) return null;
+  if (!tier || (alerts.length === 0 && !notice)) return null;
 
   return (
     <div style={{ marginBottom: 20 }}>

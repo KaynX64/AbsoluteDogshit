@@ -16,7 +16,10 @@ export async function verifyResponderHistory(run, wait, screenshot) {
       if (path.endsWith('/emergency/report-summary')) return Response.json({ pending: state.filed ? 0 : 1, overdue: state.filed ? 0 : 1, drafts: state.draft && !state.filed ? 1 : 0, canViewFiled: state.canViewFiled });
       const row = { ...base, hasDraft: !!state.draft, deferredAt: state.deferredAt || null, needsReport: !state.filed, reportId: state.filed ? 17 : null, filedAt: state.filed ? at : null, documentedByName: state.filed ? 'Synthetic Response Staff' : null };
       if (['history', 'report-worklist', 'reports'].some(name => path.endsWith('/emergency/' + name))) {
-        const empty = url.searchParams.get('search') === 'nomatch' || (path.endsWith('/reports') && !state.filed) || (path.endsWith('/report-worklist') && state.filed);
+        state.listCalls = (state.listCalls || 0) + 1;
+        if (state.holdList) await new Promise(resolve => { state.releaseList = () => { state.holdList = false; state.releaseList = null; resolve(); }; });
+        if (state.failList) return Response.json({ error: 'Synthetic list refresh failure' }, { status: 503 });
+        const empty = url.searchParams.get('search') === 'nomatch' || (path.endsWith('/reports') && !state.filed) || (path.endsWith('/report-worklist') && (state.filed || (url.searchParams.get('view') === 'drafts' && !state.draft)));
         return Response.json({ records: empty ? [] : [row], nextCursor: null });
       }
       if (path.endsWith('/emergency/history/91')) return Response.json({ ...row, timeline: [{ status: 'triggered', at }, { status: 'resolved', at, actor: 'Synthetic Response Staff' }] });
@@ -45,6 +48,35 @@ export async function verifyResponderHistory(run, wait, screenshot) {
     smoke.click('Incident reports', '.sb-item');
   })()`);
   await wait("document.querySelector('#responder-record-panel')?.textContent.includes('Synthetic Campus Member')");
+  const headingInset = await run("document.querySelector('.rh-heading').getBoundingClientRect().top - document.querySelector('.app-content').getBoundingClientRect().top");
+  assert.equal(headingInset, await run("parseFloat(getComputedStyle(document.querySelector('.app-content')).paddingTop)"), 'Reports heading starts at the normal Dispatch content inset without an empty banner');
+  const verifyFocusRefresh = async () => {
+    await wait("document.querySelector('#responder-record-panel').getAttribute('aria-busy') === 'false'");
+    await run(`smoke.visibleRecordRow = document.querySelector('.rh-table tbody tr');
+      smoke.historyState.holdList = true;
+      window.dispatchEvent(new Event('blur'));
+      window.dispatchEvent(new Event('focus'));`);
+    await wait('typeof smoke.historyState.releaseList === "function"');
+    assert.equal(await run("document.querySelector('.rh-table tbody tr') === smoke.visibleRecordRow"), true, 'Alt+Tab keeps existing record rows mounted during refresh');
+    assert.equal(await run("document.querySelector('#responder-record-panel').textContent.includes('Loading records')"), false, 'Background refresh does not replace results with a loading screen');
+    await run('smoke.historyState.releaseList()');
+    await wait("document.querySelector('#responder-record-panel').getAttribute('aria-busy') === 'false'");
+  };
+  await verifyFocusRefresh();
+  await run('smoke.tabReadCount = smoke.historyState.listCalls');
+  for (const label of ['My drafts', 'Filed', 'Needs report', 'My drafts', 'Needs report']) {
+    await run(`smoke.click(${JSON.stringify(label)}, '.rh-tabs button')`);
+    await wait(`document.querySelector('.rh-tabs [aria-selected=true]')?.textContent.includes(${JSON.stringify(label)})`);
+    assert.equal(await run("document.querySelector('#responder-record-panel').textContent.includes('Loading records')"), false, 'Prepared tabs do not flash a loading screen');
+    await wait("document.querySelector('#responder-record-panel').getAttribute('aria-busy') === 'false'");
+  }
+  // One refresh per stale inactive tab is allowed after focus invalidation;
+  // repeatedly selecting fresh tabs must not trigger another network read.
+  assert.ok(await run('smoke.historyState.listCalls - smoke.tabReadCount <= 2'));
+  await run('smoke.tabReadCount = smoke.historyState.listCalls');
+  await run("smoke.click('Needs report', '.rh-tabs button')");
+  await wait("document.querySelector('#responder-record-panel').getAttribute('aria-busy') === 'false'");
+  assert.equal(await run('smoke.historyState.listCalls'), await run('smoke.tabReadCount'), 'Reselecting the active tab makes no request');
   assert.equal(await run("document.querySelector('.rh-workspace').textContent.includes('Over 24 hours')"), true);
   await run("smoke.click('Write report', '#responder-record-panel button')");
   await wait("document.querySelector('.rh-editor textarea') && !document.querySelector('.rh-editor textarea').readOnly");
@@ -90,6 +122,13 @@ export async function verifyResponderHistory(run, wait, screenshot) {
   await wait("!document.querySelector('#report-tab-filed')");
   await run("smoke.click('Alert history', '.sb-item')");
   await wait("document.querySelector('#responder-record-panel')?.textContent.includes('Synthetic Campus Member')");
+  assert.equal(await run("document.querySelector('.rh-heading').getBoundingClientRect().top - document.querySelector('.app-content').getBoundingClientRect().top"), headingInset, 'History and reports share the normal content inset');
+  await verifyFocusRefresh();
+  await run("smoke.historyState.failList = true; window.dispatchEvent(new Event('focus'))");
+  await wait("document.querySelector('#responder-record-panel').textContent.includes('Synthetic list refresh failure')");
+  assert.equal(await run("document.querySelector('.rh-table tbody tr').textContent.includes('Synthetic Campus Member')"), true, 'A failed background refresh retains visible results and offers retry');
+  await run("smoke.historyState.failList = false; smoke.click('Retry', '#responder-record-panel button')");
+  await wait("!document.querySelector('#responder-record-panel [role=alert]') && document.querySelector('#responder-record-panel').getAttribute('aria-busy') === 'false'");
   await run("smoke.fill(document.querySelector('input[aria-label=\"Search responder records\"]'), 'nomatch')");
   await wait("document.querySelector('#responder-record-panel').textContent.includes('No matching records')");
   await run("smoke.click('Clear filters', '.rh-toolbar button')");
@@ -99,5 +138,5 @@ export async function verifyResponderHistory(run, wait, screenshot) {
   await wait("document.querySelector('#rx-frequency')?.getClientRects().length");
   assert.equal(await run("document.querySelector('#rx-frequency').value"), 'Unfinished consultation draft fixture', 'History navigation preserves unfinished clinical work');
   await run("smoke.fill(document.querySelector('#rx-frequency'), smoke.previousFrequency)");
-  console.log('Responder history checks passed: private desktop drafts, autosave serialization, deferral, failed save, conflict, single filing, read-only archive, lazy PDF, search and live archive revocation.');
+  console.log('Responder history checks passed: heading spacing, stable focus refresh, refresh failure/retry, private desktop drafts, autosave serialization, deferral, failed save, conflict, single filing, read-only archive, lazy PDF, search and live archive revocation.');
 }

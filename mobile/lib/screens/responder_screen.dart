@@ -55,7 +55,15 @@ class _ResponderScreenState extends State<ResponderScreen> {
           const ValetudoLogo(),
           const SizedBox(width: 8),
           const Flexible(
-            child: Text('LeoVital', overflow: TextOverflow.ellipsis),
+            child: Text(
+              'LeoVital',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -.5,
+              ),
+            ),
           ),
         ],
       ),

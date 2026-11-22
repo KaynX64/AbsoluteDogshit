@@ -15,6 +15,7 @@ Flutter (Dart SDK ^3.13.3). Key packages: `http`, `flutter_secure_storage` (toke
 - `widgets/` contains the shared Responder Hub, incident detail sheet, confirmed status actions, and session timeout listener.
 - The Qualified Responder flag is additive. Use live `/api/emergency/responder-access` and the session roster for eligibility and tier; community accounts may only acknowledge. `ResponderWorkspace` shares Alerts/History/Reports between the dedicated route and portal Hub. History/report reads require clinical access. Mobile contains no report editor or report-writing methods. Report counts refresh on resume/reconnect and report events; clear protected data on access/session changes. Keep duty, map, refresh and mute actions. [Responder records](../server/RESPONDER-RECORDS.md) · [Android Hub](README.md#responder-hub-on-android).
 - `utils/responsive.dart` — breakpoints.
+- Responder UI uses `ResponderStyle` and shared filters/cards. `ActiveIncidentCard` reuses `SosAlertActions` for quick actions and closure confirmation. Preserve account fonts, 200% text scaling, lazy destinations and bounded memory caches; hidden views defer refreshes.
 
 ## Account appearance and settings
 
