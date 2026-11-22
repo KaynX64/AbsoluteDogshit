@@ -18,7 +18,6 @@ await mkdir(screenshots, { recursive: true });
 const entry = join(temporary, 'main.cjs');
 await writeFile(entry, `
   const { app, BrowserWindow } = require('electron');
-  app.disableHardwareAcceleration();
   app.whenReady().then(() => {
     const window = new BrowserWindow({ show: false, width: 1366, height: 768,
       webPreferences: { contextIsolation: true, nodeIntegration: false } });

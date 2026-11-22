@@ -8,6 +8,7 @@ Electron 44 (main process = CommonJS `.cjs`) + Vite 6 + React 19 + TypeScript 5.
 
 - **Dev** (`npm run dev`) starts Vite and then Electron. Generate `../server/certs/cert.pem` and `key.pem` before launching. Vite serves HTTP when these files are absent, while Electron loads the HTTPS `VITE_URL` from `electron/config.cjs`. The dev window can show after page load if first-paint readiness has not fired.
 - **Packaged**: main loads `dist/index.html` over `file://`. This is why `vite.config.mts` sets `base: './'` — keep it or asset URLs break inside the exe.
+- **Graphics**: main removes GPU-disable switches before the app is ready and logs changes to unavailable GPU compositing. Keep Chromium's native driver checks and software fallback.
 - `app-config.json` (`apiBaseUrl`) is read by main at runtime **and** imported by the renderer at build time — see the gotcha below.
 - `certificate-error` policy (security-critical, do not loosen): dev builds tolerate the self-signed cert for local-API and Vite URLs; packaged builds only when `apiBaseUrl` is a loopback host **and** the failing URL is same-origin with it (`isSameOrigin` also blocks userinfo tricks). Any other certificate error stands.
 - `preload.cjs` exposes a minimal `contextBridge` surface (`window.electronAPI`) — extend it deliberately; keep `nodeIntegration: false` / `contextIsolation: true` (current settings).

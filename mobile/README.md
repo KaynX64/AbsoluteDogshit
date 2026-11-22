@@ -4,19 +4,34 @@ Flutter app for patients and emergency responders. Module-specific architecture,
 
 ## Configure and run
 
-Set the API host in `lib/config/api_config.dart` for the device running the app. Android devices need a reachable LAN host; the Android emulator uses `10.0.2.2` to reach the development host. See [AGENTS.md](./AGENTS.md) for TLS and Firebase setup.
+Start the API and run Flutter from `mobile/`. For a physical Android phone, put it on the same network as the API host and pass the host’s LAN IP. Replace the example IP with the IPv4 address shown by `ipconfig` on the Windows API host. The standard Android emulator uses `10.0.2.2` to reach the development host.
 
 ```powershell
 flutter pub get
-flutter run
+flutter run --dart-define=API_BASE_URL=https://192.168.1.10:5000
+# Android emulator
+flutter run --dart-define=API_BASE_URL=https://10.0.2.2:5000
+```
+
+`API_BASE_URL` is the HTTPS origin, including the port when needed. The app uses it for HTTP and realtime connections. Stop and rerun Flutter to apply a different origin.
+
+If sign-in cannot reach the server, open `/api/ping` at the configured origin from the phone. A timeout points to the server or network path. Check that the API is listening and that the LAN and Windows firewall allow the connection. If sign-in reports a secure connection failure, check the certificate chain and confirm that it covers the exact DNS name or IP used by the app.
+
+For USB-connected Android development with USB debugging enabled, forward the phone’s API port to the host and use the phone’s loopback address. Repeat `adb reverse` after reconnecting if the tunnel is gone.
+
+```powershell
+adb reverse tcp:5000 tcp:5000
+flutter run --no-pub --dart-define=API_BASE_URL=https://127.0.0.1:5000
 ```
 
 ## Build and test
 
 ```powershell
 flutter test
-flutter build apk --release
+flutter build apk --release --dart-define=API_BASE_URL=https://clinic-api.example.org
 ```
+
+Use the deployment’s actual API origin and a certificate chain the app trusts. The self-signed `localhost` certificate used for local development requires a debug build when connecting to it by LAN IP. See [AGENTS.md](./AGENTS.md) for TLS and Firebase setup.
 
 Do not commit Firebase service-account or `google-services.json` credentials. Platform folders are generated; edit only the exceptions listed in [AGENTS.md](./AGENTS.md).
 

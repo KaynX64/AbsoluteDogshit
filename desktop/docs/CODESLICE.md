@@ -24,6 +24,6 @@ See the [desktop architecture guide](../AGENTS.md). Each desktop monolith has it
 | DT-10 | `desktop/src/features/admin/CreateUserModal.tsx` | 791 | working tree | `codeslice/DT-10-CreateUserModal.md` | Admin create-user modal: role-specific fields, campus health profile, admin grants, qualified-responder flag |
 | DT-11 | `desktop/src/features/emergency/IncidentReportModal.tsx` | 14 | working tree | `codeslice/DT-11-IncidentReportModal.md` | Post-SOS-resolution incident popup: clinical-only, socket-driven, pre-filled patient identity, first-console-wins submit |
 | DT-12 | `desktop/src/features/emergency/ResponderConsole.tsx` | 528 | 265ff8e | `codeslice/DT-12-ResponderConsole.md` | SOS dispatch console: live alert feed, alarm + tray notifications, status workflow buttons, dev test harness |
-| DT-13 | `desktop/electron/main.cjs` | 28 | working tree | `codeslice/DT-13-ElectronMain.md` | Electron main: window lifecycle, embedded SQLite offline store + IPC handlers, auto-updater, scoped TLS cert bypass |
+| DT-13 | `desktop/electron/main.cjs` | 44 | working tree | `codeslice/DT-13-ElectronMain.md` | Electron main: graphics policy, window lifecycle, embedded SQLite offline store + IPC handlers, auto-updater, scoped TLS cert bypass |
 
 ---

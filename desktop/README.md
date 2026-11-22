@@ -38,6 +38,8 @@ npm run test:smoke -- 'release/alternate/win-unpacked/Valetudo HealthLink.exe' -
 
 Packaged smoke tests use synthetic data and an isolated profile to check preload, assets, SQLite replay, encounters, roles, profiles and permissions. They report startup timings and heap snapshots. Use Node.js with native WebSocket and SQLite support.
 
+The Console and layout check use Chromium's hardware acceleration when the workstation supports it. The Console removes the GPU, GPU compositing, and GPU rasterization disable flags at startup. Chromium can still fall back to software when the hardware or driver is unavailable. The Console logs when Chromium reports that hardware compositing is unavailable.
+
 ## Desktop interaction
 
 The dedicated responder console shows when each SOS was reported in Philippine time (PHT).

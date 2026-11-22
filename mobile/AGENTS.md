@@ -2,9 +2,9 @@
 
 Flutter (Dart SDK ^3.13.3). Key packages: `http`, `flutter_secure_storage` (token storage), `socket_io_client` (v2 — matches server Socket.IO v4), `qr_flutter`, `geolocator`, `flutter_local_notifications`, `firebase_core` + `firebase_messaging` (FCM push), `connectivity_plus`, `audioplayers`, `url_launcher`, `open_filex`, `path_provider`.
 
-## API host — one hardcode point
+## API host
 
-`lib/config/api_config.dart` is the host authority: Android uses a hardcoded LAN IP; the Android **emulator** must use `10.0.2.2` instead; web falls back to `localhost`. Read the configured value from that file rather than duplicating the IP in documentation. Change the URL only there, then fully restart the app so existing HTTP and socket connections use the new host.
+`lib/config/api_config.dart` is the host authority for REST and Socket.IO. Pass `--dart-define=API_BASE_URL=…` with a reachable HTTPS origin at build or launch time. Without an override, native Android uses the checked-in LAN address and other targets use `localhost`. Rebuild when changing the origin. See the [mobile setup guide](README.md#configure-and-run) for phone and emulator commands.
 
 ## Code map — lib/
 
@@ -47,6 +47,6 @@ The first Flutter frame renders before Firebase, Android notification setup and 
 
 ## Gotchas
 
-- `main.dart` installs `DevHttpOverrides` only in debug mode and its callback returns `kDebugMode`. Release builds retain certificate validation. A release device needs a certificate chain trusted by its actual Android/app trust configuration; do not assume installing a user CA is sufficient. Symptom of a trust mismatch: `HandshakeException` on login. The comment above `DevHttpOverrides` incorrectly mentions allowing release certificates; follow the executable behavior.
+- `main.dart` installs `DevHttpOverrides` only in debug mode. Release builds validate the certificate chain and configured hostname or IP. Sign-in distinguishes TLS failures from a server that cannot be reached.
 - Document/QR URLs are generated server-side from `PUBLIC_API_BASE_URL` — that host must be reachable from the phone's network or `documents_viewer_screen` and scanned QR codes will fail.
 - Never read `pubspec.lock` or the `android/gradle*` files unless the task is build configuration.

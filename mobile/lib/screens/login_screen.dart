@@ -1,8 +1,11 @@
 // mobile/lib/screens/login_screen.dart
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show TlsException;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
 
 import '../config/api_config.dart';
 import '../widgets/valetudo_logo.dart';
@@ -43,14 +46,17 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      final res = await ApiConfig.client.post(
-        Uri.parse('${ApiConfig.baseUrl}/api/auth/login'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'email': _emailController.text.trim(),
-          'password': _passwordController.text.trim(),
-        }),
-      );
+      final res = await ApiConfig.client
+          .post(
+            Uri.parse('${ApiConfig.baseUrl}/api/auth/login'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'email': _emailController.text.trim(),
+              'password': _passwordController.text.trim(),
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (!mounted) return;
 
       final data = jsonDecode(res.body);
 
@@ -91,9 +97,16 @@ class _LoginScreenState extends State<LoginScreen> {
       } else {
         setState(() => _errorMessage = data['error'] ?? 'Login failed');
       }
-    } catch (e) {
+    } catch (error) {
       if (mounted) {
-        setState(() => _errorMessage = 'Unable to connect. Please try again.');
+        setState(() {
+          _errorMessage = switch (error) {
+            TlsException() => 'Could not establish a secure connection. Check the server certificate or contact the clinic administrator.',
+            TimeoutException() || http.ClientException() => 'Could not reach the clinic server. Check your network and try again.',
+            FormatException() => 'The clinic server returned an unexpected response. Please try again.',
+            _ => 'Could not sign in. Please try again.',
+          };
+        });
       }
     } finally {
       if (mounted) {

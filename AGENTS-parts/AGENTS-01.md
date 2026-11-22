@@ -32,7 +32,7 @@ Root `package.json` only pins shared tooling (concurrently, wait-on, electron). 
 4. Provision a new, empty database with `server/schema.sql`. The script drops and recreates tables, so use `npm run migrate` from `server/` for an existing installation. See the [migration rollout guide](../server/MIGRATION-PLAN.md).
 5. From `server/`, run `npm install`, then `npm run dev`. Startup applies pending migrations before the API listens.
 6. From `desktop/`, set `apiBaseUrl` in `app-config.json`, run `npm install`, then `npm run dev`.
-7. For mobile, set the API host in `mobile/lib/config/api_config.dart` first. See the [mobile guide](../mobile/AGENTS.md).
+7. For mobile, pass the reachable HTTPS API origin using `--dart-define=API_BASE_URL=…`. See the [mobile setup guide](../mobile/README.md#configure-and-run).
 
 ## Command cheat sheet
 

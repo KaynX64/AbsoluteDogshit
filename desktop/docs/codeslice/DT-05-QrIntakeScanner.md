@@ -15,5 +15,5 @@
 | 5 | 327-371 | const handleRegisterWalkIn | const handleRegisterWalkIn |
 | 6 | 372-394 | const handleQrFileUpload | Camera and file capture through useQrCapture |
 | 7 | 395-412 | const updateVital | const updateVital |
-| 8 | 413-1215 | <TriageVitalsFields | <TriageVitalsFields |
+| 8 | 413-1215 | <TriageVitalsFields | Triage vitals and scheduled arrival form, including spacing above Confirm Arrival |
 | 9 | 1216-1264 | form id= | form id= |

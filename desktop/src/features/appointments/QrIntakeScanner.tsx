@@ -1146,7 +1146,7 @@ export default function QrIntakeScanner({ onPatientVerified }: QrIntakeScannerPr
                   {checkInSuccess || 'Patient is checked in and waiting in queue.'}
                 </div>
               ) : (
-                <form id={`${vitalId}-intake`} onSubmit={(event) => { event.preventDefault(); void handleConfirmArrival(); }}>
+                <form id={`${vitalId}-intake`} style={{ marginTop: 12 }} onSubmit={(event) => { event.preventDefault(); void handleConfirmArrival(); }}>
                 {intakeError}
                 <button
                   type="submit"
