@@ -1,8 +1,11 @@
 // mobile/lib/screens/splash_screen.dart
+import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+
 import '../config/api_config.dart';
 import '../widgets/valetudo_logo.dart';
 import '../utils/responsive.dart';
@@ -10,9 +13,12 @@ import 'login_screen.dart';
 import 'patient_portal_screen.dart';
 import 'responder_screen.dart';
 import '../services/emergency_alert_service.dart';
+import '../theme/account_theme_controller.dart';
 
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+  const SplashScreen({super.key, this.client});
+
+  final http.Client? client;
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
@@ -34,53 +40,106 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _checkSavedSession() async {
-    final token = await _storage.read(key: 'jwt_token');
-    final userDataStr = await _storage.read(key: 'user_data');
-
-    // Brief delay to allow smooth launch branding
-    await Future.delayed(const Duration(milliseconds: 800));
-
-    // No saved credentials at all → genuine first run
-    if (token == null || userDataStr == null) {
-      if (mounted) setState(() => _isChecking = false);
-      return;
-    }
-
-    Map<String, dynamic> cachedUser;
+    final String? token;
+    final String? userData;
     try {
-      cachedUser = jsonDecode(userDataStr) as Map<String, dynamic>;
+      token = await _storage.read(key: 'jwt_token');
+      userData = token == null ? null : await _storage.read(key: 'user_data');
     } catch (_) {
-      // Corrupt cache — treat as first run
-      await _storage.deleteAll();
+      // An unavailable secure store must leave sign-in reachable.
       if (mounted) setState(() => _isChecking = false);
       return;
     }
+    if (!mounted) return;
+    if (token == null || userData == null) {
+      setState(() => _isChecking = false);
+      return;
+    }
 
-    // Optimistically route the user with the cached session. The API
-    // round-trip below only exists to detect a *revoked* token; any
-    // other outcome (offline, 500, timeout) keeps the user logged in.
+    final Map<String, dynamic> cachedUser;
     try {
-      final res = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/profile/me'),
-        headers: {'Authorization': 'Bearer $token'},
-      ).timeout(const Duration(seconds: 4));
-
-      // Only a genuine auth rejection should log the user out.
-      if (res.statusCode == 401 || res.statusCode == 403) {
-        await _storage.deleteAll();
-        if (mounted) setState(() => _isChecking = false);
-        return;
+      cachedUser = jsonDecode(userData) as Map<String, dynamic>;
+      if (cachedUser['roles'] is! List && cachedUser['roles'] != null) {
+        throw const FormatException('Invalid cached roles');
       }
-      // 200, 500, 404, anything else → trust the cached session.
     } catch (_) {
-      // Network unreachable → trust the cached session (offline mode).
+      await _discardSavedSession();
+      return;
     }
 
-    EmergencyAlertService().syncFcmTokenWithBackend();
-    _routeUser(cachedUser);
+    if (!mounted) return;
+    final themes = AccountThemeScope.of(context);
+    final validation = _validateSession(token);
+    await themes.bindAccount(cachedUser, token, fromCache: true);
+    final response = await validation;
+    if (!mounted) return;
+
+    final profile = _decodeProfileResponse(response);
+    if (response?.statusCode == 401 ||
+        (response?.statusCode == 403 &&
+            profile?['error'] != 'PRIVACY_CONSENT_REQUIRED')) {
+      themes.reset();
+      await _discardSavedSession();
+      return;
+    }
+
+    final initialProfile =
+        response?.statusCode == 200 && profile?['user'] is Map ? profile : null;
+    final liveUser = initialProfile?['user'] as Map?;
+    if (liveUser != null) {
+      final liveFlag = liveUser['is_qualified_responder'] == true;
+      if (cachedUser['is_qualified_responder'] != liveFlag) {
+        cachedUser['is_qualified_responder'] = liveFlag;
+        try {
+          await _storage.write(key: 'user_data', value: jsonEncode(cachedUser));
+        } catch (_) {}
+      }
+    }
+    if (!mounted) return;
+
+    EmergencyAlertService().beginSession(token, cachedUser['user_id']);
+    unawaited(themes.refresh());
+    _routeUser(cachedUser, initialProfile);
   }
 
-  void _routeUser(Map<String, dynamic> user) {
+  Future<http.Response?> _validateSession(String token) async {
+    try {
+      return await (widget.client ?? ApiConfig.client)
+          .get(
+            Uri.parse('${ApiConfig.baseUrl}/api/profile/me'),
+            headers: {'Authorization': 'Bearer $token'},
+          )
+          .timeout(const Duration(seconds: 4));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Map<String, dynamic>? _decodeProfileResponse(http.Response? response) {
+    if (response == null ||
+        (response.statusCode != 200 && response.statusCode != 403)) {
+      return null;
+    }
+    try {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _discardSavedSession() async {
+    try {
+      await _storage.deleteAll();
+    } catch (_) {
+      debugPrint('Saved session could not be cleared.');
+    }
+    if (mounted) setState(() => _isChecking = false);
+  }
+
+  void _routeUser(
+    Map<String, dynamic> user,
+    Map<String, dynamic>? initialProfile,
+  ) {
     if (!mounted) return;
     final List<dynamic> roles = user['roles'] ?? [];
 
@@ -92,7 +151,10 @@ class _SplashScreenState extends State<SplashScreen> {
     } else {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => PatientPortalScreen(user: user)),
+        MaterialPageRoute(
+          builder: (_) =>
+              PatientPortalScreen(user: user, initialProfile: initialProfile),
+        ),
       );
     }
   }
@@ -101,7 +163,8 @@ class _SplashScreenState extends State<SplashScreen> {
     Navigator.pushReplacement(
       context,
       PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) => const LoginScreen(),
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            const LoginScreen(),
         transitionsBuilder: (context, animation, secondaryAnimation, child) =>
             FadeTransition(opacity: animation, child: child),
       ),
@@ -171,7 +234,7 @@ class _SplashScreenState extends State<SplashScreen> {
                               SizedBox(height: rs.h(24)),
 
                               Text(
-                                'valetudo.',
+                                'LeoVital',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   fontSize: rs.sp(38),
@@ -228,13 +291,19 @@ class _SplashScreenState extends State<SplashScreen> {
                                           ),
                                         )
                                       : Row(
-                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
                                           children: [
-                                            Text(
-                                              "Let's get started",
-                                              style: TextStyle(
-                                                fontSize: rs.sp(15.5),
-                                                fontWeight: FontWeight.w700,
+                                            Flexible(
+                                              child: Text(
+                                                "Let's get started",
+                                                textAlign: TextAlign.center,
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                  fontSize: rs.sp(15.5),
+                                                  fontWeight: FontWeight.w700,
+                                                ),
                                               ),
                                             ),
                                             SizedBox(width: rs.w(8)),

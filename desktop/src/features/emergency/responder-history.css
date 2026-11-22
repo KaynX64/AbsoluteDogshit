@@ -1,0 +1,44 @@
+.rh-workspace { display:flex; flex-direction:column; gap:18px; color:var(--text); width:100%; min-width:0; }
+.rh-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+.rh-heading h1 { margin:4px 0 8px; font-size:28px; letter-spacing:-.7px; }
+.rh-heading p,.rh-muted { color:var(--text-sub); }
+.rh-heading p { margin:0; max-width:68ch; line-height:1.5; }
+.rh-eyebrow { color:var(--primary); font-size:11px; letter-spacing:1.5px; font-weight:800; text-transform:uppercase; }
+.rh-card { background:var(--surface); border:1px solid var(--border); border-radius:18px; padding:20px; min-width:0; }
+.rh-toolbar,.rh-tabs,.rh-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.rh-toolbar { padding:16px; border:1px solid var(--border); border-radius:16px; background:var(--surface); }
+.rh-toolbar label { display:flex; align-items:center; gap:8px; color:var(--text-sub); font-size:12px; }
+.rh-search { flex:1; min-width:220px; }
+.rh-toolbar input,.rh-toolbar select,.rh-editor input,.rh-editor textarea { background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:10px 12px; min-height:42px; font:inherit; }
+.rh-search input { width:100%; }
+.rh-tabs button,.rh-button { display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:42px; border:1px solid var(--border); border-radius:10px; padding:9px 14px; background:var(--surface); color:var(--text); font:inherit; font-size:13px; font-weight:700; cursor:pointer; text-decoration:none; }
+.rh-tabs [aria-selected=true],.rh-button--primary { background:var(--primary); color:var(--text-on-primary); border-color:var(--primary); }
+.rh-button:disabled { opacity:.5; cursor:default; }
+.rh-badge { display:inline-flex; align-items:center; gap:5px; padding:5px 9px; border-radius:999px; background:var(--sage-100); color:var(--primary); font-size:11px; font-weight:800; white-space:nowrap; }
+.rh-badge--attention { background:var(--warning-soft); color:var(--warning); }
+.rh-table-wrap { overflow:auto; }
+.rh-table { width:100%; border-collapse:collapse; font-size:13px; text-align:left; }
+.rh-table th { color:var(--text-sub); font-size:11px; text-transform:uppercase; letter-spacing:.7px; padding:12px; border-bottom:1px solid var(--border); }
+.rh-table td { padding:16px 12px; border-bottom:1px solid var(--border); vertical-align:top; }
+.rh-table small { display:block; margin-top:5px; color:var(--text-sub); }
+.rh-table tr:last-child td { border-bottom:0; }
+.rh-empty { padding:40px 16px; text-align:center; color:var(--text-sub); }
+.rh-empty h2 { color:var(--text); font-size:18px; }
+.rh-alert { padding:12px 16px; border:1px solid var(--warning-border,var(--border)); border-radius:12px; background:var(--warning-soft); color:var(--text); line-height:1.5; }
+.rh-detail-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin:18px 0; }
+.rh-detail-grid dt { color:var(--text-sub); font-size:12px; margin-bottom:4px; }
+.rh-detail-grid dd { margin:0; overflow-wrap:anywhere; }
+.rh-timeline { padding-left:22px; }
+.rh-timeline li { padding:0 0 16px 4px; }
+.rh-timeline small { display:block; color:var(--text-sub); margin-top:4px; }
+.rh-editor { display:flex; flex-direction:column; gap:16px; }
+.rh-editor label { display:flex; flex-direction:column; gap:7px; font-weight:700; font-size:13px; }
+.rh-editor textarea { width:100%; min-height:130px; resize:vertical; line-height:1.6; }
+.rh-save-state { font-size:12px; color:var(--text-sub); min-height:20px; }
+.rh-narrative { white-space:pre-wrap; line-height:1.7; overflow-wrap:anywhere; }
+.rh-pdf { width:100%; height:60vh; border:1px solid var(--border); border-radius:10px; }
+.rh-modal { width:min(760px,100%); padding:24px; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:20px; box-shadow:0 24px 70px rgba(0,0,0,.2); }
+.rh-modal > .dialog-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+.rh-modal h2 { margin:6px 0 0; display:flex; gap:8px; align-items:center; }
+.rh-editor label .rh-muted { font-weight:400; font-size:12px; }
+@media(max-width:760px) { .rh-detail-grid { grid-template-columns:1fr; } .rh-toolbar label { width:100%; } .rh-search { min-width:0; } .rh-heading h1 { font-size:24px; } }

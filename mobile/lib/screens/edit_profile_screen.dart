@@ -1,6 +1,7 @@
 // mobile/lib/screens/edit_profile_screen.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../theme/app_palette.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
@@ -30,10 +31,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   bool _isSaving = false;
 
-  static const primaryGreen = Color(0xFF284E3A);
-  static const textMain = Color(0xFF191C1A);
-  static const textSub = Color(0xFF5A635B);
-  static const borderColor = Color(0xFFD6DFD5);
+  Color get primaryGreen => AppPalette.of(context).color(0xFF284E3A);
+  Color get textMain => AppPalette.of(context).color(0xFF191C1A);
+  Color get textSub => AppPalette.of(context).color(0xFF5A635B);
+  Color get borderColor => AppPalette.of(context).color(0xFFD6DFD5);
 
   @override
   void initState() {
@@ -81,8 +82,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       if (res.statusCode == 200) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Contact details updated successfully!'),
+          SnackBar(
+            content: const Text('Contact details updated successfully!'),
             backgroundColor: primaryGreen,
           ),
         );
@@ -102,7 +103,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: const Color(0xFF7A2E26),
+        backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
       ),
     );
   }
@@ -121,26 +122,26 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         color: textSub,
       ),
       hintStyle: TextStyle(
-        color: const Color(0xFF94A396),
+        color: AppPalette.of(context).color(0xFF94A396),
         fontSize: rs.sp(14),
       ),
       filled: true,
-      fillColor: Colors.white,
+      fillColor: AppPalette.of(context).surface,
       contentPadding: EdgeInsets.symmetric(
         horizontal: rs.w(20),
         vertical: rs.h(16),
       ),
       border: OutlineInputBorder(
         borderRadius: radius,
-        borderSide: const BorderSide(color: borderColor),
+        borderSide: BorderSide(color: borderColor),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: radius,
-        borderSide: const BorderSide(color: borderColor),
+        borderSide: BorderSide(color: borderColor),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: radius,
-        borderSide: const BorderSide(color: primaryGreen, width: 1.5),
+        borderSide: BorderSide(color: primaryGreen, width: 1.5),
       ),
     );
   }
@@ -149,14 +150,20 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Widget build(BuildContext context) {
     final rs = Rs.of(context);
     final maxContentWidth = rs.isTablet ? 560.0 : double.infinity;
+    final healthProfile = widget.healthProfile ?? {};
+    final rawSex = healthProfile['sex'];
+    final sex = rawSex?.toString().toUpperCase();
+    final rawDob = healthProfile['date_of_birth'];
+    final dob = rawDob == null ? null : rawDob.toString().split('T')[0];
+    final age = healthProfile['age'];
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F9F6),
+      backgroundColor: AppPalette.of(context).background(0xFFF7F9F6),
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: textMain),
+          icon: Icon(Icons.arrow_back_rounded, color: textMain),
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
@@ -192,7 +199,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   ),
                   SizedBox(height: rs.h(6)),
                   Text(
-                    'Edit contact details.',
+                    'Edit your profile details.',
                     style: TextStyle(
                       fontSize: rs.sp(30),
                       fontWeight: FontWeight.w800,
@@ -207,11 +214,63 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   ),
                   SizedBox(height: rs.h(24)),
 
+                  Text(
+                    'Sex (read-only)',
+                    style: TextStyle(
+                      fontSize: rs.sp(13),
+                      fontWeight: FontWeight.w700,
+                      color: textMain,
+                    ),
+                  ),
+                  SizedBox(height: rs.h(8)),
+                  InputDecorator(
+                    decoration: _pillInputDecoration(
+                      rs: rs,
+                      hint: 'Not recorded in clinic database',
+                      icon: Icons.person_outline,
+                    ),
+                    child: Text(
+                      sex ?? 'Not recorded in clinic database',
+                      style: TextStyle(
+                        fontSize: rs.sp(14),
+                        color: sex != null ? textMain : textSub,
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: rs.h(20)),
+
+                  Text(
+                    'Date of Birth (read-only)',
+                    style: TextStyle(
+                      fontSize: rs.sp(13),
+                      fontWeight: FontWeight.w700,
+                      color: textMain,
+                    ),
+                  ),
+                  SizedBox(height: rs.h(8)),
+                  InputDecorator(
+                    decoration: _pillInputDecoration(
+                      rs: rs,
+                      hint: 'Not recorded in clinic database',
+                      icon: Icons.cake_outlined,
+                    ),
+                    child: Text(
+                      dob == null
+                          ? 'Not recorded in clinic database'
+                          : '$dob${age == null ? '' : ' ($age yrs)'}',
+                      style: TextStyle(
+                        fontSize: rs.sp(14),
+                        color: dob != null ? textMain : textSub,
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: rs.h(20)),
+
                   // Infirmary Note
                   Container(
                     padding: EdgeInsets.all(rs.w(14)),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFE2EBE1),
+                      color: AppPalette.of(context).color(0xFFE2EBE1),
                       borderRadius: BorderRadius.circular(rs.r(16)),
                     ),
                     child: Row(
@@ -228,7 +287,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                             'Clinical data (blood type, allergies, conditions) must be verified and updated in-person by PSU Clinic Staff.',
                             style: TextStyle(
                               fontSize: rs.sp(12),
-                              color: const Color(0xFF424943),
+                              color: AppPalette.of(context).color(0xFF424943),
                               height: 1.35,
                             ),
                           ),
@@ -306,22 +365,22 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: primaryGreen,
-                        foregroundColor: Colors.white,
+                        foregroundColor: AppPalette.of(context).onPrimary,
                         elevation: 0,
                         shape: const StadiumBorder(),
                       ),
                       onPressed: _isSaving ? null : _saveProfile,
                       child: _isSaving
-                          ? const SizedBox(
+                          ? SizedBox(
                               width: 20,
                               height: 20,
                               child: CircularProgressIndicator(
-                                color: Colors.white,
+                                color: AppPalette.of(context).onPrimary,
                                 strokeWidth: 2,
                               ),
                             )
                           : Text(
-                              'Save contact changes',
+                              'Save profile changes',
                               style: TextStyle(
                                 fontSize: rs.sp(15),
                                 fontWeight: FontWeight.w700,

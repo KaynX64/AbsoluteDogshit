@@ -1,4 +1,4 @@
-// server/src/routes/signature.js
+// Registers clinician signature enrollment, status, and image retrieval endpoints.
 //
 // Mounted at /api/signature  (see PATCHES.md).
 //   GET  /me/status  → { enrolled, updated_at }
@@ -9,21 +9,22 @@
 // and only applies to JSON bodies, so image/png bypasses it cleanly.
 
 import express from 'express';
-import { pool } from '../db.js';
-import { authenticateToken } from '../auth.js';
+import { pool } from '../db/pool.js';
+import { authenticateToken } from '../auth/middleware.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { logAudit } from '../utils/auditLogger.js';
-import { assertValidSigner, SignerError } from '../utils/signatory.js';
+import { assertValidSigner, SignerError } from '../documents/signing/signatory.js';
 import {
   storeSignature,
   loadSignature,
   SignatureError,
   MAX_SIGNATURE_BYTES,
-} from '../utils/signatureVault.js';
+} from '../documents/signing/signatureVault.js';
 
 const router = express.Router();
 const signerOnly = requireRoles('DOCTOR', 'DENTIST');
 
+// Report whether the clinician has enrolled a handwritten signature.
 router.get('/me/status', authenticateToken, signerOnly, async (req, res) => {
   try {
     const [rows] = await pool.query(
@@ -41,6 +42,7 @@ router.get('/me/status', authenticateToken, signerOnly, async (req, res) => {
   }
 });
 
+// Return the clinician's stored signature image.
 router.get('/me/image', authenticateToken, signerOnly, async (req, res) => {
   try {
     const [rows] = await pool.query(
@@ -57,6 +59,7 @@ router.get('/me/image', authenticateToken, signerOnly, async (req, res) => {
   }
 });
 
+// Validate and store the clinician's signature and update its profile metadata.
 router.put(
   '/me',
   authenticateToken,
@@ -101,7 +104,7 @@ router.put(
       await conn.commit();
       res.json({ ok: true, signature_sha256: stored.sha256 });
     } catch (err) {
-      if (conn) await conn.rollback().catch(() => {});
+      if (conn) /* Continue response cleanup even if the signature transaction rollback fails. */ await conn.rollback().catch(() => {});
       if (err instanceof SignerError || err instanceof SignatureError) {
         return res.status(err.status).json({ error: err.message, code: err.code });
       }

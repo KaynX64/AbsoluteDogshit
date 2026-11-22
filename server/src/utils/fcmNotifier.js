@@ -1,10 +1,13 @@
+// Initializes Firebase messaging and sends push notifications to registered devices.
 // server/src/utils/fcmNotifier.js
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { initializeApp, cert } from 'firebase-admin/app';
+import { initializeApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
-import { pool } from '../db.js';
+import { pool } from '../db/pool.js';
+import { groupSosDevices, sosPushForMode } from '../emergency/deviceDelivery.js';
+import { createFcmAppOptions } from './fcmCredential.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,10 +18,14 @@ let firebaseApp = null;
 
 if (fs.existsSync(serviceAccountPath)) {
   try {
-    const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
-    firebaseApp = initializeApp({
-      credential: cert(serviceAccount),
-    });
+    const accountJson = fs.readFileSync(serviceAccountPath, 'utf8');
+    let serviceAccount;
+    try {
+      serviceAccount = JSON.parse(accountJson);
+    } catch {
+      throw new Error('Firebase service-account file contains invalid JSON.');
+    }
+    firebaseApp = initializeApp(createFcmAppOptions(serviceAccount));
     isFcmInitialized = true;
     console.log('🔥 [FCM Push] Firebase Admin SDK initialized successfully.');
   } catch (err) {
@@ -39,7 +46,7 @@ export async function sendPushToUser(userId, { title, body, data = {} }) {
     );
 
     if (rows.length === 0) return;
-    const tokens = rows.map((r) => r.fcm_token);
+    const tokens = rows.map(/* Extract device tokens registered to the target user. */ (r) => r.fcm_token);
     await sendMulticastNotification(tokens, { title, body, data });
   } catch (err) {
     console.error('[FCM] Error sending push to user:', err.message);
@@ -61,28 +68,55 @@ export async function sendPushToRoles(roleCodes = [], { title, body, data = {} }
     );
 
     if (rows.length === 0) return;
-    const tokens = rows.map((r) => r.fcm_token);
+    const tokens = rows.map(/* Extract device tokens found for the requested roles. */ (r) => r.fcm_token);
     await sendMulticastNotification(tokens, { title, body, data });
   } catch (err) {
     console.error('[FCM] Error sending push to roles:', err.message);
   }
 }
 
-async function sendMulticastNotification(tokens, { title, body, data }) {
+/**
+ * Send push notification to a list of concrete user ids — the delivery path
+ * for the qualified-responder SOS audience (flag OR legacy role, resolved
+ * live at dispatch time). Tokens are chunked in batches of 500: that is the
+ * FCM sendEachForMulticast ceiling, and unchunked lists would silently drop
+ * every token past the 500th.
+ */
+export async function sendSosPush(userIds = [], { alertId, latitude, longitude }) {
+  if (userIds.length === 0) return;
+  const [rows] = await pool.query(
+    'SELECT fcm_token, installation_id, sos_mode, device_type FROM DEVICE_TOKENS WHERE user_id IN (?)',
+    [userIds],
+  );
+
+  // Propagate provider transport failures to the durable SOS worker.
+  const results = await Promise.allSettled(Object.entries(groupSosDevices(rows)).map(async ([mode, tokens]) => {
+    const payload = sosPushForMode(mode, { alertId, latitude, longitude });
+    for (let offset = 0; offset < tokens.length; offset += 500) {
+      await sendMulticastNotification(tokens.slice(offset, offset + 500), payload, { retry: true });
+    }
+  }));
+  const failure = results.find(result => result.status === 'rejected');
+  if (failure) throw failure.reason;
+}
+
+// Send one multicast message and remove registrations Firebase reports as invalid.
+async function sendMulticastNotification(tokens, { title, body, data, androidNotification }, { retry = false } = {}) {
   if (!isFcmInitialized || !firebaseApp) {
-    console.log(`📡 [FCM Simulation] To ${tokens.length} devices | Title: "${title}" | Body: "${body}"`);
+    console.log(`[FCM Simulation] To ${tokens.length} devices`);
     return;
   }
 
   const message = {
     notification: { title, body },
-    data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])),
+    data: Object.fromEntries(Object.entries(data).map(/* Convert a notification data value to the string Firebase expects. */ ([k, v]) => [k, String(v)])),
     tokens,
     android: {
       priority: 'high',
-      notification: {
+      ...(data.type === 'EMERGENCY_SOS' ? { ttl: 60_000 } : {}),
+      notification: androidNotification ?? {
         sound: 'default',
-        channelId: 'emergency_sos_channel_v4',
+        channelId: data.type === 'QUEUE_TURN' ? 'clinic_queue_channel' : 'appointment_channel',
       },
     },
   };
@@ -93,14 +127,18 @@ async function sendMulticastNotification(tokens, { title, body, data }) {
     
     // Clean up invalid or uninstalled tokens automatically
     if (response.failureCount > 0) {
-      response.responses.forEach(async (resp, idx) => {
-        if (!resp.success) {
+      // Match invalid Firebase registrations to their submitted device tokens.
+      await Promise.all(response.responses.map(async (resp, idx) => {
+        if (resp.error?.code === 'messaging/registration-token-not-registered' ||
+            resp.error?.code === 'messaging/invalid-registration-token') {
           const badToken = tokens[idx];
+          // Treat deletion of an invalid device token as best-effort cleanup.
           await pool.query('DELETE FROM DEVICE_TOKENS WHERE fcm_token = ?', [badToken]).catch(() => {});
         }
-      });
+      }));
     }
   } catch (err) {
-    console.error('[FCM Multicast Error]:', err.message);
+    if (retry) throw err;
+    console.error('[FCM Multicast Error]:', err.code ?? err.name);
   }
 }

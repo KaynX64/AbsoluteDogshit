@@ -1,24 +1,48 @@
 // mobile/lib/screens/consultation_scheduler_screen.dart
 import 'dart:convert';
+import 'dart:async';
+
+import '../services/mobile_session_data.dart';
+import '../services/connectivity_service.dart';
+import '../widgets/lazy_card_columns.dart';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
+import '../theme/app_palette.dart';
+
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
+
 import '../config/api_config.dart';
 import '../utils/responsive.dart';
 import '../services/emergency_alert_service.dart';
+import '../widgets/appointment_booking_review.dart';
 
 class ConsultationSchedulerScreen extends StatefulWidget {
-  const ConsultationSchedulerScreen({super.key});
+  const ConsultationSchedulerScreen({super.key, this.client});
+  final http.Client? client;
 
   @override
-  State<ConsultationSchedulerScreen> createState() => _ConsultationSchedulerScreenState();
+  State<ConsultationSchedulerScreen> createState() =>
+      _ConsultationSchedulerScreenState();
 }
 
-class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScreen>
+class _ConsultationSchedulerScreenState
+    extends State<ConsultationSchedulerScreen>
     with WidgetsBindingObserver {
   final _storage = const FlutterSecureStorage();
+  http.Client get _client => widget.client ?? ApiConfig.client;
 
+  final _data = MobileSessionData.instance;
+  late final int _generation;
   int _activeSubTab = 0;
+  late final StreamSubscription<String> _historyChanges;
+  late bool _online;
+  Timer? _historyRefresh;
+  int _historyRequest = 0;
+  bool _historyFailed = false;
 
   io.Socket? _socket;
 
@@ -27,13 +51,18 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   int? _selectedDoctorId;
 
   static const List<String> _months = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
-  ];
-
-  static const List<String> _monthsAbbr = [
-    'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
-    'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
   ];
 
   static DateTime _getNextValidWeekday([DateTime? fromDate]) {
@@ -42,7 +71,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     if (fromDate == null) {
       date = date.add(const Duration(days: 1));
     }
-    while (date.weekday == DateTime.saturday || date.weekday == DateTime.sunday) {
+    while (date.weekday == DateTime.saturday ||
+        date.weekday == DateTime.sunday) {
       date = date.add(const Duration(days: 1));
     }
     return date;
@@ -64,56 +94,61 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   List<dynamic> _slots = [];
   bool _loadingSlots = false;
   String? _selectedSlotTime;
-
-  final List<String> _medicalPurposes = [
-    'General consultation',
-    'Prescription refill',
-    'Medical clearance',
-  ];
-
-  final List<String> _dentalPurposes = [
-    'Dental Checkup',
-    'Tooth Extraction',
-    'Oral Prophylaxis',
-    'Toothache Emergency',
-  ];
-
+  String? _restoredSlot;
+  int _slotsRequest = 0;
+  Timer? _slotRefreshTimer;
+  bool _slotRefreshQueued = false;
   List<String> _currentPurposes = [];
-  String _selectedPurpose = 'General consultation';
+  String _selectedPurpose = '';
 
   final _notesController = TextEditingController();
   bool _isSubmitting = false;
+  bool _isReviewing = false;
 
   List<dynamic> _myAppointments = [];
   bool _loadingHistory = false;
+  bool _isAppointmentGridView = false;
 
-  static const primaryGreen = Color(0xFF284E3A);
-  static const softSage = Color(0xFFE5EDE4);
-  static const textMain = Color(0xFF191C1A);
-  static const textSub = Color(0xFF5A635B);
-  static const borderColor = Color(0xFFD6DFD5);
-  static const disabledSlotBg = Color(0xFFEDF2EC);
-  static const disabledSlotText = Color(0xFFA3B0A4);
+  Color get primaryGreen => AppPalette.of(context).color(0xFF284E3A);
+  Color get softSage => AppPalette.of(context).color(0xFFE5EDE4);
+  Color get textMain => AppPalette.of(context).color(0xFF191C1A);
+  Color get textSub => AppPalette.of(context).color(0xFF5A635B);
+  Color get borderColor => AppPalette.of(context).color(0xFFD6DFD5);
+  Color get disabledSlotBg =>
+      Theme.of(context).colorScheme.surfaceContainerHigh;
+  Color get disabledSlotText => Theme.of(context).colorScheme.onSurfaceVariant;
 
-  static const _selectedDoctorBg = Color(0xFFE2EBE1);
-  static const _selectedAvatarBg = Color(0x26284E3A);
-  static const _infoCardBg = Color(0xFFE2EBE1);
-  static const _dividerSoft = Color(0xFFC7D6C6);
-  static const _hintColor = Color(0xFF94A396);
-  static const _monthTagColor = Color(0xFF6B7A6E);
-
+  Color get _selectedDoctorBg => AppPalette.of(context).color(0xFFE2EBE1);
+  Color get _selectedAvatarBg => primaryGreen.withValues(alpha: 0.12);
+  Color get _infoCardBg => AppPalette.of(context).color(0xFFE2EBE1);
+  Color get _dividerSoft => AppPalette.of(context).color(0xFFC7D6C6);
+  Color get _hintColor => AppPalette.of(context).color(0xFF94A396);
   final ScrollController _dateScrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _currentPurposes = _medicalPurposes;
-    _monthNotifier.value = "${_months[_selectedDate.month - 1]} ${_selectedDate.year}";
+    _generation = _data.generation;
+    final saved = _data.schedulerState;
+    _activeSubTab = saved['tab'] as int? ?? 0;
+    _online = ConnectivityService().isOnline;
+    ConnectivityService().addListener(_connectivityChanged);
+    _historyChanges = _data.changes
+        .where((path) => path == '/api/appointments/my')
+        .listen((_) => _refreshVisibleHistory());
+    _selectedDoctorId = saved['doctor'] as int?;
+    _selectedDate = saved['date'] as DateTime? ?? _selectedDate;
+    _selectedPurpose = saved['purpose'] as String? ?? '';
+    _restoredSlot = saved['slot'] as String?;
+    _notesController.text = saved['notes'] as String? ?? '';
+    _isAppointmentGridView = saved['grid'] as bool? ?? false;
+    _monthNotifier.value =
+        "${_months[_selectedDate.month - 1]} ${_selectedDate.year}";
     _generateWeekdaysList();
     _dateScrollController.addListener(_onDateScroll);
     _fetchDoctors();
-    _fetchMyAppointments();
+    if (_activeSubTab == 1) _fetchMyAppointments(force: false);
     _initSlotSocket();
   }
 
@@ -131,43 +166,95 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    ConnectivityService().removeListener(_connectivityChanged);
+    _historyRefresh?.cancel();
+    unawaited(_historyChanges.cancel());
+    if (_data.isCurrent(_generation)) {
+      _data.schedulerState.addAll({
+        'tab': _activeSubTab,
+        'doctor': _selectedDoctorId,
+        'date': _selectedDate,
+        'slot': _selectedSlotTime,
+        'purpose': _selectedPurpose,
+        'notes': _notesController.text,
+        'grid': _isAppointmentGridView,
+      });
+    }
     _notesController.dispose();
     _dateScrollController.removeListener(_onDateScroll);
     _dateScrollController.dispose();
     _monthNotifier.dispose();
-    _socket?.disconnect();
+    _slotRefreshTimer?.cancel();
+    _socket?.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && _selectedDoctorId != null) {
-      _fetchAvailableSlots();
+    if (state == AppLifecycleState.resumed) {
+      if (_activeSubTab == 0 && _selectedDoctorId != null) {
+        _fetchAvailableSlots();
+      }
+      _refreshVisibleHistory();
     }
+  }
+
+  void _connectivityChanged() {
+    final online = ConnectivityService().isOnline;
+    if (online && !_online) _refreshVisibleHistory();
+    _online = online;
+  }
+
+  void _refreshVisibleHistory() {
+    if (_activeSubTab != 1) return;
+    _historyRefresh?.cancel();
+    _historyRefresh = Timer(const Duration(milliseconds: 150), () {
+      if (mounted && _activeSubTab == 1) unawaited(_fetchMyAppointments());
+    });
   }
 
   Future<void> _initSlotSocket() async {
     final token = await _storage.read(key: 'jwt_token');
+    if (!mounted || token == null) return;
     try {
       _socket = io.io(
         ApiConfig.socketUrl,
         io.OptionBuilder()
             .setTransports(['websocket', 'polling'])
             .setAuth({'token': token})
+            .enableForceNew()
             .enableAutoConnect()
             .build(),
       );
 
       _socket?.on('appointment:booked', (data) {
+        if (!_data.isCurrent(_generation)) return;
+        _data.invalidateAppointments();
         if (!mounted || _selectedDoctorId == null) return;
-        _fetchAvailableSlots();
+        _scheduleSlotRefresh();
       });
 
       _socket?.on('appointment:cancelled', (_) {
+        if (!_data.isCurrent(_generation)) return;
+        _data.invalidateAppointments();
         if (!mounted) return;
-        _fetchAvailableSlots();
+        _scheduleSlotRefresh();
       });
     } catch (_) {}
+  }
+
+  void _scheduleSlotRefresh() {
+    if (!mounted || !_data.isCurrent(_generation)) return;
+    // Invalidate a review immediately, even while the network refresh is delayed.
+    _selectedSlotTime = null;
+    _restoredSlot = null;
+    _slotRefreshQueued = true;
+    _slotRefreshTimer?.cancel();
+    _slotRefreshTimer = Timer(const Duration(milliseconds: 120), () {
+      if (!mounted || _loadingSlots || !_slotRefreshQueued) return;
+      _slotRefreshQueued = false;
+      _fetchAvailableSlots();
+    });
   }
 
   void _onDateScroll() {
@@ -178,7 +265,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
         .clamp(0, _upcomingWeekdays.length - 1);
 
     final visibleDate = _upcomingWeekdays[index];
-    final newMonthYear = "${_months[visibleDate.month - 1]} ${visibleDate.year}";
+    final newMonthYear =
+        "${_months[visibleDate.month - 1]} ${visibleDate.year}";
 
     // No setState → no full-screen rebuild. Only the month label updates.
     if (_monthNotifier.value != newMonthYear) {
@@ -192,7 +280,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     curr = DateTime(curr.year, curr.month, curr.day);
 
     while (list.length < 60) {
-      if (curr.weekday != DateTime.saturday && curr.weekday != DateTime.sunday) {
+      if (curr.weekday != DateTime.saturday &&
+          curr.weekday != DateTime.sunday) {
         list.add(curr);
       }
       curr = curr.add(const Duration(days: 1));
@@ -203,7 +292,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
         _selectedDate.weekday == DateTime.sunday) {
       _selectedDate = list.first;
     }
-    _monthNotifier.value = "${_months[_selectedDate.month - 1]} ${_selectedDate.year}";
+    _monthNotifier.value =
+        "${_months[_selectedDate.month - 1]} ${_selectedDate.year}";
   }
 
   bool _isSameDay(DateTime a, DateTime b) {
@@ -238,7 +328,10 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     final lastPeriod = last.split(' ').last;
 
     if (firstPeriod == lastPeriod) {
-      final firstTime = first.substring(0, first.length - firstPeriod.length - 1);
+      final firstTime = first.substring(
+        0,
+        first.length - firstPeriod.length - 1,
+      );
       return '$firstTime – $last';
     }
     return '$first – $last';
@@ -278,9 +371,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
           ),
         ),
         SizedBox(width: rs.w(12)),
-        Expanded(
-          child: Container(height: 1, color: borderColor),
-        ),
+        Expanded(child: Container(height: 1, color: borderColor)),
         SizedBox(width: rs.w(12)),
         // On a compact screen the range pushes the label off — hide it
         // and let the AM/PM block carry the meaning.
@@ -317,7 +408,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
           child: Container(
             width: 5,
             height: 5,
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               color: _dividerSoft,
               shape: BoxShape.circle,
             ),
@@ -343,7 +434,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     return LayoutBuilder(
       builder: (context, constraints) {
         final slotWidth =
-            (constraints.maxWidth - (crossAxisCount - 1) * gap) / crossAxisCount;
+            (constraints.maxWidth - (crossAxisCount - 1) * gap) /
+            crossAxisCount;
         final slotHeight = slotWidth / 2.25;
 
         return Wrap(
@@ -352,7 +444,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
           children: group.map((slot) {
             final rawTime = slot['time'];
             final displayTime = _formatSlotDisplay(rawTime);
-            final isAvail = slot['isAvailable'] == true;
+            final availability = slot['availabilityByType'] as Map?;
+            final isAvail =
+                availability?[_selectedPurpose]?['available'] == true;
             final isSelected = _selectedSlotTime == rawTime;
             final isDisabled = !isAvail;
 
@@ -369,15 +463,15 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                     color: isSelected
                         ? primaryGreen
                         : isDisabled
-                            ? disabledSlotBg
-                            : Colors.white,
+                        ? disabledSlotBg
+                        : AppPalette.of(context).surface,
                     borderRadius: BorderRadius.circular(rs.r(22)),
                     border: Border.all(
                       color: isSelected
                           ? primaryGreen
                           : isDisabled
-                              ? Colors.transparent
-                              : borderColor,
+                          ? Colors.transparent
+                          : borderColor,
                       width: 1.2,
                     ),
                   ),
@@ -390,10 +484,10 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                           ? FontWeight.w700
                           : FontWeight.w600,
                       color: isSelected
-                          ? Colors.white
+                          ? AppPalette.of(context).onPrimary
                           : isDisabled
-                              ? disabledSlotText
-                              : textMain,
+                          ? disabledSlotText
+                          : textMain,
                     ),
                   ),
                 ),
@@ -405,43 +499,34 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     );
   }
 
-  void _updatePurposesForSelectedDoctor(int doctorId) {
-    final doc = _doctors.firstWhere((d) => d['user_id'] == doctorId, orElse: () => null);
-    if (doc != null) {
-      final isDentist = doc['role_code'] == 'DENTIST' ||
-          (doc['specialty'] != null &&
-              doc['specialty'].toString().toLowerCase().contains('dent'));
-
-      setState(() {
-        if (isDentist) {
-          _currentPurposes = _dentalPurposes;
-          _selectedPurpose = _dentalPurposes[0];
-        } else {
-          _currentPurposes = _medicalPurposes;
-          _selectedPurpose = _medicalPurposes[0];
-        }
-      });
-    }
-  }
-
   Future<void> _fetchDoctors() async {
-    setState(() => _loadingDoctors = true);
+    if (!mounted || !_data.isCurrent(_generation)) return;
+    final cached = _data.peek(
+      '/api/appointments/doctors',
+      maxAge: const Duration(minutes: 5),
+    );
+    if (cached is List) _doctors = cached;
+    setState(() => _loadingDoctors = _doctors.isEmpty);
     final token = await _storage.read(key: 'jwt_token');
+    if (!mounted || !_data.isCurrent(_generation)) return;
     try {
-      final res = await ApiConfig.client.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/appointments/doctors'),
-        headers: {'Authorization': 'Bearer $token'},
+      final data = await _data.get(
+        '/api/appointments/doctors',
+        token,
+        maxAge: const Duration(minutes: 5),
+        client: _client,
       );
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
+      if (mounted && _data.isCurrent(_generation)) {
         setState(() {
-          _doctors = data;
-          if (_doctors.isNotEmpty) {
+          _doctors = data as List<dynamic>;
+          if (_doctors.isNotEmpty &&
+              !_doctors.any(
+                (doctor) => doctor['user_id'] == _selectedDoctorId,
+              )) {
             _selectedDoctorId = _doctors[0]['user_id'];
-            _updatePurposesForSelectedDoctor(_selectedDoctorId!);
-            _fetchAvailableSlots();
           }
         });
+        if (_selectedDoctorId != null) _fetchAvailableSlots();
       }
     } catch (e) {
       _showToast('Failed to load doctors: $e', isError: true);
@@ -451,93 +536,221 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   }
 
   Future<void> _fetchAvailableSlots() async {
-    if (_selectedDoctorId == null) return;
+    final doctorId = _selectedDoctorId;
+    if (!mounted || !_data.isCurrent(_generation) || doctorId == null) return;
+    final request = ++_slotsRequest;
+    final selectedDate = _selectedDate;
 
     setState(() {
       _loadingSlots = true;
       _selectedSlotTime = null;
+      _slots = [];
     });
 
     final token = await _storage.read(key: 'jwt_token');
     final formattedDate =
-        "${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}";
+        "${selectedDate.year}-${selectedDate.month.toString().padLeft(2, '0')}-${selectedDate.day.toString().padLeft(2, '0')}";
 
     try {
-      final res = await ApiConfig.client.get(
-        Uri.parse(
-            '${ApiConfig.baseUrl}/api/appointments/slots?doctorId=$_selectedDoctorId&date=$formattedDate'),
-        headers: {'Authorization': 'Bearer $token'},
-      );
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        setState(() => _slots = data['slots'] ?? []);
+      final data = await _data.get(
+        '/api/appointments/slots?doctorId=$doctorId&date=$formattedDate',
+        token,
+        force: true,
+        client: _client,
+      ) as Map<String, dynamic>;
+      if (!mounted ||
+          request != _slotsRequest ||
+          !_data.isCurrent(_generation)) {
+        return;
       }
+      final types = data['rules']?['appointmentTypes'] as List? ?? [];
+      final purposes = types
+          .map((entry) => entry is Map ? entry['name'] : entry)
+          .whereType<String>()
+          .toList();
+      const excludedLunchTimes = {'12:00', '12:15', '12:30', '12:45'};
+      final slots = data['slots'] as List? ?? [];
+      setState(() {
+        _slots = slots
+            .where((slot) => !excludedLunchTimes.contains(slot['time']))
+            .toList();
+        _currentPurposes = purposes;
+        if (!purposes.contains(_selectedPurpose)) {
+          _selectedPurpose = purposes.isEmpty ? '' : purposes.first;
+        }
+        if (_restoredSlot != null &&
+            _slots.any(
+              (slot) =>
+                  slot['time'] == _restoredSlot &&
+                  slot['availabilityByType']?[_selectedPurpose]?['available'] ==
+                      true,
+            )) {
+          _selectedSlotTime = _restoredSlot;
+        }
+        _restoredSlot = null;
+      });
     } catch (e) {
-      _showToast('Failed to load slots: $e', isError: true);
+      if (mounted && request == _slotsRequest) {
+        setState(() => _currentPurposes = []);
+        _showToast('Failed to load slots: $e', isError: true);
+      }
     } finally {
-      if (mounted) setState(() => _loadingSlots = false);
+      if (mounted && request == _slotsRequest) {
+        setState(() => _loadingSlots = false);
+        if (_slotRefreshQueued) _scheduleSlotRefresh();
+      }
     }
   }
 
-  Future<void> _fetchMyAppointments() async {
-    setState(() => _loadingHistory = true);
-    final token = await _storage.read(key: 'jwt_token');
+  Future<void> _fetchMyAppointments({bool force = true}) async {
+    if (!mounted || !_data.isCurrent(_generation)) return;
+    final request = ++_historyRequest;
+    bool current() =>
+        mounted && request == _historyRequest && _data.isCurrent(_generation);
+    final cached = force ? null : _data.peek('/api/appointments/my');
+    if (cached is List) {
+      setState(() {
+        _myAppointments = cached;
+        _historyFailed = false;
+        _loadingHistory = false;
+      });
+      return;
+    }
+    setState(() {
+      _loadingHistory = true;
+      _historyFailed = false;
+    });
     try {
-      final res = await ApiConfig.client.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/appointments/my'),
-        headers: {'Authorization': 'Bearer $token'},
+      final token = await _storage.read(key: 'jwt_token');
+      if (!current()) return;
+      final data = await _data.get(
+        '/api/appointments/my',
+        token,
+        force: force,
+        client: _client,
       );
-      if (res.statusCode == 200) {
-        setState(() => _myAppointments = jsonDecode(res.body));
+      if (current()) {
+        setState(() => _myAppointments = data as List<dynamic>);
       }
-    } catch (e) {
-      _showToast('Failed to load history: $e', isError: true);
+    } catch (_) {
+      if (current()) setState(() => _historyFailed = true);
     } finally {
-      if (mounted) setState(() => _loadingHistory = false);
+      if (current()) setState(() => _loadingHistory = false);
     }
   }
 
   Future<void> _submitBooking() async {
+    if (_isSubmitting || _isReviewing || _loadingSlots) return;
     if (_selectedDoctorId == null) {
       _showToast('Please select a doctor or dentist.', isError: true);
       return;
     }
-    if (_selectedSlotTime == null) {
+    if (_selectedSlotTime == null ||
+        !_currentPurposes.contains(_selectedPurpose)) {
       _showToast('Please select an available time slot.', isError: true);
       return;
     }
 
-    setState(() => _isSubmitting = true);
-    final token = await _storage.read(key: 'jwt_token');
-
+    final doctorId = _selectedDoctorId;
+    final purpose = _selectedPurpose;
+    final date = _selectedDate;
+    final slotTime = _selectedSlotTime!;
+    final notes = _notesController.text.trim();
+    final slotsRequest = _slotsRequest;
+    final doctor = _doctors.firstWhere((doc) => doc['user_id'] == doctorId);
     final formattedDate =
-        "${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}";
-    final scheduledDateTime = "$formattedDate $_selectedSlotTime:00";
+        "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
+    final scheduledDateTime = "$formattedDate $slotTime:00";
 
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => _isReviewing = true);
+    bool? confirmed;
     try {
-      final res = await ApiConfig.client.post(
+      confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AppointmentBookingReview(
+          clinician: 'Dr. ${doctor['first_name']} ${doctor['last_name']}',
+          specialty: doctor['specialty']?.toString() ?? '',
+          purpose: purpose,
+          date: date,
+          time: _formatSlotDisplay(slotTime),
+          notes: notes,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isReviewing = false);
+    }
+    if (!mounted || confirmed != true) return;
+    // A live refresh clears the selected slot. Require a fresh review rather
+    // than submitting a slot whose availability changed behind the dialog.
+    if (_loadingSlots ||
+        slotsRequest != _slotsRequest ||
+        _selectedDoctorId != doctorId ||
+        _selectedPurpose != purpose ||
+        _selectedDate != date ||
+        _selectedSlotTime != slotTime) {
+      _showToast(
+        'Availability has updated. Please select a time and review your appointment again.',
+        isError: true,
+      );
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+    try {
+      final token = await _storage.read(key: 'jwt_token');
+      if (!mounted) return;
+      final latest = await _data.get(
+        '/api/appointments/slots?doctorId=$doctorId&date=$formattedDate',
+        token,
+        force: true,
+        client: _client,
+      ) as Map<String, dynamic>;
+      if (!mounted || !_data.isCurrent(_generation)) return;
+      final stillAvailable = (latest['slots'] as List? ?? []).any(
+        (slot) =>
+            slot['time'] == slotTime &&
+            slot['availabilityByType']?[purpose]?['available'] == true,
+      );
+      if (!stillAvailable ||
+          slotsRequest != _slotsRequest ||
+          _selectedSlotTime != slotTime ||
+          _slotRefreshQueued ||
+          _loadingSlots) {
+        _showToast(
+          'Availability has updated. Please select a time and review your appointment again.',
+          isError: true,
+        );
+        await _fetchAvailableSlots();
+        return;
+      }
+      final res = await _client.post(
         Uri.parse('${ApiConfig.baseUrl}/api/appointments'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
         body: jsonEncode({
-          'doctor_user_id': _selectedDoctorId,
+          'doctor_user_id': doctorId,
           'date_time': scheduledDateTime,
-          'appointment_type': _selectedPurpose,
-          'notes': _notesController.text.trim(),
+          'appointment_type': purpose,
+          'notes': notes,
         }),
       );
 
+      if (!mounted) return;
       final data = jsonDecode(res.body);
       if (res.statusCode == 201) {
+        _data.invalidateAppointments();
         _notesController.clear();
         await _fetchAvailableSlots();
+        if (!mounted) return;
         await _fetchMyAppointments();
+        if (!mounted) return;
 
         EmergencyAlertService().showAppointmentConfirmedNotification(
           '📅 Consultation Confirmed',
-          'Your appointment for $_selectedPurpose on $scheduledDateTime is set.',
+          'Your appointment for $purpose on $scheduledDateTime is set.',
         );
 
         if (mounted) {
@@ -545,12 +758,15 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
           showDialog(
             context: context,
             builder: (ctx) => AlertDialog(
-              backgroundColor: Colors.white,
+              backgroundColor: AppPalette.of(context).surface,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(rs.r(20)),
               ),
-              icon: const Icon(Icons.check_circle_outline,
-                  color: primaryGreen, size: 48),
+              icon: Icon(
+                Icons.check_circle_outline,
+                color: primaryGreen,
+                size: 48,
+              ),
               title: Text(
                 'Consultation Scheduled',
                 style: TextStyle(
@@ -572,7 +788,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                   ),
                   SizedBox(height: rs.h(6)),
                   Text(
-                    'Purpose: $_selectedPurpose',
+                    'Purpose: $purpose',
                     style: TextStyle(fontSize: rs.sp(13), color: textSub),
                   ),
                   SizedBox(height: rs.h(12)),
@@ -590,7 +806,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: primaryGreen,
-                    foregroundColor: Colors.white,
+                    foregroundColor: AppPalette.of(context).onPrimary,
                     shape: const StadiumBorder(),
                   ),
                   onPressed: () {
@@ -604,7 +820,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
           );
         }
       } else {
+        if (!mounted) return;
         _showToast(data['error'] ?? 'Booking failed', isError: true);
+        if (res.statusCode == 409) await _fetchAvailableSlots();
       }
     } catch (e) {
       _showToast('Network error: $e', isError: true);
@@ -619,7 +837,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: AppPalette.of(context).surface,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(rs.r(20)),
         ),
@@ -627,7 +845,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
           'Cancel Consultation',
           style: TextStyle(
             fontWeight: FontWeight.w800,
-            color: const Color(0xFF7A2E26),
+            color: AppPalette.of(context).color(0xFF7A2E26),
             fontSize: rs.sp(16),
           ),
         ),
@@ -645,10 +863,10 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
               decoration: InputDecoration(
                 hintText: 'Reason for cancellation',
                 filled: true,
-                fillColor: const Color(0xFFF7F9F6),
+                fillColor: AppPalette.of(context).color(0xFFF7F9F6),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(rs.r(14)),
-                  borderSide: const BorderSide(color: borderColor),
+                  borderSide: BorderSide(color: borderColor),
                 ),
               ),
             ),
@@ -657,11 +875,11 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Keep', style: TextStyle(color: textSub)),
+            child: Text('Keep', style: TextStyle(color: textSub)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF7A2E26),
+              backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
               foregroundColor: Colors.white,
               shape: const StadiumBorder(),
             ),
@@ -675,9 +893,12 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     if (confirm != true) return;
 
     final token = await _storage.read(key: 'jwt_token');
+    if (!mounted || !_data.isCurrent(_generation)) return;
     try {
-      final res = await ApiConfig.client.patch(
-        Uri.parse('${ApiConfig.baseUrl}/api/appointments/$appointmentId/cancel'),
+      final res = await _client.patch(
+        Uri.parse(
+          '${ApiConfig.baseUrl}/api/appointments/$appointmentId/cancel',
+        ),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
@@ -686,6 +907,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
       );
 
       if (res.statusCode == 200) {
+        _data.invalidateAppointments();
         _showToast('Appointment cancelled.');
         _fetchMyAppointments();
         _fetchAvailableSlots();
@@ -703,7 +925,11 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     final firstDate = DateTime(now.year, now.month, now.day);
     final lastDate = firstDate.add(const Duration(days: 90));
 
-    DateTime initial = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
+    DateTime initial = DateTime(
+      _selectedDate.year,
+      _selectedDate.month,
+      _selectedDate.day,
+    );
     if (initial.isBefore(firstDate) ||
         initial.isAfter(lastDate) ||
         initial.weekday == DateTime.saturday ||
@@ -719,18 +945,6 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
         lastDate: lastDate,
         selectableDayPredicate: (day) =>
             day.weekday != DateTime.saturday && day.weekday != DateTime.sunday,
-        builder: (context, child) {
-          return Theme(
-            data: Theme.of(context).copyWith(
-              colorScheme: const ColorScheme.light(
-                primary: primaryGreen,
-                onPrimary: Colors.white,
-                onSurface: textMain,
-              ),
-            ),
-            child: child!,
-          );
-        },
       );
 
       if (picked != null && !_isSameDay(picked, _selectedDate)) {
@@ -740,7 +954,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
         _monthNotifier.value = "${_months[picked.month - 1]} ${picked.year}";
         _fetchAvailableSlots();
 
-        final targetIndex = _upcomingWeekdays.indexWhere((d) => _isSameDay(d, picked));
+        final targetIndex = _upcomingWeekdays.indexWhere(
+          (d) => _isSameDay(d, picked),
+        );
         if (targetIndex != -1 && _dateScrollController.hasClients) {
           _dateScrollController.animateTo(
             targetIndex * _dateItemExtent,
@@ -770,10 +986,13 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
 
   void _showToast(String message, {bool isError = false}) {
     if (!mounted) return;
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: isError ? const Color(0xFF7A2E26) : primaryGreen,
+        backgroundColor: isError
+            ? AppPalette.of(context).color(0xFF7A2E26)
+            : primaryGreen,
       ),
     );
   }
@@ -792,7 +1011,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
             _buildHeader(rs),
             SizedBox(height: rs.h(4)),
             Expanded(
-              child: _activeSubTab == 0 ? _buildBookingTab(rs) : _buildHistoryTab(rs),
+              child: _activeSubTab == 0
+                  ? _buildBookingTab(rs)
+                  : _buildHistoryTab(rs),
             ),
           ],
         ),
@@ -802,10 +1023,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
 
   Widget _buildHeader(Rs rs) {
     return Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: rs.w(20),
-        vertical: rs.h(8),
-      ),
+      padding: EdgeInsets.symmetric(horizontal: rs.w(20), vertical: rs.h(8)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -849,7 +1067,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                     child: Container(
                       padding: EdgeInsets.symmetric(vertical: rs.h(9)),
                       decoration: BoxDecoration(
-                        color: _activeSubTab == 0 ? primaryGreen : Colors.transparent,
+                        color: _activeSubTab == 0
+                            ? primaryGreen
+                            : Colors.transparent,
                         borderRadius: BorderRadius.circular(rs.r(20)),
                       ),
                       alignment: Alignment.center,
@@ -858,7 +1078,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                         style: TextStyle(
                           fontSize: rs.sp(13),
                           fontWeight: FontWeight.w700,
-                          color: _activeSubTab == 0 ? Colors.white : primaryGreen,
+                          color: _activeSubTab == 0
+                              ? AppPalette.of(context).onPrimary
+                              : primaryGreen,
                         ),
                       ),
                     ),
@@ -866,12 +1088,17 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                 ),
                 Expanded(
                   child: GestureDetector(
-                    onTap: () => setState(() => _activeSubTab = 1),
+                    onTap: () {
+                      setState(() => _activeSubTab = 1);
+                      _fetchMyAppointments(force: false);
+                    },
                     behavior: HitTestBehavior.opaque,
                     child: Container(
                       padding: EdgeInsets.symmetric(vertical: rs.h(9)),
                       decoration: BoxDecoration(
-                        color: _activeSubTab == 1 ? primaryGreen : Colors.transparent,
+                        color: _activeSubTab == 1
+                            ? primaryGreen
+                            : Colors.transparent,
                         borderRadius: BorderRadius.circular(rs.r(20)),
                       ),
                       alignment: Alignment.center,
@@ -880,7 +1107,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                         style: TextStyle(
                           fontSize: rs.sp(13),
                           fontWeight: FontWeight.w700,
-                          color: _activeSubTab == 1 ? Colors.white : primaryGreen,
+                          color: _activeSubTab == 1
+                              ? AppPalette.of(context).onPrimary
+                              : primaryGreen,
                         ),
                       ),
                     ),
@@ -889,25 +1118,112 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
               ],
             ),
           ),
+          if (_activeSubTab == 1) ...[
+            SizedBox(height: rs.h(8)),
+            Align(
+              alignment: Alignment.centerRight,
+              child: _buildHistoryLayoutSelector(rs),
+            ),
+            if (_historyFailed)
+              ListTile(
+                title: const Text('Could not load appointments.'),
+                trailing: TextButton(
+                  onPressed: _fetchMyAppointments,
+                  child: const Text('Retry'),
+                ),
+              ),
+            if (_loadingHistory && _myAppointments.isNotEmpty)
+              const LinearProgressIndicator(),
+          ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildHistoryLayoutSelector(Rs rs) {
+    return Container(
+      padding: EdgeInsets.all(rs.w(3)),
+      decoration: BoxDecoration(
+        color: AppPalette.of(context).color(0xFFF4F6F3),
+        border: Border.all(color: borderColor),
+        borderRadius: BorderRadius.circular(rs.r(14)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildHistoryLayoutOption(rs, isGrid: false),
+          _buildHistoryLayoutOption(rs, isGrid: true),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHistoryLayoutOption(Rs rs, {required bool isGrid}) {
+    final selected = _isAppointmentGridView == isGrid;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: isGrid ? 'Grid layout' : 'List layout',
+      child: GestureDetector(
+        onTap: () => setState(() => _isAppointmentGridView = isGrid),
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: EdgeInsets.symmetric(
+            horizontal: rs.w(10),
+            vertical: rs.h(7),
+          ),
+          decoration: BoxDecoration(
+            color: selected
+                ? AppPalette.of(context).surface
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(rs.r(11)),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: AppPalette.of(context).color(0x12000000),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isGrid ? Icons.grid_view_rounded : Icons.view_agenda_outlined,
+                size: rs.w(16),
+                color: selected ? primaryGreen : textSub,
+              ),
+              SizedBox(width: rs.w(5)),
+              Text(
+                isGrid ? 'Grid' : 'List',
+                style: TextStyle(
+                  fontSize: rs.sp(11.5),
+                  fontWeight: FontWeight.w700,
+                  color: selected ? primaryGreen : textSub,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 
   Widget _buildBookingTab(Rs rs) {
     if (_loadingDoctors) {
-      return const Center(child: CircularProgressIndicator(color: primaryGreen));
+      return Center(child: CircularProgressIndicator(color: primaryGreen));
     }
 
     return RefreshIndicator(
       color: primaryGreen,
       onRefresh: _fetchAvailableSlots,
       child: ListView(
-        padding: EdgeInsets.symmetric(
-          horizontal: rs.w(20),
-          vertical: rs.h(8),
-        ),
-        cacheExtent: 300,
+        key: const PageStorageKey('booking'),
+        padding: EdgeInsets.symmetric(horizontal: rs.w(20), vertical: rs.h(8)),
+        scrollCacheExtent: const ScrollCacheExtent.pixels(300),
         addAutomaticKeepAlives: false,
         addRepaintBoundaries: true,
         addSemanticIndexes: false,
@@ -952,19 +1268,19 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
               hintText: 'Tell your care team a little about your visit…',
               hintStyle: TextStyle(color: _hintColor, fontSize: rs.sp(13)),
               filled: true,
-              fillColor: Colors.white,
+              fillColor: AppPalette.of(context).surface,
               contentPadding: EdgeInsets.all(rs.w(14)),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(rs.r(18)),
-                borderSide: const BorderSide(color: borderColor),
+                borderSide: BorderSide(color: borderColor),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(rs.r(18)),
-                borderSide: const BorderSide(color: borderColor),
+                borderSide: BorderSide(color: borderColor),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(rs.r(18)),
-                borderSide: const BorderSide(color: primaryGreen),
+                borderSide: BorderSide(color: primaryGreen),
               ),
             ),
           ),
@@ -975,28 +1291,38 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: primaryGreen,
-                foregroundColor: Colors.white,
+                foregroundColor: AppPalette.of(context).onPrimary,
                 elevation: 0,
                 shape: const StadiumBorder(),
               ),
-              onPressed: _isSubmitting ? null : _submitBooking,
+              onPressed:
+                  _isSubmitting ||
+                      _isReviewing ||
+                      _loadingSlots ||
+                      _selectedSlotTime == null
+                  ? null
+                  : _submitBooking,
               child: _isSubmitting
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 20,
                       height: 20,
                       child: CircularProgressIndicator(
-                        color: Colors.white,
+                        color: AppPalette.of(context).onPrimary,
                         strokeWidth: 2,
                       ),
                     )
                   : Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Text(
-                          'Confirm appointment',
-                          style: TextStyle(
-                            fontSize: rs.sp(15),
-                            fontWeight: FontWeight.w700,
+                        Flexible(
+                          child: Text(
+                            'Review appointment',
+                            maxLines: 2,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: rs.sp(15),
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
                         SizedBox(width: rs.w(8)),
@@ -1023,8 +1349,11 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
       items.add(
         GestureDetector(
           onTap: () {
-            setState(() => _selectedDoctorId = doc['user_id']);
-            _updatePurposesForSelectedDoctor(doc['user_id']);
+            setState(() {
+              _selectedDoctorId = doc['user_id'];
+              _currentPurposes = [];
+              _selectedPurpose = '';
+            });
             _fetchAvailableSlots();
           },
           behavior: HitTestBehavior.opaque,
@@ -1035,7 +1364,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
               vertical: rs.h(12),
             ),
             decoration: BoxDecoration(
-              color: isSelected ? _selectedDoctorBg : Colors.white,
+              color: isSelected
+                  ? _selectedDoctorBg
+                  : AppPalette.of(context).surface,
               borderRadius: BorderRadius.circular(rs.r(18)),
               border: Border.all(
                 color: isSelected ? primaryGreen : borderColor,
@@ -1085,7 +1416,8 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                     ],
                   ),
                 ),
-                if (isSelected) const Icon(Icons.check, size: 18, color: primaryGreen),
+                if (isSelected)
+                  Icon(Icons.check, size: 18, color: primaryGreen),
               ],
             ),
           ),
@@ -1095,38 +1427,126 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     return Column(children: items);
   }
 
+  IconData _purposeIcon(String purpose) {
+    final normalized = purpose.toLowerCase();
+    if (normalized.contains('general')) return Icons.chat_bubble_outline;
+    if (normalized.contains('prescription')) return Icons.medication_outlined;
+    if (normalized.contains('clearance')) return Icons.verified_user_outlined;
+    if (normalized.contains('physical examination')) {
+      return Icons.monitor_heart_outlined;
+    }
+    if (normalized.contains('dental checkup')) {
+      return Icons.medical_services_outlined;
+    }
+    if (normalized.contains('tooth extraction')) return Icons.healing_outlined;
+    if (normalized.contains('oral prophylaxis')) {
+      return Icons.cleaning_services_outlined;
+    }
+    if (normalized.contains('toothache emergency')) {
+      return Icons.emergency_outlined;
+    }
+    return Icons.medical_information_outlined;
+  }
+
   Widget _buildPurposeChips(Rs rs) {
-    return Wrap(
-      spacing: rs.w(8),
-      runSpacing: rs.h(8),
-      children: _currentPurposes.map((purpose) {
-        final isSelected = _selectedPurpose == purpose;
-        return GestureDetector(
-          onTap: () => setState(() => _selectedPurpose = purpose),
-          behavior: HitTestBehavior.opaque,
-          child: Container(
-            padding: EdgeInsets.symmetric(
-              horizontal: rs.w(16),
-              vertical: rs.h(10),
-            ),
-            decoration: BoxDecoration(
-              color: isSelected ? primaryGreen : Colors.white,
-              borderRadius: BorderRadius.circular(rs.r(20)),
-              border: Border.all(
-                color: isSelected ? primaryGreen : borderColor,
+    final spacing = rs.w(10);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final cardWidth = (constraints.maxWidth - spacing) / 2;
+        return Wrap(
+          spacing: spacing,
+          runSpacing: rs.h(10),
+          children: _currentPurposes.map((purpose) {
+            final isSelected = _selectedPurpose == purpose;
+            final radius = BorderRadius.circular(rs.r(18));
+            return SizedBox(
+              width: cardWidth,
+              child: Material(
+                color: Colors.transparent,
+                borderRadius: radius,
+                child: InkWell(
+                  borderRadius: radius,
+                  onTap: () => setState(() {
+                    if (_selectedPurpose != purpose) _selectedSlotTime = null;
+                    _selectedPurpose = purpose;
+                  }),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    constraints: BoxConstraints(minHeight: rs.h(104)),
+                    padding: EdgeInsets.all(rs.w(13)),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? softSage
+                          : AppPalette.of(context).surface,
+                      borderRadius: radius,
+                      border: Border.all(
+                        color: isSelected ? primaryGreen : borderColor,
+                        width: isSelected ? 1.5 : 1,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(
+                            alpha: isSelected ? 0.06 : 0.025,
+                          ),
+                          blurRadius: isSelected ? 12 : 8,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: rs.w(36),
+                              height: rs.w(36),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? Theme.of(context)
+                                          .colorScheme
+                                          .surfaceContainerHigh
+                                    : softSage,
+                                shape: BoxShape.circle,
+                              ),
+                              alignment: Alignment.center,
+                              child: Icon(
+                                _purposeIcon(purpose),
+                                size: rs.w(19),
+                                color: primaryGreen,
+                              ),
+                            ),
+                            const Spacer(),
+                            Icon(
+                              isSelected
+                                  ? Icons.check_circle_rounded
+                                  : Icons.circle_outlined,
+                              size: rs.w(19),
+                              color: isSelected ? primaryGreen : borderColor,
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: rs.h(12)),
+                        Text(
+                          purpose,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: rs.sp(13),
+                            fontWeight: FontWeight.w700,
+                            color: textMain,
+                            height: 1.2,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-            ),
-            child: Text(
-              purpose,
-              style: TextStyle(
-                fontSize: rs.sp(12.5),
-                fontWeight: FontWeight.w600,
-                color: isSelected ? Colors.white : textMain,
-              ),
-            ),
-          ),
+            );
+          }).toList(),
         );
-      }).toList(),
+      },
     );
   }
 
@@ -1175,7 +1595,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                   ),
                 ),
                 SizedBox(width: rs.w(4)),
-                const Icon(Icons.arrow_drop_down, color: primaryGreen, size: 20),
+                Icon(Icons.arrow_drop_down, color: primaryGreen, size: 20),
               ],
             ),
           ),
@@ -1196,11 +1616,12 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     return SizedBox(
       height: carouselHeight,
       child: ListView.builder(
+        key: const PageStorageKey('booking-dates'),
         controller: _dateScrollController,
         scrollDirection: Axis.horizontal,
         itemExtent: extent,
         itemCount: _upcomingWeekdays.length,
-        cacheExtent: 200,
+        scrollCacheExtent: const ScrollCacheExtent.pixels(200),
         addAutomaticKeepAlives: false,
         addRepaintBoundaries: true,
         itemBuilder: (context, index) {
@@ -1208,15 +1629,11 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
           final isSelected = _isSameDay(date, _selectedDate);
 
           final dayName = weekdayAbbr[date.weekday - 1];
-          final isMonthStart =
-              index == 0 || date.month != _upcomingWeekdays[index - 1].month;
-          final monthBadge = _monthsAbbr[date.month - 1];
 
           return GestureDetector(
             onTap: () {
               setState(() => _selectedDate = date);
-              _monthNotifier.value =
-                  "${_months[date.month - 1]} ${date.year}";
+              _monthNotifier.value = "${_months[date.month - 1]} ${date.year}";
               _fetchAvailableSlots();
             },
             behavior: HitTestBehavior.opaque,
@@ -1227,7 +1644,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
                 decoration: BoxDecoration(
-                  color: isSelected ? primaryGreen : Colors.white,
+                  color: isSelected
+                      ? primaryGreen
+                      : AppPalette.of(context).surface,
                   borderRadius: BorderRadius.circular(rs.r(22)),
                   border: Border.all(
                     color: isSelected ? primaryGreen : borderColor,
@@ -1246,48 +1665,26 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    if (isMonthStart)
-                      Container(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: rs.w(5),
-                          vertical: rs.h(1),
-                        ),
-                        margin: EdgeInsets.only(bottom: rs.h(2)),
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? Colors.white.withValues(alpha: 0.25)
-                              : softSage,
-                          borderRadius: BorderRadius.circular(rs.r(6)),
-                        ),
-                        child: Text(
-                          monthBadge,
-                          style: TextStyle(
-                            fontSize: rs.sp(9),
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.6,
-                            color: isSelected ? Colors.white : primaryGreen,
-                          ),
-                        ),
-                      )
-                    else
-                      Text(
-                        dayName,
-                        style: TextStyle(
-                          fontSize: rs.sp(11),
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.5,
-                          color: isSelected
-                              ? Colors.white.withValues(alpha: 0.85)
-                              : _monthTagColor,
-                        ),
+                    Text(
+                      dayName,
+                      style: TextStyle(
+                        fontSize: rs.sp(11),
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.5,
+                        color: isSelected
+                            ? AppPalette.of(context).onPrimary
+                            : textSub,
                       ),
+                    ),
                     SizedBox(height: rs.h(4)),
                     Text(
                       '${date.day}',
                       style: TextStyle(
                         fontSize: rs.sp(22),
                         fontWeight: FontWeight.w800,
-                        color: isSelected ? Colors.white : textMain,
+                        color: isSelected
+                            ? AppPalette.of(context).onPrimary
+                            : textMain,
                       ),
                     ),
                   ],
@@ -1302,9 +1699,9 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
 
   Widget _buildSlotGrid(Rs rs) {
     if (_loadingSlots) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(20),
+          padding: const EdgeInsets.all(20),
           child: CircularProgressIndicator(color: primaryGreen, strokeWidth: 2),
         ),
       );
@@ -1314,7 +1711,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
         padding: EdgeInsets.all(rs.w(16)),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppPalette.of(context).surface,
           borderRadius: BorderRadius.circular(rs.r(16)),
           border: Border.all(color: borderColor),
         ),
@@ -1325,8 +1722,12 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
       );
     }
 
-    final amSlots = _slots.where((s) => _isMorning(s['time'] as String)).toList();
-    final pmSlots = _slots.where((s) => !_isMorning(s['time'] as String)).toList();
+    final amSlots = _slots
+        .where((s) => _isMorning(s['time'] as String))
+        .toList();
+    final pmSlots = _slots
+        .where((s) => !_isMorning(s['time'] as String))
+        .toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1379,14 +1780,17 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                 style: TextStyle(
                   fontSize: rs.sp(15),
                   fontWeight: FontWeight.w800,
-                  color: const Color(0xFF191C1A),
+                  color: AppPalette.of(context).color(0xFF191C1A),
                 ),
               ),
             ],
           ),
           SizedBox(height: rs.h(12)),
           _CheckItem(rs: rs, text: 'Bring your university ID and health pass.'),
-          _CheckItem(rs: rs, text: 'Arrive 10 minutes before your appointment.'),
+          _CheckItem(
+            rs: rs,
+            text: 'Arrive 10 minutes before your appointment.',
+          ),
           _CheckItem(rs: rs, text: 'Keep a list of any medications you take.'),
           Divider(color: _dividerSoft, height: rs.h(24)),
           Row(
@@ -1420,11 +1824,12 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
   }
 
   Widget _buildHistoryTab(Rs rs) {
-    if (_loadingHistory) {
-      return const Center(child: CircularProgressIndicator(color: primaryGreen));
+    if (_loadingHistory && _myAppointments.isEmpty) {
+      return Center(child: CircularProgressIndicator(color: primaryGreen));
     }
 
     if (_myAppointments.isEmpty) {
+      if (_historyFailed) return const SizedBox.shrink();
       return RefreshIndicator(
         color: primaryGreen,
         onRefresh: _fetchMyAppointments,
@@ -1435,7 +1840,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
             Icon(
               Icons.calendar_month_outlined,
               size: rs.w(54).clamp(44.0, 60.0),
-              color: const Color(0xFFA4B0A6),
+              color: AppPalette.of(context).color(0xFFA4B0A6),
             ),
             SizedBox(height: rs.h(12)),
             Center(
@@ -1453,21 +1858,51 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
       );
     }
 
+    if (_isAppointmentGridView) {
+      final columnCount = rs.isTablet ? 3 : 2;
+      return RefreshIndicator(
+        color: primaryGreen,
+        onRefresh: _fetchMyAppointments,
+        child: CustomScrollView(
+          key: const PageStorageKey('appointment-history-grid'),
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                rs.w(20),
+                rs.h(8),
+                rs.w(20),
+                rs.h(8),
+              ),
+              sliver: LazyCardColumns(
+                columnCount: columnCount,
+                itemCount: _myAppointments.length,
+                gap: rs.w(12),
+                trailingGap: false,
+                itemBuilder: (context, index) =>
+                    _buildAppointmentGridCard(_myAppointments[index], rs),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return RefreshIndicator(
       color: primaryGreen,
       onRefresh: _fetchMyAppointments,
       child: ListView.builder(
-        padding: EdgeInsets.symmetric(
-          horizontal: rs.w(20),
-          vertical: rs.h(8),
-        ),
+        key: const PageStorageKey('appointment-history-list'),
+        padding: EdgeInsets.symmetric(horizontal: rs.w(20), vertical: rs.h(8)),
         itemCount: _myAppointments.length,
         addAutomaticKeepAlives: false,
         addRepaintBoundaries: true,
         addSemanticIndexes: false,
         itemBuilder: (context, index) {
           final item = _myAppointments[index];
-          final status = (item['status'] ?? 'scheduled').toString().toLowerCase();
+          final status = (item['status'] ?? 'scheduled')
+              .toString()
+              .toLowerCase();
 
           final isConfirmed = status == 'scheduled' || status == 'checked_in';
           final isCompleted = status == 'completed';
@@ -1477,7 +1912,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
               margin: EdgeInsets.only(bottom: rs.h(14)),
               padding: EdgeInsets.all(rs.w(18)),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppPalette.of(context).surface,
                 borderRadius: BorderRadius.circular(rs.r(22)),
                 border: Border.all(color: borderColor),
               ),
@@ -1520,22 +1955,24 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                         ),
                         decoration: BoxDecoration(
                           color: isConfirmed
-                              ? const Color(0xFFE5EDE4)
+                              ? AppPalette.of(context).color(0xFFE5EDE4)
                               : isCompleted
-                                  ? const Color(0xFFE2EBE1)
-                                  : const Color(0xFFFDE8E8),
+                              ? AppPalette.of(context).color(0xFFE2EBE1)
+                              : AppPalette.of(context).color(0xFFFDE8E8),
                           borderRadius: BorderRadius.circular(rs.r(12)),
                         ),
                         child: Text(
-                          status == 'scheduled' ? 'Confirmed' : status.toUpperCase(),
+                          status == 'scheduled'
+                              ? 'Confirmed'
+                              : status.toUpperCase(),
                           style: TextStyle(
                             fontSize: rs.sp(10.5),
                             fontWeight: FontWeight.w700,
                             color: isConfirmed
                                 ? primaryGreen
                                 : isCompleted
-                                    ? const Color(0xFF15803D)
-                                    : const Color(0xFF9B1C1C),
+                                ? AppPalette.of(context).color(0xFF15803D)
+                                : AppPalette.of(context).color(0xFF9B1C1C),
                           ),
                         ),
                       ),
@@ -1555,12 +1992,17 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                   SizedBox(height: rs.h(6)),
                   Row(
                     children: [
-                      Icon(Icons.event_outlined, size: rs.w(15), color: textSub),
+                      Icon(
+                        Icons.event_outlined,
+                        size: rs.w(15),
+                        color: textSub,
+                      ),
                       SizedBox(width: rs.w(6)),
                       Expanded(
                         child: Text(
                           _formatDateTime(
-                              item['formatted_date_time'] ?? item['date_time']),
+                            item['formatted_date_time'] ?? item['date_time'],
+                          ),
                           style: TextStyle(
                             fontSize: rs.sp(12.5),
                             fontWeight: FontWeight.w700,
@@ -1574,7 +2016,11 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                   SizedBox(height: rs.h(4)),
                   Row(
                     children: [
-                      Icon(Icons.location_on_outlined, size: rs.w(15), color: textSub),
+                      Icon(
+                        Icons.location_on_outlined,
+                        size: rs.w(15),
+                        color: textSub,
+                      ),
                       SizedBox(width: rs.w(6)),
                       Expanded(
                         child: Text(
@@ -1586,13 +2032,14 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                       ),
                     ],
                   ),
-                  if (item['notes'] != null && item['notes'].toString().isNotEmpty) ...[
+                  if (item['notes'] != null &&
+                      item['notes'].toString().isNotEmpty) ...[
                     SizedBox(height: rs.h(10)),
                     Container(
                       width: double.infinity,
                       padding: EdgeInsets.all(rs.w(10)),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF7F9F6),
+                        color: AppPalette.of(context).color(0xFFF7F9F6),
                         borderRadius: BorderRadius.circular(rs.r(12)),
                       ),
                       child: Text(
@@ -1609,7 +2056,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
                       child: Text(
                         'Cancel appointment',
                         style: TextStyle(
-                          color: const Color(0xFF7A2E26),
+                          color: AppPalette.of(context).color(0xFF7A2E26),
                           fontSize: rs.sp(13),
                           fontWeight: FontWeight.w700,
                         ),
@@ -1625,6 +2072,151 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
     );
   }
 
+  Widget _buildAppointmentGridCard(dynamic item, Rs rs) {
+    final status = (item['status'] ?? 'scheduled').toString().toLowerCase();
+    final isConfirmed = status == 'scheduled' || status == 'checked_in';
+    final isCompleted = status == 'completed';
+    final statusColor = isConfirmed
+        ? primaryGreen
+        : isCompleted
+        ? AppPalette.of(context).color(0xFF15803D)
+        : AppPalette.of(context).color(0xFF9B1C1C);
+    final statusBackground = isConfirmed
+        ? softSage
+        : isCompleted
+        ? AppPalette.of(context).color(0xFFE2EBE1)
+        : AppPalette.of(context).color(0xFFFDE8E8);
+
+    return RepaintBoundary(
+      child: Container(
+        padding: EdgeInsets.all(rs.w(14)),
+        decoration: BoxDecoration(
+          color: AppPalette.of(context).surface,
+          borderRadius: BorderRadius.circular(rs.r(18)),
+          border: Border.all(color: borderColor),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Container(
+                padding: EdgeInsets.symmetric(
+                  horizontal: rs.w(8),
+                  vertical: rs.h(4),
+                ),
+                decoration: BoxDecoration(
+                  color: statusBackground,
+                  borderRadius: BorderRadius.circular(rs.r(10)),
+                ),
+                child: Text(
+                  status == 'scheduled' ? 'CONFIRMED' : status.toUpperCase(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: rs.sp(10.5),
+                    fontWeight: FontWeight.w800,
+                    color: statusColor,
+                  ),
+                ),
+              ),
+            ),
+            SizedBox(height: rs.h(8)),
+            Text(
+              (item['appointment_type'] ?? 'General consultation').toString(),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: rs.sp(16),
+                fontWeight: FontWeight.w800,
+                color: textMain,
+              ),
+            ),
+            SizedBox(height: rs.h(5)),
+            _buildAppointmentGridDetail(
+              rs,
+              Icons.event_outlined,
+              _formatDateTime(item['formatted_date_time'] ?? item['date_time']),
+              color: textMain,
+            ),
+            SizedBox(height: rs.h(4)),
+            _buildAppointmentGridDetail(
+              rs,
+              Icons.person_outline,
+              'Dr. ${item['doctor_first_name'] ?? ''} ${item['doctor_last_name'] ?? ''}',
+            ),
+            SizedBox(height: rs.h(4)),
+            _buildAppointmentGridDetail(
+              rs,
+              Icons.location_on_outlined,
+              'Medical Clinic · Room 1',
+            ),
+            if (item['notes'] != null &&
+                item['notes'].toString().isNotEmpty) ...[
+              SizedBox(height: rs.h(7)),
+              Text(
+                item['notes'].toString(),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: rs.sp(12), color: textSub),
+              ),
+            ],
+            if (status == 'scheduled') ...[
+              SizedBox(height: rs.h(8)),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton.icon(
+                  onPressed: () => _cancelAppointment(item['appointment_id']),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppPalette.of(context).color(0xFF7A2E26),
+                    padding: EdgeInsets.symmetric(vertical: rs.h(4)),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  icon: Icon(Icons.event_busy_outlined, size: rs.w(15)),
+                  label: Text(
+                    'Cancel',
+                    style: TextStyle(
+                      fontSize: rs.sp(12),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAppointmentGridDetail(
+    Rs rs,
+    IconData icon,
+    String text, {
+    Color? color,
+  }) {
+    return Row(
+      children: [
+        Icon(icon, size: rs.w(14), color: textSub),
+        SizedBox(width: rs.w(5)),
+        Expanded(
+          child: Text(
+            text,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: rs.sp(12),
+              color: color ?? textSub,
+              fontWeight: color == textMain
+                  ? FontWeight.w700
+                  : FontWeight.normal,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildSectionHeader(Rs rs, String number, String title) {
     final badgeSize = rs.w(22).clamp(20.0, 26.0);
     return Row(
@@ -1632,10 +2224,7 @@ class _ConsultationSchedulerScreenState extends State<ConsultationSchedulerScree
         Container(
           width: badgeSize,
           height: badgeSize,
-          decoration: const BoxDecoration(
-            color: softSage,
-            shape: BoxShape.circle,
-          ),
+          decoration: BoxDecoration(color: softSage, shape: BoxShape.circle),
           alignment: Alignment.center,
           child: Text(
             number,
@@ -1676,14 +2265,18 @@ class _CheckItem extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.check, size: 16, color: Color(0xFF284E3A)),
+          Icon(
+            Icons.check,
+            size: 16,
+            color: AppPalette.of(context).color(0xFF284E3A),
+          ),
           SizedBox(width: rs.w(8)),
           Expanded(
             child: Text(
               text,
               style: TextStyle(
                 fontSize: rs.sp(12.5),
-                color: const Color(0xFF424943),
+                color: AppPalette.of(context).color(0xFF424943),
               ),
             ),
           ),

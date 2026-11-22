@@ -1,3 +1,4 @@
+// Connects to Redis and provides cache reads, writes, and invalidation.
 // server/src/utils/redisClient.js
 import 'dotenv/config';
 import Redis from 'ioredis';
@@ -11,6 +12,7 @@ export const redis = new Redis({
   port: REDIS_PORT,
   password: REDIS_PASSWORD, // <-- S-06 / S-28: Pass the Redis password
   lazyConnect: true,
+  // Return a retry delay for the first five reconnect attempts.
   retryStrategy: (times) => {
     // Retry every 3 seconds, up to 5 attempts before pausing
     if (times > 5) return null;
@@ -20,24 +22,29 @@ export const redis = new Redis({
 
 let isConnected = false;
 
+// Record that the Redis transport connected.
 redis.on('connect', () => {
   isConnected = true;
   console.log(`⚡ [Redis Cache] Connected to Redis server at ${REDIS_HOST}:${REDIS_PORT}`);
 });
 
+// Mark Redis ready so cache and revocation helpers can use it.
 redis.on('ready', () => {
   isConnected = true;
 });
 
+// Clear readiness when the Redis connection closes.
 redis.on('close', () => {
   isConnected = false;
 });
 
+// Report a Redis client error through the existing logging path.
 redis.on('error', (err) => {
   isConnected = false;
   console.warn(`⚠️ [Redis Cache Warning] Redis unavailable (${err.message}). Falling back to direct MySQL queries.`);
 });
 
+// Attempt to connect at startup and retain fallback mode after a failure.
 export async function initRedis() {
   try {
     await redis.connect();
@@ -46,6 +53,7 @@ export async function initRedis() {
   }
 }
 
+// Check that the connection is ready before issuing Redis commands.
 export function isRedisActive() {
   return isConnected && redis.status === 'ready';
 }
@@ -89,14 +97,17 @@ export async function invalidateCache(patternOrKey) {
       // server stay responsive. The stream is paused while each batch is
       // deleted so the deletion queue stays bounded; a failed batch does
       // not abort the sweep.
+      // Wait for the wildcard key scan and its batch deletions to settle.
       await new Promise((resolve, reject) => {
         const stream = redis.scanStream({ match: patternOrKey, count: 100 });
+        // Pause the scan while deleting the current batch of matching keys.
         stream.on('data', (batchKeys) => {
           if (batchKeys.length === 0) return;
           stream.pause();
+          // Resume the scan after the batch deletion attempt.
           redis
             .del(...batchKeys)
-            .catch(() => {})
+            .catch(/* Ignore a failed cache batch deletion so scanning can resume. */ () => {})
             .then(() => stream.resume());
         });
         stream.on('error', reject);

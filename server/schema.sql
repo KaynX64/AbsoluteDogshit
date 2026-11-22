@@ -1,5 +1,6 @@
 -- =============================================================================
 -- Valetudo HealthLink — Full Database Schema
+-- Fresh provisioning or disposable rebuilds. Upgrade existing databases with npm run migrate.
 -- Character Set: utf8mb4 / utf8mb4_unicode_ci
 -- Compliance: R.A. 10173 (Data Privacy Act of 2012)
 -- =============================================================================
@@ -13,9 +14,12 @@ USE `valetudo_healthlink`;
 -- DISABLE FK CHECKS DURING RECREATION
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP TABLE IF EXISTS `SCHEMA_MIGRATIONS`;
 DROP TABLE IF EXISTS `LOCAL_SYNC_LOGS`;
 DROP TABLE IF EXISTS `PHI_ACCESS_LOGS`;
 DROP TABLE IF EXISTS `AUDIT_LOGS`;
+DROP TABLE IF EXISTS `INCIDENT_REPORT_DRAFTS`;
+DROP TABLE IF EXISTS `INCIDENT_REPORTS`;
 DROP TABLE IF EXISTS `EMERGENCY_ALERTS`;
 DROP TABLE IF EXISTS `MEDICAL_CLEARANCES`;
 DROP TABLE IF EXISTS `PRESCRIPTION_ITEMS`;
@@ -29,6 +33,7 @@ DROP TABLE IF EXISTS `DENTAL_CHARTS`;
 DROP TABLE IF EXISTS `VITAL_SIGNS`;
 DROP TABLE IF EXISTS `EMR_RECORDS`;
 DROP TABLE IF EXISTS `QUEUE`;
+DROP TABLE IF EXISTS `QUEUE_TICKET_COUNTERS`;
 DROP TABLE IF EXISTS `APPOINTMENTS`;
 DROP TABLE IF EXISTS `DEVICE_TOKENS`;
 DROP TABLE IF EXISTS `CONSENT_RECORDS`;
@@ -37,7 +42,9 @@ DROP TABLE IF EXISTS `STAFF_PROFILES`;
 DROP TABLE IF EXISTS `FACULTY_PROFILES`;
 DROP TABLE IF EXISTS `NON_TEACHING_PROFILES`;
 DROP TABLE IF EXISTS `STUDENT_PROFILES`;
+DROP TABLE IF EXISTS `SERVER_POLICY`;
 DROP TABLE IF EXISTS `USER_ADMIN_PERMISSIONS`;
+DROP TABLE IF EXISTS `STAFF_ANALYTICS_PERMISSIONS`;
 DROP TABLE IF EXISTS `ADMIN_PERMISSIONS`;
 DROP TABLE IF EXISTS `USER_ROLES`;
 DROP TABLE IF EXISTS `ROLES`;
@@ -50,6 +57,14 @@ SET FOREIGN_KEY_CHECKS = 1;
 -- =============================================================================
 
 -- 1. USERS
+CREATE TABLE `SERVER_POLICY` (
+  `policy_id` TINYINT UNSIGNED NOT NULL PRIMARY KEY CHECK (`policy_id` = 1),
+  `revision` INT UNSIGNED NOT NULL DEFAULT 0,
+  `overrides` JSON NOT NULL
+) ENGINE=InnoDB;
+
+INSERT INTO `SERVER_POLICY` (`policy_id`, `overrides`) VALUES (1, JSON_OBJECT());
+
 CREATE TABLE `USERS` (
   `user_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `email` VARCHAR(255) NOT NULL UNIQUE,
@@ -58,10 +73,23 @@ CREATE TABLE `USERS` (
   `last_name` VARCHAR(100) NOT NULL,
   `phone` VARCHAR(20) NULL,
   `is_active` BOOLEAN NOT NULL DEFAULT TRUE,
+  -- Qualified Responder: role-independent flag. ADDITIVE to the role-based
+  -- SOS audience — EMERGENCY_RESPONDER/NURSE/DOCTOR/ADMIN keep receiving
+  -- alerts with the flag off; role changes never touch these columns.
+  `is_qualified_responder` TINYINT(1) NOT NULL DEFAULT 0,
+  `qualified_responder_since` TIMESTAMP NULL DEFAULT NULL,
+  `qualified_responder_note` VARCHAR(150) NULL,
+  -- Per-account UI theme (Stage 7): the desktop settings menu persists
+  -- the user's Light/Dark mode + palette preset here. Whitelisted in
+  -- server/src/auth.js (THEME_MODES / THEME_PRESETS) and validated on
+  -- every write in routes/profile.js (PUT /api/profile/theme).
+  `theme_mode` ENUM('light','dark') NOT NULL DEFAULT 'light',
+  `theme_preset` ENUM('brand','blossom','sunrise') NOT NULL DEFAULT 'brand',
   `version` INT NOT NULL DEFAULT 1,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY `idx_users_qualified_responder` (`is_qualified_responder`)
 ) ENGINE=InnoDB;
 
 -- 2. ROLES
@@ -106,6 +134,13 @@ CREATE TABLE `USER_ADMIN_PERMISSIONS` (
   CONSTRAINT `fk_uap_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_uap_perm` FOREIGN KEY (`permission_id`) REFERENCES `ADMIN_PERMISSIONS` (`permission_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_uap_grantor` FOREIGN KEY (`granted_by`) REFERENCES `USERS` (`user_id`) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- An absent row inherits role defaults. An empty JSON array disables analytics.
+CREATE TABLE `STAFF_ANALYTICS_PERMISSIONS` (
+  `user_id` BIGINT NOT NULL PRIMARY KEY,
+  `scopes` JSON NOT NULL,
+  CONSTRAINT `fk_staff_analytics_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- 4. STUDENT_PROFILES
@@ -161,9 +196,12 @@ CREATE TABLE `DEVICE_TOKENS` (
   `user_id` BIGINT NOT NULL,
   `fcm_token` VARCHAR(512) NOT NULL UNIQUE,
   `device_type` VARCHAR(50) NOT NULL DEFAULT 'android',
+  `installation_id` CHAR(32) NULL,
+  `sos_mode` ENUM('on_duty','quiet','off_duty') NOT NULL DEFAULT 'on_duty',
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX `idx_device_user` (`user_id`),
+  UNIQUE KEY `uq_device_installation` (`installation_id`),
   CONSTRAINT `fk_device_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
@@ -181,8 +219,17 @@ CREATE TABLE `HEALTH_PROFILES` (
   `immunization_history` JSON NULL,
   `emergency_contact_name` VARCHAR(150) NULL,
   `emergency_contact_phone` VARCHAR(20) NULL,
+  `sex` ENUM('MALE', 'FEMALE') NULL,
+  `date_of_birth` DATE NULL,
   `height` DECIMAL(5,2) NULL COMMENT 'Height in cm',
   `weight` DECIMAL(5,2) NULL COMMENT 'Weight in kg',
+  `bmi` DECIMAL(6,2) GENERATED ALWAYS AS (
+    CASE
+      WHEN `height` > 0 AND `weight` > 0
+      THEN ROUND(`weight` / POW(`height` / 100, 2), 2)
+      ELSE NULL
+    END
+  ) STORED,
   `version` INT NOT NULL DEFAULT 1,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -220,11 +267,19 @@ CREATE TABLE `APPOINTMENTS` (
   INDEX `idx_app_doctor_datetime` (`doctor_user_id`, `date_time`),
   INDEX `idx_app_patient_datetime` (`patient_user_id`, `date_time`),
   INDEX `idx_app_reminder` (`status`, `reminder_sent`, `date_time`),
+  INDEX `idx_app_status_datetime` (`status`, `date_time`, `deleted_at`),
   CONSTRAINT `fk_app_patient` FOREIGN KEY (`patient_user_id`) REFERENCES `USERS` (`user_id`),
   CONSTRAINT `fk_app_doctor` FOREIGN KEY (`doctor_user_id`) REFERENCES `USERS` (`user_id`)
 ) ENGINE=InnoDB;
 
 -- 12. QUEUE (live daily triage & walk-in)
+CREATE TABLE `QUEUE_TICKET_COUNTERS` (
+  `queue_date` DATE NOT NULL,
+  `counter_id` INT NOT NULL,
+  `last_number` INT NOT NULL,
+  PRIMARY KEY (`queue_date`, `counter_id`)
+) ENGINE=InnoDB;
+
 CREATE TABLE `QUEUE` (
   `queue_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `patient_user_id` BIGINT NOT NULL,
@@ -371,11 +426,14 @@ CREATE TABLE `DRUG_INTERACTIONS` (
 CREATE TABLE `INVENTORY_LOGS` (
   `log_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `batch_id` BIGINT NOT NULL,
+  `prescription_item_id` BIGINT NULL,
   `quantity_change` INT NOT NULL COMMENT 'Positive for stock-in, negative for dispense',
   `transaction_type` ENUM('receive', 'dispense', 'return', 'dispose', 'adjust', 'recall') NOT NULL,
   `reason` TEXT NULL,
   `performed_by` BIGINT NOT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_inv_rx_item` (`prescription_item_id`),
+  INDEX `idx_inv_activity_date` (`transaction_type`, `created_at`),
   CONSTRAINT `fk_inv_batch` FOREIGN KEY (`batch_id`) REFERENCES `MEDICINE_BATCHES` (`batch_id`),
   CONSTRAINT `fk_inv_user` FOREIGN KEY (`performed_by`) REFERENCES `USERS` (`user_id`)
 ) ENGINE=InnoDB;
@@ -387,15 +445,25 @@ CREATE TABLE `PRESCRIPTIONS` (
   `patient_user_id` BIGINT NOT NULL,
   `doctor_user_id` BIGINT NOT NULL,
   `issued_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `expires_at` DATE NOT NULL,
   `status` ENUM('active', 'dispensed', 'expired', 'cancelled') NOT NULL DEFAULT 'active',
   `notes` TEXT NULL,
   `qr_token` VARCHAR(255) NOT NULL UNIQUE COMMENT 'Signed reference: UUID + HMAC',
+  `contract_version` SMALLINT NOT NULL DEFAULT 1,
+  `issuance_request_id` CHAR(36) NULL,
+  `request_hash` CHAR(64) NULL,
+  `clinical_snapshot` LONGTEXT NULL,
+  UNIQUE INDEX `uq_rx_request` (`doctor_user_id`, `issuance_request_id`),
   `signature_metadata` JSON NULL COMMENT 'Signer ID, role, timestamp, document SHA-256',
   `pdf_s3_key` VARCHAR(500) NULL COMMENT 'MinIO S3 key for signed PDF',
+  `pdf_retry_at` DATETIME NULL,
+  INDEX `idx_pending_pdf` (`pdf_s3_key`, `prescription_id`),
   `version` INT NOT NULL DEFAULT 1,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   INDEX `idx_rx_patient` (`patient_user_id`, `issued_at`),
+  INDEX `idx_rx_expires` (`expires_at`),
   INDEX `idx_rx_status` (`status`),
+  INDEX `idx_rx_issued_at` (`issued_at`),
   CONSTRAINT `fk_rx_emr` FOREIGN KEY (`emr_id`) REFERENCES `EMR_RECORDS` (`emr_id`),
   CONSTRAINT `fk_rx_patient` FOREIGN KEY (`patient_user_id`) REFERENCES `USERS` (`user_id`),
   CONSTRAINT `fk_rx_doctor` FOREIGN KEY (`doctor_user_id`) REFERENCES `USERS` (`user_id`)
@@ -406,18 +474,27 @@ CREATE TABLE `PRESCRIPTION_ITEMS` (
   `item_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `prescription_id` BIGINT NOT NULL,
   `medicine_id` BIGINT NULL COMMENT 'NULL for outside (non-formulary) drugs purchased at an external pharmacy',
+  `catalog_medicine_id` BIGINT NULL,
+  `item_sequence` INT NULL,
+  `structured_details` TEXT NULL,
   `outside_name` VARCHAR(200) NULL COMMENT 'Free-text drug name for outside (non-formulary) items',
   `dosage` VARCHAR(100) NOT NULL,
   `frequency` VARCHAR(100) NOT NULL,
   `route` VARCHAR(50) NOT NULL DEFAULT 'Oral',
-  `duration_days` INT NOT NULL,
-  `quantity_dispensed` INT NOT NULL DEFAULT 0,
+  `duration_days` INT NULL,
+  `quantity_prescribed` DECIMAL(12,3) NOT NULL DEFAULT 1 COMMENT 'Quantity prescribed by clinician',
+  `quantity_dispensed` INT NOT NULL DEFAULT 0 COMMENT 'Quantity actually dispensed by the infirmary (0 for outside drugs)',
   `instructions` TEXT NULL,
   `version` INT NOT NULL DEFAULT 1,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   CONSTRAINT `fk_rx_item_parent` FOREIGN KEY (`prescription_id`) REFERENCES `PRESCRIPTIONS` (`prescription_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_rx_item_medicine` FOREIGN KEY (`medicine_id`) REFERENCES `MEDICINES` (`medicine_id`)
 ) ENGINE=InnoDB;
+
+ALTER TABLE `INVENTORY_LOGS`
+  ADD CONSTRAINT `fk_inv_rx_item`
+  FOREIGN KEY (`prescription_item_id`) REFERENCES `PRESCRIPTION_ITEMS` (`item_id`)
+  ON DELETE SET NULL;
 
 -- 23. MEDICAL_CLEARANCES
 CREATE TABLE `MEDICAL_CLEARANCES` (
@@ -431,6 +508,8 @@ CREATE TABLE `MEDICAL_CLEARANCES` (
   `qr_token` VARCHAR(255) NOT NULL UNIQUE,
   `signature_metadata` JSON NOT NULL COMMENT 'Stores signer ID, role, timestamp, document hash, revocation data',
   `pdf_s3_key` VARCHAR(500) NULL COMMENT 'MinIO S3 key for signed PDF',
+  `pdf_retry_at` DATETIME NULL,
+  INDEX `idx_pending_pdf` (`pdf_s3_key`, `clearance_id`),
   `version` INT NOT NULL DEFAULT 1,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   INDEX `idx_clearance_user` (`user_id`, `issued_at`),
@@ -456,17 +535,62 @@ CREATE TABLE `EMERGENCY_ALERTS` (
   `acknowledged_at` TIMESTAMP NULL DEFAULT NULL,
   `resolved_at` TIMESTAMP NULL DEFAULT NULL,
   `response_time_seconds` INT NULL DEFAULT NULL,
+  `location_label` VARCHAR(512) NULL,
   `notes` TEXT NULL,
+  `client_sos_id` CHAR(32) NULL,
+  `request_hash` CHAR(64) NULL,
+  `dispatch_after` DATETIME(3) NULL,
+  UNIQUE KEY `uq_sos_request` (`user_id`, `client_sos_id`),
+  INDEX `idx_sos_dispatch` (`dispatch_after`, `alert_id`),
+  INDEX `idx_alert_history` (`status`, `created_at`, `alert_id`),
+  INDEX `idx_alert_report_work` (`status`, `resolved_at`, `alert_id`),
   SPATIAL INDEX `sp_idx_alert_location` (`location`),
   CONSTRAINT `fk_ea_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`),
   CONSTRAINT `fk_ea_responder` FOREIGN KEY (`assigned_responder_id`) REFERENCES `USERS` (`user_id`) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- 25. INCIDENT_REPORTS
+-- Post-resolution documentation typed on desktop after authorized response staff
+-- closes an SOS as resolved. Identity fields (name, ID number, contact number)
+-- are pre-fetched live from the patient's profile rows; only the narrative,
+-- treatment notes and the confirmed resolution timestamp are typed here.
+CREATE TABLE `INCIDENT_REPORTS` (
+  `report_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `alert_id` BIGINT NOT NULL UNIQUE,
+  `patient_user_id` BIGINT NOT NULL,
+  `resolved_at` DATETIME NOT NULL,
+  `incident_details` TEXT NOT NULL,
+  `treatment_notes` TEXT NULL,
+  `documented_by` BIGINT NOT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `pdf_s3_key` VARCHAR(500) NULL COMMENT 'MinIO S3 key for incident report PDF',
+  `pdf_retry_at` DATETIME NULL,
+  INDEX `idx_pending_pdf` (`pdf_s3_key`, `report_id`),
+  INDEX `idx_report_history` (`created_at`, `report_id`),
+  CONSTRAINT `fk_ir_alert` FOREIGN KEY (`alert_id`) REFERENCES `EMERGENCY_ALERTS` (`alert_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_ir_patient` FOREIGN KEY (`patient_user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_ir_author` FOREIGN KEY (`documented_by`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- =============================================================================
 -- MODULE 5: SECURITY, COMPLIANCE (RA 10173) & OFFLINE SYNC
 -- =============================================================================
 
--- 25. AUDIT_LOGS
+-- Private desktop report drafts; narrative payloads use the crypto vault.
+CREATE TABLE `INCIDENT_REPORT_DRAFTS` (
+  `alert_id` BIGINT NOT NULL,
+  `author_id` BIGINT NOT NULL,
+  `payload` MEDIUMTEXT NOT NULL,
+  `revision` INT UNSIGNED NOT NULL DEFAULT 1,
+  `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `deferred_at` DATETIME(3) NULL,
+  PRIMARY KEY (`alert_id`, `author_id`),
+  INDEX `idx_report_draft_author` (`author_id`, `updated_at`, `alert_id`),
+  CONSTRAINT `fk_report_draft_alert` FOREIGN KEY (`alert_id`) REFERENCES `EMERGENCY_ALERTS` (`alert_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_report_draft_author` FOREIGN KEY (`author_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 26. AUDIT_LOGS
 CREATE TABLE `AUDIT_LOGS` (
   `audit_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `user_id` BIGINT NULL DEFAULT NULL,
@@ -480,10 +604,11 @@ CREATE TABLE `AUDIT_LOGS` (
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `prev_hash` VARCHAR(64) NOT NULL,
   `entry_hash` VARCHAR(64) NOT NULL COMMENT 'SHA-256(prev_hash + row data)',
+  INDEX `idx_alert_audit_history` (`table_affected`, `record_id`, `created_at`, `audit_id`),
   CONSTRAINT `fk_al_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
--- 26. PHI_ACCESS_LOGS
+-- 27. PHI_ACCESS_LOGS
 CREATE TABLE `PHI_ACCESS_LOGS` (
   `access_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `user_id` BIGINT NOT NULL COMMENT 'Practitioner viewing record',
@@ -497,7 +622,7 @@ CREATE TABLE `PHI_ACCESS_LOGS` (
   CONSTRAINT `fk_phi_patient` FOREIGN KEY (`patient_user_id`) REFERENCES `USERS` (`user_id`)
 ) ENGINE=InnoDB;
 
--- 27. LOCAL_SYNC_LOGS
+-- 28. LOCAL_SYNC_LOGS
 CREATE TABLE `LOCAL_SYNC_LOGS` (
   `sync_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `client_mutation_id` VARCHAR(36) NOT NULL UNIQUE COMMENT 'UUID idempotency token',
@@ -507,10 +632,8 @@ CREATE TABLE `LOCAL_SYNC_LOGS` (
   `record_id` BIGINT NULL DEFAULT NULL,
   `record_uuid` VARCHAR(36) NOT NULL,
   `action` ENUM('CREATE', 'UPDATE', 'DELETE') NOT NULL,
-  `payload` JSON NOT NULL,
   `local_version` INT NOT NULL,
   `sync_status` ENUM('pending', 'synced', 'conflict', 'error') NOT NULL DEFAULT 'pending',
-  `error_message` TEXT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `synced_at` TIMESTAMP NULL DEFAULT NULL,
   CONSTRAINT `fk_sync_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`)
@@ -558,7 +681,15 @@ INSERT INTO `ADMIN_PERMISSIONS` (`code`, `name`, `description`, `sort_order`) VA
 ('AUDIT_VIEW',        'View audit & PHI logs',     'Read-only access to the audit ledger and PHI access log', 20),
 ('TELEMETRY_VIEW',    'View system health',        'Service telemetry, uptime and health metrics',          30),
 ('RETENTION_MANAGE',  'Data retention governance', 'Retention status and statutory R.A. 10173 sweeps',       40),
+('RESPONDERS_MANAGE', 'Manage qualified responders', 'Label any account a Qualified Responder: SOS alarms on any role, tiered alert payloads (reduced medical detail for non-clinical responders). Grant together with USERS_MANAGE — the toggle lives in the Users tab.', 45),
 ('ANALYTICS_VIEW',    'View analytics',            'Epidemiological analytics and campus health reports',   50),
+('ANALYTICS_OPERATIONS', 'View clinic operations', 'Appointments, encounter volumes, department visits and SOS activity.', 51),
+('ANALYTICS_CLINICAL', 'View clinical analytics', 'Diagnosis counts, respiratory surveillance and health-risk aggregates.', 52),
+('ANALYTICS_PHARMACY', 'View pharmacy analytics', 'Dispensing, stock priorities and batch expiry.', 53),
+('ANALYTICS_HEADCOUNT', 'View campus headcount', 'Active account counts by role.', 54),
+('INCIDENT_RECORDS_VIEW', 'View incident records', 'Open the emergency incident archive and view its report PDFs.', 55),
+('TERMINAL_VIEW', 'Use server Terminal', 'View server events and run built-in diagnostics.', 57),
+('ANALYTICS_EXPORT', 'Export and print analytics', 'Download or print reports for granted analytics sections.', 56),
 ('DATABASE_MANAGE',   'Database Studio',           'Inspect and maintain raw system records',               60);
 
 -- Default password for all seeded accounts: 'Password123!'
@@ -598,27 +729,42 @@ INSERT INTO `FACULTY_PROFILES` (`user_id`, `faculty_no`, `department`, `position
 INSERT INTO `NON_TEACHING_PROFILES` (`user_id`, `employee_no`, `department`, `position`) VALUES
 (8, 'PSU-NT-2024-0187', 'Campus Maintenance & Facilities', 'Utility Worker');
 
--- STAFF_PROFILES (clinical + admin)
+-- QUALIFIED RESPONDER demo flags (fresh installs only).
+-- Seeded demo responder #4 (Denver Cerezo) keeps the flag so the migration
+-- backfill story is visible; demo student #5 (Daniella Movida) is flagged
+-- WITHOUT any clinical role — the flagship case: a student who receives
+-- SOS alarms with the community (reduced-medical-detail) tier.
+UPDATE `USERS` SET `is_qualified_responder` = 1,
+       `qualified_responder_since` = '2026-01-05 08:00:00',
+       `qualified_responder_note` = 'Campus quick-response personnel (seed)'
+ WHERE `user_id` = 4;
+UPDATE `USERS` SET `is_qualified_responder` = 1,
+       `qualified_responder_since` = '2026-02-02 09:30:00',
+       `qualified_responder_note` = 'Trained volunteer responder — seed demo (student)'
+ WHERE `user_id` = 5;
+
+-- STAFF_PROFILES (clinical, emergency response, and admin)
 -- admin_no is populated ONLY for the ADMIN role; NULL for the rest.
--- license_no is populated for DOCTOR / NURSE / DENTIST; NULL for ADMIN.
+-- license_no is populated for the seeded DOCTOR / NURSE / DENTIST accounts.
 INSERT INTO `STAFF_PROFILES` (`user_id`, `admin_no`, `license_no`, `specialty`, `department`) VALUES
 (1, 'PSU-ADM-2024-0001', NULL,             'System Administration',      'PSU Lingayen Clinic'),
 (2, NULL,                'PRC-MD-098765',  'General Medicine',           'PSU Lingayen Clinic'),
 (3, NULL,                'PRC-RN-054321',  'Emergency & Triage Nursing', 'PSU Lingayen Clinic'),
+(4, NULL,                NULL,             'Campus Emergency Response', 'PSU Lingayen Quick-Response Unit'),
 (6, NULL,                'PRC-DDS-045678', 'Dentistry & Oral Health',    'PSU Lingayen Clinic');
 
 -- HEALTH_PROFILES — minimal for the demo patient-side accounts
 INSERT INTO `HEALTH_PROFILES`
 (`user_id`, `blood_type`, `allergies`, `chronic_conditions`,
  `emergency_contact_name`, `emergency_contact_phone`,
- `height`, `weight`, `immunization_history`)
+ `date_of_birth`, `height`, `weight`, `immunization_history`)
 VALUES
 (5, 'O+', 'Penicillin', 'Mild Asthma',  'Maria Movida',   '09299876543',
- 162.50, 54.00, JSON_ARRAY()),
+ '2004-06-15', 162.50, 54.00, JSON_ARRAY()),
 (7, 'A+', 'None',       'Hypertension', 'Liza Bautista',  '09299876544',
- 172.00, 78.00, JSON_ARRAY()),
+ '1982-03-20', 172.00, 78.00, JSON_ARRAY()),
 (8, 'B+', 'None',       'None',         'Josefa Domingo', '09299876545',
- 168.00, 71.00, JSON_ARRAY());
+ '1989-11-05', 168.00, 71.00, JSON_ARRAY());
 
 -- CONSENT_RECORDS — R.A. 10173 (required for patient-side mobile access)
 INSERT INTO `CONSENT_RECORDS` (`user_id`, `consent_type`, `is_granted`, `ip_address`) VALUES

@@ -1,10 +1,12 @@
+// Issues and verifies short-lived QR health passes with single-use nonce checks.
 // server/src/routes/healthPass.js
 import express from 'express';
 import crypto from 'crypto';
-import { pool } from '../db.js';
-import { authenticateToken } from '../auth.js';
+import { pool } from '../db/pool.js';
+import { authenticateToken } from '../auth/middleware.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { logPhiAccess } from '../utils/phiLogger.js';
+import { getBmiCategory } from '../utils/bmi.js';
 import { decrypt } from '../utils/cryptoVault.js';
 import { requirePrivacyConsent } from '../middleware/consent.js';
 import { JWT_SECRET } from '../utils/secrets.js';
@@ -46,6 +48,7 @@ const NONCE_TTL_SECONDS = 15 * 60;
 const NONCE_MEMORY_LIMIT = 10000;
 const usedNonces = new Map(); // nonce -> expiresAtMs
 
+// Claim a QR nonce in memory when Redis is unavailable.
 function claimNonceInProcess(nonce) {
   const now = Date.now();
   if (usedNonces.size >= NONCE_MEMORY_LIMIT) {
@@ -66,6 +69,7 @@ function claimNonceInProcess(nonce) {
 }
 
 // GET /api/health-pass/token
+// Sign a short-lived QR token for the caller's patient ID.
 router.get('/token', authenticateToken, requirePrivacyConsent, (req, res) => {
   try {
     const userId = req.user.user_id;
@@ -84,6 +88,7 @@ router.get('/token', authenticateToken, requirePrivacyConsent, (req, res) => {
 });
 
 // POST /api/health-pass/verify
+// Validate and consume the token and read the patient's current clearance details.
 router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN'), async (req, res) => {
   const { qrToken } = req.body;
   if (!qrToken) return res.status(400).json({ error: 'QR token required.' });
@@ -170,7 +175,7 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
       `SELECT u.user_id, u.first_name, u.last_name, u.email,
               sp.student_no, sp.course, sp.year_level,
               hp.blood_type, hp.allergies, hp.chronic_conditions,
-              hp.height, hp.weight, hp.updated_at AS health_profile_updated_at
+              hp.sex, hp.height, hp.weight, hp.bmi, hp.updated_at AS health_profile_updated_at
        FROM USERS u
        LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id
        LEFT JOIN HEALTH_PROFILES hp ON u.user_id = hp.user_id
@@ -209,6 +214,7 @@ router.post('/verify', authenticateToken, requireRoles('NURSE', 'DOCTOR', 'ADMIN
       ...patient[0],
       allergies: decrypt(patient[0].allergies),
       chronic_conditions: decrypt(patient[0].chronic_conditions),
+      bmi_category: getBmiCategory(patient[0].bmi),
     };
 
     res.json({

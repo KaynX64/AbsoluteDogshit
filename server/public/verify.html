@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-  <title>Valetudo HealthLink • Official Document Verification</title>
+  <title>LeoVital HealthLink • Official Document Verification</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23284E3A'/><path d='M50 25 v50 M25 50 h50' stroke='white' stroke-width='14' stroke-linecap='round'/></svg>">
   <style>
     :root {
@@ -363,7 +363,7 @@
       <div class="brand-mark">
         <div class="brand-icon">+</div>
         <div>
-          <span class="brand-text">valetudo.</span>
+          <span class="brand-text">LeoVital.</span>
           <span class="brand-tag">HEALTHLINK VERIFY</span>
         </div>
       </div>
@@ -427,15 +427,25 @@
         const data = await res.json();
         document.getElementById('loading-state').style.display = 'none';
 
-        if (!res.ok || (!data.valid && !data.verified)) {
+        if (!res.ok) {
+          renderInvalid(data.error || 'Document record could not be verified.', token);
+          return;
+        }
+
+        // Prescription status is authoritative on the server, including the
+        // clinic's validity-date boundary. Do not reinterpret it on this device.
+        if (data.type === 'PRESCRIPTION') {
+          renderPrescription(data, token);
+          return;
+        }
+
+        if (!data.valid && !data.verified) {
           renderInvalid(data.error || 'Document signature could not be verified in university records.', token);
           return;
         }
 
         if (data.type === 'MEDICAL_CLEARANCE') {
           renderClearance(data, token);
-        } else if (data.type === 'PRESCRIPTION') {
-          renderPrescription(data, token);
         } else {
           renderGeneric(data, token);
         }
@@ -446,12 +456,15 @@
     })();
 
     function formatDate(raw) {
-      if (!raw) return 'N/A';
+      if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2}))?$/.test(raw)) return 'Not recorded';
       try {
+        const calendar = raw.slice(0, 10);
+        if (new Date(calendar + 'T00:00:00Z').toISOString().slice(0, 10) !== calendar) return 'Not recorded';
         const d = new Date(raw);
-        return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+        if (Number.isNaN(d.getTime())) return 'Not recorded';
+        return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Manila' });
       } catch (_) {
-        return raw.split('T')[0];
+        return 'Not recorded';
       }
     }
 
@@ -530,92 +543,56 @@
     }
 
     function renderPrescription(doc, token) {
-      const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(window.location.href)}`;
-      const items = doc.items || [];
-
-      let itemsRows = '';
-      if (items.length > 0) {
-        itemsRows = items.map(it => `
-          <tr>
-            <td><b>${it.medicine_name || 'Prescribed Med'}</b><br><small style="color:var(--text-sub);">${it.generic_name || ''}</small></td>
-            <td><b>${it.dosage || '500mg'}</b></td>
-            <td>${it.instructions || 'Take as directed'}<br><small style="color:var(--text-sub);">${it.frequency || 'Daily'} • ${it.duration_days || 3} days</small></td>
-            <td><b>${it.quantity_dispensed || 10} pcs</b></td>
-          </tr>
-        `).join('');
-      } else {
-        itemsRows = `<tr><td colspan="4" style="text-align:center; color:var(--text-sub);">Prescription formulary record attached to patient EMR.</td></tr>`;
-      }
+      const verified = (doc.valid === true || doc.verified === true) && ['active', 'dispensed'].includes(doc.status);
+      const statusLabel = doc.status === 'cancelled' ? 'CANCELLED PRESCRIPTION'
+        : doc.status === 'expired' ? 'EXPIRED PRESCRIPTION'
+        : verified ? 'ISSUANCE VERIFIED' : 'VERIFICATION UNAVAILABLE';
 
       const html = `
         <div class="letterhead">
           <p class="univ-title">Pangasinan State University</p>
           <h2 class="clinic-title">CAMPUS INFIRMARY MEDICAL SERVICES</h2>
-          <p class="clinic-sub">Lingayen Campus • Republic Act No. 10173 Official Digital Prescription</p>
+          <p class="clinic-sub">Lingayen Campus • Prescription record verification</p>
           <div class="divider"></div>
         </div>
 
         <div class="status-badge-wrap">
-          <span class="status-badge verified">
-            VERIFIED CLINICAL PRESCRIPTION (℞)
+          <span class="status-badge ${verified ? 'verified' : 'expired'}">
+            ${statusLabel}
           </span>
         </div>
 
         <div class="data-grid">
           <div class="data-row">
-            <span class="data-label">Patient Name:</span>
-            <span class="data-value highlight">${doc.patient || 'PSU Student'}</span>
-          </div>
-          <div class="data-row">
-            <span class="data-label">Student / ID Number:</span>
-            <span class="data-value">${doc.studentNo || 'N/A'}</span>
+            <span class="data-label">Patient (masked):</span>
+            <span class="data-value highlight">${esc(doc.patient || 'Not recorded')}</span>
           </div>
           <div class="data-row">
             <span class="data-label">Prescribed By:</span>
-            <span class="data-value">${esc(doc.issuedBy)}</span>
+            <span class="data-value">${esc(doc.issuedBy || 'Not recorded')}</span>
           </div>
           <div class="data-row">
             <span class="data-label">Date Prescribed:</span>
-            <span class="data-value">${formatDate(doc.issuedAt)}</span>
+            <span class="data-value">${esc(formatDate(doc.issuedAt))}</span>
           </div>
-          ${doc.notes ? `
+          ${doc.expiresAt ? `
           <div class="data-row">
-            <span class="data-label">Physician Notes:</span>
-            <span class="data-value" style="font-style: italic;">${doc.notes}</span>
+            <span class="data-label">Valid Until:</span>
+            <span class="data-value">${esc(formatDate(doc.expiresAt))}</span>
           </div>` : ''}
         </div>
 
-        <h4 style="font-size: 13px; font-weight: 800; color: var(--primary-green); margin: 18px 0 8px;">
-          PRESCRIBED MEDICINES (FORMULARY):
-        </h4>
-        <table class="rx-items-table">
-          <thead>
-            <tr>
-              <th>Medicine</th>
-              <th>Dosage</th>
-              <th>Sig / Instructions</th>
-              <th>Qty</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${itemsRows}
-          </tbody>
-        </table>
-
         <div class="seal-box">
-          <div class="seal-qr">
-            <img src="${qrApiUrl}" alt="Digital Seal QR">
-          </div>
           <div class="seal-meta">
-            <h5>R.A. 10173 Digital Prescription Seal</h5>
-            <p>Cryptographically signed and validated. Accepted at PSU Campus Pharmacy & partner dispensaries.</p>
-            <span class="token-snippet">${token}</span>
+            <h5>Prescription record verification</h5>
+            <p>This page reports the issuance record and current status. Medication details require authorized access. This summary is not a prescription for dispensing.</p>
+            <span class="token-snippet">${esc(token)}</span>
           </div>
         </div>
 
         <div class="actions-bar">
-          <button class="btn btn-outline" onclick="window.print()">🖨️ Print Prescription</button>
-          <a class="btn btn-primary" href="javascript:location.reload()">🔄 Re-verify Seal</a>
+          <button class="btn btn-outline" onclick="window.print()">🖨️ Print verification</button>
+          <button class="btn btn-primary" onclick="location.reload()">🔄 Recheck status</button>
         </div>
       `;
 
@@ -638,13 +615,13 @@
 
         <div style="background: var(--crimson-bg); border: 1px solid #fca5a5; border-radius: 14px; padding: 20px; text-align: center; margin-bottom: 20px;">
           <p style="font-size: 13.5px; color: var(--crimson); font-weight: 600;">
-            ${message}
+            ${esc(message)}
           </p>
           <p style="font-size: 12px; color: var(--text-sub); margin-top: 8px;">
-            The QR code token may have expired, been revoked under R.A. 10173 retention rules, or belongs to another university system.
+            The document may be expired, cancelled, revoked, or not found in this system.
           </p>
           <div style="margin-top: 14px;">
-            <code style="font-size: 11px; color: #475569; word-break: break-all;">Ref: ${token}</code>
+            <code style="font-size: 11px; color: #475569; word-break: break-all;">Ref: ${esc(token)}</code>
           </div>
         </div>
 

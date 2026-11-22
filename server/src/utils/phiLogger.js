@@ -1,5 +1,6 @@
+// Records protected health information access in the dedicated read-access ledger.
 // server/src/utils/phiLogger.js
-import { pool } from '../db.js';
+import { pool } from '../db/pool.js';
 
 /**
  * Logs read/view access of Protected Health Information (PHI).

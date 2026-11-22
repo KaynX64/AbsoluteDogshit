@@ -1,17 +1,24 @@
 // mobile/lib/screens/login_screen.dart
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show TlsException;
+
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
+
 import '../config/api_config.dart';
 import '../widgets/valetudo_logo.dart';
 import '../utils/responsive.dart';
 import 'patient_portal_screen.dart';
 import 'responder_screen.dart';
 import '../services/emergency_alert_service.dart';
+import '../theme/account_theme_controller.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({super.key, this.sessionNotice});
+
+  final String? sessionNotice;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -39,48 +46,67 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      final res = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/api/auth/login'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'email': _emailController.text.trim(),
-          'password': _passwordController.text.trim(),
-        }),
-      );
+      final res = await ApiConfig.client
+          .post(
+            Uri.parse('${ApiConfig.baseUrl}/api/auth/login'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'email': _emailController.text.trim(),
+              'password': _passwordController.text.trim(),
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (!mounted) return;
 
       final data = jsonDecode(res.body);
 
       if (res.statusCode == 200) {
         // Save BOTH token and user profile into secure storage
-        await _storage.write(key: 'jwt_token', value: data['token']);
-        await _storage.write(key: 'user_data', value: jsonEncode(data['user']));
-
-        // Sync device token for FCM background alerts
-        try {
-          await EmergencyAlertService().syncFcmTokenWithBackend();
-        } catch (_) {}
+        await Future.wait([
+          _storage.write(key: 'jwt_token', value: data['token']),
+          _storage.write(key: 'user_data', value: jsonEncode(data['user'])),
+        ]);
+        if (!mounted) return;
+        await AccountThemeScope.of(context).bindAccount(
+          Map<String, dynamic>.from(data['user']),
+          data['token'] as String,
+        );
 
         if (!mounted) return;
-
+        EmergencyAlertService().beginSession(
+          data['token'],
+          data['user']['user_id'],
+        );
         final List<dynamic> roles = data['user']['roles'] ?? [];
 
         if (roles.contains('EMERGENCY_RESPONDER')) {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (_) => ResponderScreen(user: data['user'])),
+            MaterialPageRoute(
+              builder: (_) => ResponderScreen(user: data['user']),
+            ),
           );
         } else {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (_) => PatientPortalScreen(user: data['user'])),
+            MaterialPageRoute(
+              builder: (_) => PatientPortalScreen(user: data['user']),
+            ),
           );
         }
       } else {
         setState(() => _errorMessage = data['error'] ?? 'Login failed');
       }
-    } catch (e) {
+    } catch (error) {
       if (mounted) {
-        setState(() => _errorMessage = 'Unable to connect. Please try again.');
+        setState(() {
+          _errorMessage = switch (error) {
+            TlsException() => 'Could not establish a secure connection. Check the server certificate or contact the clinic administrator.',
+            TimeoutException() || http.ClientException() => 'Could not reach the clinic server. Check your network and try again.',
+            FormatException() => 'The clinic server returned an unexpected response. Please try again.',
+            _ => 'Could not sign in. Please try again.',
+          };
+        });
       }
     } finally {
       if (mounted) {
@@ -158,7 +184,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'valetudo.',
+                            'LeoVital',
                             style: TextStyle(
                               fontSize: rs.sp(17),
                               fontWeight: FontWeight.w900,
@@ -179,6 +205,16 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ],
                   ),
+                  if (widget.sessionNotice case final notice?) ...[
+                    const SizedBox(height: 16),
+                    Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        notice,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ),
+                  ],
                   SizedBox(height: rs.h(32)),
 
                   // ── Headline ─────────────────────────────────────
@@ -264,18 +300,22 @@ class _LoginScreenState extends State<LoginScreen> {
                           size: rs.w(20),
                           color: textSub,
                         ),
-                        onPressed: () =>
-                            setState(() => _obscurePassword = !_obscurePassword),
+                        onPressed: () => setState(
+                          () => _obscurePassword = !_obscurePassword,
+                        ),
                       ),
                     ),
                   ),
                   SizedBox(height: rs.h(14)),
 
                   // ── Remember me / forgot password ───────────────
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  OverflowBar(
+                    alignment: MainAxisAlignment.spaceBetween,
+                    spacing: 8,
+                    overflowAlignment: OverflowBarAlignment.start,
                     children: [
                       Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           SizedBox(
                             height: rs.h(24),
@@ -291,18 +331,34 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                           SizedBox(width: rs.w(8)),
-                          Text(
-                            'Remember me',
-                            style: TextStyle(
-                              fontSize: rs.sp(13),
-                              color: textSub,
-                              fontWeight: FontWeight.w500,
+                          Flexible(
+                            child: Text(
+                              'Remember me',
+                              style: TextStyle(
+                                fontSize: rs.sp(13),
+                                color: textSub,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
                           ),
                         ],
                       ),
                       TextButton(
-                        onPressed: () {},
+                        onPressed: () => showDialog<void>(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text('Reset your password'),
+                            content: const Text(
+                              'Contact your campus clinic administrator to request a password reset.',
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context),
+                                child: const Text('Done'),
+                              ),
+                            ],
+                          ),
+                        ),
                         style: TextButton.styleFrom(padding: EdgeInsets.zero),
                         child: Text(
                           'Forgot password?',
@@ -355,13 +411,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   // ── Sign in button ──────────────────────────────
                   SizedBox(
                     width: double.infinity,
-                    height: rs.h(52).clamp(46.0, 58.0),
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: primaryGreen,
                         foregroundColor: Colors.white,
                         elevation: 0,
                         shape: const StadiumBorder(),
+                        minimumSize: Size(48, rs.h(52).clamp(48.0, 58.0)),
                       ),
                       onPressed: _isLoading ? null : _handleLogin,
                       child: _isLoading
@@ -376,15 +432,26 @@ class _LoginScreenState extends State<LoginScreen> {
                           : Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Text(
-                                  'Sign in to portal',
-                                  style: TextStyle(
-                                    fontSize: rs.sp(15),
-                                    fontWeight: FontWeight.w700,
+                                Flexible(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 10,
+                                    ),
+                                    child: Text(
+                                      'Sign in to portal',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: rs.sp(15),
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
                                   ),
                                 ),
                                 SizedBox(width: rs.w(8)),
-                                const Icon(Icons.arrow_forward_rounded, size: 18),
+                                const Icon(
+                                  Icons.arrow_forward_rounded,
+                                  size: 18,
+                                ),
                               ],
                             ),
                     ),
@@ -403,12 +470,14 @@ class _LoginScreenState extends State<LoginScreen> {
                           color: textSub,
                         ),
                         SizedBox(width: rs.w(6)),
-                        Text(
-                          'A little care goes a long way.',
-                          style: TextStyle(
-                            fontSize: rs.sp(12),
-                            color: textSub,
-                            fontWeight: FontWeight.w500,
+                        Flexible(
+                          child: Text(
+                            'A little care goes a long way.',
+                            style: TextStyle(
+                              fontSize: rs.sp(12),
+                              color: textSub,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ),
                       ],

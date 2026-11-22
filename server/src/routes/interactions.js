@@ -1,4 +1,4 @@
-// server/src/routes/interactions.js
+// Checks submitted medicines for interactions and serves the active medicine catalog.
 //
 // Drug-Drug Interaction Checking API
 //
@@ -10,8 +10,8 @@
 //   Returns all active interaction rules (for admin management)
 
 import express from 'express';
-import { pool } from '../db.js';
-import { authenticateToken } from '../auth.js';
+import { pool } from '../db/pool.js';
+import { authenticateToken } from '../auth/middleware.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { checkInteractionsStandalone } from '../utils/interactionChecker.js';
 
@@ -22,6 +22,7 @@ const router = express.Router();
 // Called by the frontend BEFORE submitting a prescription.
 // Returns all interactions found among the selected medicines.
 // ─────────────────────────────────────────────────────────────────────
+// Validate medicine IDs and return known pairwise interactions.
 router.post(
   '/check',
   authenticateToken,
@@ -29,37 +30,39 @@ router.post(
   async (req, res) => {
     const { medicine_ids } = req.body;
 
-    if (!Array.isArray(medicine_ids) || medicine_ids.length === 0) {
-      return res.status(400).json({ error: 'medicine_ids array is required.' });
+    if (!Array.isArray(medicine_ids) || medicine_ids.length === 0 || medicine_ids.length > 20 ||
+      medicine_ids.some(id => !['number', 'string'].includes(typeof id) || !Number.isSafeInteger(Number(id)) || Number(id) <= 0)) {
+      return res.status(400).json({ error: 'Include 1 to 20 valid catalog medicine identifiers.' });
     }
 
-    // Validate all IDs are positive integers
-    const cleanIds = medicine_ids
-      .map(Number)
-      .filter((id) => Number.isInteger(id) && id > 0);
+    // Convert validated identifiers to numbers and remove duplicates before comparing pairs.
+    const cleanIds = [...new Set(medicine_ids.map(Number))];
 
     if (cleanIds.length < 2) {
       return res.json({
         hasInteractions: false,
         interactions: [],
         blocking: false,
-        message: 'Fewer than 2 medicines selected — no interaction check needed.',
+        coverage: 'not_checked', message: 'Fewer than two identified medicines; no pairwise check was performed.',
       });
     }
 
     try {
       const interactions = await checkInteractionsStandalone(cleanIds);
 
-      // Determine if any interaction is blocking (contraindicated or severe)
+      // Contraindications block; severe findings require a recorded override.
       const hasBlocking = interactions.some(
-        (i) => i.severity === 'contraindicated' || i.severity === 'severe'
+        (i) => i.severity === 'contraindicated'
       );
 
       res.json({
         hasInteractions: interactions.length > 0,
         blocking: hasBlocking,
+        requiresOverride: interactions.some(i => i.severity === 'severe'),
+        coverage: interactions.length < cleanIds.length * (cleanIds.length - 1) / 2 ? 'partial' : 'local_rules_checked',
+        scope: 'Draft medicine pairs in local rules only; not a complete safety assessment.',
         totalInteractions: interactions.length,
-        interactions: interactions.map((i) => ({
+        interactions: interactions.map(/* Return each interaction with its severity, description, and medicine names. */ (i) => ({
           interaction_id: i.interaction_id,
           severity: i.severity,
           interaction_type: i.interaction_type,
@@ -89,6 +92,7 @@ router.post(
 // GET /api/interactions/catalogue
 // Admin view: list all active interaction rules.
 // ─────────────────────────────────────────────────────────────────────
+// Return the medicine catalog used by the interaction checker.
 router.get(
   '/catalogue',
   authenticateToken,

@@ -1,6 +1,8 @@
+// Loads and validates the required session-signing and encryption secrets.
 // ── server/src/utils/secrets.js (NEW) ───────────────────────────────
 
 import 'dotenv/config';
+// Read a required environment secret and enforce its minimum length.
 function required(name, minLen = 32) {
 const v = process.env[name];
 if (!v || v.length < minLen) {

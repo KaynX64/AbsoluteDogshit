@@ -1,7 +1,8 @@
+// Records privacy consent changes and serves consent status and retention controls.
 // server/src/routes/privacy.js
 import express from 'express';
-import { pool } from '../db.js';
-import { authenticateToken } from '../auth.js';
+import { pool } from '../db/pool.js';
+import { authenticateToken } from '../auth/middleware.js';
 import { requireRoles, requirePermission } from '../middleware/rbac.js';
 import { logAudit } from '../utils/auditLogger.js';
 
@@ -12,6 +13,7 @@ const router = express.Router();
 // =============================================================================
 
 // POST /api/privacy/consent - Record user consent under R.A. 10173
+// Record the caller's consent for the applicable privacy policy.
 router.post('/consent', authenticateToken, async (req, res) => {
   const userId = req.user.user_id;
   const { consent_type } = req.body;
@@ -48,6 +50,7 @@ router.post('/consent', authenticateToken, async (req, res) => {
 });
 
 // POST /api/privacy/revoke - Revoke consent under R.A. 10173
+// Revoke the caller's active consent and record the change.
 router.post('/revoke', authenticateToken, async (req, res) => {
   const userId = req.user.user_id;
   const connection = await pool.getConnection();
@@ -83,6 +86,7 @@ router.post('/revoke', authenticateToken, async (req, res) => {
 });
 
 // GET /api/privacy/status - Check if user has active consent
+// Return the caller's current consent status.
 router.get('/status', authenticateToken, async (req, res) => {
   try {
     const [rows] = await pool.query(
@@ -109,6 +113,7 @@ router.get('/status', authenticateToken, async (req, res) => {
 // =============================================================================
 
 // GET /api/privacy/retention/status - Retention status report (Admin only)
+// Report data retention configuration and status to an authorized administrator.
 router.get('/retention/status', authenticateToken, requireRoles('ADMIN'), requirePermission('RETENTION_MANAGE'), async (req, res) => {
   try {
     // 5-year retention cutoff for EMR records
@@ -167,6 +172,7 @@ router.get('/retention/status', authenticateToken, requireRoles('ADMIN'), requir
 });
 
 // POST /api/privacy/retention/sweep - Execute comprehensive retention purge (Admin only)
+// Apply the authorized retention sweep and report its outcome.
 router.post('/retention/sweep', authenticateToken, requireRoles('ADMIN'), requirePermission('RETENTION_MANAGE'), async (req, res) => {
   const connection = await pool.getConnection();
   try {

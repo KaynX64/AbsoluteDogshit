@@ -1,5 +1,6 @@
+// Checks the caller's current privacy consent before protected requests proceed.
 // server/src/middleware/consent.js
-import { pool } from '../db.js';
+import { pool } from '../db/pool.js';
 
 /**
  * R.A. 10173 Mandatory Statutory Consent Gatekeeper
@@ -10,7 +11,7 @@ export async function requirePrivacyConsent(req, res, next) {
 
   // 1. Clinical staff and emergency responders bypass patient consent checks for clinical duties
   const clinicalStaffRoles = ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN', 'EMERGENCY_RESPONDER'];
-  if (userRoles.some((role) => clinicalStaffRoles.includes(role))) {
+  if (userRoles.some(/* Check whether the caller is clinical staff under the consent policy. */ (role) => clinicalStaffRoles.includes(role))) {
     return next();
   }
 

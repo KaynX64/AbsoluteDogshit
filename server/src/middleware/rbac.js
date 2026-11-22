@@ -1,11 +1,14 @@
+// Enforces role and permission checks and resolves admin grants.
 // server/src/middleware/rbac.js
-import { pool } from '../db.js';
+import { pool } from '../db/pool.js';
 
+// Build middleware that requires one of the supplied roles.
 export function requireRoles(...allowedRoles) {
-  return (req, res, next) => {
+  return /* Permit the request when at least one of the caller's roles is allowed. */ (req, res, next) => {
     if (!req.user || !req.user.roles) {
       return res.status(403).json({ error: 'Access forbidden: No roles assigned.' });
     }
+    // Check each assigned role against the allowed-role list.
     const hasRole = req.user.roles.some((role) => allowedRoles.includes(role));
     if (!hasRole) {
       return res.status(403).json({ error: 'Access forbidden: Insufficient permissions.' });
@@ -18,9 +21,8 @@ export function requireRoles(...allowedRoles) {
    ADMIN ARCHETYPE PERMISSIONS (additive — requireRoles above is unchanged)
 
    Semantics:
-   • Applies ONLY to users whose roles are exclusively 'ADMIN'. Any account
-     holding a clinical/patient role (DOCTOR, DENTIST, NURSE, …) bypasses
-     permission checks entirely, exactly as before this feature existed.
+   • Applies to every account holding ADMIN, including multi-role accounts.
+   • Shared endpoints may explicitly allow a non-admin clinical role.
    • An ADMIN user with NO grant rows keeps FULL access (legacy default —
      every administrator created before this feature is unaffected).
    • An ADMIN user holding the SUPER_ADMIN sentinel keeps FULL access.
@@ -31,14 +33,15 @@ export function requireRoles(...allowedRoles) {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /** Fetch a user's raw granted admin-permission codes (empty array = legacy full access). */
-export async function getAdminPermissionCodes(userId) {
-  const [rows] = await pool.query(
+export async function getAdminPermissionCodes(userId, connection = pool) {
+  const [rows] = await connection.query(
     `SELECT ap.code
      FROM ADMIN_PERMISSIONS ap
      INNER JOIN USER_ADMIN_PERMISSIONS uap ON ap.permission_id = uap.permission_id
      WHERE uap.user_id = ?`,
     [userId]
   );
+  // Extract the administrator permission codes from the query result.
   return rows.map((r) => r.code);
 }
 
@@ -48,15 +51,15 @@ export async function getAdminPermissionCodes(userId) {
  *   isSuper = true  → full access (no grant rows at all, or SUPER_ADMIN granted)
  *   isSuper = false → limited to `codes` (never includes SUPER_ADMIN)
  */
-export async function resolveAdminPermissions(userId) {
-  const codes = await getAdminPermissionCodes(userId);
-  const isSuper = codes.length === 0 || codes.includes('SUPER_ADMIN');
-  return { isSuper, codes: isSuper ? ['SUPER_ADMIN'] : codes.filter((c) => c !== 'SUPER_ADMIN') };
+export async function resolveAdminPermissions(userId, connection = pool) {
+  return classifyAdminPermissions(await getAdminPermissionCodes(userId, connection));
 }
 
-/** Does this JWT user hold any non-ADMIN role? (permission model governs ADMIN only) */
-function hasNonAdminRole(user) {
-  return (user.roles || []).some((r) => r !== 'ADMIN');
+// Interpret stored administrator codes as Super Admin access or explicit grants.
+export function classifyAdminPermissions(codes) {
+  const isSuper = codes.length === 0 || codes.includes('SUPER_ADMIN');
+  // Keep individual grants apart from the Super Admin marker.
+  return { isSuper, codes: isSuper ? ['SUPER_ADMIN'] : codes.filter((c) => c !== 'SUPER_ADMIN') };
 }
 
 /**
@@ -64,19 +67,22 @@ function hasNonAdminRole(user) {
  * MUST be mounted after `authenticateToken` (and typically after requireRoles).
  *
  * Behaviour:
- *   • Non-ADMIN-only users (e.g. DOCTOR/DENTIST on shared analytics routes)
- *     pass through untouched — identical to pre-feature behaviour.
+ *   • Accounts without ADMIN need an explicitly allowed non-admin role.
  *   • Super admins (legacy no-rows or explicit SUPER_ADMIN) pass.
  *   • Limited admins must hold the requested code.
  */
-export function requirePermission(code) {
+export function requirePermission(code, { nonAdminRoles = [] } = {}) {
+  // Enforce the required permission using the caller's current roles and effective admin grants.
   return async (req, res, next) => {
     try {
-      if (!req.user || !req.user.roles) {
+      const roles = req.user?.roles;
+      if (!Array.isArray(roles) || roles.length === 0) {
         return res.status(403).json({ error: 'Access forbidden: No roles assigned.' });
       }
-      // Clinical/patient roles are not governed by admin permissions.
-      if (hasNonAdminRole(req.user)) return next();
+      if (!roles.includes('ADMIN')) {
+        if (roles.some(/* Check whether a non-admin role is allowed by the permission gate. */ (role) => nonAdminRoles.includes(role))) return next();
+        return res.status(403).json({ error: 'Access forbidden: Insufficient permissions.' });
+      }
 
       const { isSuper, codes } = await resolveAdminPermissions(req.user.user_id);
       if (isSuper) return next();

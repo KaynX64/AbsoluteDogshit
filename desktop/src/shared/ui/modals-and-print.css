@@ -1,0 +1,52 @@
+.modal-card {
+  position: relative;
+  background: var(--surface);
+  border-radius: var(--r-xl);
+  border: 1px solid var(--border-soft);
+  width: 100%;
+  padding: 28px;
+  max-height: 90vh;
+  overflow-y: auto;
+  margin: auto;
+}
+/* Brand hairline crowning the card — the login-card recipe. */
+.modal-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    rgba(var(--primary-rgb), 0) 0%,
+    rgba(var(--primary-rgb), 0.5) 30%,
+    rgba(var(--primary-soft-rgb), 0.3) 64%,
+    rgba(var(--primary-soft-rgb), 0) 100%
+  );
+  pointer-events: none;
+}
+/* ═══════════════════════════════════════════════════════════════════
+   SCROLLBARS — minimal
+   ═══════════════════════════════════════════════════════════════════ */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--sage-300);
+  border-radius: var(--r-pill);
+  border: 2px solid var(--surface);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--sage-400); }
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--sage-300) transparent;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   PRINT
+   ═══════════════════════════════════════════════════════════════════ */
+@media print {
+  .sb, .tb { display: none !important; }
+  .app-shell { display: block; grid-template-columns: none; }
+  .app-content { padding: 0 !important; }
+}
+

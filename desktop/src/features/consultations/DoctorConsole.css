@@ -1,0 +1,1111 @@
+/* Doctor and Dentist console layout */
+.doctor-console {
+  width: 100%;
+  container: doctor-clinic / inline-size;
+  max-width: 1500px;
+  margin-inline: auto;
+}
+
+.doctor-console .doctor-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 22px;
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.doctor-console .doctor-header .vd-page-head {
+  gap: 0;
+  margin: 0;
+}
+
+.doctor-console .doctor-header h1 {
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: -.035em;
+}
+
+.doctor-console .an-dashboard h1 {
+  font-size: clamp(18px, 2.2cqi, 22px);
+  font-weight: 750;
+  letter-spacing: -.035em;
+}
+
+.doctor-console .doctor-header p {
+  margin-top: 3px;
+}
+
+.doctor-console .doctor-heading-icon,
+.doctor-console .doctor-patient-monogram {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 46px;
+  aspect-ratio: 1;
+  border-radius: 15px;
+  background: var(--primary-tint);
+  color: var(--primary);
+}
+
+.doctor-console .doctor-signature-button,
+.doctor-console .doctor-roster-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 11px;
+  color: var(--primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.doctor-console :is(.doctor-signature-button, .doctor-roster-toggle):hover {
+  background: var(--primary-tint);
+}
+
+.doctor-console .doctor-clinic-layout {
+  display: grid;
+  grid-template-columns: clamp(270px, 29cqi, 385px) minmax(0, 1fr);
+  align-items: start;
+  gap: clamp(14px, 1.8cqi, 24px);
+}
+
+.app-content:has(.doctor-console) {
+  padding-block: 14px 12px;
+}
+
+.doctor-console[data-clinic-workspace='true'] .doctor-header {
+  gap: 10px;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+}
+
+.doctor-console[data-clinic-workspace='true'] .doctor-heading-icon {
+  width: 36px;
+}
+
+.doctor-console .doctor-context {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  gap: 10px;
+}
+
+.doctor-console .doctor-roster,
+.doctor-console .doctor-directory {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  background: var(--surface-2);
+}
+
+.doctor-console .doctor-roster {
+  padding: 9px 10px;
+}
+
+.doctor-console .doctor-directory {
+  padding: clamp(14px, 2.2cqi, 26px);
+  background: var(--surface);
+}
+
+.doctor-console .doctor-roster-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 6px 11px;
+}
+
+.doctor-console .doctor-roster-heading h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.doctor-console .doctor-roster-heading span,
+.doctor-console .doctor-roster-empty {
+  color: var(--text-sub);
+  font-size: 12px;
+}
+
+.doctor-console .doctor-roster-empty {
+  margin: 2px 6px 6px;
+}
+
+.doctor-console .doctor-roster-toggle {
+  display: none;
+}
+
+.doctor-console .doctor-queue-grid {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 3px 4px 4px;
+  list-style: none;
+}
+
+.doctor-console .doctor-queue-item {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--r-lg);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.doctor-console .doctor-queue-item:hover {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.doctor-console .doctor-queue-item[aria-pressed='true'] {
+  border-color: var(--border);
+  background: var(--surface);
+  box-shadow: inset 3px 0 var(--primary-soft), var(--shadow-xs);
+}
+
+.doctor-console .doctor-queue-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 8px;
+}
+
+.doctor-console .doctor-queue-ticket {
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.doctor-console .doctor-queue-status {
+  padding: 2px 6px;
+  border-radius: var(--r-pill);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.doctor-console .doctor-queue-name {
+  font-size: 13.5px;
+  line-height: 1.35;
+}
+
+.doctor-console .doctor-queue-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 7px;
+  color: var(--text-sub);
+  font-size: 11.5px;
+}
+
+.doctor-console .doctor-patient-workspace {
+  min-width: 0;
+}
+
+.doctor-console .doctor-workspace-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 40px 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-xl);
+  color: var(--text-sub);
+  text-align: center;
+}
+
+.doctor-console .doctor-workspace-empty :is(h2, p) {
+  margin: 0;
+}
+
+.doctor-console .doctor-workspace-empty h2 {
+  color: var(--text);
+  font-size: 16px;
+}
+
+.doctor-console .doctor-patient-card {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  background:
+    radial-gradient(ellipse at 100% 0, var(--primary-tint), transparent 58%),
+    var(--surface);
+}
+
+.doctor-console .doctor-patient-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+}
+
+.doctor-console .doctor-patient-monogram {
+  width: 36px;
+  font-size: 14px;
+  font-weight: 750;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.doctor-console .doctor-patient-title {
+  flex: 1 1 155px;
+  min-width: 0;
+}
+
+.doctor-console .doctor-patient-title h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(18px, 2.1cqi, 24px);
+  line-height: 1.12;
+  font-weight: 750;
+  letter-spacing: -.032em;
+}
+
+.doctor-console .doctor-patient-meta,
+.doctor-console .doctor-patient-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 14px;
+  color: var(--text-sub);
+  font-size: 12px;
+}
+
+.doctor-console .doctor-patient-meta {
+  margin-top: 4px;
+}
+
+.doctor-console .doctor-patient-facts {
+  margin-top: 9px;
+  line-height: 1.55;
+}
+
+.doctor-console .doctor-patient-safety {
+  display: grid;
+  gap: 4px;
+  margin-block: 8px 5px;
+}
+
+.doctor-console .doctor-safety-item {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  background: var(--surface-muted);
+  color: var(--text-sub);
+  font-size: 12px;
+}
+
+.doctor-console .doctor-safety-item .material-symbols-outlined {
+  color: var(--primary);
+}
+
+.doctor-console .doctor-safety-item strong {
+  margin-right: 7px;
+  color: var(--text);
+}
+
+.doctor-console .doctor-safety-item [data-alert='true'] {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.doctor-console .doctor-patient-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-block: 4px 6px;
+}
+
+.doctor-console :is(.doctor-patient-details, .doctor-prior-attachments) > summary {
+  padding: 5px 2px;
+  color: var(--primary);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.doctor-console .doctor-patient-details > summary {
+  font-size: 12px;
+}
+
+.doctor-console .doctor-safety-details {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.doctor-console .doctor-safety-details summary {
+  cursor: pointer;
+}
+
+.doctor-console .doctor-safety-details p {
+  margin: 4px 0 0;
+}
+
+.doctor-console .doctor-safety-details[open] .doctor-safety-preview {
+  display: none;
+}
+
+.doctor-console .doctor-prior-attachments {
+  margin-top: 10px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+
+.doctor-console .doctor-prior-attachments[open] > summary {
+  margin-bottom: 6px;
+}
+
+.doctor-console .doctor-record-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 10px;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.doctor-console .doctor-record-action .material-symbols-outlined {
+  color: var(--primary);
+}
+
+.doctor-console .doctor-record-action:hover {
+  background: var(--primary-tint);
+  border-color: var(--primary-soft);
+}
+
+.doctor-console .doctor-workspace-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 0 0 3px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.doctor-console .doctor-workspace-switch button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  color: var(--text-sub);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: var(--r-md) var(--r-md) 0 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.doctor-console .doctor-workspace-switch button:hover,
+.doctor-console .doctor-workspace-switch button[aria-selected='true'] {
+  color: var(--primary);
+  background: var(--primary-tint);
+}
+
+.doctor-console .doctor-workspace-switch button[aria-selected='true'] {
+  border-bottom-color: var(--primary);
+}
+
+.doctor-console .doctor-panel[hidden] {
+  display: none;
+}
+
+.doctor-console .doctor-panel-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 19px;
+  font-weight: 750;
+  letter-spacing: -.02em;
+}
+
+.doctor-console .doctor-panel-title .material-symbols-outlined {
+  color: var(--primary);
+}
+
+.doctor-console .doctor-encounter-panel > .doctor-panel-title {
+  margin-bottom: 13px;
+}
+
+.doctor-console .doctor-vitals-strip {
+  margin-top: 6px;
+  padding-top: 7px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.doctor-console .doctor-vitals-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-bottom: 8px;
+  color: var(--text-sub);
+}
+
+.doctor-console .doctor-vitals-heading h3 {
+  margin: 0;
+  font-size: 12px;
+}
+
+.doctor-console .doctor-vitals-heading span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.doctor-console .doctor-vitals-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  margin: 0;
+}
+
+.doctor-console .doctor-vitals-grid > div {
+  min-width: 0;
+  padding: 4px 5px;
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+  overflow-wrap: anywhere;
+}
+
+.doctor-console .doctor-vitals-grid dt {
+  color: var(--text-sub);
+  font-size: 10.5px;
+}
+
+.doctor-console .doctor-vitals-grid abbr {
+  text-decoration: none;
+}
+
+.doctor-console .doctor-vitals-grid dd {
+  display: flex;
+  align-items: center;
+  min-height: 18px;
+  margin: 2px 0 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.doctor-console .doctor-vitals-grid dd[data-missing='true'] {
+  color: var(--text-sub);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+.doctor-console .doctor-writing-grid {
+  display: grid;
+  gap: 12px 16px;
+}
+
+.doctor-console .doctor-writing-field {
+  min-width: 0;
+}
+
+.doctor-console .doctor-notes-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-sub);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@container doctor-clinic (width > 740px) {
+  .doctor-console .doctor-writing-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .doctor-console .doctor-writing-field textarea {
+    min-height: clamp(76px, 13dvh, 144px);
+  }
+}
+
+.doctor-console .doctor-encounter-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 10px 0 2px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.doctor-console .doctor-encounter-attachment,
+.doctor-console .doctor-attached-file {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.doctor-console .doctor-attached-file {
+  color: var(--text-sub);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.doctor-console .doctor-encounter-actions > button {
+  max-width: 100%;
+  white-space: normal;
+}
+
+.doctor-console .doctor-patient-card > button {
+  margin-top: 9px;
+}
+
+.doctor-console :is(.doctor-queue-item, .doctor-roster-toggle, .doctor-signature-button, .doctor-patient-actions button, .doctor-workspace-switch button, .doctor-dental-arch button):focus-visible,
+.doctor-console .doctor-panel :is(button, input, select, textarea):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.doctor-console .doctor-dental-arch button:focus-visible {
+  outline-offset: 1px;
+}
+
+@container doctor-clinic (max-width: 740px) {
+  .doctor-console .doctor-clinic-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .doctor-console .doctor-roster {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .doctor-console .doctor-roster-heading {
+    justify-content: flex-start;
+    gap: 8px;
+    padding: 0 4px;
+  }
+
+  .doctor-console .doctor-roster-toggle {
+    display: inline-flex;
+  }
+
+  .doctor-console #doctor-roster-list {
+    grid-column: 1 / -1;
+  }
+
+  .doctor-console .doctor-roster[data-expanded='false'] #doctor-roster-list {
+    display: none;
+  }
+
+}
+
+@container doctor-clinic (max-width: 420px) {
+  .doctor-console .doctor-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 7px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+  }
+
+  .doctor-console .doctor-heading-icon {
+    display: none;
+  }
+
+  .doctor-console .doctor-header p {
+    font-size: 12px;
+  }
+
+  .doctor-console .doctor-signature-label {
+    display: none;
+  }
+
+  .doctor-console .doctor-signature-button {
+    width: 36px;
+    padding: 0;
+  }
+
+  .doctor-console .doctor-patient-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+  }
+
+}
+
+.doctor-console .doctor-archive {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.doctor-console .doctor-archive > aside {
+  flex: 1 1 208px;
+  min-width: 0;
+  padding: 12px;
+  background: var(--sage-50);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-lg);
+  overflow-wrap: anywhere;
+}
+
+.doctor-console .doctor-archive > div {
+  flex: 3 1 400px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.doctor-console .doctor-archive-search {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.doctor-console .doctor-archive-search > input {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.doctor-console .doctor-patient-identity {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.doctor-console .doctor-attachment {
+  max-width: 100%;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.doctor-console .doctor-prescription-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+  gap: 12px;
+}
+
+.doctor-console .doctor-prescription-generator {
+  gap: 14px;
+}
+
+.doctor-console .doctor-prescription-fields > * {
+  min-width: 0;
+}
+
+.doctor-console .doctor-formulary-fields {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+@container doctor-clinic (min-width: 900px) {
+  .doctor-console .doctor-formulary-fields {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  }
+}
+
+.doctor-console .doctor-formulary-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.doctor-console .doctor-formulary-details > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  overflow-wrap: anywhere;
+}
+
+.doctor-console .doctor-formulary-details dt {
+  color: var(--text-sub);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.doctor-console .doctor-formulary-details dt span {
+  font-weight: 400;
+}
+
+.doctor-console .doctor-formulary-details dd {
+  margin: auto 0 0;
+  padding-top: 3px;
+  color: var(--text);
+  font-weight: 750;
+}
+
+.doctor-console .doctor-dental-arch {
+  display: grid;
+  grid-template-columns: repeat(16, minmax(36px, 1fr));
+  gap: 4px;
+  overflow-x: auto;
+  padding: 3px;
+}
+
+.doctor-console .doctor-panel {
+  min-width: 0;
+  padding: clamp(14px, 2vw, 22px);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2xl);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+}
+
+.doctor-console .doctor-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+@media (max-height: 800px) {
+  .app-content:has(.doctor-clinic-layout) {
+    padding-block: 8px;
+  }
+
+  .doctor-console[data-clinic-workspace='true'] .doctor-header {
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+  }
+
+  .doctor-console .doctor-workspace-switch {
+    margin-bottom: 8px;
+  }
+
+  .doctor-console .doctor-document-panel {
+    padding: 14px;
+  }
+
+  .doctor-console .doctor-document-panel .doctor-panel-header {
+    gap: 8px;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+  }
+
+  .doctor-console .doctor-prescription-generator {
+    gap: 8px;
+  }
+
+  .doctor-console .doctor-prescription-generator :is(input, select, textarea, #rx-formulary) {
+    min-height: 36px;
+    padding-block: 8px !important;
+  }
+
+  .doctor-console .doctor-prescription-generator .doctor-prescription-fields {
+    gap: 8px;
+  }
+
+  .doctor-console .doctor-formulary-details > div {
+    padding: 6px 8px;
+  }
+
+  .doctor-console .doctor-prescription-generator > button {
+    padding-block: 8px !important;
+  }
+}
+
+/* Desktop clinic: keep the section and its actions in the available shell height.
+   Long notes, patient lists and expanded details own their scrolling. Short or
+   narrow/zoomed windows retain the accessible flowing layout above. */
+@media screen and (min-width: 1024px) and (min-height: 700px) {
+  .app-main:has(.doctor-clinic-layout) {
+    overflow: hidden;
+  }
+
+  .app-main:has(.doctor-clinic-layout) > :is(.tb, .update-banner) {
+    flex-shrink: 0;
+  }
+
+  .app-content:has(.doctor-clinic-layout) {
+    display: flex;
+    flex: 1 1 0;
+    min-height: 0;
+    padding: 8px 20px 12px;
+    overflow: hidden;
+  }
+
+  .doctor-console[data-clinic-workspace='true'] {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .doctor-console[data-clinic-workspace='true'] .doctor-header {
+    flex: none;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+  }
+
+  .doctor-console[data-clinic-workspace='true'] .doctor-header p {
+    display: none;
+  }
+
+  .doctor-console .doctor-clinic-layout {
+    flex: 1;
+    min-height: 0;
+    grid-template-rows: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .doctor-console .doctor-context {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .doctor-console .doctor-patient-card {
+    flex: 0 0 auto;
+    max-height: calc(100% - 100px);
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .doctor-console .doctor-roster {
+    display: flex;
+    flex: 0 1 auto;
+    flex-direction: column;
+    min-height: 90px;
+    overflow: hidden;
+  }
+
+  .doctor-console .doctor-roster-heading {
+    flex: none;
+  }
+
+  .doctor-console #doctor-roster-list {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .doctor-console .doctor-queue-grid {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .doctor-console .doctor-patient-workspace,
+  .doctor-console .doctor-workspace,
+  .doctor-console .doctor-panel:not([hidden]),
+  .doctor-console .doctor-document-panel > [role='tabpanel']:not([hidden]),
+  .doctor-console .doctor-encounter-form {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .doctor-console .doctor-workspace:not(:has(> .doctor-panel:not([hidden]))) {
+    display: none;
+  }
+
+  .doctor-console .doctor-workspace-switch {
+    flex: none;
+    margin-bottom: 6px;
+  }
+
+  .doctor-console .doctor-panel {
+    padding: 12px 16px;
+  }
+
+  .doctor-console .doctor-panel-header {
+    flex: none;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+  }
+
+  .doctor-console .doctor-prescription-generator {
+    flex: 1;
+    min-height: min-content;
+    gap: 6px;
+  }
+
+  .doctor-console .doctor-prescription-generator > * {
+    flex-shrink: 0;
+  }
+
+  .doctor-console .doctor-prescription-generator .doctor-prescription-field:has(textarea) {
+    display: flex;
+    flex: 1 1 52px;
+    flex-direction: column;
+    min-height: 52px;
+    max-height: 160px;
+  }
+
+  .doctor-console .doctor-prescription-field > label {
+    margin-bottom: 3px !important;
+  }
+
+  .doctor-console .doctor-prescription-fields .doctor-prescription-field {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .doctor-console .doctor-prescription-fields .doctor-prescription-field :is(input, select) {
+    margin-top: auto;
+  }
+
+  .doctor-console .doctor-prescription-fields {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .doctor-console .doctor-formulary-fields {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  }
+
+  .doctor-console .doctor-prescription-fields:not(.doctor-formulary-fields):has(#rx-dosage) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .doctor-console .doctor-formulary-details {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .doctor-console .doctor-prescription-generator :is(input, select, #rx-formulary) {
+    min-height: 32px;
+    padding-block: 5px !important;
+  }
+
+  .doctor-console .doctor-document-panel > [role='tabpanel']:not([hidden]) {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .doctor-console .doctor-prescription-generator > button {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    margin-top: auto;
+    padding-block: 9px !important;
+  }
+
+  .doctor-console .doctor-writing-grid {
+    flex: 1;
+    min-height: 0;
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    gap: 10px 14px;
+  }
+
+  .doctor-console .doctor-writing-field {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .doctor-console :is(.doctor-writing-field, .doctor-prescription-field) textarea {
+    flex: 1;
+    min-height: 40px;
+    height: 0;
+    resize: none !important;
+    overflow-y: auto;
+  }
+
+  .doctor-console #doctor-document-clearance > div:has(#clearance-remarks) {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 80px;
+  }
+
+  .doctor-console #clearance-remarks {
+    flex: 1;
+    min-height: 56px;
+    height: 0;
+    resize: none !important;
+    overflow-y: auto;
+  }
+
+  .doctor-console .doctor-encounter-actions {
+    flex: none;
+    position: static;
+    margin-top: 8px;
+  }
+
+  .doctor-console .doctor-prior-attachments {
+    flex: none;
+    max-height: 90px;
+    overflow-y: auto;
+  }
+
+  .doctor-console #doctor-dental-panel:not([hidden]) {
+    flex: 1;
+    min-height: 0;
+    margin-bottom: 0 !important;
+    overflow-y: auto;
+  }
+}
+
+@media screen and (1024px <= width <= 1100px) and (min-height: 700px) {
+  .doctor-console .doctor-prescription-generator { gap: 3px; }
+  .doctor-console .doctor-panel { padding: 10px 12px; }
+  .doctor-console .doctor-panel-header { padding-bottom: 6px; margin-bottom: 6px; }
+  .doctor-console .doctor-formulary-details > div { padding: 6px; }
+  .doctor-console .doctor-formulary-details dt { font-size: 10.5px; }
+}
+
+@media screen and (min-width: 1101px) and (700px <= height <= 800px) {
+  .doctor-console .doctor-prescription-generator { gap: 4px; }
+  .doctor-console .doctor-formulary-details > div { padding: 6px 8px; }
+}
+
+@media screen and (min-width: 1024px) and (700px <= height <= 800px) {
+  .doctor-console[data-clinic-workspace='true'] .doctor-header {
+    margin-bottom: 4px;
+    padding-bottom: 4px;
+  }
+  .doctor-console[data-clinic-workspace='true'] .doctor-heading-icon { width: 28px; }
+  .doctor-console[data-clinic-workspace='true'] .doctor-header h1 { font-size: 20px; }
+  .doctor-console[data-clinic-workspace='true'] .doctor-signature-button {
+    min-height: 28px;
+    padding-block: 4px;
+  }
+}

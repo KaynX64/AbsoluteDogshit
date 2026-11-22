@@ -1,7 +1,9 @@
+// Builds and sends booking confirmations and reminders through SMTP or local simulation.
 // server/src/utils/mailer.js
 import 'dotenv/config';
 import nodemailer from 'nodemailer';
 
+// Read a required SMTP setting and fail startup when it is missing.
 function requiredEnv(name) {
   const val = process.env[name];
   if (!val) {
@@ -28,11 +30,13 @@ const transporter = nodemailer.createTransport({
 // delivered to students and clinical staff (audit SEC-07, CVSS 6.1).
 // Every dynamic interpolation below now passes through this escaper.
 function escapeHtml(str) {
+  // Replace each matched character with the corresponding HTML entity.
   return String(str || '').replace(/[&<>"']/g, (m) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   })[m]);
 }
 
+// Build and send the appointment confirmation or reminder email.
 export async function sendAppointmentEmail({ toEmail, patientName, doctorName, specialty, dateTime, purpose, type }) {
   let subject = '';
   let html = '';
@@ -74,8 +78,8 @@ export async function sendAppointmentEmail({ toEmail, patientName, doctorName, s
   try {
     // If running in development without real SMTP credentials, log the email
     if (!process.env.SMTP_HOST) {
-      console.log(`[Email Dispatch Simulation] To: ${toEmail} | Subject: ${subject}`);
-      return;
+      console.log(`[Email Dispatch Simulation] ${type}`);
+      return true;
     }
     await transporter.sendMail({
       from: '"PSU Lingayen HealthLink" <no-reply@psu.edu.ph>',
@@ -83,7 +87,9 @@ export async function sendAppointmentEmail({ toEmail, patientName, doctorName, s
       subject,
       html,
     });
+    return true;
   } catch (err) {
-    console.error('[Email Dispatch Error]:', err.message);
+    console.error('[Email Dispatch Error]:', err.code || err.name);
+    return false;
   }
 }

@@ -1,0 +1,39 @@
+// Handles prescription cancellation requests, including stock restoration and realtime updates.
+
+import { cancelPrescription } from '../../../documents/prescriptions/cancelPrescription.js';
+import { authenticateToken } from '../../../auth/middleware.js';
+import { requireRoles } from '../../../middleware/rbac.js';
+
+// Mount the prescription cancellation endpoint and pass in realtime access.
+export function registerPrescriptionCancellation(router, io) {
+  // ── Cancel Prescription & Restore Stock ─────────────────────────────────────
+  // Cancel the prescription through the stock-restoring service and broadcast committed changes.
+  router.patch(
+    '/prescriptions/:id/cancel',
+    authenticateToken,
+    requireRoles('DOCTOR', 'DENTIST', 'ADMIN'),
+    async (req, res) => {
+      const prescriptionId = Number(req.params.id);
+      const { reason } = req.body;
+
+      if (!prescriptionId || Number.isNaN(prescriptionId)) {
+        return res.status(400).json({ error: 'A valid prescription id is required.' });
+      }
+
+      let result;
+      try {
+        result = await cancelPrescription({ prescriptionId, reason, user: req.user, ipAddress: req.ip });
+      } catch (error) {
+        if (error.status) {
+          return res.status(error.status).json({ error: error.message, code: error.code, currentStatus: error.currentStatus });
+        }
+        console.error('[Prescription Cancel Error]:', error.code ?? error.name);
+        return res.status(500).json({ error: 'Failed to cancel prescription.' });
+      }
+      io?.emit('inventory:updated');
+      const { patientId, ...response } = result;
+      io?.to(`user:${patientId}`).emit('documents:updated', { kind: 'prescriptions' });
+      return res.json(response);
+    }
+  );
+}

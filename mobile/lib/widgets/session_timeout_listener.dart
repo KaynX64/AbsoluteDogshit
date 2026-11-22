@@ -1,10 +1,16 @@
 // mobile/lib/widgets/session_timeout_listener.dart
 import 'dart:async';
+
 import 'package:flutter/material.dart';
+
+import '../theme/app_palette.dart';
+import '../theme/account_theme_controller.dart';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import '../config/api_config.dart';
+
 import '../screens/login_screen.dart';
 import '../utils/responsive.dart';
+import '../services/emergency_alert_service.dart';
 
 class SessionTimeoutListener extends StatefulWidget {
   final Widget child;
@@ -22,11 +28,12 @@ class SessionTimeoutListener extends StatefulWidget {
 
 class _SessionTimeoutListenerState extends State<SessionTimeoutListener> {
   Timer? _inactivityTimer;
+  DateTime _lastActivity = DateTime.now();
   final _storage = const FlutterSecureStorage();
 
-  static const primaryGreen = Color(0xFF284E3A);
-  static const textMain = Color(0xFF191C1A);
-  static const textSub = Color(0xFF5A635B);
+  Color get primaryGreen => AppPalette.of(context).color(0xFF284E3A);
+  Color get textMain => AppPalette.of(context).color(0xFF191C1A);
+  Color get textSub => AppPalette.of(context).color(0xFF5A635B);
 
   @override
   void initState() {
@@ -41,21 +48,30 @@ class _SessionTimeoutListenerState extends State<SessionTimeoutListener> {
   }
 
   void _resetTimer() {
-    _inactivityTimer?.cancel();
-    _inactivityTimer =
-        Timer(Duration(minutes: widget.timeoutMinutes), _handleTimeout);
+    _lastActivity = DateTime.now();
+    _inactivityTimer ??= Timer(
+      Duration(minutes: widget.timeoutMinutes),
+      _checkDeadline,
+    );
+  }
+
+  void _checkDeadline() {
+    _inactivityTimer = null;
+    final remaining =
+        Duration(minutes: widget.timeoutMinutes) -
+        DateTime.now().difference(_lastActivity);
+    if (remaining > Duration.zero) {
+      _inactivityTimer = Timer(remaining, _checkDeadline);
+    } else {
+      _handleTimeout();
+    }
   }
 
   Future<void> _handleTimeout() async {
-    final token = await _storage.read(key: 'jwt_token');
-    if (token != null) {
-      try {
-        await ApiConfig.client.post(
-          Uri.parse('${ApiConfig.baseUrl}/api/auth/logout'),
-          headers: {'Authorization': 'Bearer $token'},
-        );
-      } catch (_) {}
-    }
+    await EmergencyAlertService().signOut(
+      await _storage.read(key: 'jwt_token'),
+    );
+    if (mounted) AccountThemeScope.of(context).reset();
     await _storage.deleteAll();
     if (!mounted) return;
 
@@ -69,7 +85,7 @@ class _SessionTimeoutListenerState extends State<SessionTimeoutListener> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: AppPalette.of(context).surface,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(rs.r(24)),
         ),
@@ -90,17 +106,13 @@ class _SessionTimeoutListenerState extends State<SessionTimeoutListener> {
           'For your protection under Republic Act No. 10173 (Data Privacy Act of 2012), '
           'your session has ended due to $durationString of inactivity.',
           textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: rs.sp(13),
-            color: textSub,
-            height: 1.4,
-          ),
+          style: TextStyle(fontSize: rs.sp(13), color: textSub, height: 1.4),
         ),
         actions: [
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: primaryGreen,
-              foregroundColor: Colors.white,
+              foregroundColor: AppPalette.of(context).onPrimary,
               elevation: 0,
               shape: const StadiumBorder(),
             ),
