@@ -63,7 +63,7 @@ export default function ActiveAccounts({
   userActionFeedback,
 }: ActiveAccountsProps) {
   return (
-    <div>
+    <div className="admin-bounded-view">
       {/* Search + count row */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, marginBottom: 14, flexWrap: 'wrap' }}>
         <div style={{ position: 'relative', flex: '1 1 320px', maxWidth: 520 }}>
@@ -190,30 +190,29 @@ export default function ActiveAccounts({
             <span>Qualified responders</span>
             <span className="admin-qualified-switch" aria-hidden="true" />
           </button>
+          <select
+            className="admin-filter-sort"
+            value={userSortKey} aria-label="Sort accounts"
+            onChange={(e) => setUserSortKey(e.target.value as typeof userSortKey)}
+          >
+            <option value="id_asc">ID: Lowest first</option>
+            <option value="id_desc">ID: Highest first</option>
+            <option value="name_asc">Name: A to Z</option>
+            <option value="name_desc">Name: Z to A</option>
+            <option value="role">Role: A to Z</option>
+          </select>
         </div>
-
-        <select
-          className="admin-filter-sort"
-          value={userSortKey} aria-label="Sort accounts"
-          onChange={(e) => setUserSortKey(e.target.value as typeof userSortKey)}
-        >
-          <option value="id_asc">ID: Lowest first</option>
-          <option value="id_desc">ID: Highest first</option>
-          <option value="name_asc">Name: A to Z</option>
-          <option value="name_desc">Name: Z to A</option>
-          <option value="role">Role: A to Z</option>
-        </select>
       </div>
 
       {/* Table */}
-      <div style={{
+      <div className="admin-table-card" style={{
         background: T.surface,
         border: `1px solid ${T.border}`,
         borderRadius: T.radius.lg,
         overflow: 'hidden',
         boxShadow: T.shadow.xs,
       }}>
-        <div className="vd-table-wrap" style={{ overflowX: "auto" }}>
+        <div className="vd-table-wrap admin-scroll-region" role="region" aria-label="Active account records" tabIndex={0}>
           <table className="tbl" style={{ minWidth: 820 }}>
             <thead>
               <tr>

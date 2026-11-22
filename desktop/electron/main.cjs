@@ -8,10 +8,10 @@ const { registerCertificatePolicy } = require('./certificatePolicy.cjs');
 const { createWindow } = require('./window.cjs');
 
 const path = require('node:path');
-const { WINDOWS_APP_ID } = require('./config.cjs');
+const { getWindowsAppId } = require('./config.cjs');
 
 if (!app.requestSingleInstanceLock()) app.exit(0);
-if (process.platform === 'win32') app.setAppUserModelId(WINDOWS_APP_ID);
+if (process.platform === 'win32') app.setAppUserModelId(getWindowsAppId(app.isPackaged));
 registerUpdateHandlers(ipcMain);
 registerPrintHandler(ipcMain);
 registerNotificationHandler(ipcMain);

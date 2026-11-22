@@ -260,7 +260,7 @@ export default function IncidentRecords() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: T.sage50 }}>
+    <div className="admin-bounded-view incident-records" style={{ background: T.sage50 }}>
       {!selectedRecord && notice}
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div
@@ -445,7 +445,7 @@ export default function IncidentRecords() {
       </div>
 
       {/* ── Content Body ────────────────────────────────────────────────────── */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px' }}>
+      <div className="admin-scroll-region" role="region" aria-label="Incident report list" tabIndex={0} style={{ padding: '20px 28px' }}>
         {loading && records.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '60px 20px', color: T.textSub }}>
             <Icon name="progress_activity" size={32} />

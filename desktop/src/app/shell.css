@@ -595,6 +595,33 @@ html[data-titlebar-fullscreen='true'] .app-titlebar { display: none; }
   flex-wrap: wrap;
 }
 
+@media screen and (1024px <= width <= 1280px) and (min-height: 700px) {
+  .app-main:has(.doctor-clinic-layout, .admin-bounded-view) > .tb {
+    flex-wrap: nowrap;
+    gap: 12px;
+    padding: 10px 20px;
+  }
+
+  .app-main:has(.doctor-clinic-layout, .admin-bounded-view) .tb-left {
+    flex: 1;
+  }
+
+  .app-main:has(.doctor-clinic-layout, .admin-bounded-view) .tb-right {
+    flex-wrap: nowrap;
+    flex: 0 1 auto;
+    max-width: 70%;
+    overflow-x: auto;
+  }
+
+  .app-main:has(.doctor-clinic-layout, .admin-bounded-view) .tb-right > * {
+    flex-shrink: 0;
+  }
+
+  .app-main:has(.doctor-clinic-layout, .admin-bounded-view) .tb-role-select {
+    max-width: 140px;
+  }
+}
+
 .tb-online {
   display: inline-flex;
   align-items: center;

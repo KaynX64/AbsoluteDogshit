@@ -743,13 +743,14 @@ UPDATE `USERS` SET `is_qualified_responder` = 1,
        `qualified_responder_note` = 'Trained volunteer responder — seed demo (student)'
  WHERE `user_id` = 5;
 
--- STAFF_PROFILES (clinical + admin)
+-- STAFF_PROFILES (clinical, emergency response, and admin)
 -- admin_no is populated ONLY for the ADMIN role; NULL for the rest.
--- license_no is populated for DOCTOR / NURSE / DENTIST; NULL for ADMIN.
+-- license_no is populated for the seeded DOCTOR / NURSE / DENTIST accounts.
 INSERT INTO `STAFF_PROFILES` (`user_id`, `admin_no`, `license_no`, `specialty`, `department`) VALUES
 (1, 'PSU-ADM-2024-0001', NULL,             'System Administration',      'PSU Lingayen Clinic'),
 (2, NULL,                'PRC-MD-098765',  'General Medicine',           'PSU Lingayen Clinic'),
 (3, NULL,                'PRC-RN-054321',  'Emergency & Triage Nursing', 'PSU Lingayen Clinic'),
+(4, NULL,                NULL,             'Campus Emergency Response', 'PSU Lingayen Quick-Response Unit'),
 (6, NULL,                'PRC-DDS-045678', 'Dentistry & Oral Health',    'PSU Lingayen Clinic');
 
 -- HEALTH_PROFILES — minimal for the demo patient-side accounts
