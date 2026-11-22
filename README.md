@@ -48,30 +48,182 @@ The API applies clinical rules and access checks. It stores records in MySQL and
 
 ## 📂 Repository Structure
 
+All Git-tracked folders and subfolders are shown below, along with selected files.
+
 ```text
 Valetudo/
-├── server/                    # Express API and Socket.IO server
+├── AGENTS-parts/        # Project development guidance
+├── desktop/             # Electron clinic staff console
+│   ├── AGENTS-parts/
+│   ├── docs/
+│   │   └── codeslice/
+│   ├── electron/        # Main process, preload, and offline storage
+│   │   └── offline/
+│   ├── public/
+│   │   └── licenses/
 │   ├── src/
-│   │   ├── app.js             # Express middleware and route mounts
-│   │   ├── routes/            # Feature endpoints
-│   │   ├── db/                # MySQL pool and migrations
-│   │   └── workers/           # Scheduled jobs
-│   ├── schema.sql             # Fresh MySQL schema
-│   └── tests/                 # API and domain tests
-├── desktop/                   # Electron clinic staff console
-│   ├── electron/              # Main process, preload, and offline storage
-│   ├── src/
-│   │   ├── features/          # Clinic and admin workspaces
-│   │   └── platform/          # Realtime and offline sync
-│   └── app-config.json        # API origin for the desktop build
-├── mobile/                    # Flutter patient and responder app
+│   │   ├── app/
+│   │   ├── assets/
+│   │   ├── config/
+│   │   ├── features/    # Clinic and admin workspaces
+│   │   │   ├── admin/
+│   │   │   ├── analytics/
+│   │   │   │   └── tabs/
+│   │   │   ├── appointments/
+│   │   │   ├── consultations/
+│   │   │   ├── documents/
+│   │   │   ├── emergency/
+│   │   │   ├── inventory/
+│   │   │   └── nurse/
+│   │   ├── img_icons/
+│   │   ├── pages/
+│   │   ├── platform/    # Realtime and offline sync
+│   │   │   ├── connectivity/
+│   │   │   ├── offline/
+│   │   │   └── realtime/
+│   │   ├── shared/
+│   │   │   └── ui/
+│   │   └── theme/
+│   ├── tests/
+│   │   └── smoke/
+│   └── app-config.json  # API origin for the desktop build
+├── mobile/              # Flutter patient and responder app
+│   ├── android/
+│   │   ├── app/
+│   │   │   └── src/
+│   │   │       ├── debug/
+│   │   │       ├── main/
+│   │   │       │   ├── kotlin/
+│   │   │       │   │   └── com/
+│   │   │       │   │       └── psu/
+│   │   │       │   │           └── valetudo/
+│   │   │       │   │               └── mobile/
+│   │   │       │   └── res/
+│   │   │       │       ├── drawable/
+│   │   │       │       ├── drawable-nodpi/
+│   │   │       │       ├── drawable-v21/
+│   │   │       │       ├── mipmap-anydpi-v26/
+│   │   │       │       ├── mipmap-hdpi/
+│   │   │       │       ├── mipmap-mdpi/
+│   │   │       │       ├── mipmap-xhdpi/
+│   │   │       │       ├── mipmap-xxhdpi/
+│   │   │       │       ├── mipmap-xxxhdpi/
+│   │   │       │       ├── raw/
+│   │   │       │       ├── values/
+│   │   │       │       └── values-night/
+│   │   │       └── profile/
+│   │   └── gradle/
+│   │       └── wrapper/
+│   ├── assets/
+│   ├── ios/
+│   │   ├── Flutter/
+│   │   ├── Runner/
+│   │   │   ├── Assets.xcassets/
+│   │   │   │   ├── AppIcon.appiconset/
+│   │   │   │   └── LaunchImage.imageset/
+│   │   │   └── Base.lproj/
+│   │   ├── Runner.xcodeproj/
+│   │   │   ├── project.xcworkspace/
+│   │   │   │   └── xcshareddata/
+│   │   │   └── xcshareddata/
+│   │   │       └── xcschemes/
+│   │   ├── Runner.xcworkspace/
+│   │   │   └── xcshareddata/
+│   │   └── RunnerTests/
 │   ├── lib/
-│   │   ├── screens/           # Patient portal and responder views
-│   │   ├── services/          # Session, connectivity, and SOS delivery
-│   │   └── widgets/           # Shared controls and Responder Hub
-│   └── test/                  # Flutter tests
-├── docker-compose.yml         # Local MySQL, Redis, and MinIO
-└── DOCUMENTATION.md           # Project guides and references
+│   │   ├── config/
+│   │   ├── models/
+│   │   ├── screens/     # Patient portal and responder views
+│   │   │   ├── AGENTS-parts/
+│   │   │   └── codeslice/
+│   │   │       └── MB-01-PatientPortalScreen-parts/
+│   │   ├── services/    # Session, connectivity, and SOS delivery
+│   │   ├── theme/
+│   │   ├── utils/
+│   │   └── widgets/     # Shared controls and Responder Hub
+│   ├── linux/
+│   │   ├── flutter/
+│   │   └── runner/
+│   ├── macos/
+│   │   ├── Flutter/
+│   │   ├── Runner/
+│   │   │   ├── Assets.xcassets/
+│   │   │   │   └── AppIcon.appiconset/
+│   │   │   ├── Base.lproj/
+│   │   │   └── Configs/
+│   │   ├── Runner.xcodeproj/
+│   │   │   ├── project.xcworkspace/
+│   │   │   │   └── xcshareddata/
+│   │   │   └── xcshareddata/
+│   │   │       └── xcschemes/
+│   │   ├── Runner.xcworkspace/
+│   │   │   └── xcshareddata/
+│   │   └── RunnerTests/
+│   ├── test/            # Flutter tests
+│   ├── web/
+│   │   └── icons/
+│   └── windows/
+│       ├── flutter/
+│       └── runner/
+│           └── resources/
+├── README-parts/        # Historical Stage1 documentation
+├── scripts/             # Repository verification utilities
+├── server/              # Express API and Socket.IO server
+│   ├── .postman/
+│   ├── AGENTS-parts/
+│   ├── postman/
+│   │   └── globals/
+│   ├── public/
+│   ├── scripts/
+│   ├── server/
+│   │   └── certs/
+│   ├── src/
+│   │   ├── admin/
+│   │   │   └── accounts/
+│   │   ├── analytics/
+│   │   │   └── reports/
+│   │   ├── appointments/
+│   │   ├── auth/
+│   │   ├── bootstrap/
+│   │   ├── config/
+│   │   ├── db/          # MySQL pool and migrations
+│   │   │   └── migrations/
+│   │   ├── documents/
+│   │   │   ├── generation/
+│   │   │   ├── pdf/
+│   │   │   │   └── templates/
+│   │   │   ├── prescriptions/
+│   │   │   └── signing/
+│   │   ├── emergency/
+│   │   ├── inventory/
+│   │   ├── middleware/
+│   │   ├── realtime/
+│   │   ├── routes/      # Feature endpoints
+│   │   │   ├── admin/
+│   │   │   │   ├── databaseStudio/
+│   │   │   │   └── userUpdates/
+│   │   │   ├── AGENTS-parts/
+│   │   │   ├── analytics/
+│   │   │   ├── appointments/
+│   │   │   │   ├── booking/
+│   │   │   │   └── intake/
+│   │   │   ├── documents/
+│   │   │   │   ├── prescriptions/
+│   │   │   │   └── verification/
+│   │   │   ├── emergency/
+│   │   │   │   └── incidentReports/
+│   │   │   ├── inventory/
+│   │   │   ├── profile/
+│   │   │   └── sync/
+│   │   ├── sync/
+│   │   ├── utils/
+│   │   ├── workers/     # Scheduled jobs
+│   │   └── app.js       # Express middleware and route mounts
+│   ├── tests/           # API and domain tests
+│   │   └── fixtures/
+│   └── schema.sql       # Fresh MySQL schema
+├── docker-compose.yml   # Local MySQL, Redis, and MinIO
+└── DOCUMENTATION.md     # Project guides and references
 ```
 
 ## 🚀 Getting started
