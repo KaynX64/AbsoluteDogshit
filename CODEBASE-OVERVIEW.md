@@ -6,7 +6,7 @@ Reviewed against this checkout on 2026-11-15. This is an architectural walkthrou
 
 HealthLink is a university campus clinic management system. It connects patients, clinic staff and emergency responders around appointments, clinical records, medicines and emergency incidents. The project guidance identifies Pangasinan State University as its setting.
 
-The repository is named `AbsoluteDogshit`. Branding is currently mixed: the desktop package and most technical guides use **Valetudo HealthLink**, while the mobile app title, its smoke test and the root README heading use **LeoVital HealthLink**. These are names within this codebase, not separate applications.
+The repository is named `AbsoluteDogshit`. The project and desktop console use **Valetudo HealthLink**, and the mobile app uses **LeoVital HealthLink**. Both apps connect to the same clinic API.
 
 ## Who uses it and what they do
 
