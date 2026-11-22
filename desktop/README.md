@@ -42,7 +42,7 @@ Packaged smoke tests use synthetic data and an isolated profile to check preload
 
 The dedicated responder console shows when each SOS was reported in Philippine time (PHT).
 
-Doctor/Dentist sections use a [compact, contained layout](docs/COMPACT-CLINIC.md). Prescribing supports multiple medicines with clinic/external fulfillment per item, a retained session draft and explicit review before issue. Server support must be enabled; see [prescribing rollout and checks](../server/PRESCRIBING-ROLLOUT.md).
+Doctor/Dentist sections use a [compact, contained layout](docs/COMPACT-CLINIC.md). See [consultation documents](docs/CONSULTATION-DOCUMENTS.md) for prescribing, read-only History, and EMR workflows.
 
 Choose **Sign out** in the sidebar and confirm to end your session.
 
@@ -83,3 +83,15 @@ The renderer bundles [Material Symbols Outlined](./src/img_icons/material-symbol
 Vite reads the checked-in font files during the build and packages them with their [licenses](./public/licenses/). Once npm dependencies are installed, `npm run build` and renderer icon and font loading work without Google or internet access. The icon font comes from [Google's Material Design Icons repository at `10ecc147`](https://github.com/google/material-design-icons/tree/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/variablefont).
 
 Feature controllers and their views live in `src/features/`. See the [code-slice index](./docs/CODESLICE.md) for entry points.
+
+## SOS responder permissions
+
+Non-clinical Qualified Responders can acknowledge an incident, view its limited details and open the map. Acknowledgment keeps the incident active. Dispatch, Resolve, False alarm and official incident reporting require authorized response staff; the Qualified Responder flag never removes existing staff permissions. Access is checked live by the API and shared across the desktop SOS controls. Deploy the server restrictions before updated clients; older clients receive a permission error for forbidden actions.
+
+`npm run test:layout` also checks community/staff SOS buttons, live permission changes, denied closure and acknowledgment across the banner, dispatch console and nurse SOS band using synthetic fixtures in a hidden window.
+
+Response staff can open **Alert history** and **Incident reports** from the sidebar. **Needs report** includes all unfinished work, **My drafts** resumes private desktop autosaves, and **Filed** is read-only with PDFs. **Save and return** preserves deferred work; over-24-hour items are highlighted. Draft conflicts preserve local text. Install server migration **015** before updated clients. [Workflow, permissions and API guide](../server/RESPONDER-RECORDS.md).
+
+Returning to the app refreshes responder records in the background without clearing the visible table. Filter changes still load a new result set, and revoked permissions clear protected records. Empty SOS banners take no space above the page heading.
+
+Report tabs prepare their default lists in the background and reuse recently loaded results when switching. Only search typing has a debounce delay. The bounded cache stays in memory, is invalidated by report updates and focus refreshes, and clears on access loss or leaving the records page; it never stores patient information in browser storage.

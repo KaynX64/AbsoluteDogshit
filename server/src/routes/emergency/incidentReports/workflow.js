@@ -4,24 +4,25 @@ import { pool } from '../../../db/pool.js';
 import { authenticateToken } from '../../../auth/middleware.js';
 import { fileIncidentReport, IncidentReportError } from '../../../emergency/fileIncidentReport.js';
 import { generateAndStoreIncidentReportPDF } from '../../../documents/documentService.js';
-import { requireResponderAccess, getResponderAudience, roleLabelFor } from '../../../emergency/responderAccess.js';
+import { requireResponderAccess, requireClinicalResponder, getResponderAudience, roleLabelFor } from '../../../emergency/responderAccess.js';
+import { requireDesktopReportClient } from '../../../emergency/historyAccess.js';
 
 // Mount pending report reads, form prefill, and incident report filing.
 export function registerIncidentWorkflowRoutes(router, io) {
   // ===========================================================================
   // 3a. GET /api/emergency/incident-reports/pending
-  // Resolved alerts (last 24h) that still need a console operator's incident
+  // All resolved alerts that still need a console operator's incident
   // report. Consoles call this on mount so the documentation popup still
   // appears when the status_change event fired while nobody was connected.
   // ===========================================================================
   // List resolved alerts that still require an incident report.
-  router.get('/incident-reports/pending', authenticateToken, requireResponderAccess, async (req, res) => {
+  router.get('/incident-reports/pending', authenticateToken, requireResponderAccess, requireClinicalResponder, async (req, res) => {
     res.set('Cache-Control', 'no-store');
     try {
       if (req.query.summary === '1') {
         const [pending] = await pool.query(`SELECT a.alert_id AS alertId, a.resolved_at AS resolvedAt
           FROM EMERGENCY_ALERTS a
-          WHERE a.status = 'resolved' AND a.resolved_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+          WHERE a.status = 'resolved'
             AND NOT EXISTS (SELECT 1 FROM INCIDENT_REPORTS ir WHERE ir.alert_id = a.alert_id)
           ORDER BY a.resolved_at DESC, a.alert_id DESC`);
         return res.json(pending);
@@ -41,7 +42,6 @@ export function registerIncidentWorkflowRoutes(router, io) {
          FROM EMERGENCY_ALERTS a
          JOIN USERS u ON a.user_id = u.user_id
          WHERE a.status = 'resolved'
-           AND a.resolved_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
            AND NOT EXISTS (SELECT 1 FROM INCIDENT_REPORTS ir WHERE ir.alert_id = a.alert_id)
          ORDER BY a.resolved_at DESC`
       );
@@ -72,7 +72,7 @@ export function registerIncidentWorkflowRoutes(router, io) {
   // plus the alert timeline and any already-filed report.
   // ===========================================================================
   // Return alert data for the incident report form or identify an already filed report.
-  router.get('/:alertId/incident-report', authenticateToken, requireResponderAccess, async (req, res) => {
+  router.get('/:alertId/incident-report', authenticateToken, requireResponderAccess, requireClinicalResponder, async (req, res) => {
     try {
       const { alertId } = req.params;
 
@@ -144,7 +144,7 @@ export function registerIncidentWorkflowRoutes(router, io) {
   // submit wins; others are told it is already documented.
   // ===========================================================================
   // File the report, notify connected clients, and attempt to generate its PDF.
-  router.post('/:alertId/incident-report', authenticateToken, requireResponderAccess, async (req, res) => {
+  router.post('/:alertId/incident-report', authenticateToken, requireResponderAccess, requireClinicalResponder, requireDesktopReportClient, async (req, res) => {
     try {
       const { alertId } = req.params;
       const responderId = req.user.user_id;

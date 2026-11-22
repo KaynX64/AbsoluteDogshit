@@ -4,6 +4,7 @@
 
 - QR capture owns camera tracks, its decode loop, and uploaded image URLs in `useQrCapture.ts`. The decoder loads on demand. Document previews cancel pending reads and revoke blob URLs on replacement or unmount.
 - Admin audit and telemetry requests follow the active view and its current grants. Dispatch keeps its polling fallback and gives realtime refreshes priority.
+- Responder record tabs use the page-owned `RecordPageCache`: at most eight in-memory queries, 15-second freshness, shared in-flight reads and default-tab prefetch. Report/focus updates invalidate freshness; access loss and unmount clear snapshots. Keep search debounced, cancel obsolete reads, and never persist these PHI summaries in browser storage.
 ## Offline storage
 
 - The first signed-in account opens or migrates the encrypted SQLite database through `electron/offline/database.cjs`. Electron `safeStorage` wraps the key for the OS profile. Keep the raw key in main and preserve the existing database when key access fails.

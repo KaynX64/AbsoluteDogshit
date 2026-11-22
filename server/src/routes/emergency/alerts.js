@@ -5,7 +5,7 @@ import { authenticateToken } from '../../auth/middleware.js';
 import { decrypt } from '../../utils/cryptoVault.js';
 import { logAudit } from '../../utils/auditLogger.js';
 import { invalidateCache } from '../../utils/redisClient.js';
-import { requireResponderAccess, resolveResponderAccess, getResponderAudience, roleLabelFor } from '../../emergency/responderAccess.js';
+import { requireResponderAccess, resolveResponderAccess, getResponderAudience, roleLabelFor, canUpdateIncidentStatus } from '../../emergency/responderAccess.js';
 
 // Mount responder eligibility, active alert reads, and alert status transitions.
 export function registerAlertRoutes(router, io) {
@@ -90,7 +90,7 @@ export function registerAlertRoutes(router, io) {
   router.patch('/:alertId/status', authenticateToken, requireResponderAccess, async (req, res) => {
     try {
       const { alertId } = req.params;
-      const { status } = req.body;
+      const { status } = req.body || {};
       const responderId = req.user.user_id;
       const tier = req.responderTier;
 
@@ -98,11 +98,12 @@ export function registerAlertRoutes(router, io) {
         return res.status(400).json({ error: 'Invalid status update.' });
       }
 
-      // Any responder tier may close an incident (resolved / false_alarm).
-      // The old community-tier 403 made "False alarm" a dead button for
-      // qualified responders without a clinical role — closing is an
-      // operational action, not a PHI disclosure, so it is tier-agnostic.
-      // Medical-detail redaction (R.A. 10173) still applies to payloads.
+      if (!canUpdateIncidentStatus(tier, status)) {
+        return res.status(403).json({
+          error: 'Qualified community responders may only acknowledge incidents.',
+          code: 'RESPONDER_ACTION_FORBIDDEN',
+        });
+      }
 
       const connection = await pool.getConnection();
       let resolvedAt = null;

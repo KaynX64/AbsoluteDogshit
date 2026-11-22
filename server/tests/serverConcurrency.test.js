@@ -75,12 +75,12 @@ async function mountedApi(t) {
   t.after(() => new Promise(/* Wait for the fixture HTTP listener to finish closing. */ resolve => server.close(resolve)));
 
   // Send an authenticated request to the mounted fixture API.
-  const request = (path, { userId = 2, roles = ['DOCTOR'], method = 'GET', json, token } = {}) => {
+  const request = (path, { userId = 2, roles = ['DOCTOR'], method = 'GET', json, token, headers = {} } = {}) => {
     token ??= jwt.sign({ user_id: userId, roles }, process.env.JWT_SECRET, { expiresIn: '5m' });
     return fetch('http://127.0.0.1:' + server.address().port + '/api' + path, {
       method,
       signal: AbortSignal.timeout(7_000),
-      headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
+      headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json', ...headers },
       body: json === undefined ? undefined : JSON.stringify(json),
     });
   };
@@ -922,6 +922,10 @@ test('multi-role incident rows stay unique and concurrent responders cannot reve
   const change = (status, options) => request('/emergency/1/status', {
     ...options, method: 'PATCH', json: { status },
   });
+  for (const status of ['dispatched', 'resolved', 'false_alarm']) {
+    assert.equal((await change(status, { userId: 7, roles: ['STUDENT'] })).status, 403);
+  }
+  assert.equal((await change('acknowledged', { userId: 7, roles: ['STUDENT'] })).status, 200);
   assert.equal((await change('dispatched')).status, 200);
   const stale = await change('acknowledged');
   assert.equal(stale.status, 409);
@@ -929,7 +933,7 @@ test('multi-role incident rows stay unique and concurrent responders cannot reve
   emit.mock.resetCalls();
   const results = await Promise.all([
     change('resolved'),
-    change('false_alarm', { userId: 7, roles: ['STUDENT'] }),
+    change('false_alarm', { userId: 4, roles: ['EMERGENCY_RESPONDER'] }),
   ]);
   assert.deepEqual(results.map(/* Extract status codes from the competing transition attempts. */ response => response.status).sort(), [200, 409]);
   // Collect realtime events produced by successful alert status changes.
@@ -962,6 +966,37 @@ test('device rotation preserves other installations and logout removes only its 
 });
 
 // Verify that concurrent incident filing publishes a single report after commit.
+test('draft revisions serialize and filing clears private drafts without expiring old work', { skip }, async t => {
+  const db = await fixture(t);
+  await db.query(`INSERT INTO EMERGENCY_ALERTS (alert_id, user_id, location, created_at, resolved_at, status)
+    VALUES (1, 5, ST_GeomFromText('POINT(0 0)', 4326), NOW() - INTERVAL 3 DAY, NOW() - INTERVAL 2 DAY, 'resolved')`);
+  const { saveDraft, readDraft } = await import('../src/emergency/reportDrafts.js');
+  const { fileIncidentReport } = await import('../src/emergency/fileIncidentReport.js');
+  const { readHistoryPage } = await import('../src/emergency/historyRead.js');
+  const { historyOptions } = await import('../src/emergency/historyQuery.js');
+  const body = { revision: 0, incidentDetails: 'Private draft fixture', treatmentNotes: '', resolvedAt: null, defer: true };
+  await Promise.all([saveDraft({ alertId: 1, authorId: 4, body }), saveDraft({ alertId: 1, authorId: 2, body: { ...body, incidentDetails: 'Other private draft fixture' } })]);
+  const competing = await Promise.allSettled([
+    saveDraft({ alertId: 1, authorId: 4, body: { ...body, revision: 1, incidentDetails: 'First replacement' } }),
+    saveDraft({ alertId: 1, authorId: 4, body: { ...body, revision: 1, incidentDetails: 'Second replacement' } }),
+  ]);
+  assert.equal(competing.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(competing.find(result => result.status === 'rejected').reason.code, 'DRAFT_REVISION_CONFLICT');
+  assert.equal((await readDraft(1, 4)).revision, 2);
+  assert.equal((await readDraft(1, 2)).incidentDetails, 'Other private draft fixture');
+  const pending = await readHistoryPage(4, 'pending', historyOptions({}, 'pending'));
+  assert.equal(pending.records.length, 1);
+  assert.equal(pending.records[0].hasDraft, true);
+  assert.ok(pending.records[0].deferredAt);
+  const filings = await Promise.allSettled([4, 2].map(responderId => fileIncidentReport({ alertId: 1, responderId, incidentDetails: 'Final fixture report', treatmentNotes: '' })));
+  assert.equal(filings.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(filings.find(result => result.status === 'rejected').reason.code, 'REPORT_ALREADY_FILED');
+  const [[drafts]] = await db.query('SELECT COUNT(*) n FROM INCIDENT_REPORT_DRAFTS WHERE alert_id = 1');
+  assert.equal(drafts.n, 0);
+  assert.deepEqual((await readHistoryPage(4, 'pending', historyOptions({}, 'pending'))).records, []);
+  assert.equal((await readHistoryPage(4, 'filed', historyOptions({ period: 'all' }, 'filed'))).records.length, 1);
+});
+
 test('concurrent incident filing publishes a single report after commit', { skip }, async t => {
   const db = await fixture(t);
   await db.query(`INSERT INTO EMERGENCY_ALERTS (alert_id, user_id, location, created_at, resolved_at, status)
@@ -975,7 +1010,7 @@ test('concurrent incident filing publishes a single report after commit', { skip
     return {};
   });
   const { request, emit } = await mountedApi(t);
-  const options = { userId: 4, roles: ['EMERGENCY_RESPONDER'], method: 'POST', json: { incident_details: 'Fixture incident report' } };
+  const options = { userId: 4, roles: ['EMERGENCY_RESPONDER'], method: 'POST', headers: { 'X-Client-Instance-Id': 'fdb4b48e-1985-48ca-85ea-168d48ed047a' }, json: { incident_details: 'Fixture incident report' } };
   const pendingPath = '/emergency/incident-reports/pending?summary=1';
   const [pending] = await (await request(pendingPath, { userId: 4, roles: options.roles })).json();
   assert.equal(pending.alertId, 1);

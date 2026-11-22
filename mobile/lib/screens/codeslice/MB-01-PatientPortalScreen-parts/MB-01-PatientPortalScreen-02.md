@@ -17,12 +17,12 @@
 | 38 | 1949-2017 | Your campus infirmary | campus infirmary card: PSU Lingayen address, Mon-Fri 8AM-5PM hours |
 | 39 | 2018-2071 | A gentle reminder | wellness reminder card; closes overview tab build |
 | 40 | 2072-2194 | _buildActiveQueueCard | queue ticket card: NOW SERVING or WAITING badge, ticket_no, ahead count, room, wait |
-| 41 | 2195-2252 | _buildSOSTab | SOS tab head: Emergency SOS title, offline flag, responsive circle sizes |
-| 42 | 2253-2332 | You are currently offline | Call 911 and show account-scoped emergency contact actions regardless of API reachability |
-| 43 | 2333-2399 | demoBadgeBg | SOS card badge, title, and explainer text |
-| 44 | 2400-2448 | _sosConsent | consent checkbox: share location + medical details, gates panic button |
-| 45 | 2449-2562 | _holdProgressNotifier | hold-to-SOS button: GestureDetector, progress ring, 2.5s countdown text |
-| 46 | 2563-2594 | _sosStatusMessage | Show queued, accepted or rejected status and close the SOS tab |
+| 41 | 2195-2254 | _buildSOSTab | SOS tab head: Emergency SOS title, offline flag, responsive circle sizes |
+| 42 | 2255-2321 | demoBadgeBg | First card: campus SOS badge, title, and explainer text |
+| 43 | 2322-2370 | _sosConsent | consent checkbox: share location + medical details, gates panic button |
+| 44 | 2371-2484 | _holdProgressNotifier | hold-to-SOS button: GestureDetector, progress ring, 2.5s countdown text |
+| 45 | 2485-2507 | _sosStatusMessage | Show queued, accepted or rejected status and close the campus SOS card |
+| 46 | 2508-2594 | You are currently offline | Below campus SOS: Call 911 and account-scoped emergency contact actions regardless of API reachability; close the tab |
 | 47 | 2595-2614 | _buildOfflineCallButton | full-width offline call button; dials via OfflineSosService.dialNumber |
 | 48 | 2615-2643 | _buildOfflineSmsButton | outlined SMS button; composeEmergencySms with prefilled emergency body |
 | 49 | 2644-2688 | _buildProfileTab | profile tab setup: loading guard, hp/u/identity, BMI parse, immunization decode |

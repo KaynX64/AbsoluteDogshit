@@ -8,13 +8,13 @@ Presentation: `ExpectedArrivals.tsx`, `SosBand.tsx`, `nursePresentation.tsx`.
 
 | # | Lines | Anchor | Entry point |
 |---|---|---|---|
-| 1 | 2-92 | — | Imports and declarations |
-| 2 | 93-142 | export default function | export default function |
-| 3 | 143-177 | const fetchLiveQueue | const fetchLiveQueue |
-| 4 | 178-246 | const updateSosStatus | const updateSosStatus |
-| 5 | 247-359 | const fetchExpected | const fetchExpected |
-| 6 | 360-385 | const openCheckInConfirm | const openCheckInConfirm |
-| 7 | 386-482 | const executeCheckInExpected | const executeCheckInExpected |
-| 8 | 483-620 | <SosBand | <SosBand |
-| 9 | 621-751 | <ExpectedArrivals | <ExpectedArrivals |
-| 10 | 752-971 | <QrIntakeScanner | <QrIntakeScanner |
+| 1 | 2-93 | — | Imports and declarations |
+| 2 | 94-150 | export default function | export default function |
+| 3 | 151-185 | const fetchLiveQueue | const fetchLiveQueue |
+| 4 | 186-258 | const updateSosStatus | const updateSosStatus |
+| 5 | 259-371 | const fetchExpected | const fetchExpected |
+| 6 | 372-397 | const openCheckInConfirm | const openCheckInConfirm |
+| 7 | 398-494 | const executeCheckInExpected | const executeCheckInExpected |
+| 8 | 495-632 | <SosBand | <SosBand |
+| 9 | 633-763 | <ExpectedArrivals | <ExpectedArrivals |
+| 10 | 764-983 | <QrIntakeScanner | <QrIntakeScanner |

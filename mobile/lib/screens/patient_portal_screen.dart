@@ -2251,84 +2251,6 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                 SizedBox(height: rs.h(18)),
 
                 Container(
-                  margin: EdgeInsets.only(bottom: rs.h(16)),
-                  padding: EdgeInsets.all(rs.w(16)),
-                  decoration: BoxDecoration(
-                    color: AppPalette.of(context).color(0xFFFDE8E8),
-                    border: Border.all(
-                      color: AppPalette.of(context).color(0xFFF8B4B4),
-                    ),
-                    borderRadius: BorderRadius.circular(rs.r(16)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.wifi_off_rounded,
-                            color: AppPalette.of(context).color(0xFF7A2E26),
-                            size: rs.w(20),
-                          ),
-                          SizedBox(width: rs.w(8)),
-                          Expanded(
-                            child: Text(
-                              isOffline
-                                  ? 'You are currently offline'
-                                  : 'Emergency calls',
-                              style: TextStyle(
-                                fontSize: rs.sp(14),
-                                fontWeight: FontWeight.w800,
-                                color: AppPalette.of(context).color(0xFF7A2E26),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: rs.h(8)),
-                      Text(
-                        "Use these buttons to contact help directly. Calls and texts depend on your phone service.",
-                        style: TextStyle(
-                          fontSize: rs.sp(12.5),
-                          color: AppPalette.of(context).color(0xFF7A2E26),
-                          height: 1.4,
-                        ),
-                      ),
-                      SizedBox(height: rs.h(14)),
-                      _buildOfflineCallButton(rs, '📞  Call 911', '911'),
-                      SizedBox(height: rs.h(8)),
-                      FutureBuilder<Map<String, dynamic>?>(
-                        future: _emergencyInfo ??= OfflineSosService()
-                            .readCachedEmergencyInfo(_account),
-                        builder: (ctx, snap) {
-                          final info = snap.data;
-                          final name =
-                              info?['contact_name'] ?? 'Emergency contact';
-                          final phone = info?['contact_phone'];
-                          if (phone == null) return const SizedBox.shrink();
-                          return Column(
-                            children: [
-                              _buildOfflineCallButton(
-                                rs,
-                                '📞  Call $name',
-                                phone,
-                              ),
-                              SizedBox(height: rs.h(8)),
-                              _buildOfflineSmsButton(
-                                rs,
-                                name,
-                                phone,
-                                'EMERGENCY: I need help. This is an automated alert from LeoVital HealthLink.',
-                              ),
-                            ],
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-
-                Container(
                   width: double.infinity,
                   padding: EdgeInsets.symmetric(
                     horizontal: rs.w(22),
@@ -2579,6 +2501,84 @@ class _PatientPortalScreenState extends State<PatientPortalScreen>
                               ? activeCrimson
                               : textSub,
                         ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                Container(
+                  margin: EdgeInsets.only(top: rs.h(16)),
+                  padding: EdgeInsets.all(rs.w(16)),
+                  decoration: BoxDecoration(
+                    color: AppPalette.of(context).color(0xFFFDE8E8),
+                    border: Border.all(
+                      color: AppPalette.of(context).color(0xFFF8B4B4),
+                    ),
+                    borderRadius: BorderRadius.circular(rs.r(16)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.wifi_off_rounded,
+                            color: AppPalette.of(context).color(0xFF7A2E26),
+                            size: rs.w(20),
+                          ),
+                          SizedBox(width: rs.w(8)),
+                          Expanded(
+                            child: Text(
+                              isOffline
+                                  ? 'You are currently offline'
+                                  : 'Emergency calls',
+                              style: TextStyle(
+                                fontSize: rs.sp(14),
+                                fontWeight: FontWeight.w800,
+                                color: AppPalette.of(context).color(0xFF7A2E26),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: rs.h(8)),
+                      Text(
+                        "Use these buttons to contact help directly. Calls and texts depend on your phone service.",
+                        style: TextStyle(
+                          fontSize: rs.sp(12.5),
+                          color: AppPalette.of(context).color(0xFF7A2E26),
+                          height: 1.4,
+                        ),
+                      ),
+                      SizedBox(height: rs.h(14)),
+                      _buildOfflineCallButton(rs, '📞  Call 911', '911'),
+                      SizedBox(height: rs.h(8)),
+                      FutureBuilder<Map<String, dynamic>?>(
+                        future: _emergencyInfo ??= OfflineSosService()
+                            .readCachedEmergencyInfo(_account),
+                        builder: (ctx, snap) {
+                          final info = snap.data;
+                          final name =
+                              info?['contact_name'] ?? 'Emergency contact';
+                          final phone = info?['contact_phone'];
+                          if (phone == null) return const SizedBox.shrink();
+                          return Column(
+                            children: [
+                              _buildOfflineCallButton(
+                                rs,
+                                '📞  Call $name',
+                                phone,
+                              ),
+                              SizedBox(height: rs.h(8)),
+                              _buildOfflineSmsButton(
+                                rs,
+                                name,
+                                phone,
+                                'EMERGENCY: I need help. This is an automated alert from LeoVital HealthLink.',
+                              ),
+                            ],
+                          );
+                        },
                       ),
                     ],
                   ),

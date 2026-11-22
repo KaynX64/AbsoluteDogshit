@@ -50,17 +50,23 @@ Appearance saves to the signed-in account using the same preferences as desktop.
 
 Dedicated responder accounts open the hub after sign-in. Other eligible accounts can open **Responder Hub** from the patient portal's health pass or profile. The hub lists active incidents and opens the details and actions available to your account.
 
+Active alert cards show the person, status and reported location. **View details** and **Navigate** use equal-width buttons, with the next permitted response action below; narrow screens and enlarged text stack the buttons. Staff move from Acknowledge to Dispatch to confirmed Resolve; community responders may only acknowledge. False alarms stay in the detail view with confirmation. Triggered incidents retain individual mute controls. The separate compact alert strip stays red for every active status and shows only a brief status/location, mute when needed, and an action to open details.
+
 - **On duty** enables automatic incident delivery and the in-app siren for a newly triggered incident. Background alerts use the audible Android notification channel.
 - **Quiet** keeps automatic incident delivery with vibration and suppresses the in-app siren. Background alerts use the quiet channel.
 - **Off duty** pauses automatic incident updates and background SOS delivery after the setting saves. Use **Refresh incidents** to check manually.
 
 Allow Android notifications for background delivery. The hub shows when delivery settings are still syncing and offers **Retry delivery settings** after a failed save. Use **Test siren for 3 seconds** to check the in-app sound. For the server rollout, see [migration 012](../server/MIGRATION-PLAN.md#fresh-and-existing-databases).
 
-Open **Pending incident reports** to document a resolved incident from the last 24 hours. The list uses the incident number and resolution time. If another responder files the report first, the app confirms it was already filed and removes it from the list.
+Non-clinical **Qualified Responders** can view limited incident details, navigate to the scene and **Acknowledge** an alert. Acknowledgment keeps the incident active; it does not dispatch a team or close the emergency. Dispatch, Resolve, False alarm and official incident reporting are reserved for authorized response staff. Staff retain these permissions whether or not they also have the Qualified Responder flag.
+
+Authorized response staff have **Alerts**, **History**, and **Reports** in the responder workspace. History and reports have search and date filters. Mobile reports are read-only: **Pending** shows unfinished documentation and **Filed** opens saved reports and PDFs. Pending items show **Complete this report in the desktop app** and any personal desktop draft indicator. Items older than 24 hours are highlighted and remain visible until filed. Report forms and draft editing are available only on desktop. Deploy migration **015** and the server first. [Workflow and access guide](../server/RESPONDER-RECORDS.md).
+
+History and report filters use icon buttons with date/outcome selection sheets. They follow the account font, colors and text scaling. Loaded destinations and recent Pending/Filed results stay available while switching; refresh keeps existing cards visible. Hidden destinations defer network reads until opened. These bounded caches stay in memory and clear when access is lost or the workspace closes.
 
 ## Emergency SOS and health pass
 
-SOS call and text actions are available independently of GPS and internet access. A submitted SOS is queued for its signed-in account and retried when the app opens, resumes, or reconnects. **Accepted by server** confirms that the server saved the request. Pending requests that reach 15 minutes expire instead of sending old coordinates. Previous device-wide queues have no reliable account owner and are excluded from replay. Deploy [migration 014](../server/MIGRATION-PLAN.md#fresh-and-existing-databases) before releasing this app.
+The SOS tab shows the complete campus SOS card first, followed by Call 911 and emergency contact call/text actions. SOS call and text actions are available independently of GPS and internet access. A submitted SOS is queued for its signed-in account and retried when the app opens, resumes, or reconnects. **Accepted by server** confirms that the server saved the request. Pending requests that reach 15 minutes expire instead of sending old coordinates. Previous device-wide queues have no reliable account owner and are excluded from replay. Deploy [migration 014](../server/MIGRATION-PLAN.md#fresh-and-existing-databases) before releasing this app.
 
 The health pass refreshes when the Overview is visible and its current QR expires. A pass can be scanned once. Use **Refresh pass** when the front desk needs to scan it again.
 

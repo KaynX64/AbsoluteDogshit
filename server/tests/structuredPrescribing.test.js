@@ -9,7 +9,7 @@ import mysql from 'mysql2/promise';
 Object.assign(process.env, { DB_PASSWORD: 'fixture', JWT_SECRET: 'fixture-jwt-'.repeat(8),
   ENCRYPTION_KEY: 'fixture-key-'.repeat(8), ENCRYPTION_SALT: 'fixture-salt-for-structured-rx',
   S3_ACCESS_KEY: 'fixture', S3_SECRET_KEY: 'fixture', STRUCTURED_PRESCRIBING_ENABLED: 'true' });
-const { normalizeDraft, assessDraft, makeReviewToken, verifyReviewToken, validateAcknowledgements } = await import('../src/documents/prescriptions/structuredContract.js');
+const { normalizeDraft, assessDraft, makeReviewToken, verifyReviewToken, validateAcknowledgements, hash } = await import('../src/documents/prescriptions/structuredContract.js');
 const { reviewStructuredPrescription, issueStructuredPrescription } = await import('../src/documents/prescriptions/structuredIssuance.js');
 const { hydratePrescription, readSnapshot } = await import('../src/documents/prescriptions/structuredRead.js');
 const { pool } = await import('../src/db/pool.js');
@@ -64,6 +64,16 @@ test('corrupt recorded content fails closed without including clinical text in p
     assert.ok(!error.message.includes('secret fixture'));
     return true;
   });
+});
+
+test('history exposes the consultation link from the verified prescription snapshot', () => {
+  const snapshot = { appointment_id: 201, notes: 'Fixture advice', items: [], issued_at: new Date().toISOString(),
+    expires_at: date(), patient: {}, doctor: {} };
+  const row = { contract_version: 2, appointment_id: 999, status: 'active', clinical_snapshot: encrypt(JSON.stringify(snapshot)),
+    signature_metadata: JSON.stringify({ hash_scope: 'prescription_payload_v2', document_sha256: hash(snapshot) }) };
+  assert.equal(hydratePrescription(row).appointment_id, 201);
+  assert.equal(hydratePrescription({ contract_version: 1, appointment_id: 8 }).appointment_id, 8);
+  assert.equal(hydratePrescription({ contract_version: 1 }).appointment_id, undefined);
 });
 
 test('known-pair failures propagate; absent rules and duplicate generic identities require explicit review', async () => {

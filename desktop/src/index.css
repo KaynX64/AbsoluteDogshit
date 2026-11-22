@@ -10,5 +10,6 @@
 @import './features/analytics/legacy-analytics.css';
 @import './features/admin/database-studio.css';
 @import './features/emergency/alert-banner.css';
+@import './features/emergency/responder-history.css';
 @import './shared/ui/utilities.css';
 @import './shared/ui/interactions.css';

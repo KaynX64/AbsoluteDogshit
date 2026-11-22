@@ -7,6 +7,8 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { installFixtures } from './workflows.mjs';
+import { verifyResponderActions } from './responder-actions.mjs';
+import { verifyResponderHistory } from './responder-history.mjs';
 
 // Renderer-only layout regressions: hidden Electron window, synthetic data,
 // isolated profile and blocked network. No clinic account or database is used.
@@ -80,7 +82,7 @@ try {
   await send('Page.enable');
   await send('Network.enable');
   await send('Network.setBlockedURLs', { urls: ['http://*', 'https://*', 'ws://*', 'wss://*'] });
-  await send('Page.addScriptToEvaluateOnNewDocument', { source: `(${installFixtures.toString()})({ themeMode: 'light' });
+  await send('Page.addScriptToEvaluateOnNewDocument', { source: `(${installFixtures.toString()})({ themeMode: ${JSON.stringify(process.argv.includes('--dark') ? 'dark' : 'light')} });
     const fixtureFetch = window.fetch;
     window.fetch = async (input, options) => {
       const { pathname: path, searchParams } = new URL(input.url || input, location.href);
@@ -131,6 +133,12 @@ try {
   await wait("document.querySelector('form input')");
   await run('smoke.login()');
   await wait("document.querySelector('#rx-frequency')");
+  await verifyResponderActions(run, wait);
+  await verifyResponderHistory(run, wait, async name => {
+    const capture = await send('Page.captureScreenshot', { format: 'png' });
+    await writeFile(join(screenshots, name + (process.argv.includes('--dark') ? '-dark' : '') + '.png'), Buffer.from(capture.data, 'base64'));
+  });
+  assert.equal(await run("document.querySelector('.doctor-queue-ticket')?.textContent"), 'Q-01', 'active consultations retain their queue ticket');
   await run(`document.documentElement.dataset.titlebar = 'overlay';
     const title = document.createElement('header'); title.className = 'app-titlebar';
     title.textContent = 'Synthetic clinic layout check'; document.querySelector('#root').prepend(title);`);
@@ -257,6 +265,67 @@ try {
   })()`);
   assert.equal(scrollState.listTop > 0 && scrollState.workspaceTop === 0, true,
     'patient list scrolls without moving the workspace: ' + JSON.stringify(scrollState));
+  // Read-only History uses the existing issuer endpoints, with explicit visit links.
+  await run(`smoke.historyCalls = []; smoke.historyFail = false; smoke.historyHold = false;
+    const originalFetch = window.fetch;
+    window.fetch = async (input, options = {}) => {
+      const url = new URL(input.url || input, location.href);
+      if (url.pathname.endsWith('/appointments/today') && url.searchParams.get('filter') === 'history') {
+        return Response.json([10, 11, 12].map(appointment_id => ({ appointment_id, patient_id: 5,
+          first_name: 'Synthetic', last_name: 'History ' + appointment_id, status: 'completed', queue_ticket: 'Q-01',
+          appointment_type: 'Medical', date_time: new Date().toISOString(), time_slot: '09:00 AM' })));
+      }
+      if (url.pathname.endsWith('/prescriptions/patient/5') || url.pathname.endsWith('/clearances/patient/5')) {
+        smoke.historyCalls.push([url.pathname, options.method || 'GET']);
+        if (smoke.historyHold) return new Promise(resolve => { smoke.releaseHistory = resolve; });
+        if (smoke.historyFail) return Response.json({ error: 'Fixture history unavailable' }, { status: 503 });
+        if (url.pathname.includes('/prescriptions/')) return Response.json([
+          { prescription_id: 501, appointment_id: 10, issued_at: '2026-11-10', status: 'active',
+            notes: 'Selected visit advice', pdfAvailable: false, items: [{ item_id: 1, medicine_name: 'Selected visit medicine',
+              instructions: 'Selected visit directions' }] },
+          { prescription_id: 502, appointment_id: 11, issued_at: '2026-11-11', status: 'cancelled',
+            notes: 'Different visit advice', items: [] },
+          { prescription_id: 503, appointment_id: null, issued_at: '2026-11-09', status: 'expired',
+            notes: 'Unlinked legacy advice', items: [] },
+        ]);
+        return Response.json([{ clearance_id: 601, appointment_id: 10, issued_at: '2026-11-10',
+          expires_at: '2099-11-10', status: 'approved', purpose: 'Selected visit clearance', remarks: 'Selected fitness statement' }]);
+      }
+      return originalFetch(input, options);
+    };
+    smoke.click('History', '.sb-item');`);
+  await wait("document.querySelector('#doctor-document-rx')?.innerText.includes('Selected visit directions')");
+  assert.equal(await run("document.querySelector('#doctor-document-title').textContent.trim()"), 'Issued documents');
+  assert.equal(await run("document.querySelectorAll('.doctor-roster .doctor-queue-ticket').length"), 0, 'completed History records hide retained queue tickets');
+  assert.equal(await run("smoke.historyCalls.some(([path]) => path.includes('/clearances/'))"), false, 'hidden clearance tab is lazy');
+  assert.equal(await run("!!document.querySelector('#rx-instructions, #clearance-purpose')"), false, 'archived visits mount no issuance fields');
+  assert.equal(await run("document.querySelector('#doctor-document-rx').innerText.includes('Different visit advice')"), false, 'another visit is excluded');
+  await run("document.querySelector('#doctor-document-rx details').open = true");
+  assert.equal(await run("document.querySelector('#doctor-document-rx').innerText.includes('Unlinked legacy advice')"), true);
+  await run("smoke.click('View / print PDF')");
+  // The fixture returns JSON rather than a PDF, but exercises the authenticated preview path.
+  await wait("document.querySelector('dialog[open] iframe[title=\"prescription-501.pdf\"]')");
+  await run("smoke.click('Close', 'dialog[open] button')");
+  await run("smoke.click('Clearance', '[role=tab]')");
+  await wait("document.querySelector('#doctor-document-clearance')?.innerText.includes('Selected fitness statement')");
+  await run("smoke.click('History 12', '.doctor-queue-item')");
+  await wait("document.querySelector('#doctor-document-clearance')?.innerText.includes('No clearance issued for this consultation.')");
+  await run("smoke.historyFail = true; smoke.click('Prescription', '[role=tab]')");
+  await wait("document.querySelector('#doctor-document-rx')?.innerText.includes('Fixture history unavailable')");
+  assert.equal(await run("document.querySelector('#doctor-document-rx').innerText.includes('No prescription issued')"), false, 'failed reads do not claim an empty visit');
+  await run("smoke.historyFail = false; smoke.click('Retry loading documents')");
+  await wait("document.querySelector('#doctor-document-rx')?.innerText.includes('No prescription issued for this consultation.')");
+  await run("smoke.historyHold = true; smoke.click('History 10', '.doctor-queue-item')");
+  await wait("typeof smoke.releaseHistory === 'function'");
+  await run("smoke.historyHold = false; smoke.click('History 11', '.doctor-queue-item')");
+  await wait("document.querySelector('#doctor-document-rx')?.innerText.includes('Different visit advice')");
+  await run("smoke.releaseHistory(Response.json([{ prescription_id: 999, appointment_id: 10, notes: 'Stale visit response', items: [] }]))");
+  await delay(100);
+  assert.equal(await run("document.querySelector('#doctor-document-rx').innerText.includes('Stale visit response')"), false, 'stale responses cannot replace the selected visit');
+  assert.equal(await run("smoke.historyCalls.every(([, method]) => method === 'GET')"), true);
+  const historyImage = await send('Page.captureScreenshot', { format: 'png' });
+  await writeFile(join(screenshots, 'consultation-documents.png'), Buffer.from(historyImage.data, 'base64'));
+  console.log('Consultation document scoping, legacy access, preview, lazy reads, empty/error/retry and stale-response checks passed.');
   await send('Emulation.setDeviceMetricsOverride', { width: 800, height: 600, deviceScaleFactor: 1, mobile: false });
   await delay(300);
   assert.equal(await run("getComputedStyle(document.querySelector('.app-main')).overflowY === 'auto'"), true,

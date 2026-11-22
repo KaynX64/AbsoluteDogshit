@@ -28,7 +28,7 @@ export function hydratePrescription(row) {
   const snapshot = readSnapshot(row);
   const { clinical_snapshot, ...publicRow } = row;
   if (!snapshot) return publicRow;
-  return { ...publicRow, contract_version: 2, notes: snapshot.notes, items: snapshot.items,
+  return { ...publicRow, contract_version: 2, appointment_id: snapshot.appointment_id, notes: snapshot.notes, items: snapshot.items,
     issued_at: snapshot.issued_at, expires_at: snapshot.expires_at,
     status: isPrescriptionExpired({ ...publicRow, expires_at: snapshot.expires_at }) ? 'expired' : publicRow.status,
     patient_snapshot: snapshot.patient, prescriber_snapshot: {

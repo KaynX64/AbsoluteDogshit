@@ -145,6 +145,23 @@ export function requireResponderAccess(req, res, next) {
     });
 }
 
+/** Action permissions use the live caller tier, independently of payload redaction. */
+export function canUpdateIncidentStatus(tier, status) {
+  return (tier === 'clinical' && ['acknowledged', 'dispatched', 'resolved', 'false_alarm'].includes(status))
+    || (tier === 'community' && status === 'acknowledged');
+}
+
+/** Run after requireResponderAccess so report workflows reuse its live lookup. */
+export function requireClinicalResponder(req, res, next) {
+  if (req.responderTier !== 'clinical') {
+    return res.status(403).json({
+      error: 'Incident reporting is restricted to authorized response staff.',
+      code: 'RESPONDER_ACTION_FORBIDDEN',
+    });
+  }
+  next();
+}
+
 const MEDICAL_DETAIL_KEYS = [
   'bloodType', 'blood_type',
   'allergies',

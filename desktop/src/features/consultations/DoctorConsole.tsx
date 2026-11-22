@@ -8,6 +8,7 @@ import type { ToothCondition, ToothRecord } from './Odontogram';
 import Odontogram from './Odontogram';
 import PrescriptionHistory, { type PrescriptionHistoryRow } from './PrescriptionHistory';
 import ClearanceHistory, { type ClearanceHistoryRow } from './ClearanceHistory';
+import ConsultationDocuments from './ConsultationDocuments';
 import PastEmrHistory from './PastEmrHistory';
 // desktop/src/features/consultations/DoctorConsole.tsx
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
@@ -199,6 +200,11 @@ export default function DoctorConsole({
   const attachmentRequest = useRef<AbortController | null>(null);
   useEffect(() => () => attachmentRequest.current?.abort(), []);
   const [openingAttachmentId, setOpeningAttachmentId] = useState<number | null>(null);
+  useEffect(() => {
+    preview.clear();
+    setPreviewModal(null);
+    setOpeningAttachmentId(null);
+  }, [selectedApp?.appointment_id, viewMode]);
 
   /* ── Odontogram state ──────────────────────────────────────── */
   const [dentalChartData, setDentalChartData] = useState<Record<number, ToothRecord>>({});
@@ -988,7 +994,8 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
   /* Opens the server-generated PDF (same file as "Download PDF") in the preview window */
   const openIssuedPdf = async (
     kind: 'prescriptions' | 'clearances',
-    id: number
+    id: number,
+    onError?: (message: string) => void
   ): Promise<boolean> => {
     const signal = preview.begin();
     setOpeningAttachmentId(null);
@@ -1010,7 +1017,10 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
       setPreviewModal({ url, fileName, mimeType: 'application/pdf' });
       return true;
     } catch (err: any) {
-      if (!signal.aborted) setFeedbackMsg({ type: 'error', text: `Issued successfully. The PDF could not be opened (${err.message}). Download it from issuance history.` });
+      if (!signal.aborted) {
+        if (onError) onError(`The PDF could not be opened (${err.message}).`);
+        else setFeedbackMsg({ type: 'error', text: `Issued successfully. The PDF could not be opened (${err.message}). Download it from issuance history.` });
+      }
       return false;
     }
   };
@@ -1785,7 +1795,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                               </span>
                             </span>
                             <span className="doctor-queue-meta">
-                              {app.queue_ticket && <span className="doctor-queue-ticket">{app.queue_ticket}</span>}
+                              {viewMode === 'active' && (app.status === 'checked_in' || app.status === 'serving') && app.queue_ticket && <span className="doctor-queue-ticket">{app.queue_ticket}</span>}
                               <span>{app.appointment_type}</span>
                               <span>{[app.date_str, app.time_slot].filter(Boolean).join(' · ')}</span>
                             </span>
@@ -1920,7 +1930,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
               role="tabpanel" aria-labelledby="doctor-tab-documents" tabIndex={0} hidden={activeWorkspacePanel !== 'documents'}>
               <div className="doctor-panel-header">
                 <h3 id="doctor-document-title" className="doctor-panel-title">
-                  Document issuance
+                  {isArchivedMode ? 'Issued documents' : 'Document issuance'}
                 </h3>
                 <div role="tablist" aria-label="Document type" onKeyDown={event => navigateTabs(event, false)}
                   style={{
@@ -1968,7 +1978,12 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
 
               <div id="doctor-document-rx" role="tabpanel" aria-labelledby="doctor-document-tab-rx"
                 tabIndex={0} hidden={docType !== 'rx'}>
-                <PrescriptionGenerator
+                {isArchivedMode ? <ConsultationDocuments
+                  key={`rx-${selectedApp.appointment_id}`}
+                  patientId={selectedApp.patient_id} appointmentId={selectedApp.appointment_id}
+                  kind="prescriptions" active={activeWorkspacePanel === 'documents' && docType === 'rx'}
+                  onViewPdf={openIssuedPdf} onDownloadPdf={handleDownloadPdf}
+                /> : <PrescriptionGenerator
                   key={selectedApp?.appointment_id}
                   active={docType === 'rx'}
                   patientUserId={selectedApp?.patient_id ?? 0}
@@ -2004,10 +2019,16 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                   onPrescriptionError={(message) => {
                     setFeedbackMsg({ text: message, type: 'error' });
                   }}
-                />
+                />}
               </div>
               <div id="doctor-document-clearance" role="tabpanel" aria-labelledby="doctor-document-tab-clearance"
                 tabIndex={0} hidden={docType !== 'clearance'} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {isArchivedMode ? <ConsultationDocuments
+                  key={`clearance-${selectedApp.appointment_id}`}
+                  patientId={selectedApp.patient_id} appointmentId={selectedApp.appointment_id}
+                  kind="clearances" active={activeWorkspacePanel === 'documents' && docType === 'clearance'}
+                  onViewPdf={openIssuedPdf} onDownloadPdf={handleDownloadPdf}
+                /> : <>
                   <div>
                     <label
                       htmlFor="clearance-purpose"
@@ -2201,6 +2222,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                       ? 'Signing & spooling…'
                       : '️ Issue, sign & print clearance'}
                   </button>
+                </>}
               </div>
             </section>
 
@@ -2803,7 +2825,7 @@ const handleSearchPatientDirectory = async (e?: React.FormEvent) => {
                     {previewModal.fileName}
                   </h3>
                   <span style={{ fontSize: 11.5, color: T.textSub }}>
-                    Diagnostic Lab / Clinical Attachment Preview
+                    Document / attachment preview
                   </span>
                 </div>
               </div>

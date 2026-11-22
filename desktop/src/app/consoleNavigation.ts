@@ -31,5 +31,8 @@ const navByRole: Record<string, { key: string; label: string; icon: string }[]> 
 };
 
 export function consoleNavigation(role: string) {
-  return navByRole[role] ?? navByRole.ADMIN;
+  return [...(navByRole[role] ?? navByRole.ADMIN),
+    { key: 'alertHistory', label: 'Alert history', icon: 'history' },
+    { key: 'reports', label: 'Incident reports', icon: 'assignment' },
+  ];
 }
