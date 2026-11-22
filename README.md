@@ -46,14 +46,33 @@ flowchart LR
 
 The API applies clinical rules and access checks. It stores records in MySQL and files in MinIO or S3. Redis supports caching and session controls. [Backend study guide](BACKEND-STUDY-GUIDE.md)
 
-### 📂 Repository structure
+## 📂 Repository Structure
 
-| Path | Contents |
-| --- | --- |
-| [`server/`](server/AGENTS.md) | Express routes, domain services, workers, MySQL schema and migrations, and API tests. |
-| [`desktop/`](desktop/README.md) | Electron, React, TypeScript, and Vite staff console. |
-| [`mobile/`](mobile/README.md) | Flutter patient portal and Android responder workspace. |
-| [`docker-compose.yml`](docker-compose.yml) | Local MySQL, Redis, and MinIO services. |
+```text
+Valetudo/
+├── server/                    # Express API and Socket.IO server
+│   ├── src/
+│   │   ├── app.js             # Express middleware and route mounts
+│   │   ├── routes/            # Feature endpoints
+│   │   ├── db/                # MySQL pool and migrations
+│   │   └── workers/           # Scheduled jobs
+│   ├── schema.sql             # Fresh MySQL schema
+│   └── tests/                 # API and domain tests
+├── desktop/                   # Electron clinic staff console
+│   ├── electron/              # Main process, preload, and offline storage
+│   ├── src/
+│   │   ├── features/          # Clinic and admin workspaces
+│   │   └── platform/          # Realtime and offline sync
+│   └── app-config.json        # API origin for the desktop build
+├── mobile/                    # Flutter patient and responder app
+│   ├── lib/
+│   │   ├── screens/           # Patient portal and responder views
+│   │   ├── services/          # Session, connectivity, and SOS delivery
+│   │   └── widgets/           # Shared controls and Responder Hub
+│   └── test/                  # Flutter tests
+├── docker-compose.yml         # Local MySQL, Redis, and MinIO
+└── DOCUMENTATION.md           # Project guides and references
+```
 
 ## 🚀 Getting started
 
