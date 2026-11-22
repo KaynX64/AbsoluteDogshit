@@ -1,7 +1,7 @@
 <div align="center">
 <img src="desktop/src/assets/valetudo_logo.png" alt="Valetudo HealthLink logo" width="112">
 
-# 🩺 Valetudo HealthLink
+# 🩺 LeoVital HealthLink
 
 **Campus clinic management for Pangasinan State University**
 
