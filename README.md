@@ -18,7 +18,7 @@
 
 ## 📖 Overview
 
-**Valetudo HealthLink** connects students and employees with clinic staff and emergency responders. Patients and responders use the **LeoVital HealthLink** Flutter app. Staff use the Electron console for care and administration.
+**LeoVital HealthLink** connects students and employees with clinic staff and emergency responders. Patients and responders use the **LeoVital HealthLink** Flutter app. Staff use the Electron console for care and administration.
 
 ## ✨ Key features
 
@@ -36,7 +36,7 @@
 ```mermaid
 flowchart LR
     Mobile["LeoVital mobile app"] -->|"HTTPS and Socket.IO"| API["Express API :5000"]
-    Desktop["Valetudo staff console"] -->|"HTTPS and Socket.IO"| API
+    Desktop["LeoVital staff console"] -->|"HTTPS and Socket.IO"| API
     Desktop --- Local[("Encrypted SQLite")]
     API --> SQL[("MySQL")]
     API --> Cache[("Redis")]
@@ -51,7 +51,7 @@ The API applies clinical rules and access checks. It stores records in MySQL and
 All Git-tracked folders and subfolders are shown below, along with selected files.
 
 ```text
-Valetudo/                                       # Project repository
+ROOT/                                       # Project repository
 ├── AGENTS-parts/                               # Project development guidance
 ├── desktop/                                    # Electron clinic staff console
 │   ├── AGENTS-parts/                           # Staff console development guidance
