@@ -134,6 +134,10 @@ class ResponderRoster extends ChangeNotifier {
   String? _tier;
   String? get tier => _tier;
   bool get eligible => _tier != null;
+  bool get canManageIncidents => _tier == 'clinical';
+  bool canUpdateStatus(IncidentStatus status) =>
+      (canManageIncidents && status != IncidentStatus.triggered) ||
+      (_tier == 'community' && status == IncidentStatus.acknowledged);
   bool qualified = false;
   bool loading = false;
   bool failed = false;

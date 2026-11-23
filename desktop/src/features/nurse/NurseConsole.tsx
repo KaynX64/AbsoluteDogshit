@@ -2,6 +2,7 @@ import Dialog from '../../shared/ui/Dialog';
 import { NURSE_CSS, ConsoleHeader, SkeletonRows, EmptyState, StatTile, isOverdue, card, mono, iconChip, smallButton, duration } from './nursePresentation';
 import type { SosAlert, ExpectedItem, ActiveTicket } from './nurseTypes';
 import SosBand from './SosBand';
+import { useResponderAccess } from '../emergency/ResponderAccess';
 import ExpectedArrivals from './ExpectedArrivals';
 // desktop/src/features/nurse/NurseConsole.tsx
 //
@@ -96,6 +97,7 @@ export default function NurseConsole({
 }: NurseConsoleProps = {}) {
   const [internalView] = useState<NurseViewMode>('triage');
   const viewMode = controlledView ?? internalView;
+  const { tier, refreshAccess, canUpdateStatus } = useResponderAccess();
 
   const [, setVerifiedPatient] = useState<any>(null);
   const [, setScannedToken] = useState('');
@@ -108,6 +110,12 @@ export default function NurseConsole({
   const [sosBusyId, setSosBusyId] = useState<number | null>(null);
   const [sosError, setSosError] = useState('');
   const [sosConfirm, setSosConfirm] = useState<{ alert: SosAlert; status: 'resolved' | 'false_alarm' } | null>(null);
+  useEffect(() => {
+    if (tier !== 'clinical') {
+      setSosConfirm(null);
+      setSosError('');
+    }
+  }, [tier]);
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
   const [noShowCount, setNoShowCount] = useState<number>(0);
   const [invStats, setInvStats] = useState<{
@@ -179,7 +187,7 @@ export default function NurseConsole({
     alertId: number,
     status: 'acknowledged' | 'dispatched' | 'resolved' | 'false_alarm'
   ) => {
-    if (sosBusyId !== null) return;
+    if (sosBusyId !== null || !canUpdateStatus(status)) return;
     const closing = status === 'resolved' || status === 'false_alarm';
     setSosError('');
     setSosBusyId(alertId);
@@ -196,6 +204,10 @@ export default function NurseConsole({
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
+        if (res.status === 401 || res.status === 403) {
+          setSosConfirm(null);
+          await refreshAccess(true);
+        }
         throw new Error(err.error || 'Failed to update the SOS alert.');
       } else if (closing) {
         setSosConfirm(null);
@@ -522,7 +534,7 @@ export default function NurseConsole({
   ) : null;
 
   /* Closing an SOS is destructive — confirm in-app, never with window.confirm. */
-  const sosConfirmModal = sosConfirm
+  const sosConfirmModal = sosConfirm && tier === 'clinical'
     ? (
         <Dialog label="Confirm SOS closure" size="compact" urgent busy={sosBusyId !== null} onDismiss={() => { setSosError(''); setSosConfirm(null); }}>
           <div className="modal-card" style={{ maxWidth: 430 }}>

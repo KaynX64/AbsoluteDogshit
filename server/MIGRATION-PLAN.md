@@ -4,6 +4,8 @@
 
 ## Fresh and existing databases
 
+Migration **015** adds encrypted author-owned incident report drafts and history/worklist/audit indexes. Deploy it and the server before updated clients. It preserves filed reports; the shared pending worklist no longer drops tasks after 24 hours. [Responder records and client rollout](RESPONDER-RECORDS.md).
+
 `schema.sql` defines the current clean-install baseline. The numbered migrations preserve the upgrade history and are kept intact after deployment. Some table definitions intentionally appear in both because the upgrades also support installations that predate those tables. The MySQL rehearsal compares the upgraded foundation table definitions with a fresh install to catch drift.
 
 - Provision a new, empty database using `schema.sql`, then run the migration command. The schema script drops and recreates tables and is reserved for fresh provisioning and disposable fixtures.

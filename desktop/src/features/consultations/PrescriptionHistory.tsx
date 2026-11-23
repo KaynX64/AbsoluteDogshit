@@ -4,6 +4,8 @@ import Icon from '../../shared/ui/Icon';
 
 export interface PrescriptionHistoryRow {
   prescription_id: number;
+  appointment_id?: number | string | null;
+  pdfAvailable?: boolean;
   contract_version?: number;
   issued_at: string;
   expires_at?: string | null;
@@ -74,6 +76,21 @@ export default function PrescriptionHistory({ setShowRxHistoryModal, rxHistoryPa
           </button>
         </div>
 
+        <PrescriptionHistoryContent rxHistoryError={rxHistoryError} loadingRxHistory={loadingRxHistory} rxHistory={rxHistory} handleDownloadPdf={handleDownloadPdf} setRxHistoryError={setRxHistoryError} />
+      </div>
+    </Dialog>
+  );
+}
+
+
+type PrescriptionHistoryContentProps = Pick<PrescriptionHistoryProps, 'rxHistoryError' | 'loadingRxHistory' | 'rxHistory' | 'handleDownloadPdf' | 'setRxHistoryError'> & {
+  emptyMessage?: string;
+  onViewPdf?: (kind: 'prescriptions' | 'clearances', id: number) => void;
+};
+
+export function PrescriptionHistoryContent({ rxHistoryError, loadingRxHistory, rxHistory, handleDownloadPdf, setRxHistoryError, onViewPdf,
+  emptyMessage = 'You have not issued any prescriptions to this patient.' }: PrescriptionHistoryContentProps) {
+  return <>
         {rxHistoryError && (
           <div
             style={{
@@ -108,7 +125,7 @@ export default function PrescriptionHistory({ setShowRxHistoryModal, rxHistoryPa
               color: T.textMuted,
             }}
           >
-            You have not issued any prescriptions to this patient.
+            {emptyMessage}
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -224,6 +241,13 @@ export default function PrescriptionHistory({ setShowRxHistoryModal, rxHistoryPa
                     </div>
                   )}
 
+                  {onViewPdf && <button type="button" style={btnGhost}
+                    onClick={() => onViewPdf('prescriptions', rx.prescription_id)}>
+                    <Icon name="visibility" size={14} /> View / print PDF
+                  </button>}
+                  {rx.pdfAvailable === false && <p style={{ color: T.textSub, fontSize: 12 }}>
+                    PDF is pending. Recorded document details remain available.
+                  </p>}
                   <button
                     type="button"
                     onClick={() =>
@@ -246,7 +270,5 @@ export default function PrescriptionHistory({ setShowRxHistoryModal, rxHistoryPa
             })}
           </div>
         )}
-      </div>
-    </Dialog>
-  );
+  </>;
 }

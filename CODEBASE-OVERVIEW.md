@@ -6,7 +6,7 @@ Reviewed against this checkout on 2026-11-15. This is an architectural walkthrou
 
 HealthLink is a university campus clinic management system. It connects patients, clinic staff and emergency responders around appointments, clinical records, medicines and emergency incidents. The project guidance identifies Pangasinan State University as its setting.
 
-The repository is named `AbsoluteDogshit`. Branding is currently mixed: the desktop package and most technical guides use **Valetudo HealthLink**, while the mobile app title, its smoke test and the root README heading use **LeoVital HealthLink**. These are names within this codebase, not separate applications.
+The repository is named `AbsoluteDogshit`. The project and desktop console use **Valetudo HealthLink**, and the mobile app uses **LeoVital HealthLink**. Both apps connect to the same clinic API.
 
 ## Who uses it and what they do
 
@@ -54,13 +54,13 @@ The server also schedules appointment reminders, no-show transitions and prescri
 
 ## Records, emergencies and offline behavior
 
-[schema.sql](server/schema.sql) defines 33 base tables, plus a separate migration ledger created by the runner. The groups cover identity/roles, profiles/consent, appointments/queues, encounters/vitals/dental charts, prescriptions/inventory, emergencies/incidents, audit logs and operational policy. The schema script recreates tables; existing installations use migrations.
+[schema.sql](server/schema.sql) defines 34 base tables, plus a separate migration ledger created by the runner. The groups cover identity/roles, profiles/consent, appointments/queues, encounters/vitals/dental charts, prescriptions/inventory, emergencies/incidents, audit logs and operational policy. The schema script recreates tables; existing installations use migrations.
 
-SOS captures a location and notifies eligible recipients through realtime and push channels. Non-clinical community responders receive reduced payloads without medical details. On Android, an eligible responder can choose On duty, Quiet or Off duty for the installation. The shared mobile roster reconciles open incidents through the API, and responders can refresh it manually while off duty. Closing an alert leads into incident documentation and an official report PDF. [Responder Hub guide](mobile/README.md#responder-hub-on-android)
+SOS captures a location and notifies eligible recipients through realtime and push channels. Non-clinical community responders receive reduced payloads without medical details and can acknowledge alerts or open their locations. Dispatch, closure and incident-report workflows require the live clinical responder tier. On Android, an eligible responder can choose On duty, Quiet or Off duty for the installation. The shared mobile roster reconciles open incidents through the API, and responders can refresh it manually while off duty. Closing an alert leads into incident documentation and an official report PDF. [Responder Hub guide](mobile/README.md#responder-hub-on-android)
 
 Desktop offline support caches patient/encounter data and queues supported clinical changes in encrypted SQLite. Reconnection replays the signed-in account's changes through server transactions with duplicate detection and conflict handling. It does not make every feature available offline; attachment uploads require connectivity.
 
-Mobile offline support caches emergency contacts per account and keeps call/SMS actions available. Keyed SOS requests can retry on reconnect without creating a second alert. The server acknowledges the saved alert and schedules dispatch separately. Mobile responders can file pending reports from the Responder Hub. Calls and SMS depend on phone service.
+Mobile offline support caches emergency contacts per account and keeps call/SMS actions available. Keyed SOS requests can retry on reconnect without creating a second alert. The server acknowledges the saved alert and schedules dispatch separately. Mobile response staff can review searchable history and pending/filed reports. Report writing, encrypted private drafts and filing are desktop-only; deferred documentation remains outstanding until filed. See the [responder records guide](server/RESPONDER-RECORDS.md). Calls and SMS depend on phone service.
 
 ## Assessment and verification
 

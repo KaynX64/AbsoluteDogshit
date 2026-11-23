@@ -22,8 +22,128 @@ const {
   parseQualifiedResponderBody,
   LEGACY_RESPONDER_ROLES,
   CLINICAL_ROLES,
+  canUpdateIncidentStatus,
+  requireClinicalResponder,
 } = await import('../src/emergency/responderAccess.js');
 const { groupSosDevices, sosPushForMode } = await import('../src/emergency/deviceDelivery.js');
+
+test('community actions are acknowledgment-only; staff roles retain their permissions', () => {
+  const statuses = ['triggered', 'acknowledged', 'dispatched', 'resolved', 'false_alarm', 'invalid'];
+  for (const [tier, expected] of [
+    ['community', ['acknowledged']],
+    ['clinical', ['acknowledged', 'dispatched', 'resolved', 'false_alarm']],
+    [null, []], ['unknown', []],
+  ]) {
+    assert.deepEqual(statuses.filter(status => canUpdateIncidentStatus(tier, status)), expected);
+  }
+  for (const role of CLINICAL_ROLES) {
+    for (const flagged of [true, false]) {
+      const tier = resolveResponderTier({ isQualifiedResponder: flagged, roles: ['STUDENT', role] });
+      assert.equal(tier, 'clinical');
+      for (const status of ['acknowledged', 'dispatched', 'resolved', 'false_alarm']) {
+        assert.equal(canUpdateIncidentStatus(tier, status), true);
+      }
+    }
+  }
+  let passed = false;
+  requireClinicalResponder({ responderTier: 'clinical' }, {}, () => { passed = true; });
+  assert.equal(passed, true);
+});
+
+test('live route guards deny forbidden actions without transactions or broadcasts and keep acknowledgment active', async t => {
+  const { pool } = await import('../src/db/pool.js');
+  const keyPath = fileURLToPath(new URL('../serviceAccountKey.json', import.meta.url));
+  const existsSync = fs.existsSync;
+  const hideKey = t.mock.method(fs, 'existsSync', path => path !== keyPath && existsSync(path));
+  let emergencyRoutes;
+  try {
+    ({ default: emergencyRoutes } = await import('../src/routes/emergency/index.js'));
+  } finally {
+    hideKey.mock.restore();
+  }
+  const events = [];
+  const io = { to() { return this; }, emit(...args) { events.push(args); } };
+  const router = emergencyRoutes(io);
+  let roles = ['STUDENT'], flagged = true, active = 1;
+  t.mock.method(pool, 'query', async sql => {
+    if (sql.includes('GROUP BY')) return [[{ user_id: 42, is_qualified_responder: flagged, has_clinical_role: roles.includes('NURSE') ? 1 : 0 }]];
+    if (sql.includes('FROM USER_ROLES')) return [roles.map(code => ({ code }))];
+    assert.ok(sql.includes('FROM USERS'), 'Only live access queries should reach the pool');
+    return [[{ is_active: active, deleted_at: null, is_qualified_responder: flagged }]];
+  });
+  let currentStatus = 'triggered';
+  const mutations = [];
+  const connection = {
+    async beginTransaction() {}, async commit() {}, async rollback() {}, release() {},
+    async query(sql, params) {
+      if (sql.includes('UPDATE EMERGENCY_ALERTS')) {
+        if (!params.at(-1).includes(currentStatus)) return [{ affectedRows: 0 }];
+        currentStatus = params[0];
+        mutations.push(currentStatus);
+        return [{ affectedRows: 1 }];
+      }
+      if (sql.includes('SELECT status')) return [[{ status: currentStatus }]];
+      if (sql.includes('SELECT resolved_at')) return [[{ resolved_at: new Date('2026-11-21T00:00:00Z') }]];
+      if (sql.includes('SELECT entry_hash')) return [[]];
+      assert.ok(sql.includes('INSERT INTO AUDIT_LOGS'));
+      mutations.push('audit');
+      return [{ insertId: 1 }];
+    },
+  };
+  const acquire = t.mock.method(pool, 'getConnection', async () => connection);
+
+  // Invoke the real route chain after authentication, including its live access lookup.
+  const request = (path, method = 'get', status) => new Promise((resolve, reject) => {
+    const route = router.stack.find(({ route }) => route?.path === path && route.methods[method]).route;
+    const req = { user: { user_id: 42, roles: ['ADMIN'] }, params: { alertId: '9' }, query: {}, body: { status }, get() {} };
+    let code = 200, index = 1;
+    const res = { status(value) { code = value; return this; }, set() {}, json(body) { resolve({ status: code, body }); } };
+    const next = () => {
+      try { Promise.resolve(route.stack[index++].handle(req, res, next)).catch(reject); } catch (error) { reject(error); }
+    };
+    next();
+  });
+  for (const status of ['dispatched', 'resolved', 'false_alarm']) {
+    const result = await request('/:alertId/status', 'patch', status);
+    assert.equal(result.status, 403);
+    assert.equal(result.body.code, 'RESPONDER_ACTION_FORBIDDEN');
+  }
+  for (const [path, method] of [
+    ['/incident-reports/pending', 'get'],
+    ['/:alertId/incident-report', 'get'],
+    ['/:alertId/incident-report', 'post'],
+    ['/history', 'get'], ['/history/:alertId', 'get'], ['/report-summary', 'get'],
+    ['/report-worklist', 'get'], ['/reports', 'get'], ['/reports/:reportId', 'get'],
+    ['/:alertId/incident-report-draft', 'get'], ['/:alertId/incident-report-draft', 'put'],
+  ]) {
+    const result = await request(path, method);
+    assert.equal(result.status, 403);
+    assert.equal(result.body.code, 'RESPONDER_ACTION_FORBIDDEN');
+  }
+  assert.equal(acquire.mock.callCount(), 0);
+  assert.deepEqual(mutations, []);
+  assert.deepEqual(events, []);
+
+  assert.equal((await request('/:alertId/status', 'patch', 'acknowledged')).status, 200);
+  assert.equal(currentStatus, 'acknowledged');
+  assert.deepEqual(mutations, ['acknowledged', 'audit']);
+  assert.equal(events.some(([name]) => name === 'emergency:incident_report_required'), false);
+  assert.equal(events.find(([name]) => name === 'emergency:status_change')[1].status, 'acknowledged');
+  assert.equal((await request('/:alertId/status', 'patch', 'acknowledged')).status, 409);
+
+  // Role grants are read live; the stale ADMIN claim above never grants access.
+  roles = ['NURSE']; flagged = false;
+  assert.equal((await request('/:alertId/status', 'patch', 'dispatched')).status, 200);
+  assert.equal((await request('/:alertId/status', 'patch', 'resolved')).status, 200);
+  assert.equal(currentStatus, 'resolved');
+  assert.equal((await request('/:alertId/status', 'patch', 'false_alarm')).status, 409);
+  const beforeDenied = acquire.mock.callCount();
+  roles = ['STUDENT'];
+  assert.equal((await request('/:alertId/status', 'patch', 'acknowledged')).status, 403);
+  flagged = true; active = 0;
+  assert.equal((await request('/:alertId/status', 'patch', 'acknowledged')).status, 403);
+  assert.equal(acquire.mock.callCount(), beforeDenied);
+});
 
 // Verify that SOS push groups separate legacy, audible, quiet and off-duty registrations.
 test('SOS push groups separate legacy, audible, quiet and off-duty registrations', () => {

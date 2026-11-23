@@ -4,19 +4,34 @@ Flutter app for patients and emergency responders. Module-specific architecture,
 
 ## Configure and run
 
-Set the API host in `lib/config/api_config.dart` for the device running the app. Android devices need a reachable LAN host; the Android emulator uses `10.0.2.2` to reach the development host. See [AGENTS.md](./AGENTS.md) for TLS and Firebase setup.
+Start the API and run Flutter from `mobile/`. For a physical Android phone, put it on the same network as the API host and pass the host’s LAN IP. Replace the example IP with the IPv4 address shown by `ipconfig` on the Windows API host. The standard Android emulator uses `10.0.2.2` to reach the development host.
 
 ```powershell
 flutter pub get
-flutter run
+flutter run --dart-define=API_BASE_URL=https://192.168.1.10:5000
+# Android emulator
+flutter run --dart-define=API_BASE_URL=https://10.0.2.2:5000
+```
+
+`API_BASE_URL` is the HTTPS origin, including the port when needed. The app uses it for HTTP and realtime connections. Stop and rerun Flutter to apply a different origin.
+
+If sign-in cannot reach the server, open `/api/ping` at the configured origin from the phone. A timeout points to the server or network path. Check that the API is listening and that the LAN and Windows firewall allow the connection. If sign-in reports a secure connection failure, check the certificate chain and confirm that it covers the exact DNS name or IP used by the app.
+
+For USB-connected Android development with USB debugging enabled, forward the phone’s API port to the host and use the phone’s loopback address. Repeat `adb reverse` after reconnecting if the tunnel is gone.
+
+```powershell
+adb reverse tcp:5000 tcp:5000
+flutter run --no-pub --dart-define=API_BASE_URL=https://127.0.0.1:5000
 ```
 
 ## Build and test
 
 ```powershell
 flutter test
-flutter build apk --release
+flutter build apk --release --dart-define=API_BASE_URL=https://clinic-api.example.org
 ```
+
+Use the deployment’s actual API origin and a certificate chain the app trusts. The self-signed `localhost` certificate used for local development requires a debug build when connecting to it by LAN IP. See [AGENTS.md](./AGENTS.md) for TLS and Firebase setup.
 
 Do not commit Firebase service-account or `google-services.json` credentials. Platform folders are generated; edit only the exceptions listed in [AGENTS.md](./AGENTS.md).
 
@@ -50,17 +65,23 @@ Appearance saves to the signed-in account using the same preferences as desktop.
 
 Dedicated responder accounts open the hub after sign-in. Other eligible accounts can open **Responder Hub** from the patient portal's health pass or profile. The hub lists active incidents and opens the details and actions available to your account.
 
+Active alert cards show the person, status and reported location. **View details** and **Navigate** use equal-width buttons, with the next permitted response action below; narrow screens and enlarged text stack the buttons. Staff move from Acknowledge to Dispatch to confirmed Resolve; community responders may only acknowledge. False alarms stay in the detail view with confirmation. Triggered incidents retain individual mute controls. The separate compact alert strip stays red for every active status and shows only a brief status/location, mute when needed, and an action to open details.
+
 - **On duty** enables automatic incident delivery and the in-app siren for a newly triggered incident. Background alerts use the audible Android notification channel.
 - **Quiet** keeps automatic incident delivery with vibration and suppresses the in-app siren. Background alerts use the quiet channel.
 - **Off duty** pauses automatic incident updates and background SOS delivery after the setting saves. Use **Refresh incidents** to check manually.
 
 Allow Android notifications for background delivery. The hub shows when delivery settings are still syncing and offers **Retry delivery settings** after a failed save. Use **Test siren for 3 seconds** to check the in-app sound. For the server rollout, see [migration 012](../server/MIGRATION-PLAN.md#fresh-and-existing-databases).
 
-Open **Pending incident reports** to document a resolved incident from the last 24 hours. The list uses the incident number and resolution time. If another responder files the report first, the app confirms it was already filed and removes it from the list.
+Non-clinical **Qualified Responders** can view limited incident details, navigate to the scene and **Acknowledge** an alert. Acknowledgment keeps the incident active; it does not dispatch a team or close the emergency. Dispatch, Resolve, False alarm and official incident reporting are reserved for authorized response staff. Staff retain these permissions whether or not they also have the Qualified Responder flag.
+
+Authorized response staff have **Alerts**, **History**, and **Reports** in the responder workspace. History and reports have search and date filters. Mobile reports are read-only: **Pending** shows unfinished documentation and **Filed** opens saved reports and PDFs. Pending items show **Complete this report in the desktop app** and any personal desktop draft indicator. Items older than 24 hours are highlighted and remain visible until filed. Report forms and draft editing are available only on desktop. Deploy migration **015** and the server first. [Workflow and access guide](../server/RESPONDER-RECORDS.md).
+
+History and report filters use icon buttons with date/outcome selection sheets. They follow the account font, colors and text scaling. Loaded destinations and recent Pending/Filed results stay available while switching; refresh keeps existing cards visible. Hidden destinations defer network reads until opened. These bounded caches stay in memory and clear when access is lost or the workspace closes.
 
 ## Emergency SOS and health pass
 
-SOS call and text actions are available independently of GPS and internet access. A submitted SOS is queued for its signed-in account and retried when the app opens, resumes, or reconnects. **Accepted by server** confirms that the server saved the request. Pending requests that reach 15 minutes expire instead of sending old coordinates. Previous device-wide queues have no reliable account owner and are excluded from replay. Deploy [migration 014](../server/MIGRATION-PLAN.md#fresh-and-existing-databases) before releasing this app.
+The SOS tab shows the complete campus SOS card first, followed by Call 911 and emergency contact call/text actions. SOS call and text actions are available independently of GPS and internet access. A submitted SOS is queued for its signed-in account and retried when the app opens, resumes, or reconnects. **Accepted by server** confirms that the server saved the request. Pending requests that reach 15 minutes expire instead of sending old coordinates. Previous device-wide queues have no reliable account owner and are excluded from replay. Deploy [migration 014](../server/MIGRATION-PLAN.md#fresh-and-existing-databases) before releasing this app.
 
 The health pass refreshes when the Overview is visible and its current QR expires. A pass can be scanned once. Use **Refresh pass** when the front desk needs to scan it again.
 

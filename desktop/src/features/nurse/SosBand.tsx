@@ -2,6 +2,7 @@ import { T, rgba, softBadge } from '../../theme';
 import Icon from '../../shared/ui/Icon';
 import { allergyIsReal, mono, iconChip, smallButton, minutesSinceIso, duration, clockOf } from './nursePresentation';
 import type { SosAlert } from './nurseTypes';
+import { useResponderAccess } from '../emergency/ResponderAccess';
 
 interface SosBandProps {
   sosAlerts: SosAlert[];
@@ -20,6 +21,8 @@ export default function SosBand({
   updateSosStatus,
   setSosConfirm,
 }: SosBandProps) {
+  const { tier } = useResponderAccess();
+  if (!tier) return null;
   return (
     <section
       id="nc-sos"
@@ -85,7 +88,7 @@ export default function SosBand({
           const busy = sosBusyId === a.alert_id;
           const rail = a.status === 'triggered' ? T.danger : a.status === 'acknowledged' ? T.warning : T.info;
           const elapsed = minutesSinceIso(a.created_at);
-          const redacted = a.medicalDetailsRedacted === true;
+          const redacted = tier !== 'clinical' || a.medicalDetailsRedacted !== false;
 
           return (
             <li
@@ -194,7 +197,7 @@ export default function SosBand({
                   borderTop: `1px dashed ${T.borderSoft}`,
                 }}
               >
-                {a.status === 'triggered' && (
+                {tier && a.status === 'triggered' && (
                   <button
                     type="button"
                     disabled={busy}
@@ -204,7 +207,7 @@ export default function SosBand({
                     <Icon name="pan_tool" size={14} /> Acknowledge
                   </button>
                 )}
-                {a.status !== 'dispatched' && (
+                {tier === 'clinical' && a.status !== 'dispatched' && (
                   <button
                     type="button"
                     disabled={busy}
@@ -214,22 +217,22 @@ export default function SosBand({
                     <Icon name="local_shipping" size={14} /> Dispatch
                   </button>
                 )}
-                <button
+                {tier === 'clinical' && <button
                   type="button"
                   disabled={busy}
                   onClick={() => setSosConfirm({ alert: a, status: 'resolved' })}
                   style={{ ...smallButton(true, T.success), opacity: busy ? 0.6 : 1 }}
                 >
                   <Icon name="check" size={14} /> Resolve
-                </button>
-                <button
+                </button>}
+                {tier === 'clinical' && <button
                   type="button"
                   disabled={busy}
                   onClick={() => setSosConfirm({ alert: a, status: 'false_alarm' })}
                   style={{ ...smallButton(false, T.textSub), opacity: busy ? 0.6 : 1 }}
                 >
                   False alarm
-                </button>
+                </button>}
                 {a.latitude != null && a.longitude != null && (
                   <a
                     href={`https://www.google.com/maps?q=${a.latitude},${a.longitude}`}

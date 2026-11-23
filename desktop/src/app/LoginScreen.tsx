@@ -27,6 +27,7 @@ export default function LoginScreen({ email, setEmail, password, setPassword, er
   const errorId = 'login-error';
   const emailId = 'login-email';
   const passwordId = 'login-password';
+  const passwordHintId = 'login-password-hint';
 
   const handleLoginCardPointerMove = (e: PointerEvent<HTMLElement>) => {
     if (e.pointerType !== 'mouse') return;
@@ -213,10 +214,7 @@ export default function LoginScreen({ email, setEmail, password, setPassword, er
               </div>
 
               <div className="login-field">
-                <div className="login-label-row">
-                  <label className="login-label" htmlFor={passwordId}>Password</label>
-                  <span className="login-hint">Forgot? Ask your administrator</span>
-                </div>
+                <label className="login-label" htmlFor={passwordId}>Password</label>
                 <div className="login-input-wrap">
                   <input
                     id={passwordId}
@@ -229,7 +227,7 @@ export default function LoginScreen({ email, setEmail, password, setPassword, er
                     onBlur={() => setCapsLock(false)}
                     autoComplete="current-password"
                     required
-                    aria-describedby={error ? errorId : undefined}
+                    aria-describedby={error ? `${errorId} ${passwordHintId}` : passwordHintId}
                   />
                   <button
                     type="button"
@@ -240,6 +238,7 @@ export default function LoginScreen({ email, setEmail, password, setPassword, er
                     {revealPassword ? 'Hide' : 'Show'}
                   </button>
                 </div>
+                <p className="login-hint" id={passwordHintId}>Forgot? Ask your administrator</p>
                 {capsLock && (
                   <p className="login-caps">
                     <Icon name="keyboard_capslock" size={14} tone="warning" />

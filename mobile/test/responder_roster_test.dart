@@ -10,6 +10,7 @@ import 'package:mobile/services/emergency_alert_service.dart';
 import 'package:mobile/services/responder_roster.dart';
 import 'package:mobile/widgets/responder_hub.dart';
 import 'package:mobile/widgets/sos_alert_actions.dart';
+import 'package:mobile/screens/incident_reports_screen.dart';
 
 Map<String, Object> incidentData(int id, {int user = 11}) => {
   'alert_id': id,
@@ -29,6 +30,211 @@ ResponderRoster roster() => ResponderRoster()
   ..setAccess('community', true);
 
 void main() {
+  test('action permissions depend on access tier rather than the qualification flag', () {
+    final state = roster();
+    final allowed = <String?, List<IncidentStatus>>{
+      'community': [IncidentStatus.acknowledged],
+      'clinical': [
+        IncidentStatus.acknowledged,
+        IncidentStatus.dispatched,
+        IncidentStatus.resolved,
+        IncidentStatus.falseAlarm,
+      ],
+      null: [],
+    };
+    for (final entry in allowed.entries) {
+      state.setAccess(entry.key, true);
+      expect(
+        IncidentStatus.values.where(state.canUpdateStatus).toList(),
+        entry.value,
+      );
+    }
+    state.setAccess('clinical', false);
+    expect(state.canManageIncidents, isTrue);
+  });
+
+  testWidgets(
+    'community acknowledgment keeps the incident active and staff actions follow live access',
+    (tester) async {
+      final state = roster()..accept(incident(1));
+      final submitted = <IncidentStatus>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ListenableBuilder(
+              listenable: state,
+              builder: (_, _) => SosAlertActions(
+                roster: state,
+                incident: state[1] ?? incident(1),
+                onUpdate: (id, status) async {
+                  submitted.add(status);
+                  state.statusChanged(id, status);
+                  return null;
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(find.text('Acknowledge'), findsOneWidget);
+      expect(find.text('Dispatch to location'), findsNothing);
+      expect(find.text('Resolve'), findsNothing);
+      expect(find.text('False alarm'), findsNothing);
+      await tester.tap(find.text('Acknowledge'));
+      await tester.pumpAndSettle();
+      expect(state[1]?.status, IncidentStatus.acknowledged);
+      expect(find.text('Acknowledge'), findsNothing);
+      state.setAccess('clinical', true);
+      await tester.pumpAndSettle();
+      expect(find.text('Resolve'), findsOneWidget);
+      await tester.tap(find.text('Resolve'));
+      await tester.pumpAndSettle();
+      state.setAccess('community', true);
+      await tester.pump();
+      await tester.tap(find.text('Resolve incident'));
+      await tester.pumpAndSettle();
+      expect(
+        state.incidents,
+        isEmpty,
+      ); // Tier change clears the previous snapshot.
+      expect(find.text('Resolve'), findsNothing);
+      state.setAccess(null, false);
+      await tester.pumpAndSettle();
+      expect(find.text('Acknowledge'), findsNothing);
+      expect(submitted, [IncidentStatus.acknowledged]);
+    },
+  );
+
+  testWidgets('community report routes cannot load or submit staff reports', (
+    tester,
+  ) async {
+    final service = EmergencyAlertService.test(
+      MockClient((_) async {
+        fail('Community report screen must not issue a request');
+      }),
+    );
+    service.roster
+      ..begin(10)
+      ..setAccess('community', true);
+    await tester.pumpWidget(
+      MaterialApp(home: IncidentReportsScreen(service: service)),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.text('History and reports are restricted to response staff.'),
+      findsOneWidget,
+    );
+    expect(find.byType(TextFormField), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('report entry follows the current responder tier', (
+    tester,
+  ) async {
+    final service = EmergencyAlertService();
+    addTearDown(() => service.roster.setAccess(null, false));
+    service.roster
+      ..begin(10)
+      ..setAccess('clinical', false);
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: ResponderHub())),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Pending incident reports'), findsOneWidget);
+    service.roster.setAccess('community', true);
+    await tester.pumpAndSettle();
+    expect(find.text('Pending incident reports'), findsNothing);
+    expect(find.text('Refresh incidents'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  for (final deniedAction in ['none', 'status', 'report']) {
+    testWidgets(
+      'service guards requests and recovers live access after $deniedAction denial',
+      (tester) async {
+        final original = debugDefaultTargetPlatformOverride;
+        debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+        final calls = <http.Request>[];
+        var tier = deniedAction == 'none' ? 'community' : 'clinical';
+        final service = EmergencyAlertService.test(
+          MockClient((request) async {
+            calls.add(request);
+            if (request.url.path.endsWith('/responder-access')) {
+              return http.Response(
+                jsonEncode({
+                  'authorized': true,
+                  'tier': tier,
+                  'isQualifiedResponder': true,
+                }),
+                200,
+              );
+            }
+            if (request.url.path.endsWith('/active')) {
+              return http.Response(jsonEncode([incidentData(9)]), 200);
+            }
+            if (request.method == 'PATCH' ||
+                request.url.path.contains('incident-report')) {
+              if (deniedAction != 'none') {
+                tier = 'community';
+                return http.Response(
+                  '{"code":"RESPONDER_ACTION_FORBIDDEN"}',
+                  403,
+                );
+              }
+              return http.Response('{}', 200);
+            }
+            return http.Response('{}', 200);
+          }),
+        );
+        try {
+          service.beginSession('fixture-token', 10);
+          await tester.pump();
+          await service.refreshAccess();
+          await service.refreshIncidents(manual: true);
+          calls.clear();
+          if (deniedAction == 'status') {
+            expect(
+              await service.updateStatus(9, IncidentStatus.resolved),
+              isNotNull,
+            );
+          } else if (deniedAction == 'report') {
+            await expectLater(
+              service.pendingIncidentReports(),
+              throwsStateError,
+            );
+          }
+          expect(service.roster.tier, 'community');
+          expect(service.roster[9], isNotNull);
+          final sent = calls.length;
+          for (final status in [
+            IncidentStatus.dispatched,
+            IncidentStatus.resolved,
+            IncidentStatus.falseAlarm,
+          ]) {
+            expect(await service.updateStatus(9, status), isNotNull);
+          }
+          await expectLater(service.pendingIncidentReports(), throwsStateError);
+          await expectLater(
+            service.readResponderRecords('/history'),
+            throwsStateError,
+          );
+          expect(calls.length, sent);
+          if (deniedAction == 'none') {
+            expect(
+              await service.updateStatus(9, IncidentStatus.acknowledged),
+              isNull,
+            );
+            expect(service.roster[9]?.status, IncidentStatus.acknowledged);
+          }
+        } finally {
+          service.endSession();
+          await tester.pump();
+          debugDefaultTargetPlatformOverride = original;
+        }
+      },
+    );
+  }
+
   test('deduplicates alerts, keeps every incident and mutes by alert ID', () {
     final state = roster();
     state.accept(incident(1));
@@ -145,6 +351,7 @@ void main() {
           home: Scaffold(
             body: SosAlertActions(
               incident: incident(1),
+              roster: roster()..setAccess('clinical', true),
               onUpdate: (_, status) {
                 results.add(status);
                 return request.future;

@@ -3,7 +3,7 @@
 ## Read before touching cross-module config
 
 - **Desktop API URL is build-time.** Vite bundles `apiBaseUrl` from `desktop/app-config.json` into renderer REST and Socket.IO requests. Electron main also reads the packaged config for certificate checks. To retarget the packaged renderer, edit the config and run `npm run dist` again.
-- Mobile API URL is hardcoded in `mobile/lib/config/api_config.dart` (Android uses the LAN IP; the Android emulator needs `10.0.2.2`).
+- Mobile REST and Socket.IO use the HTTPS origin selected by `--dart-define=API_BASE_URL=…` in `mobile/lib/config/api_config.dart`. For local Android development, use the LAN IP for a phone or `10.0.2.2` for the standard Android emulator.
 - Server CORS is an allow-list (SEC-10): defaults cover the Vite dev origins + the packaged `file://` build (origin `null`); extend via `CORS_ALLOWED_ORIGINS` env. Requests without an `Origin` header pass the origin check and still face the route's authentication and authorization checks.
 - `PUBLIC_API_BASE_URL` (server `.env`) is the URL baked into generated PDFs/QR codes — it must be reachable from whatever device scans them.
 
