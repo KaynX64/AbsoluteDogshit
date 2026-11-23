@@ -1,6 +1,7 @@
 // Revokes the current session when Redis is available, disconnects its sockets, and records logout.
 
 import { pool } from '../db/pool.js';
+import { inTransaction } from '../db/transaction.js';
 import { disconnectSessionSockets } from '../realtime/presence.js';
 import { logAudit } from '../utils/auditLogger.js';
 import { redis, isRedisActive } from '../utils/redisClient.js';
@@ -40,9 +41,8 @@ export async function logoutUser(req, res, io) {
     }
 
     // Record session termination to R.A. 10173 Audit Ledger
-    const connection = await pool.getConnection();
     try {
-      await logAudit(connection, {
+      await inTransaction(connection => logAudit(connection, {
         userId: user?.user_id || null,
         action: 'UPDATE',
         table: 'AUTH_SESSIONS',
@@ -50,11 +50,9 @@ export async function logoutUser(req, res, io) {
         oldValue: null,
         newValue: { event: 'USER_LOGOUT_SESSION_TERMINATED', email: user?.email },
         ipAddress: req.ip,
-      });
+      }));
     } catch (auditErr) {
       console.error('[Logout Audit Warning]:', auditErr.message);
-    } finally {
-      connection.release();
     }
 
     res.json({ message: 'Session terminated and token invalidated successfully.', deviceReleased });

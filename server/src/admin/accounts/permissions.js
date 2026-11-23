@@ -1,6 +1,6 @@
 // Validates admin permission codes and updates account grants within the caller's transaction.
 
-import { resolveAdminPermissions } from '../../middleware/rbac.js';
+import { classifyAdminPermissions } from '../../middleware/rbac.js';
 import { fail } from '../../utils/httpError.js';
 
 /* ═════════════════════════════════════════════════════════════════════════
@@ -66,9 +66,17 @@ export async function setAdminPermissionGrants(connection, targetUserId, codes, 
  * so non-super admins cannot create, promote, edit or override
  * administrator accounts (including Super Admin passwords).
  */
-export async function requireSuperAdminCaller(req) {
-  const caller = await resolveAdminPermissions(req.user.user_id);
-  if (!caller.isSuper) {
+export async function requireSuperAdminCaller(req, connection) {
+  const [rows] = await connection.query(`
+    SELECT ap.code FROM USERS u
+    JOIN USER_ROLES ur ON ur.user_id = u.user_id
+    JOIN ROLES r ON r.role_id = ur.role_id AND r.code = 'ADMIN'
+    LEFT JOIN USER_ADMIN_PERMISSIONS uap ON uap.user_id = u.user_id
+    LEFT JOIN ADMIN_PERMISSIONS ap ON ap.permission_id = uap.permission_id
+    WHERE u.user_id = ? AND u.is_active = TRUE AND u.deleted_at IS NULL
+    FOR SHARE`, [req.user.user_id]);
+  const caller = classifyAdminPermissions(rows.map(row => row.code).filter(Boolean));
+  if (!rows.length || !caller.isSuper) {
     throw fail('Only a Super Admin can perform this administrator-account action.', 403);
   }
   return caller;

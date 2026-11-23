@@ -175,7 +175,7 @@ export function registerUserDirectoryRoutes(router, io) {
         : (roleRows[0]?.code || null);
 
       if (targetRole === 'ADMIN') {
-        await requireSuperAdminCaller(req);
+        await requireSuperAdminCaller(req, connection);
         const targetCodes = grantsByUser.get(targetUserId) || [];
         const targetIsSuper = targetCodes.length === 0 || targetCodes.includes('SUPER_ADMIN');
         if (targetRows[0].is_active && targetIsSuper) {

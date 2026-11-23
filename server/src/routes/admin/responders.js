@@ -43,7 +43,7 @@ export function registerResponderManagementRoutes(router, io) {
       // decision (same lifecycle rule as every other administrator field).
       const targetRole = await getUserRoleCode(connection, targetUserId);
       if (targetRole === 'ADMIN') {
-        await requireSuperAdminCaller(req);
+        await requireSuperAdminCaller(req, connection);
       }
 
       const current = rows[0];

@@ -1,6 +1,6 @@
 // Allocates eligible lots by earliest expiry and records prescription deductions and returns.
 
-import { logAudit } from '../utils/auditLogger.js';
+import { logAuditBatch } from '../utils/auditLogger.js';
 
 // Lock usable lots and plan deductions in first-expiry-first-out order.
 export async function planStock(connection, requestedByMedicine) {
@@ -77,6 +77,7 @@ export async function planStock(connection, requestedByMedicine) {
 
 // Deduct the planned quantities and write their prescription-linked movement entries.
 export async function applyStockDeductions(connection, { plannedDeductions, formularyDispenseLines, prescriptionId, doctorUserId, ipAddress }) {
+  const audits = [];
   // ── Execute planned FEFO stock deductions & write inventory logs ────────
   for (const d of plannedDeductions) {
     await connection.query(
@@ -115,7 +116,7 @@ export async function applyStockDeductions(connection, { plannedDeductions, form
       );
     }
 
-    await logAudit(connection, {
+    audits.push({
       userId: doctorUserId,
       action: 'UPDATE',
       table: 'MEDICINE_BATCHES',
@@ -133,6 +134,7 @@ export async function applyStockDeductions(connection, { plannedDeductions, form
   if (formularyDispenseLines.some(/* Check whether any formulary line still has unlinked deductions. */ (line) => line.quantity_to_link !== 0)) {
     throw new Error('Prescription item quantities do not match the planned inventory deductions.');
   }
+  await logAuditBatch(connection, audits);
 }
 
 // Restore the lots referenced by a cancelled prescription and append return entries.
@@ -157,6 +159,7 @@ export async function restorePrescriptionStock(connection, { prescriptionId, use
     [prescriptionId, `Automated FEFO dispense for Prescription #${prescriptionId} (%`]
   );
   const restoredBatches = new Set();
+  const audits = [];
 
   for (const log of dispenseLogs) {
     const [batchRows] = await connection.query(
@@ -187,7 +190,7 @@ export async function restorePrescriptionStock(connection, { prescriptionId, use
         ]
       );
 
-      await logAudit(connection, {
+      audits.push({
         userId: userId,
         action: 'UPDATE',
         table: 'MEDICINE_BATCHES',
@@ -202,5 +205,6 @@ export async function restorePrescriptionStock(connection, { prescriptionId, use
       });
     }
   }
+  await logAuditBatch(connection, audits);
   return restoredBatches.size;
 }

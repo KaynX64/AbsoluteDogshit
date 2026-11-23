@@ -25,7 +25,9 @@ Use this index to find the current guide for a task. Confirm behavior against so
 ## Reviews and historical material
 
 - [Codebase review](CODEBASE-REVIEW.md) — dated assessment and checks performed.
-- [Server structure review](server/STRUCTURE-REVIEW.md) — past refactor and remaining follow-up.
+- [Server structure review](server/STRUCTURE-REVIEW.md) — backend refactors and transaction ownership.
+- [Backend performance and stability report](server/PERFORMANCE-REVIEW.md) — load, fault tests and measured priorities.
+- [Mixed-load implementation results](server/MIXED-LOAD-RESULTS.md) — matched acceptance benchmarks and rollout controls.
 - [Historical Stage1 README](README-parts/README-01.md) — earlier project snapshot and split reference sections.
 - `audit.md`, when available locally, is an ignored historical report. Revalidate findings against the current implementation.
 

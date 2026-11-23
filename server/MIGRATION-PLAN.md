@@ -4,7 +4,11 @@
 
 ## Fresh and existing databases
 
-Migration **015** adds encrypted author-owned incident report drafts and history/worklist/audit indexes. Deploy it and the server before updated clients. It preserves filed reports; the shared pending worklist no longer drops tasks after 24 hours. [Responder records and client rollout](RESPONDER-RECORDS.md).
+Migration **016** adds `AUDIT_CHAIN_STATE` and seeds it from the latest committed audit entry. Stop every API process and job that writes the audit ledger before applying this migration. Save a database backup, migrate, and start only the new server. Startup checks that the state matches the ledger tail. Existing audit entries and their hash format carry forward.
+
+For a phased rollout, start the new binary with `MIXED_LOAD_CONTROLS=false` to put the audit writer in service first. That setting retains live dashboard queries, skips admission control and uses the original budget of ten shared database connections. Rehearse the enabled configuration in staging, record the matched load results and restart with the flag enabled. The five-second dashboard freshness limit takes effect with the enabled configuration.
+
+Prefer rolling back analytics or admission separately while retaining migration 016 and the new audit writer. The previous binary rejects a ledger containing version 016. For an exact binary rollback, stop all writers, back up the current database, and have the database operator remove only the migration 016 ledger entry after verifying that it is the latest version. Retain the state table and every audit entry. Before re-upgrading, stop the old writers, verify continuity from the recorded head through the committed tail, reconcile the state row to that verified last ID and hash, and run the migration again. Investigate any discrepancy before resuming service.
 
 `schema.sql` defines the current clean-install baseline. The numbered migrations preserve the upgrade history and are kept intact after deployment. Some table definitions intentionally appear in both because the upgrades also support installations that predate those tables. The MySQL rehearsal compares the upgraded foundation table definitions with a fresh install to catch drift.
 
@@ -23,6 +27,8 @@ Migration **015** adds encrypted author-owned incident report drafts and history
 - Migration 012 adds a unique installation ID and SOS mode to device tokens and a nullable location label to emergency alerts. Apply it before deploying the Android responder update. Legacy registrations keep their existing SOS channel.
 - Migration 013 adds structured prescription snapshots, ordered encrypted item details, decimal external quantities and issuance request uniqueness. Historical clinical values and stored PDFs are retained. Deploy updated server/readers with v2 issuance disabled, release desktop/mobile, complete clinician review, then enable the flag. See [prescribing rollout](PRESCRIBING-ROLLOUT.md) and [API contract](STRUCTURED-PRESCRIBING.md).
 - Migration 014 adds account-scoped SOS request identities and a delivery lease to `EMERGENCY_ALERTS`. Existing alerts have no scheduled delivery. Deploy the API and confirm the SOS Dispatch Worker is running before releasing the keyed mobile client. Test an interrupted receipt and a concurrent retry against disposable MySQL.
+
+- Migration 015 adds encrypted author-owned incident report drafts and history indexes. The pending worklist keeps unfinished reports across days. [Responder records and client rollout](RESPONDER-RECORDS.md).
 
 ## Rehearsal and recovery
 

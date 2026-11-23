@@ -99,7 +99,9 @@ test('booking releases before confirmation lookup and broadcasts only an empty r
       if (sql.includes('FROM SERVER_POLICY')) return [[{ revision: 0, overrides: {} }]];
       if (sql.includes('FROM USERS WHERE')) return [[{ user_id: 21 }]];
       if (sql.includes('JOIN USER_ROLES')) return [[{ code: 'DOCTOR' }]];
-      if (sql.includes('FROM APPOINTMENTS') || sql.includes('FROM AUDIT_LOGS')) return [[]];
+      if (sql.includes('FROM APPOINTMENTS') || sql.startsWith('SET ')) return [[]];
+      if (sql.includes('FROM USERS FORCE INDEX (PRIMARY)') || sql.includes('UPDATE AUDIT_CHAIN_STATE')) return [[]];
+      if (sql.includes('FROM AUDIT_CHAIN_STATE')) return [[{ last_entry_hash: '0'.repeat(64) }]];
       if (sql.includes('INSERT INTO APPOINTMENTS')) return [{ insertId: 53 }];
       if (sql.includes('INSERT INTO AUDIT_LOGS')) return [{}];
       throw new Error('Unexpected booking query');

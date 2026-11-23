@@ -12,14 +12,14 @@ export function markDueAppointmentsNoShow(graceMinutes) {
          AND date_time < DATE_SUB(NOW(), INTERVAL ? MINUTE)
          AND date_time > DATE_SUB(NOW(), INTERVAL 24 HOUR)
          AND deleted_at IS NULL
-       FOR UPDATE SKIP LOCKED`,
+       ORDER BY date_time, appointment_id LIMIT 100 FOR UPDATE SKIP LOCKED`,
       [graceMinutes],
     );
     // Collect the IDs of overdue appointments selected for transition.
     const ids = expired.map((row) => row.appointment_id);
     if (ids.length) {
       const [result] = await connection.query(
-        `UPDATE APPOINTMENTS SET status = 'no_show'
+        `UPDATE APPOINTMENTS FORCE INDEX (PRIMARY) SET status = 'no_show'
          WHERE appointment_id IN (?) AND status = 'scheduled' AND deleted_at IS NULL`,
         [ids],
       );

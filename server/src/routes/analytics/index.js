@@ -6,11 +6,10 @@ import { resolveAnalyticsAccess } from '../../analytics/access.js';
 import { registerAnalyticsDashboard } from './dashboard.js';
 import { registerAnalyticsExports } from './exports.js';
 
-const router = express.Router();
-
-router.use(authenticateToken, resolveAnalyticsAccess);
-
-registerAnalyticsDashboard(router);
-registerAnalyticsExports(router);
-
-export default router;
+export default function analyticsRoutes(readSnapshot) {
+  const router = express.Router();
+  router.use(authenticateToken, resolveAnalyticsAccess);
+  registerAnalyticsDashboard(router, readSnapshot);
+  registerAnalyticsExports(router);
+  return router;
+}

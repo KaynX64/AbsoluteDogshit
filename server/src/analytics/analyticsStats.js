@@ -43,12 +43,20 @@ const yieldToEventLoop = () => new Promise(/* Schedule promise resolution for th
  * @returns {Promise<{diagnosis: string, count: number}[]>} sorted by count desc
  */
 export async function countDiagnoses(queryFn, { batchSize = BATCH_SIZE, maxDistinct = MAX_DISTINCT } = {}) {
+  return (await scanEncounterAnalytics(queryFn, { batchSize, maxDistinct })).diagnoses;
+}
+
+export async function scanEncounterAnalytics(queryFn, { batchSize = BATCH_SIZE, maxDistinct = MAX_DISTINCT, surveillance = false } = {}) {
   const counts = new Map();
+  const fluStats = { cases_past_7_days: 0, cases_prev_7_days: 0 };
   let lastId = 0;
 
   for (;;) {
     const [rows] = await queryFn(
-      `SELECT emr_id, diagnosis
+      `SELECT emr_id, diagnosis${surveillance ? `, CASE
+          WHEN encounter_date BETWEEN NOW() - INTERVAL 7 DAY AND NOW() THEN 1
+          WHEN encounter_date >= NOW() - INTERVAL 14 DAY AND encounter_date < NOW() - INTERVAL 7 DAY THEN 2
+          ELSE 0 END AS flu_period` : ''}
          FROM EMR_RECORDS
         WHERE emr_id > ?
           AND diagnosis IS NOT NULL AND diagnosis != ''
@@ -61,6 +69,9 @@ export async function countDiagnoses(queryFn, { batchSize = BATCH_SIZE, maxDisti
 
     for (const row of rows) {
       let plain = decrypt(row.diagnosis);
+      if (row.flu_period && /flu|respiratory|fever|cough/i.test(plain || '')) {
+        fluStats[row.flu_period === 1 ? 'cases_past_7_days' : 'cases_prev_7_days']++;
+      }
       if (plain === DECRYPT_FAILED) plain = UNREADABLE_LABEL;
       else plain = (plain || '').trim() || DEFAULT_DIAGNOSIS;
       counts.set(plain, (counts.get(plain) || 0) + 1);
@@ -71,12 +82,13 @@ export async function countDiagnoses(queryFn, { batchSize = BATCH_SIZE, maxDisti
     await yieldToEventLoop();
   }
 
-  return [...counts.entries()]
+  const diagnoses = [...counts.entries()]
     // Convert an aggregate count entry into a diagnosis row.
     .map(([diagnosis, count]) => ({ diagnosis, count }))
     // Rank by count and use diagnosis text to break ties.
     .sort((a, b) => b.count - a.count || a.diagnosis.localeCompare(b.diagnosis))
     .slice(0, maxDistinct);
+  return { diagnoses, fluStats };
 }
 
 /**

@@ -1,4 +1,4 @@
-# Server structure review
+# Server structure and performance review
 
 The implementation now separates route composition, domain transactions, and post-commit work. The earlier structure review led to the changes below. Use the linked modules and tests for current behavior.
 
@@ -17,8 +17,8 @@ The implementation now separates route composition, domain transactions, and pos
 
 The [server replay ledger](src/sync/replayService.js) retains mutation outcomes. [Migration 011](src/db/migrations/011-replay-outcomes.js) removes legacy payloads and free-form errors. The [desktop storage upgrade](../desktop/README.md#offline-storage) encrypts the cache and preserves pending work from the SQLite queue and the renderer mirror.
 
-## Open follow-up
+## Performance and stability
 
-- Cold diagnosis aggregation still accumulates distinct labels before truncating its output. Measure memory during [aggregation](src/analytics/analyticsStats.js) and report rendering with representative volumes before changing the format or caching strategy.
+The [backend performance report](PERFORMANCE-REVIEW.md) contains the burst and sustained-load results, controlled failure tests, verification limits and reproduction commands.
 
 Use the existing feature directories for related code. Keep transaction ownership with the workflow and pass its connection to participating queries. Use the mounted API tests for route contracts and disposable MySQL for transaction, locking and query-plan checks.

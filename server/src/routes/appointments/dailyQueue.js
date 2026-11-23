@@ -3,7 +3,7 @@
 import { inTransaction } from '../../db/transaction.js';
 import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';
-import { getCache, setCache } from '../../utils/redisClient.js';
+import { readDailyQueue } from '../../appointments/dailyQueueCache.js';
 import {
   countTodaysNoShows,
   getPersonalTicket,
@@ -59,11 +59,7 @@ export function registerDailyQueueRoutes(router, io) {
   // Return the shared daily ticket list.
   router.get('/queue/today', authenticateToken, clinicalDesk, async (_req, res) => {
     try {
-      const cached = await getCache('queue:today');
-      if (cached) return res.json(cached);
-      const rows = await listDailyTickets();
-      await setCache('queue:today', rows, 30);
-      res.json(rows);
+      res.json(await readDailyQueue(listDailyTickets));
     } catch (error) {
       console.error('[Appointments] Error fetching daily queue:', error.code || error.name);
       res.status(500).json({ error: 'Failed to fetch daily triage queue.' });

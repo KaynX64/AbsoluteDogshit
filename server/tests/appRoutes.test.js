@@ -33,6 +33,9 @@ try {
 }
 const { pool } = await import('../src/db/pool.js');
 
+const { loadAuthorizedAnalytics } = await import('../src/analytics/summary.js');
+let readAnalyticsSnapshot = async scopes => ({ asOf: Date.now(), data: await loadAuthorizedAnalytics(scopes) });
+
 let listener;
 let baseUrl;
 // Mount the real API with a read-only realtime double and open a test listener.
@@ -43,7 +46,7 @@ before(async () => {
     emit() { assert.fail('Read-only fixture unexpectedly broadcast an event'); },
     // Fail if the read-only test API attempts to emit to a room.
     to() { assert.fail('Read-only fixture unexpectedly targeted a realtime room'); },
-  });
+  }, { readAnalyticsSnapshot: scopes => readAnalyticsSnapshot(scopes) });
   listener = app.listen(0, '127.0.0.1');
   await once(listener, 'listening');
   baseUrl = 'http://127.0.0.1:' + listener.address().port;
@@ -128,7 +131,8 @@ test('password change releases only the submitted device when the change commits
           if (devices.get(token) === owner) nextDevice = token;
           return [{ affectedRows: nextDevice ? 1 : 0 }];
         }
-        if (sql.startsWith('SELECT entry_hash')) return [[]];
+        if (sql.includes('FROM USERS FORCE INDEX (PRIMARY)') || sql.includes('UPDATE AUDIT_CHAIN_STATE')) return [[]];
+        if (sql.includes('FROM AUDIT_CHAIN_STATE')) return [[{ last_entry_hash: '0'.repeat(64) }]];
         assert.match(sql, /INSERT INTO AUDIT_LOGS/);
         if (failAudit) throw new Error('fixture audit failure');
         return [{ affectedRows: 1 }];
@@ -210,6 +214,41 @@ test('inventory expiry alerts and summary use a 30-day window', async t => {
 });
 
 // Verify that analytics headcount scope skips all other loaders and limits every report format.
+test('analytics serves a fresh snapshot and rejects an expired snapshot under live permissions', async t => {
+  const previous = readAnalyticsSnapshot;
+  const previousFlag = process.env.MIXED_LOAD_CONTROLS;
+  t.after(() => {
+    readAnalyticsSnapshot = previous;
+    if (previousFlag === undefined) delete process.env.MIXED_LOAD_CONTROLS;
+    else process.env.MIXED_LOAD_CONTROLS = previousFlag;
+  });
+  let roles = ['ANALYTICS_VIEW', 'ANALYTICS_HEADCOUNT'].map(permission_code => ({ role_code: 'ADMIN', permission_code }));
+  t.mock.method(pool, 'query', async sql => {
+    if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1, deleted_at: null }]];
+    if (sql.includes('AS permission_code')) return [roles];
+    if (sql.includes('SELECT r.code, r.name')) return [[]];
+    assert.fail('Unexpected query for a snapshot response');
+  });
+  let asOf = Date.now();
+  readAnalyticsSnapshot = async () => ({ asOf, data: { headcount: [], topDiagnoses: [{ diagnosis: 'private scope', count: 1 }] } });
+  const fetchSnapshot = () => request('/api/analytics/summary', { roles: ['ADMIN'] });
+  const fresh = await fetchSnapshot();
+  assert.equal(fresh.status, 200);
+  assert.equal(fresh.headers.get('x-analytics-as-of'), new Date(asOf).toISOString());
+  assert.equal((await fresh.json()).clinical, null);
+  asOf -= 6_000;
+  const expired = await fetchSnapshot();
+  assert.equal(expired.status, 503);
+  assert.equal(expired.headers.get('retry-after'), '1');
+  roles = [{ role_code: 'ADMIN', permission_code: 'USERS_MANAGE' }];
+  assert.equal((await fetchSnapshot()).status, 403);
+  roles = ['ANALYTICS_VIEW', 'ANALYTICS_HEADCOUNT'].map(permission_code => ({ role_code: 'ADMIN', permission_code }));
+  process.env.MIXED_LOAD_CONTROLS = 'false';
+  const duringCutover = await fetchSnapshot();
+  assert.equal(duringCutover.status, 200);
+  assert.equal(duringCutover.headers.get('x-analytics-as-of'), null);
+});
+
 test('analytics headcount scope skips all other loaders and limits every report format', async t => {
   let codes = ['ANALYTICS_VIEW', 'ANALYTICS_HEADCOUNT', 'ANALYTICS_EXPORT'];
   const unexpected = [];
@@ -725,7 +764,8 @@ test('Database Studio rolls back and releases when an audit write fails', async 
         calls.push('insert');
         return [{ insertId: 4 }];
       }
-      if (sql.includes('SELECT entry_hash')) return [[]];
+      if (sql.includes('FROM USERS FORCE INDEX (PRIMARY)') || sql.includes('UPDATE AUDIT_CHAIN_STATE')) return [[]];
+      if (sql.includes('FROM AUDIT_CHAIN_STATE')) return [[{ last_entry_hash: '0'.repeat(64) }]];
       assert.match(sql, /INSERT INTO AUDIT_LOGS/);
       throw new Error('Fixture audit failure');
     },

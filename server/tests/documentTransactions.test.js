@@ -57,7 +57,8 @@ for (const { path, body, idField, pdfTable, service } of [cases[1], { ...cases[0
         if (sql.includes('FROM USERS')) return [[{ user_id: 42, is_active: 1, role_code: 'STUDENT' }]];
         if (sql.includes('FROM APPOINTMENTS')) return [[{ status: 'checked_in' }]];
         if (sql.includes('FROM EMR_RECORDS')) return [[{ emr_id: 17 }]];
-        if (sql.includes('FROM AUDIT_LOGS')) return [[]];
+        if (sql.includes('FROM USERS FORCE INDEX (PRIMARY)') || sql.includes('UPDATE AUDIT_CHAIN_STATE')) return [[]];
+        if (sql.includes('FROM AUDIT_CHAIN_STATE')) return [[{ last_entry_hash: '0'.repeat(64) }]];
         if (/^INSERT INTO (PRESCRIPTIONS|PRESCRIPTION_ITEMS|MEDICAL_CLEARANCES|AUDIT_LOGS)\b/.test(sql)) {
           if (sql.startsWith('INSERT INTO MEDICAL_CLEARANCES')) {
             assert.equal(JSON.parse(params.at(-1)).appointment_id, 8);
@@ -192,6 +193,8 @@ test('the stock workflow locks FEFO lots and links each deduction to its prescri
       }
       if (sql.startsWith('UPDATE MEDICINE_BATCHES')) changes.push(params);
       else if (sql.startsWith('INSERT INTO INVENTORY_LOGS')) links.push(params.slice(0, 3));
+      else if (sql.includes('FROM USERS FORCE INDEX (PRIMARY)') || sql.includes('UPDATE AUDIT_CHAIN_STATE')) return [[]];
+      else if (sql.includes('FROM AUDIT_CHAIN_STATE')) return [[{ last_entry_hash: '0'.repeat(64) }]];
       else if (!sql.includes('AUDIT_LOGS')) assert.fail('Unexpected stock query');
       return [[]];
     },

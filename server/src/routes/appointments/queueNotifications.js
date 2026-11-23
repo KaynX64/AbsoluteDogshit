@@ -2,11 +2,11 @@
 
 import { pool } from '../../db/pool.js';
 import { sendPushToUser } from '../../utils/fcmNotifier.js';
-import { invalidateCache } from '../../utils/redisClient.js';
+import { invalidateDailyQueue } from '../../appointments/dailyQueueCache.js';
 
 // Clear stale queue cache entries and send appointment and queue updates after commit.
 export async function publishQueueChange(io, change, { callPatient = false, queueFirst = false } = {}) {
-  await invalidateCache('queue:*');
+  await invalidateDailyQueue();
   if (io) {
     if (queueFirst) io.emit('queue:updated');
     io.emit('appointment:status_changed', change);

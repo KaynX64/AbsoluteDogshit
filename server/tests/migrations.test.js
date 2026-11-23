@@ -82,7 +82,7 @@ test('fresh schema is adopted once even when two migration runners start togethe
     department: 'PSU Lingayen Quick-Response Unit',
   }]);
   const applied = await Promise.all([runMigrations(pool), runMigrations(pool)]);
-  assert.deepEqual(applied.sort((a, b) => a - b), [0, 15]);
+  assert.deepEqual(applied.sort((a, b) => a - b), [0, 16]);
   assert.equal(await responderFlag(pool), 1);
   const readOnlyPool = {
     // Wrap a fixture connection so completed migrations can only make read queries.
@@ -104,6 +104,32 @@ test('fresh schema is adopted once even when two migration runners start togethe
   assert.equal(await runMigrations(readOnlyPool), 0);
 });
 
+test('audit cutover adopts history and rolls the chain head back with its entries', { skip }, async t => {
+  const pool = await fixture(t);
+  const historicalHash = 'a'.repeat(64);
+  await pool.query('DROP TABLE AUDIT_CHAIN_STATE');
+  await pool.query("INSERT INTO AUDIT_LOGS (action, table_affected, prev_hash, entry_hash) VALUES ('CREATE', 'FIXTURE', REPEAT('0', 64), ?)", [historicalHash]);
+  await runMigrations(pool);
+  const { logAudit, logAuditBatch } = await import('../src/utils/auditLogger.js');
+  const entry = { userId: 1, action: 'UPDATE', table: 'FIXTURE', recordId: 1 };
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    await logAudit(connection, entry);
+    await connection.rollback();
+    await connection.beginTransaction();
+    await logAuditBatch(connection, [entry, { ...entry, recordId: 2 }]);
+    await connection.commit();
+  } finally { connection.release(); }
+  const [rows] = await pool.query('SELECT audit_id, entry_hash, prev_hash FROM AUDIT_LOGS ORDER BY audit_id');
+  assert.equal(rows.length, 3);
+  assert.equal(rows[1].prev_hash, historicalHash);
+  assert.equal(rows[2].prev_hash, rows[1].entry_hash);
+  assert.equal(await runMigrations(pool), 0);
+  await pool.query('UPDATE AUDIT_CHAIN_STATE SET last_audit_id = 1');
+  await assert.rejects(runMigrations(pool), /Audit chain state disagrees/);
+});
+
 // Verify that replay migration removes legacy payloads and retains duplicate outcomes.
 test('replay migration removes legacy payloads and retains duplicate outcomes', { skip }, async t => {
   const pool = await fixture(t);
@@ -115,7 +141,7 @@ test('replay migration removes legacy payloads and retains duplicate outcomes', 
     VALUES ('old-mutation', 2, 'desktop', 'EMR_RECORDS', 'old-record', 'CREATE',
             JSON_OBJECT('notes', 'fixture private text'), 1, 42, 'synced', 'legacy error')
   `);
-  assert.equal(await runMigrations(pool), 15);
+  assert.equal(await runMigrations(pool), 16);
   const [columns] = await pool.query('SHOW COLUMNS FROM LOCAL_SYNC_LOGS');
   assert.ok(columns.every(/* Check the remaining ledger columns for removed payload and error fields. */ column => !['payload', 'error_message'].includes(column.Field)));
   const [[row]] = await pool.query(`
@@ -137,7 +163,7 @@ test('an existing schema keeps revoked responders, admin grants and saved policy
   await pool.query("DELETE FROM ADMIN_PERMISSIONS WHERE code IN ('INCIDENT_RECORDS_VIEW', 'TERMINAL_VIEW')");
   await pool.query('UPDATE SERVER_POLICY SET revision = 4 WHERE policy_id = 1');
   await pool.query('DROP TABLE STAFF_ANALYTICS_PERMISSIONS');
-  assert.equal(await runMigrations(pool), 15);
+  assert.equal(await runMigrations(pool), 16);
   const [[terminal]] = await pool.query("SELECT code FROM ADMIN_PERMISSIONS WHERE code = 'TERMINAL_VIEW'");
   assert.equal(terminal.code, 'TERMINAL_VIEW');
   const [[staffSettings]] = await pool.query('SELECT COUNT(*) AS total FROM STAFF_ANALYTICS_PERMISSIONS');
@@ -186,7 +212,7 @@ test('legacy tables and columns are rebuilt additively and the responder backfil
   await pool.query(`INSERT INTO PRESCRIPTION_ITEMS
     (prescription_id, outside_name, dosage, frequency, duration_days, quantity_dispensed)
     VALUES (1, 'fixture', 'fixture', 'fixture', 1, 4)`);
-  assert.equal(await runMigrations(pool), 15);
+  assert.equal(await runMigrations(pool), 16);
   const [[legacyDevice]] = await pool.query("SELECT installation_id, sos_mode FROM DEVICE_TOKENS WHERE fcm_token = 'legacy-token'");
   assert.deepEqual(legacyDevice, { installation_id: null, sos_mode: 'on_duty' });
   const [dayIndex] = await pool.query("SHOW INDEX FROM APPOINTMENTS WHERE Key_name = 'idx_app_status_datetime'");
@@ -232,7 +258,7 @@ test('an interrupted responder schema change resumes with its original backfill 
   assert.equal(await responderFlag(pool), 0);
   const [[{ applied_at }]] = await pool.query('SELECT applied_at FROM SCHEMA_MIGRATIONS WHERE version = 3');
   assert.equal(applied_at, null);
-  assert.equal(await runMigrations(pool), 13);
+  assert.equal(await runMigrations(pool), 14);
   assert.equal(await responderFlag(pool), 1);
 });
 
@@ -250,7 +276,7 @@ test('migration 014 adds the SOS scheduler without replaying existing alerts', {
     DROP INDEX uq_sos_request, DROP INDEX idx_sos_dispatch,
     DROP COLUMN client_sos_id, DROP COLUMN request_hash, DROP COLUMN dispatch_after`);
   await pool.query("INSERT INTO EMERGENCY_ALERTS (user_id, location) VALUES (5, ST_SRID(POINT(120, 16), 4326))");
-  assert.equal(await runMigrations(pool), 15);
+  assert.equal(await runMigrations(pool), 16);
   const [[alert]] = await pool.query('SELECT client_sos_id, request_hash, dispatch_after FROM EMERGENCY_ALERTS');
   assert.deepEqual(alert, { client_sos_id: null, request_hash: null, dispatch_after: null });
   assert.equal(await runMigrations(pool), 0);

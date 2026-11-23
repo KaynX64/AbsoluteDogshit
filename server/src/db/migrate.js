@@ -19,8 +19,9 @@ import responderDelivery from './migrations/012-responder-delivery.js';
 import structuredPrescriptions from './migrations/013-structured-prescriptions.js';
 import sosDelivery from './migrations/014-sos-delivery.js';
 import responderHistory from './migrations/015-responder-history.js';
+import auditChainState, { verifyAuditHead } from './migrations/016-audit-chain-state.js';
 
-const migrations = [foundation, clinicalDocuments, responders, appointmentDayIndex, pharmacyActivityIndexes, incidentRecordsPermission, analyticsScopes, staffAnalyticsPermissions, pdfRetry, terminalPermission, replayOutcomes, responderDelivery, structuredPrescriptions, sosDelivery, responderHistory];
+const migrations = [foundation, clinicalDocuments, responders, appointmentDayIndex, pharmacyActivityIndexes, incidentRecordsPermission, analyticsScopes, staffAnalyticsPermissions, pdfRetry, terminalPermission, replayOutcomes, responderDelivery, structuredPrescriptions, sosDelivery, responderHistory, auditChainState];
 const requiredTables = [
   'USERS', 'ROLES', 'USER_ROLES', 'STAFF_PROFILES', 'HEALTH_PROFILES', 'EMERGENCY_ALERTS',
   'PRESCRIPTIONS', 'PRESCRIPTION_ITEMS', 'INVENTORY_LOGS', 'MEDICAL_CLEARANCES', 'AUDIT_LOGS', 'APPOINTMENTS',
@@ -126,6 +127,7 @@ export async function runMigrations(pool) {
         throw new Error('Migration ' + migration.version + ' (' + migration.name + ') failed.', { cause });
       }
     }
+    await verifyAuditHead(connection);
     completed = true;
     return applied;
   } finally {

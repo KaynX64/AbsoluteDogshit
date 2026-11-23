@@ -4,7 +4,7 @@ import { pool } from '../../db/pool.js';
 import { authenticateToken } from '../../auth/middleware.js';
 import { decrypt } from '../../utils/cryptoVault.js';
 import { logAudit } from '../../utils/auditLogger.js';
-import { invalidateCache } from '../../utils/redisClient.js';
+import { invalidateDailyQueue } from '../../appointments/dailyQueueCache.js';
 import { requireResponderAccess, resolveResponderAccess, getResponderAudience, roleLabelFor, canUpdateIncidentStatus } from '../../emergency/responderAccess.js';
 
 // Mount responder eligibility, active alert reads, and alert status transitions.
@@ -185,7 +185,7 @@ export function registerAlertRoutes(router, io) {
         }
 
         await connection.commit();
-        await invalidateCache('queue:*');
+        await invalidateDailyQueue();
       } catch (err) {
         await connection.rollback();
         throw err;

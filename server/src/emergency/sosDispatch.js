@@ -2,11 +2,11 @@
 import { pool } from '../db/pool.js';
 import { decrypt } from '../utils/cryptoVault.js';
 import { sendSosPush } from '../utils/fcmNotifier.js';
-import { invalidateCache } from '../utils/redisClient.js';
+import { invalidateDailyQueue } from '../appointments/dailyQueueCache.js';
 import { redactForTier, getResponderAudience, roleLabelFor } from './responderAccess.js';
 
 async function dispatchAlert(alert, io) {
-  await invalidateCache('queue:*');
+  await invalidateDailyQueue();
   if (alert.status !== 'triggered' || !alert.recent) return;
   const { alert_id: alertId, user_id: userId, location_label: formattedAddress } = alert;
   const lat = Number(alert.latitude);

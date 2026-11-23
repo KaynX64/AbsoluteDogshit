@@ -3,8 +3,8 @@
 import { pool } from '../db/pool.js';
 
 // Read encounter and SOS counts against the same fourteen-day MySQL calendar.
-export async function getDailyTimelines() {
-  const [days] = await pool.query(`
+export async function getDailyTimelines(database = pool) {
+  const [days] = await database.query(`
     WITH RECURSIVE calendar AS (
       SELECT CURDATE() - INTERVAL 13 DAY AS day
       UNION ALL

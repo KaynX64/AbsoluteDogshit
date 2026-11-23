@@ -27,8 +27,8 @@ export async function startServer(server, { io, isHttps, signal }) {
   const stopWorkers = startScheduler([
     { name: 'SOS Dispatch Worker', intervalMs: 5000, run: () => dispatchPendingSos(io), runImmediately: true },
     { name: 'Reminder Worker', intervalMs: 15 * 60 * 1000, /* Send due appointment reminders with realtime notifications. */ run: () => sendDueAppointmentReminders(io) },
-    { name: 'Auto-No-Show Worker', intervalMs: 60 * 1000, /* Process scheduled appointments that have passed the no-show grace period. */ run: () => processAppointmentNoShows(io), runImmediately: true },
-    { name: 'Prescription Expiry Worker', intervalMs: 30 * 60 * 1000, /* Expire due prescriptions and publish their status changes. */ run: () => processPrescriptionExpiry(io), runImmediately: true },
+    { name: 'Auto-No-Show Worker', intervalMs: 60 * 1000, run: () => processAppointmentNoShows(io, signal), runImmediately: true },
+    { name: 'Prescription Expiry Worker', intervalMs: 30 * 60 * 1000, run: () => processPrescriptionExpiry(io, signal), runImmediately: true },
     { name: 'PDF Backfill Worker', intervalMs: 5 * 60 * 1000, run: backfillDocumentPdfs, runImmediately: true },
   ]);
   // Stop the scheduled workers when the listener closes.
