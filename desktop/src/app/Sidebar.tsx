@@ -2,6 +2,8 @@ import { consoleNavigation } from './consoleNavigation';
 import Icon from '../shared/ui/Icon';
 import ThemedLogo from '../shared/ui/ThemedLogo';
 import SettingsMenu from './SettingsMenu';
+import { useResponderAccess } from '../features/emergency/ResponderAccess';
+import { useIncidentReports } from '../features/emergency/IncidentReportContext';
 
 interface SidebarProps {
   role: string;
@@ -15,8 +17,11 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ role, onSignOut, onChangePassword, activeItem, onItemClick, badgeCounts, showIncidentRecords, showTerminal }: SidebarProps) {
+  const { tier } = useResponderAccess();
+  const { summary } = useIncidentReports();
   const navItems = consoleNavigation(role).filter(item =>
-    (item.key !== 'incidents' || showIncidentRecords) && (item.key !== 'terminal' || showTerminal),
+    (item.key !== 'incidents' || showIncidentRecords) && (item.key !== 'terminal' || showTerminal) &&
+    (!['alertHistory', 'reports'].includes(item.key) || tier === 'clinical'),
   );
 
   return (
@@ -33,7 +38,7 @@ export default function Sidebar({ role, onSignOut, onChangePassword, activeItem,
       <nav className="sb-nav" aria-label="Console navigation">
         {navItems.map((item) => {
           const isActive = activeItem === item.key;
-          const badge = badgeCounts?.[item.key] ?? 0;
+          const badge = item.key === 'reports' ? summary?.pending ?? 0 : badgeCounts?.[item.key] ?? 0;
           return (
             <button
               key={item.key}

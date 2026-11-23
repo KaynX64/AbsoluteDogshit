@@ -4,7 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../services/emergency_alert_service.dart';
 import '../theme/account_theme_controller.dart';
 import '../widgets/account_settings_button.dart';
-import '../widgets/responder_hub.dart';
+import '../widgets/responder_workspace.dart';
 import '../widgets/sign_out_confirmation.dart';
 import '../widgets/valetudo_logo.dart';
 import 'login_screen.dart';
@@ -55,7 +55,15 @@ class _ResponderScreenState extends State<ResponderScreen> {
           const ValetudoLogo(),
           const SizedBox(width: 8),
           const Flexible(
-            child: Text('LeoVital', overflow: TextOverflow.ellipsis),
+            child: Text(
+              'LeoVital',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -.5,
+              ),
+            ),
           ),
         ],
       ),
@@ -72,7 +80,7 @@ class _ResponderScreenState extends State<ResponderScreen> {
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 640),
-          child: const ResponderHub(),
+          child: const ResponderWorkspace(),
         ),
       ),
     ),

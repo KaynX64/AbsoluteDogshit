@@ -113,7 +113,11 @@ export function registerIncidentArchiveRoutes(router) {
   // Serves the official incident report PDF to administrators with archive access.
   // ===========================================================================
   // Stream the archived report PDF after checking permission and storage availability.
-  router.get('/incident-reports/:reportId/pdf', authenticateToken, requireIncidentRecordsView, async (req, res) => {
+  router.get('/incident-reports/:reportId/pdf', authenticateToken, requireIncidentRecordsView, serveIncidentReportPdf);
+}
+
+export async function serveIncidentReportPdf(req, res) {
+    res.setHeader('Cache-Control', 'no-store');
     const reportId = Number(req.params.reportId);
     if (!reportId) return res.status(400).json({ error: 'Invalid report id.' });
 
@@ -155,5 +159,4 @@ export function registerIncidentArchiveRoutes(router) {
       console.error('[Incident Report PDF Error]:', err);
       res.status(500).json({ error: 'Failed to retrieve incident report PDF.' });
     }
-  });
 }

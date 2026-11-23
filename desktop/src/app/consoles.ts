@@ -4,3 +4,6 @@ export { default as DoctorConsole } from '../features/consultations/DoctorConsol
 export { default as AdminConsole } from '../features/admin/AdminConsole';
 export { default as ResponderConsole } from '../features/emergency/ResponderConsole';
 export { default as IncidentReportModal } from '../features/emergency/IncidentReportModal';
+export { ResponderAccessProvider } from '../features/emergency/ResponderAccess';
+export { IncidentReportProvider } from '../features/emergency/IncidentReportContext';
+export { default as ResponderRecords } from '../features/emergency/ResponderRecords';

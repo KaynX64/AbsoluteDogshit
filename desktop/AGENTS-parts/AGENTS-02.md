@@ -4,6 +4,7 @@
 
 - QR capture owns camera tracks, its decode loop, and uploaded image URLs in `useQrCapture.ts`. The decoder loads on demand. Document previews cancel pending reads and revoke blob URLs on replacement or unmount.
 - Admin audit and telemetry requests follow the active view and its current grants. Dispatch keeps its polling fallback and gives realtime refreshes priority.
+- Responder record tabs use the page-owned `RecordPageCache`: at most eight in-memory queries, 15-second freshness, shared in-flight reads and default-tab prefetch. Report/focus updates invalidate freshness; access loss and unmount clear snapshots. Keep search debounced, cancel obsolete reads, and never persist these PHI summaries in browser storage.
 ## Offline storage
 
 - The first signed-in account opens or migrates the encrypted SQLite database through `electron/offline/database.cjs`. Electron `safeStorage` wraps the key for the OS profile. Keep the raw key in main and preserve the existing database when key access fails.
@@ -13,6 +14,7 @@
 ## Shared desktop interaction
 
 - Keep the shell height in `src/app/shell.css` so the workspace fits beneath the title bar. Doctor/Dentist clinic sections inherit this height and keep their forms/actions visible; scroll notes, patient lists and other long components internally. The clinic CSS enables this at 1024px × 700px and above, with an accessible flowing fallback below that. Do not restore whole-workspace scrolling for ordinary clinic sections. Run `npm run build` and `npm run test:layout` when changing these constraints.
+- Database Studio, account lists, Privacy & audit, and Incident Records use the same desktop breakpoint and flowing fallback. Keep their headings and controls in the available workspace and scroll the record lists independently. Their layout rules live in `features/admin/AdminConsole.css` and `features/admin/database-studio.css` under `src/`.
 - Use `src/shared/ui/Dialog.tsx` for modal workflows, `ConfirmAction.tsx` for destructive confirmations, and `feedback.tsx` for inline action status. Keep save and draft state in the feature controller.
 - Use `data-dialog-initial` on the heading for long reviews or on the safe action for destructive confirmations. Group headings and actions with `dialog-header` and `dialog-footer`. Keep form drafts safe from outside clicks.
 - Prescribing lives in `StructuredPrescriptionGenerator.tsx`, `MedicationEditor.tsx` and `StructuredPrescriptionReview.tsx`; `PrescriptionGenerator.tsx` retains the import entry. Keep drafts in memory, invalidate review on edits, and retain the exact body/UUID after uncertain issuance until a retry resolves it. Server capability detection gates issuance. [Contract](../../server/STRUCTURED-PRESCRIBING.md).

@@ -5,6 +5,10 @@ const API_BASE_URL = (appConfig.apiBaseUrl || 'https://localhost:5000').replace(
 const VITE_URL = 'https://127.0.0.1:5173';
 const WINDOWS_APP_ID = 'com.psu.valetudo.desktop';
 
+function getWindowsAppId(isPackaged) {
+  return isPackaged ? WINDOWS_APP_ID : `${WINDOWS_APP_ID}.dev`;
+}
+
 /** Native window title — also rendered by the app-drawn title strip. */
 const WINDOW_TITLE = 'LeoVital HealthLink - PSU Lingayen Infirmary';
 
@@ -28,6 +32,7 @@ module.exports = {
   API_BASE_URL,
   VITE_URL,
   WINDOWS_APP_ID,
+  getWindowsAppId,
   WINDOW_TITLE,
   TITLEBAR_HEIGHT,
   CUSTOM_TITLE_BAR: supportsSystemBackdrop(),

@@ -969,10 +969,10 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
   const suspendedUsersCount = usersList.length - activeUsersCount;
 
   return (
-    <div style={{ width: '100%' }}>
+    <div className="admin-workspace">
       {notice}
       {confirmation}
-      <div data-workspace-view>
+      <div className="admin-workspace-view" data-workspace-view>
       {/* ── Header ────────────────────────────────────────────── */}
       {activeTab !== 'terminal' && (activeTab !== 'analytics' || !can('ANALYTICS_VIEW')) && <div className="vd-page-head">
         <div className="vd-page-head-eyebrow">Administration</div>
@@ -987,7 +987,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
           {activeTab === 'serverPolicy' && 'Server Policy'}
         </h1>
         <p className="vd-page-head-sub">
-          {activeTab === 'users' && 'Manage institutional accounts, access permissions and account status. Seven RBAC roles govern access. Editing a user changes their assigned permissions; suspending an account disables access without deleting its profile.'}
+          {activeTab === 'users' && 'Manage institutional accounts, permissions and account status.'}
           {activeTab === 'archived' && 'Review accounts that have been archived. Sign-in is disabled; associated clinical and audit history is retained.'}
           {activeTab === 'audit' && 'Trace access and changes to clinic information with read-only audit records.'}
           {activeTab === 'telemetry' && 'Service telemetry and clinical data lifecycle governance, in one place.'}
@@ -1059,7 +1059,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: USERS                                                 */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      {(activeTab === 'users' || activeTab === 'archived') && <div id="admin-account-panel-users"
+      {(activeTab === 'users' || activeTab === 'archived') && <div className="admin-panel" id="admin-account-panel-users"
         role="tabpanel" aria-labelledby="admin-account-tab-users" tabIndex={0} hidden={activeTab !== 'users'}>
       {activeTab === 'users' && !can('USERS_MANAGE') && (<NoPermissionPanel required="USERS_MANAGE" />)}
       {activeTab === 'users' && can('USERS_MANAGE') && (
@@ -1091,7 +1091,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* TAB: ARCHIVED ACCOUNTS                                     */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      {(activeTab === 'users' || activeTab === 'archived') && <div id="admin-account-panel-archived"
+      {(activeTab === 'users' || activeTab === 'archived') && <div className="admin-panel" id="admin-account-panel-archived"
         role="tabpanel" aria-labelledby="admin-account-tab-archived" tabIndex={0} hidden={activeTab !== 'archived'}>
       {activeTab === 'archived' && !can('USERS_MANAGE') && (<NoPermissionPanel required="USERS_MANAGE" />)}
       {activeTab === 'archived' && can('USERS_MANAGE') && (

@@ -21,7 +21,7 @@ export default function ArchivedAccounts({
   filteredArchivedUsers,
 }: ArchivedAccountsProps) {
   return (
-    <div style={{
+    <div className="admin-bounded-view admin-table-card" style={{
       background: T.surface,
       border: `1px solid ${T.border}`,
       borderRadius: T.radius.lg,
@@ -90,7 +90,7 @@ export default function ArchivedAccounts({
               No archived accounts match your search.
             </div>
           ) : (
-            <div className="vd-table-wrap" style={{ overflowX: 'auto' }}>
+            <div className="vd-table-wrap admin-scroll-region" role="region" aria-label="Archived account records" tabIndex={0}>
               <table className="tbl" style={{ minWidth: 760 }}>
                 <thead>
                   <tr>

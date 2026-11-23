@@ -18,6 +18,7 @@ DROP TABLE IF EXISTS `SCHEMA_MIGRATIONS`;
 DROP TABLE IF EXISTS `LOCAL_SYNC_LOGS`;
 DROP TABLE IF EXISTS `PHI_ACCESS_LOGS`;
 DROP TABLE IF EXISTS `AUDIT_LOGS`;
+DROP TABLE IF EXISTS `INCIDENT_REPORT_DRAFTS`;
 DROP TABLE IF EXISTS `INCIDENT_REPORTS`;
 DROP TABLE IF EXISTS `EMERGENCY_ALERTS`;
 DROP TABLE IF EXISTS `MEDICAL_CLEARANCES`;
@@ -541,13 +542,15 @@ CREATE TABLE `EMERGENCY_ALERTS` (
   `dispatch_after` DATETIME(3) NULL,
   UNIQUE KEY `uq_sos_request` (`user_id`, `client_sos_id`),
   INDEX `idx_sos_dispatch` (`dispatch_after`, `alert_id`),
+  INDEX `idx_alert_history` (`status`, `created_at`, `alert_id`),
+  INDEX `idx_alert_report_work` (`status`, `resolved_at`, `alert_id`),
   SPATIAL INDEX `sp_idx_alert_location` (`location`),
   CONSTRAINT `fk_ea_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`),
   CONSTRAINT `fk_ea_responder` FOREIGN KEY (`assigned_responder_id`) REFERENCES `USERS` (`user_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
 -- 25. INCIDENT_REPORTS
--- Post-resolution documentation typed by a console operator after ANY responder
+-- Post-resolution documentation typed on desktop after authorized response staff
 -- closes an SOS as resolved. Identity fields (name, ID number, contact number)
 -- are pre-fetched live from the patient's profile rows; only the narrative,
 -- treatment notes and the confirmed resolution timestamp are typed here.
@@ -563,6 +566,7 @@ CREATE TABLE `INCIDENT_REPORTS` (
   `pdf_s3_key` VARCHAR(500) NULL COMMENT 'MinIO S3 key for incident report PDF',
   `pdf_retry_at` DATETIME NULL,
   INDEX `idx_pending_pdf` (`pdf_s3_key`, `report_id`),
+  INDEX `idx_report_history` (`created_at`, `report_id`),
   CONSTRAINT `fk_ir_alert` FOREIGN KEY (`alert_id`) REFERENCES `EMERGENCY_ALERTS` (`alert_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_ir_patient` FOREIGN KEY (`patient_user_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_ir_author` FOREIGN KEY (`documented_by`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE
@@ -571,6 +575,20 @@ CREATE TABLE `INCIDENT_REPORTS` (
 -- =============================================================================
 -- MODULE 5: SECURITY, COMPLIANCE (RA 10173) & OFFLINE SYNC
 -- =============================================================================
+
+-- Private desktop report drafts; narrative payloads use the crypto vault.
+CREATE TABLE `INCIDENT_REPORT_DRAFTS` (
+  `alert_id` BIGINT NOT NULL,
+  `author_id` BIGINT NOT NULL,
+  `payload` MEDIUMTEXT NOT NULL,
+  `revision` INT UNSIGNED NOT NULL DEFAULT 1,
+  `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `deferred_at` DATETIME(3) NULL,
+  PRIMARY KEY (`alert_id`, `author_id`),
+  INDEX `idx_report_draft_author` (`author_id`, `updated_at`, `alert_id`),
+  CONSTRAINT `fk_report_draft_alert` FOREIGN KEY (`alert_id`) REFERENCES `EMERGENCY_ALERTS` (`alert_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_report_draft_author` FOREIGN KEY (`author_id`) REFERENCES `USERS` (`user_id`) ON DELETE CASCADE
+) ENGINE=InnoDB;
 
 -- 26. AUDIT_LOGS
 CREATE TABLE `AUDIT_LOGS` (
@@ -586,6 +604,7 @@ CREATE TABLE `AUDIT_LOGS` (
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `prev_hash` VARCHAR(64) NOT NULL,
   `entry_hash` VARCHAR(64) NOT NULL COMMENT 'SHA-256(prev_hash + row data)',
+  INDEX `idx_alert_audit_history` (`table_affected`, `record_id`, `created_at`, `audit_id`),
   CONSTRAINT `fk_al_user` FOREIGN KEY (`user_id`) REFERENCES `USERS` (`user_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
@@ -724,13 +743,14 @@ UPDATE `USERS` SET `is_qualified_responder` = 1,
        `qualified_responder_note` = 'Trained volunteer responder — seed demo (student)'
  WHERE `user_id` = 5;
 
--- STAFF_PROFILES (clinical + admin)
+-- STAFF_PROFILES (clinical, emergency response, and admin)
 -- admin_no is populated ONLY for the ADMIN role; NULL for the rest.
--- license_no is populated for DOCTOR / NURSE / DENTIST; NULL for ADMIN.
+-- license_no is populated for the seeded DOCTOR / NURSE / DENTIST accounts.
 INSERT INTO `STAFF_PROFILES` (`user_id`, `admin_no`, `license_no`, `specialty`, `department`) VALUES
 (1, 'PSU-ADM-2024-0001', NULL,             'System Administration',      'PSU Lingayen Clinic'),
 (2, NULL,                'PRC-MD-098765',  'General Medicine',           'PSU Lingayen Clinic'),
 (3, NULL,                'PRC-RN-054321',  'Emergency & Triage Nursing', 'PSU Lingayen Clinic'),
+(4, NULL,                NULL,             'Campus Emergency Response', 'PSU Lingayen Quick-Response Unit'),
 (6, NULL,                'PRC-DDS-045678', 'Dentistry & Oral Health',    'PSU Lingayen Clinic');
 
 -- HEALTH_PROFILES — minimal for the demo patient-side accounts

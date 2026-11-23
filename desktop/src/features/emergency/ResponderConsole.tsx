@@ -6,11 +6,15 @@ import { API_BASE_URL } from '../../config/api';
 import { CLIENT_INSTANCE_ID } from '../../platform/realtime/clientInstance';
 import Icon from '../../shared/ui/Icon';
 import { formatReportedTime } from './reportedTime';
+import { useResponderAccess } from './ResponderAccess';
 
 export default function ResponderConsole() {
   const { notify, notice } = useActionFeedback();
   const [activeAlerts, setActiveAlerts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const { tier, refreshAccess, canUpdateStatus } = useResponderAccess();
+  const [updating, setUpdating] = useState<Set<number>>(new Set());
+  const inFlight = useRef(new Set<number>());
 
   /* ── Audio alarm (identical) ─────────────────────────────── */
   const playEmergencyAlarm = () => {
@@ -30,6 +34,7 @@ export default function ResponderConsole() {
 
   const alertRequest = useRef<AbortController | null>(null);
   const fetchAlerts = async (silent = false, replace = true) => {
+    if (!tier) return;
     if (alertRequest.current && !replace) return;
     alertRequest.current?.abort();
     const request = new AbortController();
@@ -41,6 +46,13 @@ export default function ResponderConsole() {
         headers: { Authorization: `Bearer ${token}` },
         signal: request.signal,
       });
+      if (request.signal.aborted) return;
+      if (res.status === 401 || res.status === 403) {
+        setActiveAlerts([]);
+        await refreshAccess(true);
+        return;
+      }
+      if (!res.ok) return;
       const data = await res.json();
       if (!request.signal.aborted && Array.isArray(data)) setActiveAlerts(data);
     } catch (err) {
@@ -55,6 +67,8 @@ export default function ResponderConsole() {
 
   const socket = useDesktopSocket();
   useEffect(() => {
+    setActiveAlerts([]);
+    if (!tier) return;
     fetchAlerts(false);
 
     const unsubscribe = subscribeToDesktopEvents(socket, (on) => {
@@ -93,19 +107,12 @@ export default function ResponderConsole() {
       clearInterval(interval);
       unsubscribe();
     };
-  }, [socket]);
+  }, [socket, tier]);
 
   const updateStatus = async (alertId: number, status: string) => {
-    setActiveAlerts((prev) =>
-      prev
-        .map((a) => (Number(a.alert_id) === Number(alertId) ? { ...a, status } : a))
-        .filter((a) =>
-          status === 'resolved' || status === 'false_alarm'
-            ? Number(a.alert_id) !== Number(alertId)
-            : true
-        )
-    );
-
+    if (!canUpdateStatus(status) || inFlight.current.has(alertId)) return;
+    inFlight.current.add(alertId);
+    setUpdating(new Set(inFlight.current));
     const token = localStorage.getItem('valetudo_token');
     try {
       const response = await fetch(`${API_BASE_URL}/api/emergency/${alertId}/status`, {
@@ -119,12 +126,16 @@ export default function ResponderConsole() {
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
+        if (response.status === 401 || response.status === 403) await refreshAccess(true);
         throw new Error(body.error || 'The server rejected the status update.');
       }
       fetchAlerts(true);
     } catch (err) {
       notify('Could not update the SOS status. Try again.', true);
       fetchAlerts(true);
+    } finally {
+      inFlight.current.delete(alertId);
+      setUpdating(new Set(inFlight.current));
     }
   };
 
@@ -375,7 +386,7 @@ export default function ResponderConsole() {
                       Blood type
                     </div>
                     <div style={{ fontSize: 16, fontWeight: 800, color: T.text }}>
-                      {a.blood_type || 'Unknown'}
+                      {tier === 'clinical' && a.medicalDetailsRedacted === false ? (a.blood_type || 'Unknown') : 'Restricted'}
                     </div>
                   </div>
                   <div>
@@ -389,7 +400,7 @@ export default function ResponderConsole() {
                       fontSize: 14, fontWeight: 800,
                       color: allergyIsWarning ? T.danger : T.success,
                     }}>
-                      {allergyIsWarning ? `${a.allergies}` : (a.allergies || 'None listed')}
+                      {tier === 'clinical' && a.medicalDetailsRedacted === false ? (allergyIsWarning ? `${a.allergies}` : (a.allergies || 'None listed')) : 'Restricted'}
                     </div>
                   </div>
                   <div>
@@ -455,6 +466,7 @@ export default function ResponderConsole() {
                   {a.status === 'triggered' && (
                     <button
                       type="button"
+                      disabled={updating.has(a.alert_id)}
                       onClick={() => updateStatus(a.alert_id, 'acknowledged')}
                       style={{
                         padding: '10px 20px', borderRadius: T.radius.pill,
@@ -467,17 +479,19 @@ export default function ResponderConsole() {
                       Acknowledge
                     </button>
                   )}
-                  {a.status !== 'dispatched' && (
+                  {tier === 'clinical' && a.status !== 'dispatched' && (
                     <button
                       type="button"
+                      disabled={updating.has(a.alert_id)}
                       onClick={() => updateStatus(a.alert_id, 'dispatched')}
                       style={{ ...btnPrimary, padding: '10px 20px' }}
                     >
                       Dispatch team
                     </button>
                   )}
-                  <button
+                  {tier === 'clinical' && <button
                     type="button"
+                    disabled={updating.has(a.alert_id)}
                     onClick={() => updateStatus(a.alert_id, 'resolved')}
                     style={{
                       padding: '10px 18px', borderRadius: T.radius.pill,
@@ -488,9 +502,10 @@ export default function ResponderConsole() {
                     }}
                   >
                     Resolve
-                  </button>
-                  <button
+                  </button>}
+                  {tier === 'clinical' && <button
                     type="button"
+                    disabled={updating.has(a.alert_id)}
                     onClick={() => updateStatus(a.alert_id, 'false_alarm')}
                     style={{
                       padding: '10px 16px', borderRadius: T.radius.pill,
@@ -501,7 +516,7 @@ export default function ResponderConsole() {
                     }}
                   >
                     False alarm
-                  </button>
+                  </button>}
                 </div>
               </div>
             );

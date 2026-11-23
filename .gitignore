@@ -45,3 +45,7 @@ output
 
 #fails
 /desktop/release-refactor
+
+#documentation_templates
+BACKEND-STUDY-GUIDE.md
+POSTMAN-API-GUIDE.md

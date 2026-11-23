@@ -1,6 +1,7 @@
 import { useActionFeedback } from '../../shared/ui/feedback';
 // desktop/src/features/emergency/EmergencyAlertBanner.tsx
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useResponderAccess } from './ResponderAccess';
 import { subscribeToDesktopEvents, useDesktopSocket } from '../../platform/realtime/desktopRealtime';
 import { API_BASE_URL } from '../../config/api';
 import { CLIENT_INSTANCE_ID } from '../../platform/realtime/clientInstance';
@@ -34,7 +35,10 @@ interface EmergencyAlert {
 export default function EmergencyAlertBanner() {
   const { notify, notice } = useActionFeedback();
   const [alerts, setAlerts] = useState<EmergencyAlert[]>([]);
-  const [authorized, setAuthorized] = useState(false);
+  const { tier, refreshAccess, canUpdateStatus } = useResponderAccess();
+  const [updating, setUpdating] = useState<Set<number>>(new Set());
+  const inFlight = useRef(new Set<number>());
+  const refreshAlerts = useRef<(() => Promise<void>) | null>(null);
   const socket = useDesktopSocket();
 
   // Synthesize an audible emergency alert chime using Web Audio API
@@ -54,16 +58,19 @@ export default function EmergencyAlertBanner() {
 
   useEffect(() => {
     const token = localStorage.getItem('valetudo_token');
-    if (!token) return;
+    if (!token || !tier) {
+      setAlerts([]);
+      return;
+    }
 
-    let accessGranted = false;
+    let accessGranted = true;
     let request: AbortController | undefined;
     let alertVersion = 0;
 
     const clearAccess = () => {
       accessGranted = false;
-      setAuthorized(false);
       setAlerts([]);
+      void refreshAccess(true);
     };
 
     const fetchActiveAlerts = async () => {
@@ -75,21 +82,6 @@ export default function EmergencyAlertBanner() {
         signal: controller.signal,
       };
       try {
-        const access = await fetch(`${API_BASE_URL}/api/emergency/responder-access`, options);
-        if (controller.signal.aborted) return;
-        if (!access.ok) {
-          clearAccess();
-          return;
-        }
-        const capability = await access.json();
-        if (controller.signal.aborted) return;
-        if (capability?.authorized !== true) {
-          clearAccess();
-          return;
-        }
-
-        accessGranted = true;
-        setAuthorized(true);
         const snapshotVersion = alertVersion;
         const res = await fetch(`${API_BASE_URL}/api/emergency/active`, options);
         if (controller.signal.aborted) return;
@@ -131,13 +123,10 @@ export default function EmergencyAlertBanner() {
       } catch (_) {}
     };
 
+    refreshAlerts.current = fetchActiveAlerts;
     void fetchActiveAlerts();
     const unsubscribe = subscribeToDesktopEvents(socket, (on) => {
       on('reconnect', fetchActiveAlerts);
-      on('responder:status_changed', () => {
-        clearAccess();
-        void fetchActiveAlerts();
-      });
       on('emergency:new_alert', (newAlert: EmergencyAlert) => {
         if (!accessGranted) return;
         alertVersion += 1;
@@ -170,11 +159,16 @@ export default function EmergencyAlertBanner() {
 
     return () => {
       request?.abort();
+      accessGranted = false;
+      if (refreshAlerts.current === fetchActiveAlerts) refreshAlerts.current = null;
       unsubscribe();
     };
-  }, [socket]);
+  }, [socket, tier, refreshAccess]);
 
   const updateStatus = async (alertId: number, status: string) => {
+    if (!canUpdateStatus(status) || inFlight.current.has(alertId)) return;
+    inFlight.current.add(alertId);
+    setUpdating(new Set(inFlight.current));
     const token = localStorage.getItem('valetudo_token');
     try {
       const response = await fetch(`${API_BASE_URL}/api/emergency/${alertId}/status`, {
@@ -188,22 +182,27 @@ export default function EmergencyAlertBanner() {
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
+        if (response.status === 401 || response.status === 403) await refreshAccess(true);
         throw new Error(body.error || 'The server rejected the status update.');
       }
+      await refreshAlerts.current?.();
     } catch (err: any) {
       notify(`Could not update the SOS status. ${err.message}`, true);
+    } finally {
+      inFlight.current.delete(alertId);
+      setUpdating(new Set(inFlight.current));
     }
   };
 
   // Display alerts only after live responder access has been confirmed.
-  if (!authorized) return null;
+  if (!tier || (alerts.length === 0 && !notice)) return null;
 
   return (
     <div style={{ marginBottom: 20 }}>
       {notice}
       {/* ACTIVE EMERGENCY ALERTS BANNER */}
       {alerts.map((alert) => {
-        const redacted = alert.medicalDetailsRedacted === true;
+        const redacted = tier !== 'clinical' || alert.medicalDetailsRedacted !== false;
         return (
           <div key={alert.alertId} className="ea-alert">
             <div className="ea-alert-head">
@@ -275,31 +274,35 @@ export default function EmergencyAlertBanner() {
               {alert.status === 'triggered' && (
                 <button
                   className="ea-action ea-action-ack"
+                  disabled={updating.has(alert.alertId)}
                   onClick={() => updateStatus(alert.alertId, 'acknowledged')}
                 >
                   Acknowledge Alert
                 </button>
               )}
-              {alert.status !== 'dispatched' && (
+              {tier === 'clinical' && alert.status !== 'dispatched' && (
                 <button
                   className="ea-action ea-action-dispatch"
+                  disabled={updating.has(alert.alertId)}
                   onClick={() => updateStatus(alert.alertId, 'dispatched')}
                 >
                   Dispatch Response Team
                 </button>
               )}
-              <button
+              {tier === 'clinical' && <button
                 className="ea-action ea-action-resolve"
+                disabled={updating.has(alert.alertId)}
                 onClick={() => updateStatus(alert.alertId, 'resolved')}
               >
                 Mark Resolved
-              </button>
-              <button
+              </button>}
+              {tier === 'clinical' && <button
                 className="ea-action ea-action-false"
+                disabled={updating.has(alert.alertId)}
                 onClick={() => updateStatus(alert.alertId, 'false_alarm')}
               >
                 False Alarm
-              </button>
+              </button>}
             </div>
           </div>
         );

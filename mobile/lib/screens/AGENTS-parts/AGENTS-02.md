@@ -31,6 +31,7 @@
 ### login_screen.dart
 - [Slice map](../codeslice/MB-06-LoginScreen.md).
 - `_handleLogin` persists the JWT and user, binds the account theme and starts the shared alert session. Device registration runs asynchronously.
+- Sign-in bounds the wait for the API response and distinguishes unreachable servers, TLS failures and responses it cannot parse.
 - After storing the session, bind its account theme through `AccountThemeScope` before navigation. Never carry the previous account's theme into a new sign-in.
 
 ### splash_screen.dart

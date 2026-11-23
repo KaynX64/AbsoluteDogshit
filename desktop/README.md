@@ -20,13 +20,13 @@ npm run dist
 
 `npm run build` checks both TypeScript projects before building the renderer. `npm run dist` creates the Windows installer and unpacked app under `release/`. Do not edit or commit generated `dist/` or `release/` output.
 
-Windows uses `src/assets/valetudo_icon.ico` for the executable and the running window's taskbar icon. The packaged app also copies the icon into its resources folder for Electron to load at startup. Keep executable resource editing enabled and use the same application ID for Electron and the installer shortcuts. If an existing pin still shows the old icon after updating, unpin it, open the updated app, then pin it again.
+Windows uses `src/assets/valetudo_icon.ico` for the executable, the running window, and new taskbar pins. The installed app and its Start Menu shortcut share a Windows application ID. Development uses a separate ID so a shortcut to Electron cannot share the installed app's taskbar button. If an existing pin still shows the old icon, unpin it and pin the updated app from the Start Menu.
 
 ## Verification
 
 ```powershell
 npm test
-# Check compact Doctor/Dentist layouts using the current renderer build
+# Check clinic layouts and admin workspace scrolling
 npm run build
 npm run test:layout
 npm run test:smoke
@@ -38,11 +38,13 @@ npm run test:smoke -- 'release/alternate/win-unpacked/Valetudo HealthLink.exe' -
 
 Packaged smoke tests use synthetic data and an isolated profile to check preload, assets, SQLite replay, encounters, roles, profiles and permissions. They report startup timings and heap snapshots. Use Node.js with native WebSocket and SQLite support.
 
+The Console and layout check use Chromium's hardware acceleration when the workstation supports it. The Console removes the GPU, GPU compositing, and GPU rasterization disable flags at startup. Chromium can still fall back to software when the hardware or driver is unavailable. The Console logs when Chromium reports that hardware compositing is unavailable.
+
 ## Desktop interaction
 
 The dedicated responder console shows when each SOS was reported in Philippine time (PHT).
 
-Doctor/Dentist sections use a [compact, contained layout](docs/COMPACT-CLINIC.md). Prescribing supports multiple medicines with clinic/external fulfillment per item, a retained session draft and explicit review before issue. Server support must be enabled; see [prescribing rollout and checks](../server/PRESCRIBING-ROLLOUT.md).
+Doctor/Dentist sections use a [compact, contained layout](docs/COMPACT-CLINIC.md). See [consultation documents](docs/CONSULTATION-DOCUMENTS.md) for prescribing, read-only History, and EMR workflows.
 
 Choose **Sign out** in the sidebar and confirm to end your session.
 
@@ -50,9 +52,11 @@ Super Admins can grant **Use server Terminal** when creating or editing a Limite
 
 Student, Faculty and Non-Teaching account creation includes optional sex, date of birth and emergency contact details.
 
+Database Studio, account lists, Privacy & audit, and Incident Records keep their controls visible at desktop window sizes. Scroll within a table, the System tables list, or the incident list to see more records. Database Studio's pagination stays below the table.
+
 The Admin Terminal focuses its command prompt as soon as the tab opens. Press Enter to run a command and keep typing in the prompt. New output stays in view while the terminal is following the latest line. Requests time out without locking the prompt.
 
-Hover over an analytics line graph to highlight the nearest reporting day and see its count. Use **View data** to read the same values with the keyboard.
+Hover over an analytics line graph to highlight the nearest reporting day and see its count. Use **View data** to read the same values with the keyboard. Expanded tables scroll within the workspace.
 
 Use the sidebar and keyboard to navigate. See [keyboard and dialog behavior](docs/COMPACT-CLINIC.md#keyboard-and-dialogs) for tab activation, focus and draft handling.
 
@@ -81,3 +85,15 @@ The renderer bundles [Material Symbols Outlined](./src/img_icons/material-symbol
 Vite reads the checked-in font files during the build and packages them with their [licenses](./public/licenses/). Once npm dependencies are installed, `npm run build` and renderer icon and font loading work without Google or internet access. The icon font comes from [Google's Material Design Icons repository at `10ecc147`](https://github.com/google/material-design-icons/tree/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/variablefont).
 
 Feature controllers and their views live in `src/features/`. See the [code-slice index](./docs/CODESLICE.md) for entry points.
+
+## SOS responder permissions
+
+Non-clinical Qualified Responders can acknowledge an incident, view its limited details and open the map. Acknowledgment keeps the incident active. Dispatch, Resolve, False alarm and official incident reporting require authorized response staff; the Qualified Responder flag never removes existing staff permissions. Access is checked live by the API and shared across the desktop SOS controls. Deploy the server restrictions before updated clients; older clients receive a permission error for forbidden actions.
+
+`npm run test:layout` also checks community/staff SOS buttons, live permission changes, denied closure and acknowledgment across the banner, dispatch console and nurse SOS band using synthetic fixtures in a hidden window.
+
+Response staff can open **Alert history** and **Incident reports** from the sidebar. **Needs report** includes all unfinished work, **My drafts** resumes private desktop autosaves, and **Filed** is read-only with PDFs. **Save and return** preserves deferred work; over-24-hour items are highlighted. Draft conflicts preserve local text. Install server migration **015** before updated clients. [Workflow, permissions and API guide](../server/RESPONDER-RECORDS.md).
+
+Returning to the app refreshes responder records in the background without clearing the visible table. Filter changes still load a new result set, and revoked permissions clear protected records. Empty SOS banners take no space above the page heading.
+
+Report tabs prepare their default lists in the background and reuse recently loaded results when switching. Only search typing has a debounce delay. The bounded cache stays in memory, is invalidated by report updates and focus refreshes, and clears on access loss or leaving the records page; it never stores patient information in browser storage.

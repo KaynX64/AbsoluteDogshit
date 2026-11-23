@@ -7,6 +7,7 @@ const { WINDOWS_APP_ID } = require('../electron/config.cjs');
 const { build } = require('../package.json');
 
 const windowModulePath = require.resolve('../electron/window.cjs');
+const fixtureAppPath = path.join(__dirname, 'fixture project');
 
 function createWindowFixture(isPackaged = false) {
   let createdWindow;
@@ -29,6 +30,7 @@ function createWindowFixture(isPackaged = false) {
     loadURL() {}
     loadFile() {}
     setTitle() {}
+    setAppDetails(details) { this.appDetails = details; }
     show() { this.visible = true; }
     focus() {}
     isVisible() { return this.visible; }
@@ -38,7 +40,12 @@ function createWindowFixture(isPackaged = false) {
   }
 
   const electron = {
-    app: { isPackaged, getPath: () => 'fixture' },
+    app: {
+      isPackaged,
+      getName: () => 'HealthLink',
+      getAppPath: () => fixtureAppPath,
+      getPath: () => 'fixture',
+    },
     BrowserWindow: FakeBrowserWindow,
     Menu: { setApplicationMenu() {} },
     shell: { openExternal: () => Promise.resolve(), showItemInFolder() {} },
@@ -88,4 +95,21 @@ test('packaged window still appears on ready-to-show', () => {
   win.emit('ready-to-show');
 
   assert.equal(win.visible, true);
+});
+
+test('Windows taskbar pins use the HealthLink icon and the correct launch target', { skip: process.platform !== 'win32' }, () => {
+  const installed = createWindowFixture(true);
+  const development = createWindowFixture();
+  assert.deepEqual(installed.appDetails, {
+    appId: build.appId,
+    appIconPath: installed.options.icon,
+    relaunchCommand: `"${process.execPath}"`,
+    relaunchDisplayName: 'HealthLink',
+  });
+  assert.deepEqual(development.appDetails, {
+    appId: `${build.appId}.dev`,
+    appIconPath: development.options.icon,
+    relaunchCommand: `"${process.execPath}" "${fixtureAppPath}"`,
+    relaunchDisplayName: 'HealthLink (Development)',
+  });
 });

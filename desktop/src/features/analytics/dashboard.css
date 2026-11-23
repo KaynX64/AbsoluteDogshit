@@ -138,7 +138,13 @@
 .an-trend figcaption { margin-top: .25em; font-size: .8125em; }
 .an-values { margin-top: .6em; }
 .an-values summary { width: fit-content; min-height: 2.15em; font-size: .8125em; font-weight: 650; }
-.an-table-wrap { overflow-x: auto; max-width: 100%; margin-top: .5em; }
+.an-table-wrap {
+  /* Keep the visually hidden caption inside the table's scroll container. */
+  position: relative;
+  overflow-x: auto;
+  max-width: 100%;
+  margin-top: .5em;
+}
 .an-table { border-collapse: collapse; width: 100%; font-size: .8125em; line-height: 1.35; }
 .an-table :is(th, td) { padding: .54em .62em; text-align: start; border-bottom: 1px solid var(--an-border); overflow-wrap: anywhere; }
 .an-table thead { background: var(--an-soft); }
