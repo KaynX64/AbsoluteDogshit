@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
+import { verifyReportLayout, verifyDocumentationSpacing } from './report-layout.mjs';
 
-export async function verifyResponderHistory(run, wait, screenshot) {
+export async function verifyResponderHistory(run, wait, screenshot, resize) {
   await run(`(() => {
     smoke.beforeHistoryFetch = window.fetch;
-    smoke.previousFrequency = document.querySelector('#rx-frequency').value;
-    smoke.fill(document.querySelector('#rx-frequency'), 'Unfinished consultation draft fixture');
     const at = new Date(Date.now() - 2 * 86400000).toISOString();
     smoke.historyState = { draft: null, filed: false, failSave: false, holdSave: false, saveCalls: 0, fileCalls: 0, pdfCalls: 0, canViewFiled: true };
     const base = { alertId: 91, patient: { userId: 5, name: 'Synthetic Campus Member', identifier: 'FIX-91', phone: '0000000000' },
@@ -20,7 +19,9 @@ export async function verifyResponderHistory(run, wait, screenshot) {
         if (state.holdList) await new Promise(resolve => { state.releaseList = () => { state.holdList = false; state.releaseList = null; resolve(); }; });
         if (state.failList) return Response.json({ error: 'Synthetic list refresh failure' }, { status: 503 });
         const empty = url.searchParams.get('search') === 'nomatch' || (path.endsWith('/reports') && !state.filed) || (path.endsWith('/report-worklist') && (state.filed || (url.searchParams.get('view') === 'drafts' && !state.draft)));
-        return Response.json({ records: empty ? [] : [row], nextCursor: null });
+        const records = state.manyRows ? Array.from({ length: 25 }, (_, index) => ({ ...row, alertId: 91 + index })) : [row];
+        return Response.json({ records: empty ? [] : url.searchParams.has('before') ? [{ ...row, alertId: 116 }] : records,
+          nextCursor: !empty && state.manyRows && !url.searchParams.has('before') ? 'layout-next-page' : null });
       }
       if (path.endsWith('/emergency/history/91')) return Response.json({ ...row, timeline: [{ status: 'triggered', at }, { status: 'resolved', at, actor: 'Synthetic Response Staff' }] });
       if (path.endsWith('/emergency/91/incident-report-draft')) {
@@ -50,6 +51,14 @@ export async function verifyResponderHistory(run, wait, screenshot) {
   await wait("document.querySelector('#responder-record-panel')?.textContent.includes('Synthetic Campus Member')");
   const headingInset = await run("document.querySelector('.rh-heading').getBoundingClientRect().top - document.querySelector('.app-content').getBoundingClientRect().top");
   assert.equal(headingInset, await run("parseFloat(getComputedStyle(document.querySelector('.app-content')).paddingTop)"), 'Reports heading starts at the normal Dispatch content inset without an empty banner');
+  await verifyDocumentationSpacing(run);
+  if (resize) await verifyReportLayout(run, wait, resize, screenshot);
+  await run("smoke.click('Queue', '.sb-item')");
+  await wait("document.querySelector('#rx-frequency')?.getClientRects().length");
+  await run(`smoke.previousFrequency = document.querySelector('#rx-frequency').value;
+    smoke.fill(document.querySelector('#rx-frequency'), 'Unfinished consultation draft fixture');
+    smoke.click('Incident reports', '.sb-item');`);
+  await wait("document.querySelector('#responder-record-panel')?.textContent.includes('Synthetic Campus Member')");
   const verifyFocusRefresh = async () => {
     await wait("document.querySelector('#responder-record-panel').getAttribute('aria-busy') === 'false'");
     await run(`smoke.visibleRecordRow = document.querySelector('.rh-table tbody tr');
@@ -90,6 +99,7 @@ export async function verifyResponderHistory(run, wait, screenshot) {
   await screenshot?.('responder-report-editor');
   await run("smoke.click('Save and return', 'dialog button')");
   await wait("!document.querySelector('dialog[open]') && document.querySelector('#responder-record-panel').textContent.includes('My draft saved')");
+  await verifyDocumentationSpacing(run);
   assert.equal(await run('Boolean(smoke.historyState.deferredAt)'), true);
   await run("smoke.click('Resume draft', '#responder-record-panel button')");
   await wait("document.querySelector('.rh-editor textarea')?.value === 'Latest synthetic draft typed during save'");
@@ -111,6 +121,7 @@ export async function verifyResponderHistory(run, wait, screenshot) {
   assert.equal(await run('smoke.historyState.draft'), null);
   await run("smoke.click('Filed', '.rh-tabs button')");
   await wait("document.querySelector('#responder-record-panel').textContent.includes('IR-17')");
+  await verifyDocumentationSpacing(run);
   assert.equal(await run('smoke.historyState.pdfCalls'), 0);
   await run("smoke.click('View', '#responder-record-panel button')");
   await wait("document.querySelector('dialog')?.textContent.includes('Final synthetic narrative')");

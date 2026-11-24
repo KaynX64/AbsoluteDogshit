@@ -1,3 +1,4 @@
+import { resolveResponderAccess } from '../../emergency/responderAccess.js';
 // Reads and updates the signed-in user's profile under the privacy consent gate.
 
 import { pool } from '../../db/pool.js';
@@ -51,7 +52,7 @@ export function registerSelfProfileRead(router) {
 
       // UI hint only — the flag is a display/UX switch. Authorization for SOS
       // routes is always resolved live (requireResponderAccess reads the DB).
-      userRows[0].is_qualified_responder = Boolean(userRows[0].is_qualified_responder);
+      userRows[0].is_qualified_responder = (await resolveResponderAccess(userId)).isQualifiedResponder;
 
       // Fetch clinical profile from HEALTH_PROFILES
       const [healthRows] = await pool.query(

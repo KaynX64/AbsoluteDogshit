@@ -12,13 +12,13 @@ Sibling of this directory's `AGENTS.md`. Each mobile monolith has its own slice 
 
 | ID | File | LOC | Commit | Map | Role |
 |---|------|-----|--------|-----|------|
-| MB-01 | `mobile/lib/screens/patient_portal_screen.dart` | 3545 | e0aadaa | `codeslice/MB-01-PatientPortalScreen-parts/` | Patient 5-tab shell: overview/QR pass, appointments, SOS, documents, profile; queue socket, offline SOS |
-| MB-02 | `mobile/lib/screens/consultation_scheduler_screen.dart` | 2235 | f8d61a1 | `codeslice/MB-02-ConsultationSchedulerScreen.md` | Appointment booking and cancellation screen (Book a consultation + My appointments tabs) with live slot sync. |
-| MB-03 | `mobile/lib/screens/documents_viewer_screen.dart` | 2140 | working tree | `codeslice/MB-03-DocumentsViewerScreen.md` | Documents viewer: immutable recorded prescriptions, clearances, lab/imaging, QR verification and streamed PDF download. |
+| MB-01 | `mobile/lib/screens/patient_portal_screen.dart` | 3461 | e0aadaa | `codeslice/MB-01-PatientPortalScreen-parts/` | Patient 5-tab shell: overview/QR pass, appointments, SOS, documents, profile; queue socket, offline SOS |
+| MB-02 | `mobile/lib/screens/consultation_scheduler_screen.dart` | 2287 | f8d61a1 | `codeslice/MB-02-ConsultationSchedulerScreen.md` | Appointment booking and cancellation screen (Book a consultation + My appointments tabs) with live slot sync. |
+| MB-03 | `mobile/lib/screens/documents_viewer_screen.dart` | 2198 | working tree | `codeslice/MB-03-DocumentsViewerScreen.md` | Documents viewer: immutable recorded prescriptions, clearances, lab/imaging, QR verification and streamed PDF download. |
 | MB-04 | `mobile/lib/screens/responder_screen.dart` | 88 | working tree | `codeslice/MB-04-ResponderScreen.md` | Dedicated responder route using the shared incident roster and duty controls. |
 | MB-05 | `mobile/lib/screens/change_password_screen.dart` | 483 | 500434b | `codeslice/MB-05-ChangePasswordScreen.md` | Change-password form with accessible field errors and a return to sign-in after success |
 | MB-06 | `mobile/lib/screens/login_screen.dart` | 495 | working tree | `codeslice/MB-06-LoginScreen.md` | Login form: POST /api/auth/login, persists jwt_token + user_data, routes EMERGENCY_RESPONDER to ResponderScreen else PatientPortalScreen |
-| MB-07 | `mobile/lib/services/emergency_alert_service.dart` | 1196 | working tree | `codeslice/MB-07-EmergencyAlertService.md` | Authenticated SOS service for incident reconciliation, FCM, duty modes and foreground audio. |
+| MB-07 | `mobile/lib/services/emergency_alert_service.dart` | 1218 | working tree | `codeslice/MB-07-EmergencyAlertService.md` | Authenticated SOS service for incident reconciliation, FCM, duty modes and foreground audio. |
 | MB-08 | `mobile/lib/widgets/responder_hub.dart` | 514 | working tree | `codeslice/MB-08-ResponderHub.md` | Shared responder entry, roster, Android duty controls and incident detail sheet |
 | MB-09 | `mobile/lib/screens/responder_records_view.dart` | 532 | working tree | `codeslice/MB-09-ResponderRecordsView.md` | Searchable read-only alert history and pending/filed incident reports |
 

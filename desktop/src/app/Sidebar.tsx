@@ -49,7 +49,7 @@ export default function Sidebar({ role, onSignOut, onChangePassword, activeItem,
               style={{ cursor: onItemClick ? 'pointer' : 'default', position: 'relative' }}
             >
               <Icon name={item.icon} size={20} />
-              <span>{item.label}</span>
+              <span className={item.key === 'qualifications' ? 'sb-qualification-label' : undefined}>{item.key === 'qualifications' ? <>Responder <br />qualifications</> : item.label}</span>
               {badge > 0 && (
                 <span className="sb-badge">
                   {badge > 99 ? '99+' : badge}

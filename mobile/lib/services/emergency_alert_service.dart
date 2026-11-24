@@ -102,6 +102,7 @@ class EmergencyAlertService {
   final reportSummary = ValueNotifier<ReportWorkSummary?>(null);
   final reportSummaryError = ValueNotifier<String?>(null);
   Future<void>? _reportSummaryRequest;
+  Timer? _qualificationExpiry;
   final _storage = const FlutterSecureStorage(
     aOptions: AndroidOptions(storageNamespace: 'responder_device'),
   );
@@ -202,6 +203,8 @@ class EmergencyAlertService {
   }
 
   void endSession({bool preserveNotification = false}) {
+    _qualificationExpiry?.cancel();
+    _qualificationExpiry = null;
     MobileSessionData.instance.clear();
     _session++;
     _accessVersion++;
@@ -386,6 +389,8 @@ class EmergencyAlertService {
   }
 
   void _clearAccess() {
+    _qualificationExpiry?.cancel();
+    _qualificationExpiry = null;
     _accessVersion++;
     _accessRequest = null;
     _announced.clear();
@@ -441,6 +446,23 @@ class EmergencyAlertService {
         _clearAccess();
       }
       roster.setAccess(tier as String, result['isQualifiedResponder'] == true);
+      _qualificationExpiry?.cancel();
+      final expiresAt = DateTime.tryParse(
+        result['expiresAt']?.toString() ?? '',
+      );
+      if (expiresAt != null) {
+        final remaining = expiresAt.difference(DateTime.now());
+        final delay = remaining.isNegative
+            ? Duration.zero
+            : remaining > const Duration(days: 24)
+            ? const Duration(days: 24)
+            : remaining;
+        _qualificationExpiry = Timer(delay, () {
+          if (!_current(session)) return;
+          _clearAccess();
+          unawaited(recover());
+        });
+      }
       if (tier == 'clinical') unawaited(refreshReportSummary());
       return true;
     } catch (error) {

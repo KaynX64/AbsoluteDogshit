@@ -11,7 +11,7 @@ class ApiConfig {
     const configuredUrl = String.fromEnvironment('API_BASE_URL');
     if (configuredUrl.isEmpty) {
       return !kIsWeb && defaultTargetPlatform == TargetPlatform.android
-          ? 'https://192.168.1.62:5000'
+          ? 'https://192.168.100.69:5000'
           : 'https://localhost:5000';
     }
 

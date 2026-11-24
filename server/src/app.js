@@ -11,6 +11,7 @@ import profileRoutes from './routes/profile/index.js';
 import healthPassRoutes from './routes/healthPass.js';
 import appointmentRoutes from './routes/appointments/index.js';
 import emergencyRouter from './routes/emergency/index.js';
+import responderQualifications from './routes/responderQualifications.js';
 import inventoryRoutes from './routes/inventory/index.js';
 import documentRoutes from './routes/documents/index.js';
 import adminRoutes from './routes/admin/index.js';
@@ -123,6 +124,7 @@ export function mountApiRoutes(app, io, { restart } = {}) {
   app.use('/api/health-pass', healthPassRoutes);
   app.use('/api/appointments', appointmentRoutes(io));
   app.use('/api/emergency', emergencyRouter(io));
+  app.use('/api/responder-qualifications', responderQualifications(io));
   app.use('/api/inventory', inventoryRoutes(io));
   app.use('/api/documents', documentRoutes(io));
   app.use('/api/admin', adminRoutes(io, restart));

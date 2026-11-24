@@ -17,9 +17,17 @@ npm run test:layout
 
 The check uses the local Electron dependency in a hidden window. It does not exercise installed-app packaging or the live API. The packaged workflow suite remains `npm run test:smoke` after building an unpacked release.
 
+Use `npm run test:layout -- --admin-only` for focused Admin checks, or add `--dark` for dark mode. Account checks cover both lists at 1917×1020, 1366×768 and 1024×700; they verify table height, horizontal scrolling, all role options, status/responder filters, sorting, search, expandable permissions help and the small-window fallback. Screenshots use the `accounts-` prefix.
+
+The same checks open native dropdown menus to verify shared rounded picker/option styling, keyboard selection, Escape/focus behavior, the top-bar role menu and layering inside dialogs. Open-menu screenshots use the `rounded-` prefix.
+
+The layout check also verifies sidebar count contrast across all six preset/mode combinations and responder documentation spacing. Alert history and Incident reports are checked with overflowing, paginated fixtures after navigation from Doctor, Dentist, Nurse and Responder workspaces, including a 1024 × 700 desktop and a 900 × 650 flowing fallback. Use `npm run test:layout -- --dark` to run the surrounding clinic checks in dark mode as well.
+
 ## Keyboard and dialogs
 
 Use the sidebar to change workspaces. In tab groups, use Left and Right Arrow to move, and Home or End to jump to the first or last tab. Doctor/Dentist and Analytics activate local panels as focus moves. Account and Inventory views activate with Enter or Space.
 
 Modal dialogs keep the keyboard inside and return focus when dismissed. Read-only previews support clicking outside. Editable dialogs use their Close, Cancel, or Return to form actions. During a save, wait for the result. For a failed save, use the action again after reviewing the error. SOS incident documentation still supports **Skip for now**.
+
+Add account has one scrolling field body between a stationary header and footer. Cancel/Create account remain at the card's bottom, without overlaying permission cards or leaving visible fields below the buttons. The Admin layout check verifies this at 1366×768, 1024×720, 620×900 and 800×520, at the top/middle/bottom of a long permissions form, in light and dark modes.
 

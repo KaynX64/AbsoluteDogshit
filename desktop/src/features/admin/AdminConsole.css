@@ -2,10 +2,54 @@
   width: 100%;
 }
 
+/* A single form scroller between normal-flow header/footer rows. */
+.desktop-dialog.admin-create-user-dialog { overflow:hidden; }
+.desktop-dialog.admin-create-user-dialog > .admin-create-user-card {
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+  max-height:min(90dvh, calc(100dvh - 32px));
+  overflow:hidden;
+  padding:0;
+}
+.admin-create-user-dialog .admin-create-user-card > .dialog-header {
+  position:static;
+  flex:0 0 auto;
+  padding:20px 24px 16px;
+  border-bottom:1px solid var(--border);
+}
+.admin-create-user__form { display:flex; flex-direction:column; flex:1 1 auto; min-height:0; overflow:hidden; margin:0; }
+.admin-create-user__body { flex:1 1 auto; min-height:0; overflow:auto; overscroll-behavior:contain; padding:20px 24px; }
+.desktop-dialog.admin-create-user-dialog .admin-create-user__footer { position:static; flex:0 0 auto; margin:0; padding:12px 24px; }
+.admin-create-user-dialog :is(input,textarea,select,button,summary) { scroll-margin-block:12px; }
+@media(max-width:650px) {
+  .admin-create-user-dialog .admin-create-user-card > .dialog-header { padding:16px; }
+  .admin-create-user__body { padding:16px; }
+  .desktop-dialog.admin-create-user-dialog .admin-create-user__footer { padding:12px 16px; }
+}
+
+.admin-workspace-view[data-account-workspace='true'] > .vd-page-head { gap:4px; margin-bottom:10px; }
+.admin-workspace-view[data-account-workspace='true'] .vd-page-head-eyebrow { display:none; }
+.admin-workspace-view[data-account-workspace='true'] .vd-page-head-sub { margin:0; max-width:none; font-size:12px; }
+.admin-account-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px 16px; flex-wrap:wrap; margin-bottom:10px; }
+.admin-account-search { position:relative; flex:1 1 260px; max-width:520px; min-width:0; }
+.admin-account-counts { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.admin-account-filter { display:flex; align-items:center; gap:8px; color:var(--text-sub); font-size:12px; }
+.admin-account-filter select { min-height:36px; padding:7px 10px; border:1px solid var(--border); border-radius:var(--r-sm); background:var(--surface); color:var(--text); font:inherit; }
+.admin-account-roles { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
+.admin-accounts-table tbody td { padding:12px 16px; line-height:1.5; }
+.admin-accounts-table td:nth-child(2) { min-width:150px; }
+.admin-accounts-table td:nth-child(3) { min-width:220px; white-space:nowrap; }
+.admin-accounts-table td:nth-child(4) { min-width:220px; }
+.admin-account-help { margin-top:8px; color:var(--text-sub); font-size:12px; line-height:1.5; }
+.admin-account-help summary { width:fit-content; cursor:pointer; padding:4px 0; }
+.admin-account-help p { margin:6px 0 0; max-width:100ch; }
+.admin-archived-toolbar { padding:10px 12px; margin:0; border-bottom:1px solid var(--border); }
+
 @media screen and (min-width: 1024px) and (min-height: 700px) {
   /* Only the record lists take the remaining height. Page controls keep their
      natural size so they can wrap without covering the records. */
-  .app-main:has(.admin-bounded-view) > :not(.app-content),
+  .app-main[data-workspace-kind='console']:has(.admin-bounded-view) > :not(.app-content),
   .admin-workspace:has(.admin-bounded-view) > .desktop-feedback,
   .admin-workspace-view:has(.admin-bounded-view) > :is(.vd-page-head, [role="tablist"]),
   .admin-bounded-view > :not(.admin-panel, .admin-table-card, .admin-scroll-region, .db-studio-body),
@@ -14,7 +58,7 @@
     flex-shrink: 0;
   }
 
-  .app-content:has(.admin-bounded-view),
+  .app-content[data-workspace-kind='console']:has(.admin-bounded-view),
   :is(.admin-workspace, .admin-workspace-view):has(.admin-bounded-view),
   :is(.admin-bounded-view, .admin-panel:not([hidden]), .admin-table-card) {
     display: flex;
@@ -24,9 +68,11 @@
     min-height: 0;
   }
 
-  .app-content:has(.admin-bounded-view) {
+  .app-content[data-workspace-kind='console']:has(.admin-bounded-view) {
     padding-block: clamp(14px, 2.5vh, 28px);
   }
+
+  .app-content[data-workspace-kind='console']:has(.admin-workspace-view[data-account-workspace='true']) { padding:16px 24px 20px; }
 
   .admin-scroll-region {
     flex: 1;
@@ -44,12 +90,12 @@
 
 .admin-user-filterbar {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: flex-start;
   flex-wrap: wrap;
-  gap: 10px 12px;
-  margin-bottom: 14px;
-  padding: 10px 12px;
+  gap: 8px 12px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
   background: var(--sage-50);
   border: 1px solid var(--border-soft);
   border-radius: var(--r-lg);
@@ -57,11 +103,11 @@
 
 .admin-user-filter-groups {
   display: flex;
-  flex: 0 0 100%;
-  align-items: flex-end;
-  justify-content: space-between;
+  flex: 1;
+  align-items: center;
+  justify-content: flex-start;
   flex-wrap: wrap;
-  gap: 10px 12px;
+  gap: 8px 12px;
   min-width: 0;
 }
 
@@ -142,7 +188,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 42px;
+  min-height: 36px;
   padding: 7px 8px;
   color: var(--text-sub);
   background: var(--surface);
@@ -196,7 +242,7 @@
 }
 
 .admin-filter-sort {
-  min-height: 42px;
+  min-height: 36px;
   margin-left: auto;
   padding: 7px 12px;
   color: var(--text-sub);
@@ -220,7 +266,7 @@
 }
 
 @media screen and (1024px <= width <= 1280px) and (min-height: 700px) {
-  .app-main:has(.admin-bounded-view) .tb-right {
+  .app-main[data-workspace-kind='console']:has(.admin-bounded-view) .tb-right {
     max-width: 75%;
   }
 }

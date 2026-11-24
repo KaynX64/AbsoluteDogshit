@@ -151,10 +151,7 @@ export default function AdminConsole({
   const [editHealthLoading, setEditHealthLoading] = useState(false);
   const [editHealthExists, setEditHealthExists] = useState(false);
   const [editAccountMeta, setEditAccountMeta] = useState<any | null>(null);
-  /* Qualified Responder: snapshot of the flag/note as loaded from the
-     server — diffs against it decide whether the save flow must call the
-     dedicated label endpoint after the main profile PUT. */
-  const [editQrOriginal, setEditQrOriginal] = useState<{ flag: boolean; note: string } | null>(null);
+
   /* Database Studio state */
   const [dbTablesList, setDbTablesList] = useState<any[]>([]);
   const [selectedDbTable, setSelectedDbTable] = useState<string>('USERS');
@@ -537,10 +534,6 @@ export default function AdminConsole({
       qualified_responder_note: (u.qualified_responder_note || ''),
       sos_via_role: u.sos_via_role === true || u.sos_via_role === 1,
     });
-    setEditQrOriginal({
-      flag: u.is_qualified_responder === true || u.is_qualified_responder === 1,
-      note: (u.qualified_responder_note || '').trim(),
-    });
     setAdminPasswordInput('');
     setModalFeedback(null);
     /* Advanced editor: every open starts fresh in Basic mode. */
@@ -727,37 +720,6 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
        body: JSON.stringify({ immunizations: adminUserVaccines }),
      });
 
-        /* Sync the Qualified Responder label (dedicated endpoint guarded by
-           RESPONDERS_MANAGE). Reported separately — a failure here must never
-           roll back the profile save (partial success, like permissions). */
-        let qrWarning: string | null = null;
-        const qrNoteNow = (editingUser.qualified_responder_note || '').trim();
-        const qrFlagChanged = editQrOriginal ? editQrOriginal.flag !== Boolean(editingUser.is_qualified_responder) : false;
-        const qrNoteChanged = editQrOriginal ? editQrOriginal.note !== qrNoteNow : false;
-        if (editQrOriginal && (qrFlagChanged || qrNoteChanged)) {
-          try {
-            const qrRes = await fetch(`${API_BASE_URL}/api/admin/users/${editingUser.id}/qualified-responder`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-              body: JSON.stringify({
-                is_qualified_responder: Boolean(editingUser.is_qualified_responder),
-                // Note is only meaningful while the flag is ON; sending it
-                // while ON keeps/edits it, and the server clears it on OFF.
-                note: editingUser.is_qualified_responder ? qrNoteNow : undefined,
-              }),
-            });
-            const qrData = await qrRes.json().catch(() => ({}));
-            if (!qrRes.ok) {
-              qrWarning = qrData.error || 'The Qualified Responder label was not changed.';
-              setModalFeedback({ text: 'Profile saved, but the Qualified Responder label failed: ' + qrWarning, isError: true });
-            } else {
-              setEditQrOriginal({ flag: Boolean(editingUser.is_qualified_responder), note: qrNoteNow });
-            }
-          } catch (qrErr: any) {
-            qrWarning = qrErr.message;
-            setModalFeedback({ text: 'Profile saved, but the Qualified Responder label sync failed: ' + qrErr.message, isError: true });
-          }
-        }
         /* Sync admin archetype permissions (dedicated endpoint; the server
            enforces self-edit and super-only guards). Only Super Admins may
            modify administrator permission sets (adjusted feature). */
@@ -790,7 +752,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
         fetchUsers();
         // Refresh the Advanced editor (BMI / versions) if it was in use.
         if (editHealthLoaded) fetchEditHealthProfile(Number(editingUser.id));
-        if (!permWarning && !qrWarning) {
+        if (!permWarning) {
           setEditingUser(null);
           notify(data.message || 'Account profile saved.');
         }
@@ -972,7 +934,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
     <div className="admin-workspace">
       {notice}
       {confirmation}
-      <div className="admin-workspace-view" data-workspace-view>
+      <div className="admin-workspace-view" data-account-workspace={activeTab === 'users' || activeTab === 'archived'} data-workspace-view>
       {/* ── Header ────────────────────────────────────────────── */}
       {activeTab !== 'terminal' && (activeTab !== 'analytics' || !can('ANALYTICS_VIEW')) && <div className="vd-page-head">
         <div className="vd-page-head-eyebrow">Administration</div>
@@ -1014,11 +976,12 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
         <div
           role="tablist"
           aria-label="Account views"
+          className="admin-account-tabs"
           onKeyDown={event => navigateTabs(event, false)}
           style={{
             display: 'flex',
             gap: 8,
-            marginBottom: 18,
+            marginBottom: 10,
             borderBottom: `1px solid ${T.border}`,
           }}
         >
@@ -1038,7 +1001,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                 tabIndex={isSelected ? 0 : -1}
                 onClick={() => changeTab(key)}
                 style={{
-                  padding: '10px 14px',
+                  padding: '8px 12px',
                   border: 0,
                   borderBottom: `2px solid ${isSelected ? T.primary : 'transparent'}`,
                   background: 'transparent',
@@ -1789,17 +1752,17 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
 
                   {/* ADMIN ARCHETYPE — permission grants editor */}
                   {editingUser.role === 'ADMIN' && (
-                    <div style={{
+                    <div className="admin-permissions-section" style={{
                       marginBottom: 20, padding: 16,
                       borderRadius: T.radius.md,
-                      background: '#F5F3FF', border: '1px solid #DDD6FE',
+                      background: T.tonalLilacBg, border: `1px solid ${T.borderStrong}`,
                     }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 10, flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: 12.5, fontWeight: 800, color: '#6D28D9' }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 800, color: T.text }}>
                           <Icon name="shield" size={14} /> Admin archetype &amp; permissions
                         </span>
                         {editingUser.id === myPerms.userId && (
-                          <span style={{ fontSize: 10.5, color: '#5B21B6', fontStyle: 'italic' }}>
+                          <span style={{ fontSize: 10.5, color: T.textSub, fontStyle: 'italic' }}>
                             This is your own account — permissions cannot be self-modified
                           </span>
                         )}
@@ -1807,24 +1770,24 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
 
                       {myPerms.is_super ? (
                         <>
-                          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                          <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
                             <button
                               type="button"
                               onClick={() => setEditAdminArchetype('super')}
                               disabled={!myPerms.is_super}
                               style={{
-                                flex: 1, padding: '9px 12px',
-                                border: `1px solid ${editAdminArchetype === 'super' ? '#6D28D9' : 'transparent'}`,
+                                flex: '1 1 190px', padding: '9px 12px',
+                                border: `1px solid ${editAdminArchetype === 'super' ? T.primary : 'transparent'}`,
                                 borderRadius: T.radius.pill,
-                                background: editAdminArchetype === 'super' ? '#FFFFFF' : 'transparent',
-                                color: editAdminArchetype === 'super' ? '#6D28D9' : T.textSub,
+                                background: editAdminArchetype === 'super' ? T.surface : 'transparent',
+                                color: editAdminArchetype === 'super' ? T.primary : T.textSub,
                                 fontWeight: editAdminArchetype === 'super' ? 800 : 600,
                                 fontSize: 12, fontFamily: T.font,
                                 cursor: !myPerms.is_super ? 'not-allowed' : 'pointer',
                                 opacity: !myPerms.is_super ? 0.55 : 1,
                                 boxShadow: editAdminArchetype === 'super' ? T.shadow.xs : 'none',
                                 transition: 'all 120ms ease',
-                                whiteSpace: 'nowrap',
+                                whiteSpace: 'normal',
                               }}
                               title={!myPerms.is_super ? 'Only a Super Admin can assign the SUPER_ADMIN archetype' : undefined}
                             >
@@ -1834,17 +1797,17 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                               type="button"
                               onClick={() => setEditAdminArchetype('limited')}
                               style={{
-                                flex: 1, padding: '9px 12px',
-                                border: `1px solid ${editAdminArchetype === 'limited' ? '#6D28D9' : 'transparent'}`,
+                                flex: '1 1 190px', padding: '9px 12px',
+                                border: `1px solid ${editAdminArchetype === 'limited' ? T.primary : 'transparent'}`,
                                 borderRadius: T.radius.pill,
-                                background: editAdminArchetype === 'limited' ? '#FFFFFF' : 'transparent',
-                                color: editAdminArchetype === 'limited' ? '#6D28D9' : T.textSub,
+                                background: editAdminArchetype === 'limited' ? T.surface : 'transparent',
+                                color: editAdminArchetype === 'limited' ? T.primary : T.textSub,
                                 fontWeight: editAdminArchetype === 'limited' ? 800 : 600,
                                 fontSize: 12, fontFamily: T.font,
                                 cursor: 'pointer',
                                 boxShadow: editAdminArchetype === 'limited' ? T.shadow.xs : 'none',
                                 transition: 'all 120ms ease',
-                                whiteSpace: 'nowrap',
+                                whiteSpace: 'normal',
                               }}
                             >
                               <Icon name="settings" size={14} /> Limited Admin · choose permissions
@@ -1852,7 +1815,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                           </div>
 
                           {editAdminArchetype === 'super' ? (
-                            <p style={{ fontSize: 12, color: '#5B21B6', margin: 0, lineHeight: 1.55 }}>
+                            <p style={{ fontSize: 12, color: T.textSub, margin: 0, lineHeight: 1.55 }}>
                               Unrestricted access to every console capability — identical to the
                               seeded administrator account.
                             </p>
@@ -1862,14 +1825,14 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                                 const checked = editAdminPerms.includes(p.code);
                                 const beyondCaller = !myPerms.is_super && !myPerms.permissions.includes(p.code);
                                 return (
-                                  <label
+                                  <label className="admin-permission-card"
                                     key={p.code}
                                     style={{
                                       display: 'flex', alignItems: 'flex-start', gap: 8,
                                       padding: '9px 11px',
                                       borderRadius: T.radius.sm,
-                                      background: checked ? '#EDE9FE' : '#FFFFFF',
-                                      border: `1px solid ${checked ? '#C4B5FD' : '#E9E5F8'}`,
+                                      background: checked ? T.primaryTint : T.surface,
+                                      border: `1px solid ${checked ? T.primary : T.border}`,
                                       cursor: beyondCaller ? 'not-allowed' : 'pointer',
                                       opacity: beyondCaller ? 0.55 : 1,
                                     }}
@@ -1883,7 +1846,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                                           prev.includes(p.code) ? prev.filter((c) => c !== p.code) : [...prev, p.code]
                                         )
                                       }
-                                      style={{ marginTop: 2, accentColor: '#6D28D9' }}
+                                      style={{ marginTop: 2, accentColor: T.primary }}
                                     />
                                     <span>
                                       <span style={{ display: 'block', fontSize: 12, fontWeight: 700, color: T.text }}>
@@ -1900,7 +1863,7 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                           )}
                         </>
                       ) : (
-                        <p style={{ fontSize: 12, color: '#5B21B6', margin: 0, lineHeight: 1.55 }}>
+                        <p style={{ fontSize: 12, color: T.textSub, margin: 0, lineHeight: 1.55 }}>
                           <Icon name="lock" size={14} /> Only a Super Admin can modify administrator permissions
                           {editingUser.admin_archetype === 'super'
                             ? ' — this is a full-access administrator.'
@@ -1969,87 +1932,9 @@ const fetchUserVaccinesForAdmin = async (userId: number) => {
                     </div>
                   )}
 
-                  {/* ── QUALIFIED RESPONDER — account property, every role ──
-                      Not a health field: it lives on the Basic tab for every
-                      role. The flag is ADDITIVE: accounts that already
-                      receive SOS through their role keep it when off. */}
-                  <div style={{
-                    marginTop: 24, marginBottom: 20, padding: 16,
-                    borderRadius: T.radius.md,
-                    background: '#FFF7ED', border: '1px solid #FED7AA',
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
-                      <span style={{ fontSize: 13, fontWeight: 800, color: '#C2410C' }}>
-                        <Icon name="emergency" size={14} /> Emergency response · Qualified Responder
-                      </span>
-                      <label
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 8,
-                          cursor: (can('RESPONDERS_MANAGE') && !(editingUser.role === 'ADMIN' && !myPerms.is_super))
-                            ? 'pointer' : 'not-allowed',
-                          opacity: (can('RESPONDERS_MANAGE') && !(editingUser.role === 'ADMIN' && !myPerms.is_super)) ? 1 : 0.6,
-                          fontWeight: 700, fontSize: 12.5, color: T.text,
-                        }}
-                        title={
-                          !can('RESPONDERS_MANAGE')
-                            ? 'Requires the RESPONDERS_MANAGE permission (ask a Super Admin).'
-                            : (editingUser.role === 'ADMIN' && !myPerms.is_super)
-                              ? 'Only a Super Admin may change this label on an administrator account.'
-                              : 'Label this account a Qualified Responder — it will receive Emergency SOS alarms on any role.'
-                        }
-                      >
-                        <input
-                          type="checkbox"
-                          checked={Boolean(editingUser.is_qualified_responder)}
-                          disabled={!can('RESPONDERS_MANAGE') || (editingUser.role === 'ADMIN' && !myPerms.is_super)}
-                          onChange={(e) => setEditingUser({ ...editingUser, is_qualified_responder: e.target.checked })}
-                          style={{ width: 16, height: 16, accentColor: '#C2410C' }}
-                        />
-                        Qualified Responder
-                      </label>
-                    </div>
-
-                    <p style={{ fontSize: 11.5, color: T.textSub, margin: '0 0 12px', lineHeight: 1.55 }}>
-                      Role-independent SOS label. A labelled account receives Emergency SOS
-                      alarms and can act on them — whatever its role is.{' '}
-                      {Boolean(editingUser.sos_via_role) && (
-                        <b style={{ color: '#9A3412' }}>
-                          This account also receives SOS through its {editingUser.role} role —
-                          turning the label off will NOT stop role-based alerts (change the role instead).
-                        </b>
-                      )}
-                    </p>
-
-                    {Boolean(editingUser.is_qualified_responder) && (
-                      <>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 14 }}>
-                          <div>
-                            <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
-                              Note (max 150 chars)
-                            </label>
-                            <input
-                              style={inputStyle}
-                              maxLength={150}
-                              placeholder="e.g. First-aid certified, campus volunteer responder"
-                              value={editingUser.qualified_responder_note || ''}
-                              disabled={!can('RESPONDERS_MANAGE') || (editingUser.role === 'ADMIN' && !myPerms.is_super)}
-                              onChange={(e) => setEditingUser({ ...editingUser, qualified_responder_note: e.target.value })}
-                            />
-                          </div>
-                          <div>
-                            <label style={{ fontSize: 12, fontWeight: 700, color: T.textSub, display: 'block', marginBottom: 6 }}>
-                              Qualified since
-                            </label>
-                            <input
-                              style={{ ...inputStyle, background: '#FFFDF9' }}
-                              readOnly
-                              value={editingUser.qualified_responder_since || '—'}
-                              title="Read-only: set automatically when the label was granted"
-                            />
-                          </div>
-                        </div>
-                      </>
-                    )}
+                  <div className="admin-responder-card" style={{marginTop:24,padding:16,color:T.text,background:T.warningSoft,borderRadius:12}}>
+                    <strong>Qualified Responder · {editingUser.is_qualified_responder ? 'Approved' : 'Not active'}</strong>
+                    <p>Applications, assessment evidence, appointments and revocation are managed in Responder qualifications.</p>
                   </div>
 
                   {/* ── ADVANCED: Health record — every HEALTH_PROFILES column ── */}

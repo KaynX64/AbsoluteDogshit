@@ -24,6 +24,8 @@ Migration **015** adds encrypted author-owned incident report drafts and history
 - Migration 013 adds structured prescription snapshots, ordered encrypted item details, decimal external quantities and issuance request uniqueness. Historical clinical values and stored PDFs are retained. Deploy updated server/readers with v2 issuance disabled, release desktop/mobile, complete clinician review, then enable the flag. See [prescribing rollout](PRESCRIBING-ROLLOUT.md) and [API contract](STRUCTURED-PRESCRIBING.md).
 - Migration 014 adds account-scoped SOS request identities and a delivery lease to `EMERGENCY_ALERTS`. Existing alerts have no scheduled delivery. Deploy the API and confirm the SOS Dispatch Worker is running before releasing the keyed mobile client. Test an interrupted receipt and a concurrent retry against disposable MySQL.
 
+- Migration 016 adds responder applications, reviewers, assessments, private evidence, appointments and notices. Existing roles/flags become draft candidates, never approvals. Preserve staged legacy access while clinic reviewers prepare a roster, deploy clients, then explicitly enable qualification enforcement. Fresh schemas include labelled synthetic demos; existing production migrations do not fabricate approval. See [qualification deployment](RESPONDER-QUALIFICATIONS.md#deployment-and-synthetic-scenarios).
+
 ## Rehearsal and recovery
 
 1. Run `node --test` from `server/`. Set `VALETUDO_MIGRATION_TEST_PORT` to the loopback port of an isolated MySQL 8 instance to include the migration rehearsals. The tests create randomly named databases and remove them on teardown. Set `VALETUDO_MIGRATION_TEST_PASSWORD` if that instance requires a root password.
