@@ -8,7 +8,7 @@
 ## Offline storage
 
 - The first signed-in account opens or migrates the encrypted SQLite database through `electron/offline/database.cjs`. Electron `safeStorage` wraps the key for the OS profile. Keep the raw key in main and preserve the existing database when key access fails.
-- `electron/offline/registerHandlers.cjs` binds queue operations to the active app account. `src/platform/offline/offlineQueue.ts` imports the legacy mirror by mutation ID before clearing it and sends only the signed-in account's pending changes. Unassigned legacy entries stay encrypted until ownership can be verified. Keep clinical payloads out of browser storage.
+- `electron/offline/registerHandlers.cjs` binds queue operations to the active app account. `src/platform/offline/offlineQueue.ts` imports the legacy mirror by mutation ID before clearing it and sends only the signed-in account's pending changes. Unassigned legacy entries stay encrypted until ownership can be verified; the explicit top-bar discard action removes only unsynced unassigned rows and their orphaned drafts after confirmation. Keep clinical payloads out of browser storage.
 - The encounter form clears only after the offline write succeeds. `src/platform/offline/offlineSync.ts` advances the bootstrap checkpoint only after every page is saved. See [offline storage and rollout details](../README.md#offline-storage).
 
 ## Shared desktop interaction

@@ -125,6 +125,7 @@ class AppointmentBookingReview extends StatelessWidget {
         ),
       ),
       actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+      actionsOverflowButtonSpacing: 12,
       actions: [
         OutlinedButton(
           autofocus: true,

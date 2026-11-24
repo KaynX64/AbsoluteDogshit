@@ -67,4 +67,38 @@ function assignLegacyAppointments(db, userId, appointmentIds) {
   })();
 }
 
-module.exports = { insertMutation, discardSyncedPayloads, importLegacyQueue, unassignedAppointments, assignLegacyAppointments };
+function discardUnassignedMutations(db, expectedCount) {
+  if (!Number.isSafeInteger(expectedCount) || expectedCount < 1) {
+    throw new Error('A positive unassigned-change count is required.');
+  }
+
+  return db.transaction(() => {
+    const rows = db.prepare(`
+      SELECT record_uuid FROM LOCAL_SYNC_LOGS
+      WHERE user_id = 0 AND sync_status <> 'synced'
+    `).all();
+    if (rows.length !== expectedCount) {
+      throw new Error('The unassigned offline queue changed. Refresh and try again.');
+    }
+
+    const deleteDraft = db.prepare(`
+      DELETE FROM CACHED_EMR_RECORDS
+      WHERE record_uuid = ? AND doctor_user_id = 0 AND is_draft = 1
+    `);
+    for (const row of rows) deleteDraft.run(row.record_uuid);
+
+    return db.prepare(`
+      DELETE FROM LOCAL_SYNC_LOGS
+      WHERE user_id = 0 AND sync_status <> 'synced'
+    `).run().changes;
+  })();
+}
+
+module.exports = {
+  insertMutation,
+  discardSyncedPayloads,
+  importLegacyQueue,
+  unassignedAppointments,
+  assignLegacyAppointments,
+  discardUnassignedMutations,
+};

@@ -1,4 +1,10 @@
-const { insertMutation, importLegacyQueue, unassignedAppointments, assignLegacyAppointments } = require('./queue.cjs');
+const {
+  insertMutation,
+  importLegacyQueue,
+  unassignedAppointments,
+  assignLegacyAppointments,
+  discardUnassignedMutations,
+} = require('./queue.cjs');
 
 function registerOfflineHandlers(ipcMain, openDatabase) {
   let sqliteDb;
@@ -37,6 +43,11 @@ function registerOfflineHandlers(ipcMain, openDatabase) {
     if (owner(event) !== userId || !Array.isArray(ids) || ids.length > 100 ||
         ids.some(id => !Number.isSafeInteger(id) || id <= 0)) return;
     assignLegacyAppointments(sqliteDb, userId, ids);
+  });
+  ipcMain.handle('offline-discard-unassigned', (event, expectedCount) => {
+    requireDatabase();
+    if (!owner(event)) throw new Error('Sign in before discarding offline changes.');
+    return discardUnassignedMutations(sqliteDb, expectedCount);
   });
   ipcMain.handle('offline-pending-count', event => {
     requireDatabase();

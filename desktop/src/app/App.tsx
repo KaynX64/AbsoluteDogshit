@@ -112,6 +112,7 @@ function AppShell() {
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [offlineQueue, setOfflineQueue] = useState({ pending: 0, needsReview: 0, unassigned: 0, unavailable: false });
   const [isReplaying, setIsReplaying] = useState(false);
+  const [isDiscardingUnassigned, setIsDiscardingUnassigned] = useState(false);
 
   /* ── Change password modal ──────────────────────────────────── */
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -274,6 +275,26 @@ function AppShell() {
     }
   };
 
+  const handleDiscardUnassigned = async () => {
+    const expectedCount = offlineQueue.unassigned;
+    if (isDiscardingUnassigned || expectedCount < 1) return;
+    const label = `${expectedCount} unassigned offline change${expectedCount === 1 ? '' : 's'}`;
+    if (!await confirmAction(`Discard ${label}`, 'This permanently removes these unsynced changes and their local drafts from this computer. Continue only if you have confirmed they are disposable test or stale data. Assigned and synced changes will not be removed.')) return;
+
+    setIsDiscardingUnassigned(true);
+    try {
+      const removed = await window.electronAPI?.offlineDiscardUnassigned(expectedCount);
+      if (typeof removed !== 'number') throw new Error('Encrypted offline storage is unavailable.');
+      const counts = await offlineQueueStatus();
+      setOfflineQueue({ ...counts, unavailable: false });
+      notify(`Discarded ${removed} unassigned offline change${removed === 1 ? '' : 's'}.`);
+    } catch (err: any) {
+      notify(`Could not discard unassigned offline changes. ${err.message}`, true);
+    } finally {
+      setIsDiscardingUnassigned(false);
+    }
+  };
+
 const handleChangePassword = async (e: React.FormEvent) => {
   e.preventDefault();
   if (isSubmittingPassword) return;
@@ -385,7 +406,9 @@ const handleChangePassword = async (e: React.FormEvent) => {
           offlineUnassigned={offlineQueue.unassigned}
           offlineStorageUnavailable={offlineQueue.unavailable}
           isReplaying={isReplaying}
+          isDiscardingUnassigned={isDiscardingUnassigned}
           onManualReplay={handleManualReplay}
+          onDiscardUnassigned={handleDiscardUnassigned}
           roleView={activeRoleView}
           roles={user.roles}
           onChangeRoleView={role => {

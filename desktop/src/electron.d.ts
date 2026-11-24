@@ -19,6 +19,7 @@ declare global {
     offlineImportLegacy: (rows: unknown) => Promise<void>;
     offlineUnassignedAppointments: () => Promise<number[]>;
     offlineAssignLegacy: (data: { userId: number; ids: number[] }) => Promise<void>;
+    offlineDiscardUnassigned: (expectedCount: number) => Promise<number>;
     offlinePendingCount: () => Promise<{ pending: number; needsReview: number; unassigned: number }>;
     offlineQueueMutation: (mutation: any) => Promise<{ success: boolean; error?: string }>;
     offlineGetPendingMutations: (limit?: number) => Promise<any[]>;
