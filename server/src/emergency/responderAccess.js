@@ -1,29 +1,11 @@
 // Resolves live responder eligibility and restricts each alert payload to the recipient's access tier.
 // server/src/emergency/responderAccess.js
 import { pool } from '../db/pool.js';
+import { appointmentAccess, RESPONSE_STAFF_ROLES } from './qualificationPolicy.js';
 
-/* ═════════════════════════════════════════════════════════════════════════
-   QUALIFIED RESPONDER — role-independent SOS access
-   ═════════════════════════════════════════════════════════════════════════
-   Any account can be labelled a Qualified Responder
-   (USERS.is_qualified_responder). The flag is ADDITIVE to the legacy
-   role-based audience:
-
-   • LEGACY_RESPONDER_ROLES — roles that received SOS alerts before this
-     feature existed. They keep receiving them with the flag off. To stop
-     alerts for such a user, change the role (the flag never overrides a
-     role-based grant).
-   • CLINICAL_ROLES — roles treated as clinical (same list consent.js uses).
-     Clinical recipients see the full alert payload; flagged users with no
-     clinical role (community responders) get a reduced payload without
-     medical details.
-
-   The flag is always read LIVE from the database (never from the 24-hour
-   JWT), so grants and revocations take effect immediately.
-   ═════════════════════════════════════════════════════════════════════════ */
-
-export const LEGACY_RESPONDER_ROLES = ['EMERGENCY_RESPONDER', 'NURSE', 'DOCTOR', 'ADMIN'];
-export const CLINICAL_ROLES = ['DOCTOR', 'DENTIST', 'NURSE', 'ADMIN', 'EMERGENCY_RESPONDER'];
+// Legacy eligibility is only retained during the explicitly staged rollout.
+export const LEGACY_RESPONDER_ROLES = ['EMERGENCY_RESPONDER','NURSE','DOCTOR','ADMIN'];
+export const CLINICAL_ROLES = RESPONSE_STAFF_ROLES;
 
 /** Human label for a role code — shared by /sos and /active so every client
  *  renders the server's roleLabel instead of its own mapping. */
@@ -42,83 +24,56 @@ export function roleLabelFor(code) {
 }
 
 /** Pure tiering primitive (no MySQL — unit-testable). */
-export function tierFromRow({ isQualifiedResponder = false, hasClinicalRole = false } = {}) {
-  if (hasClinicalRole) return 'clinical';
-  if (isQualifiedResponder) return 'community';
-  return null;
+export function tierFromRow({isQualifiedResponder=false,hasClinicalRole=false,appointmentLevel='community'}={}) {
+ if(!isQualifiedResponder)return null;
+ if(appointmentLevel==='staff')return hasClinicalRole?'clinical':null;
+ return appointmentLevel==='community'?'community':null;
 }
 
 /** Pure tiering from a role-code list (unit-testable). */
-export function resolveResponderTier({ isQualifiedResponder = false, roles = [] } = {}) {
+export function resolveResponderTier({ isQualifiedResponder = false, roles = [], appointmentLevel = 'community' } = {}) {
   return tierFromRow({
-    isQualifiedResponder,
+    isQualifiedResponder, appointmentLevel,
     hasClinicalRole: roles.some(/* Check whether a role qualifies for clinical alert details. */ (r) => CLINICAL_ROLES.includes(r)),
   });
 }
 
-/**
- * Live SOS audience: every account that must receive an alert right now.
- * One query over USERS / USER_ROLES / ROLES returning each recipient's id
- * and tier. Conditions: is_active = 1, deleted_at IS NULL, and
- * (flag = 1 OR a legacy responder role).
- */
-export async function getResponderAudience({ excludeUserId = null } = {}) {
-  const [rows] = await pool.query(
-    `SELECT u.user_id,
-            u.is_qualified_responder,
-            COALESCE(MAX(CASE WHEN r.code IN (?) THEN 1 END), 0) AS has_clinical_role
-     FROM USERS u
-     LEFT JOIN USER_ROLES ur ON u.user_id = ur.user_id
-     LEFT JOIN ROLES r ON ur.role_id = r.role_id
-     WHERE u.is_active = TRUE
-       AND u.deleted_at IS NULL
-       AND (u.is_qualified_responder = 1 OR r.code IN (?))
-     GROUP BY u.user_id, u.is_qualified_responder`,
-    [CLINICAL_ROLES, LEGACY_RESPONDER_ROLES]
-  );
-
-  // Shape each eligible responder's user ID and medical access tier.
-  return rows
-    // Omit the SOS sender from the responder audience.
-    .filter((row) => Number(row.user_id) !== Number(excludeUserId))
-    .map((row) => ({
-      userId: Number(row.user_id),
-      tier: tierFromRow({
-        isQualifiedResponder: Boolean(row.is_qualified_responder),
-        hasClinicalRole: Number(row.has_clinical_role) === 1,
-      }),
-    }));
+// Missing configuration or database errors never silently enable legacy access.
+export async function qualificationEnforced(db = pool) {
+ const [[settings]] = await db.query('SELECT enforced FROM RESPONDER_QUALIFICATION_SETTINGS WHERE settings_id=1');
+ if (!settings) throw new Error('Responder qualification settings are missing.');
+ return Boolean(settings.enforced);
 }
-
-/**
- * Live access check for ONE user (flag OR legacy role), including the
- * is_active / deleted_at guards the JWT never carries.
- * Returns { authorized, tier, isQualifiedResponder }.
- */
-export async function resolveResponderAccess(userId) {
-  const [rows] = await pool.query(
-    `SELECT u.is_active, u.deleted_at, u.is_qualified_responder
-     FROM USERS u WHERE u.user_id = ?`,
-    [userId]
-  );
-  if (rows.length === 0) return { authorized: false, tier: null, isQualifiedResponder: false };
-
-  const [roleRows] = await pool.query(
-    `SELECT r.code FROM USER_ROLES ur INNER JOIN ROLES r ON ur.role_id = r.role_id
-     WHERE ur.user_id = ?`,
-    [userId]
-  );
-  // Extract the live role codes used to resolve SOS eligibility.
-  const roles = roleRows.map((r) => r.code);
-  const isActive = Boolean(rows[0].is_active) && rows[0].deleted_at === null;
-  // Check whether a role grants legacy SOS access.
-  const legacyRole = roles.some((r) => LEGACY_RESPONDER_ROLES.includes(r));
-  const flagged = Boolean(rows[0].is_qualified_responder);
-  const authorized = isActive && (legacyRole || flagged);
-  const tier = authorized
-    ? resolveResponderTier({ isQualifiedResponder: flagged, roles })
-    : null;
-  return { authorized, tier, isQualifiedResponder: isActive && flagged };
+export async function resolveResponderAccess(userId, db = pool) {
+ const [[user]] = await db.query('SELECT is_active,deleted_at,is_qualified_responder FROM USERS WHERE user_id=?',[userId]);
+ if (!user) return appointmentAccess(null,[],false);
+ const [roles] = await db.query('SELECT r.code FROM USER_ROLES ur JOIN ROLES r ON r.role_id=ur.role_id WHERE ur.user_id=?',[userId]);
+ const codes=roles.map(row=>row.code);
+ const [[appointment]] = await db.query(`SELECT p.*,DATE_FORMAT(p.starts_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS starts_at,DATE_FORMAT(p.expires_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS expires_at FROM RESPONDER_APPOINTMENTS p WHERE user_id=? ORDER BY appointment_id DESC LIMIT 1`,[userId]);
+ const enforced=await qualificationEnforced(db);
+ const active=Boolean(user.is_active && user.deleted_at===null);
+ const access=appointmentAccess(appointment,codes,active);
+ if (enforced || appointment) return {...access,qualificationEnforced:enforced};
+ const legacy=active && (Boolean(user.is_qualified_responder) || codes.some(r=>LEGACY_RESPONDER_ROLES.includes(r)));
+ return {...access,authorized:legacy,tier:legacy ? (codes.some(r=>CLINICAL_ROLES.includes(r)) || codes.includes('ADMIN') ? 'clinical':'community'):null,isQualifiedResponder:active && Boolean(user.is_qualified_responder),qualificationEnforced:false};
+}
+export async function getResponderAudience({excludeUserId=null}={}) {
+ const enforced=await qualificationEnforced();
+ const [rows]=await pool.query(
+  `SELECT u.user_id,u.is_qualified_responder,p.appointment_id,p.level,p.status,DATE_FORMAT(p.starts_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS starts_at,DATE_FORMAT(p.expires_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS expires_at,
+   GROUP_CONCAT(DISTINCT r.code) AS role_codes FROM USERS u
+   LEFT JOIN USER_ROLES ur ON ur.user_id=u.user_id LEFT JOIN ROLES r ON r.role_id=ur.role_id
+   LEFT JOIN RESPONDER_APPOINTMENTS p ON p.appointment_id=(SELECT MAX(p2.appointment_id) FROM RESPONDER_APPOINTMENTS p2 WHERE p2.user_id=u.user_id)
+   WHERE u.is_active=1 AND u.deleted_at IS NULL AND (p.appointment_id IS NOT NULL OR ?=0)
+   GROUP BY u.user_id,u.is_qualified_responder,p.appointment_id,p.level,p.status,p.starts_at,p.expires_at`,[enforced?1:0]);
+ return rows.filter(row=>Number(row.user_id)!==Number(excludeUserId)).flatMap(row=>{
+  const roles=(row.role_codes||'').split(',');
+  const access=appointmentAccess(row.appointment_id ? row:null,roles);
+  if (access.authorized) return [{userId:Number(row.user_id),tier:access.tier}];
+  if (!enforced && !row.appointment_id && (row.is_qualified_responder || roles.some(r=>LEGACY_RESPONDER_ROLES.includes(r))))
+   return [{userId:Number(row.user_id),tier:roles.some(r=>CLINICAL_ROLES.includes(r)) || roles.includes('ADMIN')?'clinical':'community'}];
+  return [];
+ });
 }
 
 /**

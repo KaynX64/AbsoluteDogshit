@@ -20,7 +20,7 @@ export default function ResponderConsole() {
    const playEmergencyAlarm = () => {
     try {
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      
+
       // --- CUSTOMIZE YOUR BEEPS HERE ---
       const beepCount = 7;           // Number of times it beeps
       const beepDuration = 0.6;     // How long each beep lasts (in seconds)
@@ -32,18 +32,18 @@ export default function ResponderConsole() {
       for (let i = 0; i < beepCount; i++) {
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
-        
+
         // Calculate when this specific beep should start
         const timeOffset = i * (beepDuration + gapDuration);
-        
+
         osc.frequency.setValueAtTime(850, startTime + timeOffset); // 850 Hz tone
         osc.connect(gain);
         gain.connect(audioCtx.destination);
-        
+
         // Schedule the start and stop for this beep
         osc.start(startTime + timeOffset);
         osc.stop(startTime + timeOffset + beepDuration);
-        
+
         // Clean up the audio context after the very last beep finishes
         if (i === beepCount - 1) {
           osc.onended = () => { void audioCtx.close().catch(() => {}); };

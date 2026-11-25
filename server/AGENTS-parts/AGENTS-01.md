@@ -20,6 +20,7 @@ After the API starts, `src/bootstrap/backupStartup.js` asynchronously checks the
 | `profile/index.js` | `/api/profile` | self-profile, clinical health profile, theme and device tokens |
 | `healthPass.js` | `/api/health-pass` | medical clearances & QR health passes |
 | `appointments/index.js` | `/api/appointments` | booking, queue, intake, consultations and patient history. Emits `appointment:*` and `queue:updated`. |
+| `responderQualifications.js` | `/api/responder-qualifications` | Applicant drafts/evidence, clinic reviews, reviewer designation, appointments and rollout. [Contract](../RESPONDER-QUALIFICATIONS.md). |
 | `emergency/index.js` | `/api/emergency` | SOS lifecycle, live qualified/legacy responder audience, tiered per-user realtime/FCM delivery, staff-only searchable history and report worklists. Community responders may only acknowledge. Closing is atomic; report filing and draft cleanup share a transaction. Desktop-only author drafts are encrypted and revision-guarded. Targeted desktop resolution prompts, PDF storage/recovery and archive permissions remain. [Responder records](../RESPONDER-RECORDS.md). |
 | `inventory/index.js` | `/api/inventory` | medicines, batches, inventory logs |
 | `documents/index.js` | `/api/documents` | EMR docs, PDFs, attachments, signed one-time download tokens and public `GET /verify/:qrToken`. |

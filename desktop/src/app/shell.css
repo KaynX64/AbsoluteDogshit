@@ -226,6 +226,8 @@ html[data-titlebar-fullscreen='true'] .app-titlebar { display: none; }
   font-weight: 700;
 }
 
+.sb-qualification-label { line-height: 1.3; }
+
 .sb-item.is-active::before {
   content: '';
   position: absolute;
@@ -254,7 +256,7 @@ html[data-titlebar-fullscreen='true'] .app-titlebar { display: none; }
   padding: 0 6px;
   border-radius: 999px;
   background: var(--danger);
-  color: #fff;
+  color: var(--text-on-danger);
   font-size: 10px;
   font-weight: 700;
   line-height: 18px;
@@ -596,28 +598,28 @@ html[data-titlebar-fullscreen='true'] .app-titlebar { display: none; }
 }
 
 @media screen and (1024px <= width <= 1280px) and (min-height: 700px) {
-  .app-main:has(.doctor-clinic-layout, .admin-bounded-view) > .tb {
+  .app-main:is([data-workspace-kind='records'], [data-workspace-kind='console']:has(.doctor-clinic-layout, .admin-bounded-view)) > .tb {
     flex-wrap: nowrap;
     gap: 12px;
     padding: 10px 20px;
   }
 
-  .app-main:has(.doctor-clinic-layout, .admin-bounded-view) .tb-left {
+  .app-main:is([data-workspace-kind='records'], [data-workspace-kind='console']:has(.doctor-clinic-layout, .admin-bounded-view)) .tb-left {
     flex: 1;
   }
 
-  .app-main:has(.doctor-clinic-layout, .admin-bounded-view) .tb-right {
+  .app-main:is([data-workspace-kind='records'], [data-workspace-kind='console']:has(.doctor-clinic-layout, .admin-bounded-view)) .tb-right {
     flex-wrap: nowrap;
     flex: 0 1 auto;
     max-width: 70%;
     overflow-x: auto;
   }
 
-  .app-main:has(.doctor-clinic-layout, .admin-bounded-view) .tb-right > * {
+  .app-main:is([data-workspace-kind='records'], [data-workspace-kind='console']:has(.doctor-clinic-layout, .admin-bounded-view)) .tb-right > * {
     flex-shrink: 0;
   }
 
-  .app-main:has(.doctor-clinic-layout, .admin-bounded-view) .tb-role-select {
+  .app-main:is([data-workspace-kind='records'], [data-workspace-kind='console']:has(.doctor-clinic-layout, .admin-bounded-view)) .tb-role-select {
     max-width: 140px;
   }
 }

@@ -29,10 +29,14 @@ export function registerUserDirectoryRoutes(router, io) {
               END as status,
               u.created_at,
               u.deleted_at as archived_at,
-              u.is_qualified_responder,
+              CASE WHEN u.is_active=1 AND u.deleted_at IS NULL THEN
+                CASE WHEN qs.enforced=0 AND qa.appointment_id IS NULL THEN u.is_qualified_responder
+                 WHEN qa.status='active' AND qa.starts_at<=UTC_TIMESTAMP(3) AND qa.expires_at>UTC_TIMESTAMP(3)
+                 AND (qa.level='community' OR EXISTS(SELECT 1 FROM USER_ROLES qr JOIN ROLES qrole ON qrole.role_id=qr.role_id WHERE qr.user_id=u.user_id AND qrole.code IN ('NURSE','DOCTOR','DENTIST','EMERGENCY_RESPONDER'))) THEN 1 ELSE 0 END
+               ELSE 0 END AS is_qualified_responder,
               DATE_FORMAT(u.qualified_responder_since, '%Y-%m-%d %H:%i') as qualified_responder_since,
               u.qualified_responder_note,
-              CASE WHEN r.code IN ('EMERGENCY_RESPONDER', 'NURSE', 'DOCTOR', 'ADMIN')
+              CASE WHEN qs.enforced=0 AND qa.appointment_id IS NULL AND r.code IN ('EMERGENCY_RESPONDER', 'NURSE', 'DOCTOR', 'ADMIN')
                    THEN TRUE ELSE FALSE END as sos_via_role,
               sp.student_no, sp.course, sp.year_level,
               fp.faculty_no,
@@ -52,6 +56,8 @@ export function registerUserDirectoryRoutes(router, io) {
                 WHERE uap.user_id = u.user_id
               ) as admin_permissions_raw
        FROM USERS u
+       JOIN RESPONDER_QUALIFICATION_SETTINGS qs ON qs.settings_id=1
+       LEFT JOIN RESPONDER_APPOINTMENTS qa ON qa.appointment_id=(SELECT MAX(qp.appointment_id) FROM RESPONDER_APPOINTMENTS qp WHERE qp.user_id=u.user_id)
        LEFT JOIN USER_ROLES ur ON u.user_id = ur.user_id
        LEFT JOIN ROLES r ON ur.role_id = r.role_id
        LEFT JOIN STUDENT_PROFILES sp ON u.user_id = sp.user_id

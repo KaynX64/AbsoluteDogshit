@@ -1,0 +1,61 @@
+/* Keep native select semantics while styling the actual top-layer menu.
+   Older preview browsers retain their platform picker. List boxes are excluded. */
+@supports (appearance: base-select) {
+  select:not([multiple]):not([size]),
+  select:not([multiple]):not([size])::picker(select) {
+    appearance: base-select;
+  }
+
+  select:not([multiple]):not([size]) {
+    border-radius: var(--r-md);
+    cursor: pointer;
+  }
+
+  select:not([multiple]):not([size])::picker(select) {
+    margin-block: 4px;
+    padding: 4px;
+    max-block-size: min(320px, calc(100dvh - 24px));
+    overflow: auto;
+    overscroll-behavior: contain;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-modal);
+    font-family: var(--font);
+    font-size: var(--fs-body);
+    font-weight: 500;
+    line-height: 1.5;
+  }
+
+  select:not([multiple]):not([size]) option {
+    min-block-size: 34px;
+    padding: 7px 10px;
+    border-radius: var(--r-sm);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    color: var(--text);
+    background: transparent;
+    cursor: pointer;
+  }
+
+  select:not([multiple]):not([size]) option:checked {
+    background: var(--primary-tint);
+    color: var(--text);
+  }
+
+  select:not([multiple]):not([size]) option:is(:hover, :focus-visible):not(:disabled) {
+    background: var(--sage-200);
+    color: var(--text);
+  }
+
+  select:not([multiple]):not([size]) option:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
+  }
+
+  select:not([multiple]):not([size]) option::checkmark { color: var(--primary); }
+  select:not([multiple]):not([size])::picker-icon { color: currentColor; margin-inline-start: 8px; }
+  select:not([multiple]):not([size]):disabled,
+  select:not([multiple]):not([size]) option:disabled { color: var(--text-muted); cursor: not-allowed; }
+}

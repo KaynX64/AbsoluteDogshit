@@ -73,11 +73,15 @@ Active alert cards show the person, status and reported location. **View details
 
 Allow Android notifications for background delivery. The hub shows when delivery settings are still syncing and offers **Retry delivery settings** after a failed save. Use **Test siren for 3 seconds** to check the in-app sound. For the server rollout, see [migration 012](../server/MIGRATION-PLAN.md#fresh-and-existing-databases).
 
-Non-clinical **Qualified Responders** can view limited incident details, navigate to the scene and **Acknowledge** an alert. Acknowledgment keeps the incident active; it does not dispatch a team or close the emergency. Dispatch, Resolve, False alarm and official incident reporting are reserved for authorized response staff. Staff retain these permissions whether or not they also have the Qualified Responder flag.
+Non-clinical **Qualified Responders** can view limited incident details, navigate to the scene and **Acknowledge** an alert. Acknowledgment keeps the incident active; it does not dispatch a team or close the emergency. Dispatch, Resolve, False alarm and official incident reporting are reserved for authorized response staff. After roster cutover, these actions require an active staff appointment and a live clinical/emergency staff role. ADMIN alone is not a responder.
 
 Authorized response staff have **Alerts**, **History**, and **Reports** in the responder workspace. History and reports have search and date filters. Mobile reports are read-only: **Pending** shows unfinished documentation and **Filed** opens saved reports and PDFs. Pending items show **Complete this report in the desktop app** and any personal desktop draft indicator. Items older than 24 hours are highlighted and remain visible until filed. Report forms and draft editing are available only on desktop. Deploy migration **015** and the server first. [Workflow and access guide](../server/RESPONDER-RECORDS.md).
 
 History and report filters use icon buttons with date/outcome selection sheets. They follow the account font, colors and text scaling. Loaded destinations and recent Pending/Filed results stay available while switching; refresh keeps existing cards visible. Hidden destinations defer network reads until opened. These bounded caches stay in memory and clear when access is lost or the workspace closes.
+
+## Responder qualification
+
+Open Account settings → Responder qualification to apply, accept a nomination, attach PDF/image evidence, track clinic feedback or request renewal. Campus-supervised assessment is accepted; external certificates are optional. Pending applicants receive no responder access. Renewal does not interrupt an existing valid appointment. Decisions and reminders appear in Notifications. [Complete process and rollout](../server/RESPONDER-QUALIFICATIONS.md).
 
 ## Emergency SOS and health pass
 

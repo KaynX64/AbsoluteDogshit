@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../screens/change_password_screen.dart';
+import '../screens/responder_qualification_screen.dart';
 import '../theme/account_theme_controller.dart';
 
 class AccountSettingsButton extends StatelessWidget {
@@ -130,6 +131,23 @@ class AccountSettingsSheet extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      ListTile(
+                        leading: const Icon(Icons.verified_user_outlined),
+                        title: const Text('Responder qualification'),
+                        subtitle: const Text(
+                          'Apply, review your status or renew',
+                        ),
+                        onTap: () {
+                          final navigator = Navigator.of(context);
+                          navigator.pop();
+                          navigator.push(
+                            MaterialPageRoute<void>(
+                              builder: (_) =>
+                                  const ResponderQualificationScreen(),
+                            ),
+                          );
+                        },
+                      ),
                       Semantics(
                         header: true,
                         child: Text('Appearance', style: headingStyle),

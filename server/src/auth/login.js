@@ -1,3 +1,4 @@
+import { resolveResponderAccess } from '../emergency/responderAccess.js';
 // Rate-limits sign-in attempts, verifies credentials, and issues session tokens.
 
 import bcrypt from 'bcryptjs';
@@ -148,7 +149,7 @@ export async function loginUser(req, res) {
     if (users.length === 0) {
       // Run dummy compare so response time is identical to a real password check
       await bcrypt.compare(password, DUMMY_HASH);
-      return res.status(401).json({ error: 'Invalid institutional email or password.' });
+      return res.status(401).json({ error: 'Institutional email or password does not exist.' });
     }
 
     const user = users[0];
@@ -157,7 +158,7 @@ export async function loginUser(req, res) {
     const isMatch = await bcrypt.compare(password, user.password_hash);
 
     if (!isMatch) {
-      return res.status(401).json({ error: 'Invalid institutional email or password.' });
+      return res.status(401).json({ error: 'Incorrect institutional email or password.' });
     }
 
     // =========================================================================
@@ -258,7 +259,7 @@ export async function loginUser(req, res) {
         permissions: adminPermissions,
         // UI hint ONLY — never used for authorization. SOS access is always
         // resolved live from the database (the 24h JWT would go stale).
-        is_qualified_responder: Boolean(user.is_qualified_responder),
+        is_qualified_responder: (await resolveResponderAccess(user.user_id)).isQualifiedResponder,
         // Per-account UI theme (Stage 7). Clamped against the whitelist so
         // a manually-edited DB row can never push an invalid value to
         // clients — unknown/NULL falls back to the defaults (light/brand).

@@ -37,6 +37,10 @@ Each API area exports a router or a factory. Feature folders compose their route
 - Terminal routes are mounted under `/api/admin/operations`. `TERMINAL_VIEW` grants Limited Admin access to status and built-in diagnostics. Restart requires Super Admin access and `npm start`.
 - Admin System Health reads live Socket.IO presence from `GET /api/admin/connected-users` with `TELEMETRY_VIEW`. The response covers this server process, groups windows by sign-in session, and exposes token issue time and earliest currently connected socket time.
 
+## Responder qualifications
+
+`responderQualifications.js` mounts at `/api/responder-qualifications` independently of operational access. Live designated nurses/doctors approve other applicants; RESPONDERS_MANAGE grants oversight and revocation. Qualification tables are private and excluded from Database Studio. [Workflow/API](../../../RESPONDER-QUALIFICATIONS.md).
+
 ## Responder delivery
 
 The consent-independent `GET /api/emergency/responder-access` reports live eligibility, qualification and tier. The open roster includes a persisted `formattedAddress` when available. Status changes use a conditional forward transition. Authenticated `POST /api/profile/fcm-token` accepts Android `installation_id` and `sos_mode` together. `src/emergency/deviceDelivery.js` maintains one token per upgraded installation, routes On duty and Quiet to separate Android notification channels, and omits Off duty installations from SOS push. Upgraded SOS pushes carry the incident ID for an authenticated refresh. Logout and password change remove the matching registration for the caller. See the [migration rollout](../../../MIGRATION-PLAN.md#fresh-and-existing-databases).

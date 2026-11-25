@@ -63,10 +63,10 @@ export default function ActiveAccounts({
   userActionFeedback,
 }: ActiveAccountsProps) {
   return (
-    <div className="admin-bounded-view">
+    <div className="admin-bounded-view admin-accounts">
       {/* Search + count row */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, marginBottom: 14, flexWrap: 'wrap' }}>
-        <div style={{ position: 'relative', flex: '1 1 320px', maxWidth: 520 }}>
+      <div className="admin-account-toolbar">
+        <div className="admin-account-search">
           <span style={{
             position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)',
             color: T.textMuted, display: 'grid', placeItems: 'center',
@@ -75,19 +75,21 @@ export default function ActiveAccounts({
           </span>
           <input
             type="text"
+            aria-label="Search active accounts"
             placeholder="Search by name, email or role"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             style={{
               ...inputStyle,
-              paddingLeft: 40,
+              padding: '7px 12px 7px 36px',
+              minHeight: 36,
               borderRadius: T.radius.pill,
               background: T.surface,
             }}
           />
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="admin-account-counts">
           <span style={{
             padding: '5px 12px', borderRadius: T.radius.pill,
             background: T.sage200, color: T.primary,
@@ -105,7 +107,8 @@ export default function ActiveAccounts({
               display: 'inline-flex',
               alignItems: 'center',
               gap: 6,
-              padding: '8px 16px',
+              padding: '7px 12px',
+              minHeight: 36,
               borderRadius: T.radius.pill,
               background: T.primary,
               color: T.textOnPrimary,
@@ -128,63 +131,27 @@ export default function ActiveAccounts({
 
       <div className="admin-user-filterbar">
         <div className="admin-user-filter-groups">
-          <div className="admin-filter-section">
-            <span className="admin-filter-section-label">Role</span>
-            <div className="admin-filter-control" role="group" aria-label="Filter accounts by role">
+          <label className="admin-account-filter">Role
+            <select aria-label="Filter accounts by role" value={userRoleFilter} onChange={event => setUserRoleFilter(event.target.value)}>
               {[
-                { code: 'ALL', label: 'All roles', icon: 'groups' },
-                { code: 'DOCTOR', label: 'Doctor', icon: 'stethoscope' },
-                { code: 'DENTIST', label: 'Dentist', icon: 'dentistry' },
-                { code: 'NURSE', label: 'Nurse', icon: 'medical_information' },
-                { code: 'STUDENT', label: 'Student', icon: 'school' },
-                { code: 'FACULTY', label: 'Faculty', icon: 'co_present' },
-                { code: 'NON_TEACHING', label: 'Non-Teaching', icon: 'badge' },
-                { code: 'EMERGENCY_RESPONDER', label: 'Responder', icon: 'emergency' },
-                { code: 'ADMIN', label: 'Admin', icon: 'admin_panel_settings' },
-              ].map((r) => {
-                const isSelected = userRoleFilter === r.code;
-                return (
-                  <button
-                    key={r.code}
-                    type="button"
-                    className={`admin-filter-button${isSelected ? ' is-selected' : ''}`}
-                    aria-pressed={isSelected}
-                    onClick={() => setUserRoleFilter(r.code)}
-                  >
-                    <Icon name={r.icon} size={14} /> {r.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="admin-filter-section">
-            <span className="admin-filter-section-label">Status</span>
-            <div className="admin-filter-control" role="group" aria-label="Filter accounts by status">
-              {(['ALL', 'Active', 'Suspended'] as const).map((s) => {
-                const isSelected = userStatusFilter === s;
-                return (
-                  <button
-                    key={s}
-                    type="button"
-                    className={`admin-filter-button${isSelected ? ' is-selected' : ''}`}
-                    aria-pressed={isSelected}
-                    onClick={() => setUserStatusFilter(s)}
-                  >
-                    {s !== 'ALL' && <span className={`admin-status-dot admin-status-dot-${s.toLowerCase()}`} aria-hidden="true" />}
-                    {s === 'ALL' ? 'All statuses' : s}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+                ['ALL', 'All roles'], ['DOCTOR', 'Doctor'], ['DENTIST', 'Dentist'], ['NURSE', 'Nurse'],
+                ['STUDENT', 'Student'], ['FACULTY', 'Faculty'], ['NON_TEACHING', 'Non-Teaching'],
+                ['EMERGENCY_RESPONDER', 'Responder'], ['ADMIN', 'Admin'],
+              ].map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>
+          <label className="admin-account-filter">Status
+            <select aria-label="Filter accounts by status" value={userStatusFilter} onChange={event => setUserStatusFilter(event.target.value as typeof userStatusFilter)}>
+              <option value="ALL">All statuses</option><option value="Active">Active</option><option value="Suspended">Suspended</option>
+            </select>
+          </label>
 
           <button
             type="button"
             className={`admin-qualified-filter${userQrOnly ? ' is-selected' : ''}`}
             aria-pressed={userQrOnly}
             onClick={() => setUserQrOnly((v) => !v)}
-            title="Show only accounts labelled Qualified Responder (role-independent SOS label)"
+            title="Show only accounts with active clinic-approved responder appointments"
           >
             <Icon name="emergency" size={16} tone={userQrOnly ? 'warning' : 'sub'} />
             <span>Qualified responders</span>
@@ -213,7 +180,7 @@ export default function ActiveAccounts({
         boxShadow: T.shadow.xs,
       }}>
         <div className="vd-table-wrap admin-scroll-region" role="region" aria-label="Active account records" tabIndex={0}>
-          <table className="tbl" style={{ minWidth: 820 }}>
+          <table className="tbl admin-accounts-table" style={{ minWidth: 1040 }}>
             <thead>
               <tr>
                 <th style={{ width: 90 }}>User ID</th>
@@ -232,20 +199,20 @@ export default function ActiveAccounts({
                   </td>
                   <td style={{ fontWeight: 600, color: T.text }}>{u.name}</td>
                   <td style={{ color: T.textSub }}>{u.email}</td>
-                  <td>
+                  <td><div className="admin-account-roles">
                     <span style={rolePill(u.role)}>{u.role}</span>
                     {(u.is_qualified_responder === true || u.is_qualified_responder === 1) && (
                       <span
                         style={{
                           display: 'inline-flex', alignItems: 'center', gap: 4,
-                          marginLeft: 8, padding: '2px 9px',
+                          padding: '2px 9px',
                           borderRadius: T.radius.pill,
                           fontSize: 9.5, fontWeight: 800, letterSpacing: 0.4,
                           background: '#FFF7ED', color: '#C2410C',
                           border: '1px solid #FED7AA',
                         }}
                         title={
-                          `Qualified Responder (independent SOS label)${
+                          `Qualified Responder (clinic-approved appointment)${
                             u.qualified_responder_since ? ` · since ${u.qualified_responder_since}` : ''
                           }${u.qualified_responder_note ? ` · ${u.qualified_responder_note}` : ''}`
                         }
@@ -257,7 +224,7 @@ export default function ActiveAccounts({
                       <span
                         style={{
                           display: 'inline-flex', alignItems: 'center', gap: 4,
-                          marginLeft: 8, padding: '2px 9px',
+                          padding: '2px 9px',
                           borderRadius: T.radius.pill,
                           fontSize: 9.5, fontWeight: 800, letterSpacing: 0.4,
                           background: u.admin_archetype === 'super' ? '#EDE9FE' : T.sage50,
@@ -273,13 +240,13 @@ export default function ActiveAccounts({
                         {u.admin_archetype === 'super' ? 'SUPER' : `LIMITED · ${u.admin_permissions?.length ?? 0}`}
                       </span>
                     )}
-                  </td>
+                  </div></td>
                   <td>
                     <span style={{
                       display: 'inline-flex', alignItems: 'center', gap: 6,
                       padding: '4px 12px', borderRadius: T.radius.pill,
                       fontSize: 11, fontWeight: 700,
-                      background: u.status === 'Active' ? T.successSoft : '#F5EFE9',
+                      background: u.status === 'Active' ? T.successSoft : T.warningSoft,
                       color: u.status === 'Active' ? T.success : T.warning,
                     }}>
                       <span style={{ fontSize: 7 }}>●</span>
@@ -380,11 +347,9 @@ export default function ActiveAccounts({
         )}
       </div>
 
-      {/* Footer note (matches Figma's RBAC blurb) */}
-      <p style={{
-        marginTop: 16, fontSize: 12.5, color: T.textSub, lineHeight: 1.6,
-      }}>
-        Seven RBAC roles govern access. Editing a user changes their assigned permissions;
+      <details className="admin-account-help">
+        <summary>About account permissions</summary>
+        <p>Roles govern access. Editing a user changes their assigned permissions;
         suspending an account disables access without deleting its profile.
         ADMIN accounts carry an archetype — <b>Super</b> (full access) or <b>Limited</b> (only
         the capabilities granted at creation).
@@ -393,7 +358,8 @@ export default function ActiveAccounts({
           read-only, admin passwords cannot be overridden, and new administrator
           accounts cannot be created — those actions require a Super Admin.</>
         )}
-      </p>
+        </p>
+      </details>
     </div>
   );
 }

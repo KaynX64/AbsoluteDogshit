@@ -10,6 +10,7 @@ import { processPrescriptionExpiry } from '../workers/prescriptionExpiryWorker.j
 import { backfillDocumentPdfs } from '../workers/documentPdfBackfillWorker.js';
 import { initializeDependencies } from './dependencies.js';
 import { dispatchPendingSos } from '../emergency/sosDispatch.js';
+import { processResponderQualifications } from '../workers/responderQualificationWorker.js';
 
 // Initialize dependencies, open the listener, and start the registered background workers.
 export async function startServer(server, { io, isHttps, signal }) {
@@ -25,6 +26,7 @@ export async function startServer(server, { io, isHttps, signal }) {
   logActiveLimits(getServerPolicy().limits);
   console.log(`✅ Valetudo HealthLink API & WebSockets running on ${isHttps ? 'HTTPS/WSS' : 'HTTP/WS'} port ${port}`);
   const stopWorkers = startScheduler([
+    { name: 'Responder Qualifications', intervalMs: 60 * 60 * 1000, run: () => processResponderQualifications(io), runImmediately: true },
     { name: 'SOS Dispatch Worker', intervalMs: 5000, run: () => dispatchPendingSos(io), runImmediately: true },
     { name: 'Reminder Worker', intervalMs: 15 * 60 * 1000, /* Send due appointment reminders with realtime notifications. */ run: () => sendDueAppointmentReminders(io) },
     { name: 'Auto-No-Show Worker', intervalMs: 60 * 1000, run: () => processAppointmentNoShows(io, signal), runImmediately: true },

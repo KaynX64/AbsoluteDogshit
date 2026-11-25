@@ -16,7 +16,7 @@ Mobile contains no report editor or report-writing service methods. Pending summ
 
 ## API and access
 
-All new routes below are under `/api/emergency` and require authentication plus live clinical responder access. Community accounts cannot use them. Filed-report reads also check live ADMIN membership and `INCIDENT_RECORDS_VIEW`; a Limited Admin's other clinical roles do not bypass that grant. Non-admin clinical responders may review filed reports. Existing administrator archive and patient-owned document routes keep their permissions.
+All new routes below are under `/api/emergency` and require authentication plus live clinical responder access. Community accounts cannot use them. Filed-report reads also check live ADMIN membership and `INCIDENT_RECORDS_VIEW`; a Limited Admin's other clinical roles do not bypass that grant. Non-admin clinical responders may review filed reports. Administrator archive reads additionally require active staff responder authorization; patient-owned document access remains independent. Qualification is defined in the [appointment workflow](RESPONDER-QUALIFICATIONS.md).
 
 | Method and path | Purpose |
 |---|---|

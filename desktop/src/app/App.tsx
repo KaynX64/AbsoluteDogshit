@@ -18,6 +18,7 @@ import Icon from '../shared/ui/Icon';
 
 
 import Sidebar from './Sidebar';
+import QualificationWorkspace from '../features/emergency/QualificationWorkspace';
 import TopBar from './TopBar';
 import TitleBar from './TitleBar';
 import LoginScreen from './LoginScreen';
@@ -98,7 +99,7 @@ function AppShell() {
   );
   function navigateTo(destination: string) {
     requestWorkspace(activeRoleView, destination);
-    if (destination === 'alertHistory' || destination === 'reports') {
+    if (destination === 'alertHistory' || destination === 'reports' || destination === 'qualifications') {
       setResponseViews(current => ({ ...current, [activeRoleView]: destination })); return;
     }
     setResponseViews(current => ({ ...current, [activeRoleView]: '' }));
@@ -396,7 +397,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
         onItemClick={navigateTo}
       />
 
-      <div className="app-main">
+      <div className="app-main" data-workspace-kind={destination === 'alertHistory' || destination === 'reports' || destination === 'qualifications' ? 'records' : 'console'}>
         <TopBar
           user={user}
           role={activeRoleView}
@@ -460,14 +461,15 @@ const handleChangePassword = async (e: React.FormEvent) => {
         <main
           className="app-content"
           id="desktop-workspace"
+          data-workspace-kind={destination === 'alertHistory' || destination === 'reports' || destination === 'qualifications' ? 'records' : 'console'}
           ref={workspace}
           tabIndex={-1}
-          style={activeRoleView === 'NURSE' && nurseViewMode === 'inventory' && destination !== 'alertHistory' && destination !== 'reports'
+          style={activeRoleView === 'NURSE' && nurseViewMode === 'inventory' && destination !== 'alertHistory' && destination !== 'reports' && destination !== 'qualifications'
             ? { padding: 0, display: 'flex', minHeight: 0, overflow: 'hidden' }
             : undefined}
         >
-          <div hidden={destination === 'alertHistory' || destination === 'reports'} style={{ display: destination === 'alertHistory' || destination === 'reports' ? 'none' : 'contents' }}>
-          <DesktopSocketContext.Provider value={destination === 'alertHistory' || destination === 'reports' ? null : desktopSocket}>
+          <div hidden={destination === 'alertHistory' || destination === 'reports' || destination === 'qualifications'} style={{ display: destination === 'alertHistory' || destination === 'reports' || destination === 'qualifications' ? 'none' : 'contents' }}>
+          <DesktopSocketContext.Provider value={destination === 'alertHistory' || destination === 'reports' || destination === 'qualifications' ? null : desktopSocket}>
           {activeRoleView === 'NURSE' && (
             <NurseConsole
               viewMode={nurseViewMode}
@@ -487,6 +489,7 @@ const handleChangePassword = async (e: React.FormEvent) => {
           {activeRoleView === 'EMERGENCY_RESPONDER' && destination === 'dispatch' && <ResponderConsole />}
           </DesktopSocketContext.Provider>
           </div>
+          {destination === 'qualifications' && <QualificationWorkspace key={user.user_id} />}
           {(destination === 'alertHistory' || destination === 'reports') && <ResponderRecords key={destination} history={destination === 'alertHistory'} />}
         </main>
       </div>

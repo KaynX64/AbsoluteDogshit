@@ -24,7 +24,10 @@ export function ResponderAccessProvider({ children }: { children: ReactNode }) {
   const tierRef = useRef<ResponderTier>(null);
   const pending = useRef<{ controller: AbortController; promise: Promise<ResponderTier> } | null>(null);
   const socket = useDesktopSocket();
+  const expiryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearAccess = useCallback(() => {
+    if (expiryTimer.current) clearTimeout(expiryTimer.current);
+    expiryTimer.current = null;
     tierRef.current = null;
     setTier(null);
   }, []);
@@ -49,6 +52,11 @@ export function ResponderAccessProvider({ children }: { children: ReactNode }) {
           ? access.tier as ResponderTier : null;
         tierRef.current = next;
         setTier(next);
+        if (expiryTimer.current) clearTimeout(expiryTimer.current);
+        if (next && access.expiresAt) {
+          const delay = Math.max(0, new Date(access.expiresAt).getTime() - Date.now());
+          expiryTimer.current = setTimeout(() => { void refreshAccess(true); }, Math.min(delay, 2_147_000_000));
+        }
         return next;
       } catch {
         if (!controller.signal.aborted) clearAccess();
@@ -74,6 +82,7 @@ export function ResponderAccessProvider({ children }: { children: ReactNode }) {
       pending.current?.controller.abort();
       pending.current = null;
       tierRef.current = null;
+      if (expiryTimer.current) clearTimeout(expiryTimer.current);
       unsubscribe();
       window.removeEventListener('focus', onFocus);
     };

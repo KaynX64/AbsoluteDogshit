@@ -54,11 +54,15 @@ Student, Faculty and Non-Teaching account creation includes optional sex, date o
 
 Database Studio, account lists, Privacy & audit, and Incident Records keep their controls visible at desktop window sizes. Scroll within a table, the System tables list, or the incident list to see more records. Database Studio's pagination stays below the table.
 
+Users & roles uses compact role/status dropdowns alongside the Qualified responders filter and sorting control to leave more room for accounts. Active and Archived accounts share smaller search controls and wider, horizontally scrollable table columns. Expand **About account permissions** below the active list for the permissions explanation.
+
 The Admin Terminal focuses its command prompt as soon as the tab opens. Press Enter to run a command and keep typing in the prompt. New output stays in view while the terminal is following the latest line. Requests time out without locking the prompt.
 
 Hover over an analytics line graph to highlight the nearest reporting day and see its count. Use **View data** to read the same values with the keyboard. Expanded tables scroll within the workspace.
 
 Use the sidebar and keyboard to navigate. See [keyboard and dialog behavior](docs/COMPACT-CLINIC.md#keyboard-and-dialogs) for tab activation, focus and draft handling.
+
+Dropdown menus throughout Desktop use rounded corners and theme-matched option highlights, including filters, role switching and form selectors. They keep native keyboard selection, Escape to dismiss, and scrolling for long option lists. Older preview browsers without customizable-select support use their platform menu.
 
 Controls lift or press by 1 px, with 90 ms press feedback and a 140 ms release. Tabs enter in 220 ms and slide 4 px in the direction of selection. Main sidebar views slide 8 px and fade in over 240 ms. Later destinations enter from the right and earlier ones from the left. Switching roles uses a fade. SOS messages and analytics access changes appear immediately. Windows reduced-motion settings and print disable these effects.
 
@@ -96,4 +100,14 @@ Response staff can open **Alert history** and **Incident reports** from the side
 
 Returning to the app refreshes responder records in the background without clearing the visible table. Filter changes still load a new result set, and revoked permissions clear protected records. Empty SOS banners take no space above the page heading.
 
+At desktop sizes of at least 1024 × 700, Alert history and Incident reports keep headings, tabs and filters visible while the records table scrolls. **Load more records** stays below the table. Smaller windows scroll the page; wide tables can also scroll horizontally. Switching from a consultation preserves the unfinished draft without restricting report scrolling. Sidebar counts adapt their text color to light and dark themes.
+
+These record views share a compact layout across staff consoles: report counts sit alongside the tabs, search and filters use smaller controls, and the shorter heading leaves more height for incident rows. Controls wrap when the window narrows.
+
 Report tabs prepare their default lists in the background and reuse recently loaded results when switching. Only search typing has a debounce delay. The bounded cache stays in memory, is invalidated by report updates and focus refreshes, and clears on access loss or leaving the records page; it never stores patient information in browser storage.
+
+## Responder qualifications
+
+Use the sidebar to apply or renew your own appointment. Designated clinic nurses/doctors can review applications, record campus assessments and approve other people. Administrators with RESPONDERS_MANAGE inspect the full process, nominate accounts, designate reviewers and suspend/revoke appointments. Account badges are read-only. Qualification is separate from duty mode and does not imply an external certificate. [Workflow, permissions and rollout](../server/RESPONDER-QUALIFICATIONS.md).
+
+The application list and form scroll separately at desktop sizes, with save/review actions kept visible. Search and status filters help find loaded applications. Nominations and reviewer management open in a separate dialog. Refresh keeps the current application and unsaved text visible, including after failed requests. Each local view remembers its selection while open. Save your draft before leaving the qualifications workspace. [Layout, buffering and verification](docs/RESPONDER-QUALIFICATIONS-UI.md).
