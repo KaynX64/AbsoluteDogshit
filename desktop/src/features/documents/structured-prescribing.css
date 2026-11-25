@@ -16,6 +16,7 @@
 .rx-v2-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px 6px; }
 .rx-v2-field { display: flex; flex-direction: column; min-width: 0; justify-content: space-between; gap: 3px; font-size: 10.5px; line-height: 1.2; color: var(--text-sub); font-weight: 650; }
 .rx-v2-field > input, .rx-v2-field > select { width: 100%; min-height: 30px; }
+.rx-v2-field > select { block-size: 30px; }
 .rx-v2-wide { grid-column: span 2; }
 .rx-v2-confirm { display: flex; gap: 5px; align-items: center; font-size: 10.5px; line-height: 1.2; color: var(--text-sub); }
 .rx-v2-confirm input { flex: none; }
