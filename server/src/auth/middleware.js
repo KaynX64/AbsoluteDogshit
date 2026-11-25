@@ -33,6 +33,7 @@ export function authenticateToken(req, res, next) {
       try {
         const blacklistKey = sessionBlocklistKey(user, token);
         const isRevoked = await redis.get(blacklistKey);
+        if (res.destroyed) return;
         if (isRevoked) {
           return res.status(401).json({
             error: 'TOKEN_REVOKED',
@@ -44,8 +45,11 @@ export function authenticateToken(req, res, next) {
       }
     }
 
+    if (res.destroyed) return;
     try {
-      if (!(await isSessionAccountActive(user.user_id))) {
+      const active = await isSessionAccountActive(user.user_id);
+      if (res.destroyed) return;
+      if (!active) {
         return res.status(401).json({
           error: 'ACCOUNT_INACTIVE',
           message: 'This account is no longer active. Please contact an administrator.',
@@ -53,7 +57,8 @@ export function authenticateToken(req, res, next) {
       }
     } catch (accountErr) {
       console.error('[Account Status Check Error]:', accountErr.message);
-      return res.status(503).json({ error: 'Account status could not be verified.' });
+      if (!res.destroyed) res.status(503).json({ error: 'Account status could not be verified.' });
+      return;
     }
 
     req.user = user;

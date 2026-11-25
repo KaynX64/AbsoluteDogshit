@@ -3,7 +3,7 @@
 ## Auth model — src/auth/
 
 - `login.js` owns login rate limiting, the bcrypt timing equalizer, role lookup, and the 24-hour JWT with `user_id`, `email`, `roles`, and `jti`.
-- `middleware.js` authenticates HTTP requests. It shares the Redis denylist key and active-account query in `session.js` with Socket.IO. `logout.js` and `password.js` write revocations using the same key.
+- `middleware.js` authenticates HTTP requests. It shares the Redis denylist key and active-account query in `session.js` with Socket.IO. HTTP authentication stops when the response closes during either lookup. `logout.js` and `password.js` write revocations using the same key.
 - `attachmentTokens.js` issues short-lived, attachment-bound, single-use download tokens and checks for replays.
 
 ## Domain modules and shared utilities
@@ -37,6 +37,8 @@ Run the full suite with `node --test` from `server/`. `tests/appRoutes.test.js` 
 Set `VALETUDO_MIGRATION_TEST_PORT` for a disposable MySQL 8 instance to include the migration and concurrency tests. Set `VALETUDO_MIGRATION_TEST_PASSWORD` if the instance requires it. The concurrency suite covers startup, prescription expiry, reminder claims, and replay.
 
 `node --test tests/<file>.test.js` from `server/`. The crypto vault suite checks v2 envelopes and startup configuration in isolated processes. `scripts/encrypt-plaintext-health-profiles.js` is a one-off tool for encrypting legacy plaintext rows.
+
+`npm run seed:clinic -- --development-fixture` runs the [synthetic clinic fixture](../../README.md#synthetic-clinic-data) against a loopback development database that has the schema's demo clinical staff accounts.
 
 ## Security controls to preserve
 

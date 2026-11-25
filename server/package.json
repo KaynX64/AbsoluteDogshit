@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/bootstrap/supervisor.js",
-    "migrate": "node scripts/migrate.js"
+    "migrate": "node scripts/migrate.js",
+    "seed:clinic": "node scripts/seed-clinic.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1141.0",

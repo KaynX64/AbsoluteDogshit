@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { once } from 'node:events';
 import { after, before, mock, test } from 'node:test';
+import { setImmediate } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
@@ -19,6 +20,7 @@ Object.assign(process.env, {
   S3_ACCESS_KEY: 'fixture-access',
   S3_SECRET_KEY: 'fixture-secret',
   CORS_ALLOWED_ORIGINS: '',
+  MIXED_LOAD_CONTROLS: 'true',
 });
 
 const keyPath = fileURLToPath(new URL('../serviceAccountKey.json', import.meta.url));
@@ -61,14 +63,14 @@ after(async () => {
 });
 
 // Make an HTTP request to the test API with an optional signed session and JSON body.
-const request = (path, { roles, userId = 21, method = 'GET', headers = {}, json } = {}) => {
+const request = (path, { roles, userId = 21, method = 'GET', headers = {}, json, signal } = {}) => {
   if (roles) {
     const token = jwt.sign({ user_id: userId, roles }, process.env.JWT_SECRET, { expiresIn: '5m' });
     headers = { ...headers, authorization: 'Bearer ' + token };
   }
   const body = json === undefined ? undefined : JSON.stringify(json);
   if (body !== undefined) headers = { ...headers, 'content-type': 'application/json' };
-  return fetch(baseUrl + path, { method, headers, body });
+  return fetch(baseUrl + path, { method, headers, body, signal });
 };
 
 // Verify that account appearance reads only the authenticated user and shares desktop preference writes.
@@ -174,6 +176,49 @@ test('password change releases only the submitted device when the change commits
   assert.equal((await change('Replacement1', 'secondpassphrase', 'another-account')).status, 200);
   assert.equal((await change('secondpassphrase', 'thirdpassphrase')).status, 200);
   assert.equal(devices.size, 2);
+});
+
+test('cancelled inventory requests stay quiet and real catalogue failures still return 500', { timeout: 5000 }, async t => {
+  const medicine = { medicine_id: 1, name: 'Fixture medicine', available_stock: 5 };
+  let hold;
+  let catalogueError = null;
+  // Stub the driver below the tracked pool so disconnects exercise real admission cleanup.
+  t.mock.method(pool.pool, 'query', (sql, params, callback = params) => {
+    if (hold && sql.includes(hold.fragment)) return hold.started.resolve(callback);
+    if (sql.includes('SELECT is_active, deleted_at')) return callback(null, [{ is_active: 1, deleted_at: null }]);
+    if (sql.includes('COALESCE(m.reorder_level')) return callback(null, [{ count: 0 }]);
+    assert.match(sql, /AS available_stock/);
+    return callback(catalogueError, [medicine]);
+  });
+  const log = t.mock.method(console, 'error', () => {});
+  const options = { roles: ['NURSE'] };
+
+  for (const [route, fragment, rows] of [
+    ['/medicines', 'SELECT is_active, deleted_at', [{ is_active: 1, deleted_at: null }]],
+    ['/dashboard-summary', 'COALESCE(m.reorder_level', [{ count: 0 }]],
+  ]) {
+    hold = { fragment, started: Promise.withResolvers() };
+    const closed = Promise.withResolvers();
+    listener.prependOnceListener('request', (_req, res) => res.once('close', closed.resolve));
+    const controller = new AbortController();
+    const cancelled = assert.rejects(request(`/api/inventory${route}`, { ...options, signal: controller.signal }), { name: 'AbortError' });
+    const completeQuery = await hold.started.promise;
+    controller.abort();
+    await Promise.all([cancelled, closed.promise]);
+    completeQuery(null, rows);
+    await setImmediate();
+    assert.equal(log.mock.callCount(), 0);
+  }
+  hold = undefined;
+
+  const result = await request('/api/inventory/medicines', options);
+  assert.equal(result.status, 200);
+  assert.deepEqual(await result.json(), [medicine]);
+  catalogueError = new Error('Fixture database failure');
+  const failed = await request('/api/inventory/medicines', options);
+  assert.equal(failed.status, 500);
+  assert.deepEqual(await failed.json(), { error: 'Failed to fetch medicines catalogue.' });
+  assert.equal(log.mock.callCount(), 1);
 });
 
 // Verify that inventory expiry alerts and summary use a 30-day window.

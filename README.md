@@ -317,7 +317,13 @@ Run each command from its module directory.
 | Desktop | `npm test` |
 | Mobile | `flutter test` |
 
-Use synthetic data for manual checks. [MySQL-backed tests](BACKEND-STUDY-GUIDE.md#7-study-exercises) · [Packaged desktop checks](desktop/README.md#verification)
+### Synthetic clinic data
+
+Run `npm run seed:clinic -- --development-fixture` from `server/` after provisioning the local development database with `schema.sql` and configuring `.env`. The fixture adds six patients across student, faculty, and non-teaching roles, appointments, two tickets for the seed day, medical and dental history, and inventory with low stock and near-expiry and expired lots. Repeat runs skip the fixture so changes made during testing are preserved.
+
+Sign in as `clinic-avery@example.invalid` for a waiting patient or `clinic-blair@example.invalid` for a dental consultation in progress. Both use the demo password documented in [schema.sql](server/schema.sql). Use the existing demo doctor, dentist, or nurse account to see the corresponding staff views. Bookings and inventory dates are relative to the database date when you first run the fixture.
+
+[MySQL-backed tests](BACKEND-STUDY-GUIDE.md#7-study-exercises) · [Packaged desktop checks](desktop/README.md#verification) · [Responder qualification fixture](server/RESPONDER-QUALIFICATIONS.md#deployment-and-synthetic-scenarios)
 
 ## 🔒 Privacy and security
 

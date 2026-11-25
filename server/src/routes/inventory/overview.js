@@ -5,6 +5,12 @@ import { listReorderSuggestions } from '../../inventory/pharmacyAnalytics.js';
 import { authenticateToken } from '../../auth/middleware.js';
 import { requireRoles } from '../../middleware/rbac.js';
 
+function handleReadError(res, error, logMessage, responseMessage) {
+  if (error?.code === 'CLIENT_DISCONNECTED') return;
+  console.error(logMessage, error);
+  if (!res.destroyed) res.status(500).json({ error: responseMessage });
+}
+
 // Mount stock, expiry, reorder, ledger, and catalog reads.
 export function registerInventoryOverview(router) {
   // =============================================================================
@@ -27,8 +33,7 @@ export function registerInventoryOverview(router) {
       );
       res.json(rows);
     } catch (error) {
-      console.error('Error fetching inventory batches:', error);
-      res.status(500).json({ error: 'Failed to fetch inventory batches.' });
+      handleReadError(res, error, 'Error fetching inventory batches:', 'Failed to fetch inventory batches.');
     }
   });
 
@@ -47,8 +52,7 @@ export function registerInventoryOverview(router) {
       );
       res.json(medicines);
     } catch (error) {
-      console.error('Failed to fetch medicine master:', error);
-      res.status(500).json({ error: 'Failed to fetch medicines catalogue.' });
+      handleReadError(res, error, 'Failed to fetch medicine master:', 'Failed to fetch medicines catalogue.');
     }
   });
 
@@ -74,8 +78,7 @@ export function registerInventoryOverview(router) {
       );
       res.json(rows);
     } catch (error) {
-      console.error('Error in expiry sweep:', error);
-      res.status(500).json({ error: 'Failed to execute expiry sweep.' });
+      handleReadError(res, error, 'Error in expiry sweep:', 'Failed to execute expiry sweep.');
     }
   });
 
@@ -85,8 +88,7 @@ export function registerInventoryOverview(router) {
     try {
       res.json(await listReorderSuggestions());
     } catch (error) {
-      console.error('Error computing reorder suggestions:', error);
-      res.status(500).json({ error: 'Failed to calculate reorder suggestions.' });
+      handleReadError(res, error, 'Error computing reorder suggestions:', 'Failed to calculate reorder suggestions.');
     }
   });
 
@@ -111,8 +113,7 @@ export function registerInventoryOverview(router) {
       );
       res.json(logs);
     } catch (error) {
-      console.error('Error fetching inventory consumption logs:', error);
-      res.status(500).json({ error: 'Failed to retrieve inventory logs.' });
+      handleReadError(res, error, 'Error fetching inventory consumption logs:', 'Failed to retrieve inventory logs.');
     }
   });
 
@@ -153,8 +154,7 @@ export function registerInventoryOverview(router) {
         expiredCount: Number(expired[0]?.count) || 0,
       });
     } catch (error) {
-      console.error('Error fetching inventory summary:', error);
-      res.status(500).json({ error: 'Failed to retrieve inventory summary.' });
+      handleReadError(res, error, 'Error fetching inventory summary:', 'Failed to retrieve inventory summary.');
     }
   });
 }
