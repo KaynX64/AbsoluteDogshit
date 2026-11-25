@@ -4,7 +4,7 @@ import { pool } from '../../../db/pool.js';
 import { authenticateToken } from '../../../auth/middleware.js';
 import { requireRoles } from '../../../middleware/rbac.js';
 import { logAudit } from '../../../utils/auditLogger.js';
-import { invalidateCache } from '../../../utils/redisClient.js';
+import { invalidateDailyQueue } from '../../../appointments/dailyQueueCache.js';
 import { reserveQueueTicket } from '../../../appointments/queueTickets.js';
 import { validateVitals } from '../../../appointments/vitals.js';
 import { intakeCounterId, findActiveQueueEntry } from './activeQueue.js';
@@ -133,7 +133,7 @@ export function registerWalkIn(router, io) {
       });
 
       await connection.commit();
-      await invalidateCache('queue:*');
+      await invalidateDailyQueue();
 
       if (io) {
         io.emit('queue:updated');

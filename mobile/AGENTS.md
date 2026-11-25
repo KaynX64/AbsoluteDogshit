@@ -4,7 +4,7 @@ Flutter (Dart SDK ^3.13.3). Key packages: `http`, `flutter_secure_storage` (toke
 
 ## API host
 
-`lib/config/api_config.dart` is the host authority for REST and Socket.IO. Pass `--dart-define=API_BASE_URL=…` with a reachable HTTPS origin at build or launch time. Without an override, native Android uses the checked-in LAN address and other targets use `localhost`. Rebuild when changing the origin. See the [mobile setup guide](README.md#configure-and-run) for phone and emulator commands.
+`lib/config/api_config.dart` is the host authority for REST and Socket.IO. Pass `--dart-define=API_BASE_URL=…` with a reachable HTTPS origin at build or launch time. Without an override, the app uses the checked-in LAN address. Rebuild when changing the origin. See the [mobile setup guide](README.md#configure-and-run) for phone and emulator commands.
 
 ## Code map — lib/
 

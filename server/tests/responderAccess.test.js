@@ -89,7 +89,8 @@ test('live route guards deny forbidden actions without transactions or broadcast
       }
       if (sql.includes('SELECT status')) return [[{ status: currentStatus }]];
       if (sql.includes('SELECT resolved_at')) return [[{ resolved_at: new Date('2026-11-21T00:00:00Z') }]];
-      if (sql.includes('SELECT entry_hash')) return [[]];
+      if (sql.includes('FROM USERS FORCE INDEX (PRIMARY)') || sql.includes('UPDATE AUDIT_CHAIN_STATE')) return [[]];
+      if (sql.includes('FROM AUDIT_CHAIN_STATE')) return [[{ last_entry_hash: '0'.repeat(64) }]];
       assert.ok(sql.includes('INSERT INTO AUDIT_LOGS'));
       mutations.push('audit');
       return [{ insertId: 1 }];

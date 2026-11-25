@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { pool } from '../db/pool.js';
 import { logAudit } from '../utils/auditLogger.js';
+import { inTransaction } from '../db/transaction.js';
 import { JWT_SECRET } from '../utils/secrets.js';
 import { redis, isRedisActive } from '../utils/redisClient.js';
 import { getServerPolicy } from '../config/serverPolicy.js';
@@ -229,9 +230,8 @@ export async function loginUser(req, res) {
     );
 
     // 4. Record to R.A. 10173 Immutable Audit Ledger
-    const connection = await pool.getConnection();
     try {
-      await logAudit(connection, {
+      await inTransaction(connection => logAudit(connection, {
         userId: user.user_id,
         action: 'LOGIN',
         table: 'AUTH_SESSIONS',
@@ -239,11 +239,9 @@ export async function loginUser(req, res) {
         oldValue: null,
         newValue: { email: user.email, roles: roleCodes },
         ipAddress: req.ip,
-      });
+      }));
     } catch (auditErr) {
       console.error('[Auth Audit Warning]:', auditErr.message);
-    } finally {
-      connection.release();
     }
 
     // Successful login — reset the rate-limit counter for this IP

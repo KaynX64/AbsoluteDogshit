@@ -36,6 +36,8 @@ Routers that emit realtime events receive `io` as a factory argument: `appointme
 
 The [feature route map](../src/routes/AGENTS.md) lists the feature modules and their entry points.
 
+The API admits 24 ordinary operations and reserves four extra SOS slots. Ordinary requests can wait in a 12-place queue for up to 100 ms. SOS has a separate 32-place priority queue with a one-second wait limit. The connection budget is eight shared connections, one for SOS requests and one for the dashboard worker. Excess requests receive HTTP 503.
+
 `appointment:booked` is an authenticated global refresh signal with an empty object payload. Clients retrieve appointment details through authorized REST endpoints.
 
 ## Middleware — src/middleware/

@@ -158,10 +158,10 @@ export function registerSosRoutes(router) {
           ipAddress: req.ip,
         });
         return result.insertId;
-      });
+      }, { retries: 2 });
       return replyWithReceipt(res, { alert_id: alertId, location_label: address }, false);
     } catch (error) {
-      if (id && error.code === 'ER_DUP_ENTRY') {
+      if (id && (error.code === 'ER_DUP_ENTRY' || error.commitUncertain)) {
         try {
           const accepted = await readAccepted(request);
           if (accepted) return replyWithReceipt(res, accepted, true);
@@ -170,7 +170,7 @@ export function registerSosRoutes(router) {
         }
       }
       console.error('[SOS Submission]:', error.code ?? error.name);
-      res.status(503).json({ error: 'Could not verify SOS receipt.' });
+      res.set('Retry-After', '1').status(503).json({ error: 'Could not verify SOS receipt.' });
     }
   });
 }

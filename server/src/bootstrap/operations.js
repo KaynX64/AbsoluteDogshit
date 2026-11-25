@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { pool } from '../db/pool.js';
 import { isRedisActive } from '../utils/redisClient.js';
 import { getWorkerStats } from '../workers/scheduler.js';
+import { loadMetrics } from './loadMetrics.js';
 
 import { events, recordOperation } from './operationEvents.js';
 export { recordOperation };
@@ -17,7 +18,7 @@ export function serverStatus() {
 
 export const commands = Object.freeze({
   // Collect system and dependency status for the Terminal status command.
-  status: async () => ({ instanceId, ...await collectSystemStatus() }),
+  status: async () => ({ instanceId, ...await collectSystemStatus(), load: loadMetrics() }),
   // Check MySQL connectivity and report whether Redis is ready or in fallback mode.
   health: async () => {
     await pool.query('SELECT 1');

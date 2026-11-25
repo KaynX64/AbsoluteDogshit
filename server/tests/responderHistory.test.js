@@ -41,7 +41,8 @@ test('encrypted drafts are private, revision guarded and never audit narrative t
       const key = `${params[0]}:${params[1]}`, row = rows.get(key);
       if (row?.revision !== params[2]) return [{ affectedRows: 0 }]; rows.delete(key); return [{ affectedRows: 1 }];
     }
-    if (sql.includes('SELECT entry_hash')) return [[]];
+    if (sql.includes('FROM USERS FORCE INDEX (PRIMARY)') || sql.includes('UPDATE AUDIT_CHAIN_STATE')) return [[]];
+    if (sql.includes('FROM AUDIT_CHAIN_STATE')) return [[{ last_entry_hash: '0'.repeat(64) }]];
     if (sql.includes('INSERT INTO AUDIT_LOGS')) { audits.push(JSON.parse(params[5])); return [{ insertId: 1 }]; }
     assert.fail('Unexpected draft query');
   };

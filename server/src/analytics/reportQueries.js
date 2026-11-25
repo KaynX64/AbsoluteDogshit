@@ -3,8 +3,8 @@
 import { pool } from '../db/pool.js';
 
 // Count consultations by patient department with an optional result limit.
-export async function listConsultationsByDepartment({ fallback = 'General Walk-in', limit } = {}) {
-  const [rows] = await pool.query(
+export async function listConsultationsByDepartment({ fallback = 'General Walk-in', limit, database = pool } = {}) {
+  const [rows] = await database.query(
     `SELECT department, COUNT(*) AS count
      FROM (
        SELECT COALESCE(sp.course, fp.department, ?) AS department
@@ -21,8 +21,8 @@ export async function listConsultationsByDepartment({ fallback = 'General Walk-i
 }
 
 // Count active accounts assigned to each role.
-export async function listActiveRoles() {
-  const [rows] = await pool.query(
+export async function listActiveRoles(database = pool) {
+  const [rows] = await database.query(
     `SELECT r.code, r.name, COUNT(u.user_id) AS count
      FROM ROLES r
      LEFT JOIN USER_ROLES ur ON r.role_id = ur.role_id
@@ -46,8 +46,8 @@ export async function listInventoryForReport({ orderByExpiry = false } = {}) {
 }
 
 // Read the medicine batches that meet the dashboard's inventory alert criteria.
-export async function listInventoryAlerts(limit) {
-  const [rows] = await pool.query(
+export async function listInventoryAlerts(limit, database = pool) {
+  const [rows] = await database.query(
     `SELECT b.batch_id, m.name, m.generic_name, b.batch_no, b.quantity_on_hand, m.reorder_level,
             DATE_FORMAT(b.expiry_date, '%Y-%m-%d') AS expiry_date,
             DATEDIFF(b.expiry_date, CURDATE()) AS days_until_expiry

@@ -663,6 +663,21 @@ html[data-titlebar-fullscreen='true'] .app-titlebar { display: none; }
 .tb-replay:hover:not(:disabled) { background: #F8E5C8; }
 .tb-replay:disabled { opacity: 0.6; cursor: not-allowed; }
 
+.tb-discard-unassigned {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: var(--r-pill);
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid var(--danger-border);
+  cursor: pointer;
+  font-family: var(--font);
+  transition: background var(--dur-base) var(--ease);
+}
+.tb-discard-unassigned:hover:not(:disabled) { background: var(--danger-border); }
+.tb-discard-unassigned:disabled { opacity: 0.6; cursor: not-allowed; }
+
 .tb-sample {
   font-size: 11.5px;
   font-weight: 600;

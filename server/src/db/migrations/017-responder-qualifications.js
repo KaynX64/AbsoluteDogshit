@@ -52,7 +52,7 @@ export const qualificationTables = [
 ) ENGINE=InnoDB`,
 ];
 export default {
-    version: 16, name: 'Responder qualification applications and appointments',
+    version: 17, name: 'Responder qualification applications and appointments',
     async schema(connection) {
         for (const sql of qualificationTables)
             await connection.query(sql);

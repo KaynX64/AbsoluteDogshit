@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:http/http.dart' as http;
 
 class ApiConfig {
@@ -10,9 +8,7 @@ class ApiConfig {
   static String _resolveBaseUrl() {
     const configuredUrl = String.fromEnvironment('API_BASE_URL');
     if (configuredUrl.isEmpty) {
-      return !kIsWeb && defaultTargetPlatform == TargetPlatform.android
-          ? 'https://192.168.100.69:5000'
-          : 'https://localhost:5000';
+      return 'https://10.162.151.59:5000';
     }
 
     final uri = Uri.tryParse(configuredUrl.trim());

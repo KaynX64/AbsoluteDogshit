@@ -87,6 +87,26 @@ test('offline IPC caches, queues, and completes mutations using the existing SQL
   assert.equal((await call('offline-mark-synced', { client_mutation_id: 'fixture-mutation', user_id: 2, server_record_id: 7 })).success, true);
   assert.deepEqual((await call('offline-get-pending-mutations')).map(row => row.client_mutation_id), ['legacy-only']);
   assert.equal(db.prepare("SELECT payload FROM LOCAL_SYNC_LOGS WHERE client_mutation_id = 'fixture-mutation'").get().payload, '{}');
+
+  const disposable = [1, 2, 3].map(index => ({
+    ...legacy,
+    client_mutation_id: `disposable-${index}`,
+    record_uuid: `disposable-draft-${index}`,
+    payload: { ...legacy.payload, appointment_id: 30 + index },
+  }));
+  call('offline-import-legacy', disposable);
+  db.prepare("UPDATE LOCAL_SYNC_LOGS SET sync_status = 'error' WHERE client_mutation_id = 'disposable-3'").run();
+  db.prepare(`INSERT INTO LOCAL_SYNC_LOGS
+    (client_mutation_id, user_id, device_id, table_name, record_uuid, action, payload, sync_status)
+    VALUES ('synced-unassigned', 0, 'fixture', 'EMR_RECORDS', 'synced-record', 'CREATE', '{}', 'synced')`).run();
+  assert.equal(call('offline-pending-count').unassigned, 3);
+  assert.throws(() => call('offline-discard-unassigned', 2), /queue changed/);
+  assert.equal(call('offline-pending-count').unassigned, 3, 'a stale count cannot discard changed queue data');
+  assert.equal(call('offline-discard-unassigned', 3), 3);
+  assert.equal(call('offline-pending-count').unassigned, 0);
+  assert.equal(call('offline-pending-count').pending, 1, 'account-owned changes remain queued');
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM CACHED_EMR_RECORDS WHERE doctor_user_id = 0 AND is_draft = 1").get().count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM LOCAL_SYNC_LOGS WHERE client_mutation_id = 'synced-unassigned'").get().count, 1);
 });
 
 test('plaintext database upgrades once, preserving legacy queue data and encrypting the file', async t => {

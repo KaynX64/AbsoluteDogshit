@@ -3,7 +3,7 @@
 |---|---|
 | secrets.js | `JWT_SECRET`, `ENCRYPTION_KEY` (validated at import) |
 | cryptoVault.js | `encrypt`, `decrypt`, `isEncryptedValue` (AES-256-GCM v2 envelopes with required `ENCRYPTION_SALT`) |
-| auditLogger.js | `logAudit(conn, {userId, action, table, recordId, oldValue, newValue, ipAddress})` |
+| auditLogger.js | Append with `logAudit(conn, entry)` or `logAuditBatch(conn, entries)` after business writes and before commit. The caller uses an explicit transaction. |
 | phiLogger.js | `logPhiAccess({...})` → PHI_ACCESS_LOGS |
 | redisClient.js | `initRedis`, `isRedisActive`, `getCache`, `setCache`, `invalidateCache` |
 | s3Vault.js | `uploadToS3`, `getFromS3`, `getBufferFromS3`, `deleteFromS3`, `ensureBucketExists` |

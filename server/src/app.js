@@ -19,6 +19,7 @@ import analyticsRoutes from './routes/analytics/index.js';
 import syncRoutes from './routes/sync/index.js';
 import interactionsRoutes from './routes/interactions.js';
 import signatureRoutes from './routes/signature.js';
+import { createAdmission, loadControlsEnabled } from './bootstrap/admission.js';
 
 // ── SEC-10 Remediation (CORS allow-list) ──────────────────────────────
 // cors() (allow-everything) let ANY website reach the API from a
@@ -71,6 +72,7 @@ export function createApp({ isOriginAllowed = createOriginCheck() } = {}) {
         console.warn(`⚠️ [CORS] Cross-origin request from unauthorized origin blocked: ${origin}`);
         return callback(null, false);
       },
+      exposedHeaders: ['X-Analytics-As-Of', 'Retry-After'],
     })
   );
   app.use(express.json());
@@ -108,11 +110,12 @@ export function createApp({ isOriginAllowed = createOriginCheck() } = {}) {
     next();
   });
 
+  if (loadControlsEnabled()) app.use('/api', createAdmission());
   return app;
 }
 
 // Mount authentication, liveness, and feature routes on the app.
-export function mountApiRoutes(app, io, { restart } = {}) {
+export function mountApiRoutes(app, io, { restart, readAnalyticsSnapshot } = {}) {
   app.post('/api/auth/login', loginRateLimit, loginUser);
   // Pass the logout request and realtime server to the session handler.
   app.post('/api/auth/logout', authenticateToken, (req, res) => logoutUser(req, res, io));
@@ -128,7 +131,7 @@ export function mountApiRoutes(app, io, { restart } = {}) {
   app.use('/api/inventory', inventoryRoutes(io));
   app.use('/api/documents', documentRoutes(io));
   app.use('/api/admin', adminRoutes(io, restart));
-  app.use('/api/analytics', analyticsRoutes);
+  app.use('/api/analytics', analyticsRoutes(readAnalyticsSnapshot));
   app.use('/api/sync', syncRoutes);
   app.use('/api/interactions', interactionsRoutes);
   app.use('/api/signature', signatureRoutes);

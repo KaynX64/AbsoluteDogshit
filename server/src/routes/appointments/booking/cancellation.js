@@ -3,7 +3,7 @@
 import { pool } from '../../../db/pool.js';
 import { authenticateToken } from '../../../auth/middleware.js';
 import { logAudit } from '../../../utils/auditLogger.js';
-import { invalidateCache } from '../../../utils/redisClient.js';
+import { invalidateDailyQueue } from '../../../appointments/dailyQueueCache.js';
 
 // Mount the appointment cancellation endpoint.
 export function registerBookingCancellation(router, io) {
@@ -78,7 +78,7 @@ export function registerBookingCancellation(router, io) {
       });
 
       await connection.commit();
-      await invalidateCache('queue:*');
+      await invalidateDailyQueue();
 
       if (io) {
         io.emit('appointment:cancelled', { appointment_id: appointmentId });

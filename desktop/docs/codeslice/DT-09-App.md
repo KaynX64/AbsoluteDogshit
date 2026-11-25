@@ -14,9 +14,9 @@ The sign-in shell loads before the staff console bundle. The renderer warms the 
 | 2 | 47-125 | function AppShell | function AppShell |
 | 3 | 126-210 | const handleSignOut | Confirm manual sign-out before clearing the session |
 | 4 | 211-261 | const handleLogin | const handleLogin |
-| 5 | 262-347 | const handleManualReplay | const handleManualReplay |
-| 6 | 348-367 | <LoginScreen | <LoginScreen |
-| 7 | 368-379 | <Sidebar | <Sidebar |
-| 8 | 380-476 | <TopBar | <TopBar |
-| 9 | 477-602 | <IncidentReportModal | <IncidentReportModal |
-| 10 | 603-609 | export default function App | export default function App |
+| 5 | 262-364 | const handleManualReplay | const handleManualReplay |
+| 6 | 365-380 | <LoginScreen | <LoginScreen |
+| 7 | 381-399 | <Sidebar | <Sidebar |
+| 8 | 400-499 | <TopBar | <TopBar |
+| 9 | 500-625 | <IncidentReportModal | <IncidentReportModal |
+| 10 | 626-632 | export default function App | export default function App |

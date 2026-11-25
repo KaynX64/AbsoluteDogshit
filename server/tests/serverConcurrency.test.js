@@ -68,7 +68,11 @@ async function mountedApi(t) {
   const { createApp, mountApiRoutes } = await withoutFirebaseCredentials(t, () => import('../src/app.js'));
   const app = createApp();
   const emit = t.mock.fn();
-  mountApiRoutes(app, { emit, /* Return the same emission mock for a targeted realtime room. */ to: () => ({ emit }) });
+  const { computeAnalyticsAggregates } = await import('../src/analytics/summary.js');
+  const { pool } = await import('../src/db/pool.js');
+  mountApiRoutes(app, { emit, to: () => ({ emit }), in: () => ({ disconnectSockets() {} }) }, {
+    readAnalyticsSnapshot: async () => ({ asOf: Date.now(), data: await computeAnalyticsAggregates(pool) }),
+  });
   const server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   // Register cleanup for the fixture HTTP listener.
@@ -86,6 +90,69 @@ async function mountedApi(t) {
   };
   return { request, emit };
 }
+
+test('parallel bookings enforce slot capacity and the following recovery hour', { skip }, async t => {
+  const db = await fixture(t);
+  const { request } = await mountedApi(t);
+  const [[{ day }]] = await db.query("SELECT DATE_FORMAT(CURRENT_DATE + INTERVAL 2 DAY, '%Y-%m-%d') AS day");
+  const book = hour => request('/appointments', { userId: 5, roles: ['STUDENT'], method: 'POST',
+    json: { doctor_user_id: 2, date_time: day + ' ' + hour, appointment_type: 'Prescription refill' } });
+  const attempts = await Promise.all(Array.from({ length: 8 }, () => book('08:00:00')));
+  assert.deepEqual(attempts.map(response => response.status).sort(), [201, 201, 201, 409, 409, 409, 409, 409]);
+  const recovery = await book('09:00:00');
+  assert.equal(recovery.status, 409);
+  assert.match((await recovery.json()).error, /recovery buffer/);
+  const [[audit]] = await db.query("SELECT COUNT(*) AS n FROM AUDIT_LOGS WHERE table_affected = 'APPOINTMENTS'");
+  assert.equal(audit.n, 3);
+});
+
+test('parallel check-ins emit once and persist one queue ticket', { skip }, async t => {
+  const db = await fixture(t);
+  const { request, emit } = await mountedApi(t);
+  await db.query("INSERT INTO APPOINTMENTS (appointment_id, patient_user_id, doctor_user_id, date_time, appointment_type) VALUES (1, 5, 2, NOW(), 'Medical')");
+  const check = () => request('/appointments/1/checkin', { userId: 3, roles: ['NURSE'], method: 'POST', json: {} });
+  const attempts = await Promise.all([check(), check()]);
+  assert.deepEqual(attempts.map(response => response.status).sort(), [200, 409]);
+  const [[queue]] = await db.query('SELECT COUNT(*) AS n FROM QUEUE WHERE appointment_id = 1');
+  assert.equal(queue.n, 1);
+  assert.equal(emit.mock.calls.filter(call => call.arguments[0] === 'queue:updated').length, 1);
+});
+
+test('administrator qualification and archival share a one-connection pool', { skip }, async t => {
+  const db = await fixture(t, 1);
+  const { request } = await mountedApi(t);
+  await db.query("INSERT INTO USER_ROLES (user_id, role_id) SELECT 4, role_id FROM ROLES WHERE code = 'ADMIN'");
+  const caller = { userId: 1, roles: ['ADMIN'] };
+  const legacy = await request('/admin/users/4/qualified-responder', { ...caller, method: 'PUT', json: { is_qualified_responder: false } });
+  assert.equal(legacy.status, 409);
+  assert.equal((await legacy.json()).code, 'QUALIFICATION_WORKFLOW_REQUIRED');
+
+  const [[{ appointment_id }]] = await db.query('SELECT appointment_id FROM RESPONDER_APPOINTMENTS WHERE user_id = 4');
+  const revoke = await request('/responder-qualifications/appointments/' + appointment_id + '/end', {
+    ...caller, method: 'POST', json: { status: 'revoked', reason: 'Fixture revocation' },
+  });
+  assert.equal(revoke.status, 200);
+  const [[{ status }]] = await db.query('SELECT status FROM RESPONDER_APPOINTMENTS WHERE appointment_id = ?', [appointment_id]);
+  assert.equal(status, 'revoked');
+  const archive = await request('/admin/users/4', { ...caller, method: 'DELETE' });
+  assert.equal(archive.status, 200);
+});
+
+test('no-show batch updates other appointments while an eligible row is locked', { skip }, async t => {
+  const db = await fixture(t);
+  const { markDueAppointmentsNoShow } = await import('../src/appointments/noShow.js');
+  await db.query('INSERT INTO APPOINTMENTS (patient_user_id, doctor_user_id, date_time, appointment_type) VALUES ?',
+    [Array.from({ length: 100 }, () => [5, 2, new Date(Date.now() - 2 * 3600_000), 'Medical'])]);
+  const blocker = await db.getConnection();
+  try {
+    await blocker.beginTransaction();
+    await blocker.query('SELECT appointment_id FROM APPOINTMENTS WHERE appointment_id = 1 FOR UPDATE');
+    const changed = await markDueAppointmentsNoShow(15);
+    assert.equal(changed.length, 99);
+    assert(!changed.includes(1));
+  } finally { await blocker.rollback(); blocker.release(); }
+  assert.deepEqual(await markDueAppointmentsNoShow(15), [1]);
+});
 
 // Seed checked-in appointments for concurrent queue and encounter scenarios.
 async function insertCheckedInAppointments(db) {

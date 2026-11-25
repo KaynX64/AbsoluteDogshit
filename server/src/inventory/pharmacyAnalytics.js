@@ -78,9 +78,9 @@ export async function listReorderSuggestions() {
 }
 
 // Load recent prescribing and dispensing metrics and any requested replenishment data.
-export async function getPharmacyAnalytics({ includeDispensing = true, includeReorder = false, limit = 6 } = {}) {
+export async function getPharmacyAnalytics({ includeDispensing = true, includeReorder = false, limit = 6, database = pool } = {}) {
   if (!includeDispensing) {
-    const [rows] = await pool.query(`
+    const [rows] = await database.query(`
       ${formularyMetrics}
       SELECT medicine_id, name, generic_name, form, strength, unit, total_stock_on_hand,
              reorder_level, suggested_reorder_qty, stock_status
@@ -98,7 +98,7 @@ export async function getPharmacyAnalytics({ includeDispensing = true, includeRe
   const inventoryColumns = includeReorder
     ? ', total_stock_on_hand, reorder_level, suggested_reorder_qty, stock_status, reorder_rank'
     : '';
-  const [rows] = await pool.query(`
+  const [rows] = await database.query(`
     ${formularyMetrics},
     ranked AS (
       SELECT metrics.*,

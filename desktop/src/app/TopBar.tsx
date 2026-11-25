@@ -7,14 +7,17 @@ interface TopBarProps {
   offlineUnassigned: number;
   offlineStorageUnavailable: boolean;
   isReplaying: boolean;
+  isDiscardingUnassigned: boolean;
   onManualReplay: () => void;
+  onDiscardUnassigned: () => void;
   roleView: string;
   roles: string[];
   onChangeRoleView: (v: string) => void;
 }
 
 export default function TopBar({
-  user, role, isOnline, offlineQueueCount, offlineNeedsReview, offlineUnassigned, offlineStorageUnavailable, isReplaying, onManualReplay,
+  user, role, isOnline, offlineQueueCount, offlineNeedsReview, offlineUnassigned, offlineStorageUnavailable,
+  isReplaying, isDiscardingUnassigned, onManualReplay, onDiscardUnassigned,
   roleView, roles, onChangeRoleView,
 }: TopBarProps) {
   const initials =
@@ -61,9 +64,19 @@ export default function TopBar({
 
         {offlineStorageUnavailable && <span className="tb-online is-off" role="status">Offline storage unavailable</span>}
         {offlineUnassigned > 0 && (
-          <span className="tb-online is-off" role="status" title="These changes are encrypted and need account verification before replay.">
-            {offlineUnassigned} unassigned offline changes
-          </span>
+          <>
+            <span className="tb-online is-off" role="status" title="These changes are encrypted and need account verification before replay.">
+              {offlineUnassigned} unassigned offline changes
+            </span>
+            <button
+              type="button"
+              className="tb-discard-unassigned"
+              onClick={onDiscardUnassigned}
+              disabled={isDiscardingUnassigned}
+            >
+              {isDiscardingUnassigned ? 'Discarding…' : 'Discard'}
+            </button>
+          </>
         )}
         {offlineNeedsReview > 0 && (
           <span className="tb-online is-off" role="status" title="Unresolved changes are retained in encrypted storage.">

@@ -15,7 +15,8 @@ import { processResponderQualifications } from '../src/workers/responderQualific
 import { COMPETENCIES } from '../src/emergency/qualificationPolicy.js';
 import qualificationsRouter from '../src/routes/responderQualifications.js';
 import { JWT_SECRET } from '../src/utils/secrets.js';
-import qualificationMigration, {qualificationTables} from '../src/db/migrations/016-responder-qualifications.js';
+import { qualificationTables } from '../src/db/migrations/017-responder-qualifications.js';
+import { getWhitelistedTables } from '../src/routes/admin/databaseStudio/schema.js';
 const skip = !process.env.VALETUDO_MIGRATION_TEST_PORT && 'Set VALETUDO_MIGRATION_TEST_PORT to use disposable MySQL databases';
 test('qualification lifecycle, concurrent decisions, privacy, renewal and development scenarios', { skip }, async (t) => {
     const database = 'vhl_qualification_test_' + randomUUID().replaceAll('-', '');
@@ -33,6 +34,9 @@ test('qualification lifecycle, concurrent decisions, privacy, renewal and develo
     await runMigrations(db);
     t.mock.method(pool, 'query', (...args) => db.query(...args));
     t.mock.method(pool, 'getConnection', () => db.getConnection());
+    const visibleTables = (await getWhitelistedTables()).map(({ tableName }) => tableName.toUpperCase());
+    assert.ok(visibleTables.includes('USERS'));
+    assert.ok(!visibleTables.some(table => table === 'AUDIT_CHAIN_STATE' || table.startsWith('RESPONDER_')));
     const stored = new Map();
     const app = express();
     app.use(express.json());
@@ -153,7 +157,15 @@ test('qualification lifecycle, concurrent decisions, privacy, renewal and develo
     }
     await db.query("INSERT IGNORE INTO USER_ROLES (user_id,role_id) SELECT 3,role_id FROM ROLES WHERE code='NURSE'");
     await db.query('UPDATE USERS SET is_qualified_responder=1 WHERE user_id=5');
-    await qualificationMigration.schema(db); await qualificationMigration.data(db);
+    // Leave version 016 in place to simulate upgrading an existing Stage1 database.
+    const [[auditMigration]] = await db.query('SELECT * FROM SCHEMA_MIGRATIONS WHERE version = 16');
+    await db.query('DELETE FROM SCHEMA_MIGRATIONS WHERE version = 17');
+    assert.equal(await runMigrations(db), 1);
+    const [ledger] = await db.query('SELECT * FROM SCHEMA_MIGRATIONS WHERE version >= 16 ORDER BY version');
+    assert.deepEqual(ledger[0], auditMigration);
+    assert.equal(ledger[1].version, 17);
+    assert.ok(ledger[1].applied_at);
+    assert.equal(await runMigrations(db), 0);
     assert.equal((await db.query('SELECT enforced FROM RESPONDER_QUALIFICATION_SETTINGS'))[0][0].enforced,0);
     assert.equal((await db.query('SELECT COUNT(*) AS count FROM RESPONDER_APPOINTMENTS'))[0][0].count,0,'A production upgrade must not fabricate approvals');
     await assert.rejects(enableQualificationRoster(1),/Approve an active response staff roster/);

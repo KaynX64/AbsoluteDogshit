@@ -1,15 +1,26 @@
 // Serves the scoped dashboard summary, department counts, and report access status.
 
 import { requireAnalyticsExport } from '../../analytics/access.js';
-import { analyticsSummary } from '../../analytics/summary.js';
+import { loadAuthorizedAnalytics, projectAnalytics } from '../../analytics/summary.js';
+import { getDashboardSnapshot, recordSnapshotAge, snapshotMaxAgeMs } from '../../analytics/dashboardSnapshots.js';
+import { loadControlsEnabled } from '../../bootstrap/admission.js';
 import { listConsultationsByDepartment } from '../../analytics/reportQueries.js';
 
 // Mount scoped dashboard, print authorization, and department count endpoints.
-export function registerAnalyticsDashboard(router) {
+export function registerAnalyticsDashboard(router, readSnapshot = getDashboardSnapshot) {
   // Return the dashboard sections allowed by the caller's analytics scopes.
   router.get('/summary', async (req, res) => {
     try {
-      res.json(await analyticsSummary(req.analyticsScopes));
+      if (!loadControlsEnabled()) return res.json(projectAnalytics(req.analyticsScopes, await loadAuthorizedAnalytics(req.analyticsScopes)));
+      const snapshot = await readSnapshot(req.analyticsScopes);
+      const age = snapshot && Date.now() - snapshot.asOf;
+      res.set('Cache-Control', 'no-store');
+      if (!snapshot || age < 0 || age > snapshotMaxAgeMs) {
+        return res.set('Retry-After', '1').status(503).json({ error: 'Analytics is refreshing. Please retry shortly.', code: 'ANALYTICS_REFRESHING' });
+      }
+      recordSnapshotAge(snapshot.asOf);
+      res.set('X-Analytics-As-Of', new Date(snapshot.asOf).toISOString());
+      res.json(projectAnalytics(req.analyticsScopes, snapshot.data));
     } catch (error) {
       console.error('[Analytics summary]', error.code || error.name);
       res.status(500).json({ error: 'Failed to compute health analytics summary.' });

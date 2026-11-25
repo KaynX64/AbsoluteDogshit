@@ -31,7 +31,7 @@ export default function adminRouter(io, restart) {
   registerRoleUpdates(router);
   registerAccountProfileUpdates(router);
   registerAccountCredentialRoutes(router);
-  registerResponderManagementRoutes(router, io);
+  registerResponderManagementRoutes(router);
   registerPermissionUpdateRoute(router);
   registerStaffAnalyticsRoutes(router);
   registerAuditAndTelemetryRoutes(router);

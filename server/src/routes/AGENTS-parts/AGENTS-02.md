@@ -2,15 +2,13 @@
 
 # Route policies and handler contracts
 
-Analytics summary reports fourteen MySQL calendar days for both encounter and SOS timelines. The current day is partial. `emergencyMetrics.timedClosures` distinguishes a measured zero-second closure from an empty sample. Empty diagnosis and department datasets are returned as empty arrays.
+The dashboard serves snapshots at most five seconds old. `X-Analytics-As-Of` marks source time. A missing fresh snapshot returns HTTP 503 after a bounded wait. Encounter and SOS graphs use 14 MySQL calendar days. Today is partial. `emergencyMetrics.timedClosures` separates zero-second closures from no sample. Empty diagnosis and department results are arrays.
 
-Analytics reads current roles and admin grants together on each request. Administrators with other roles use their admin grants. Clinical includes aggregate Surveillance, and Pharmacy includes Dispensing. Doctors and dentists receive Operations, Clinical, Dispensing with availability, and Export. Nurses receive Operations, Surveillance, Pharmacy, and Export. A diagnosis ranking is loaded only for Clinical. Batch alerts and reorder rankings require Pharmacy. Department detail requires Operations. Downloads and print authorization require Export and at least one authorized section.
-
-Super Admins manage per-account staff overrides through GET and PUT `/api/admin/users/:id/analytics-permissions`. A null override inherits the current staff role defaults. An explicit list replaces those defaults, with independent controls for diagnosis, surveillance, dispensing and inventory. An empty list denies analytics. The same settings apply to the summary, department detail, exports and print authorization.
+Live grants gate all analytics routes. Mixed-role admins use admin grants. Doctors and dentists get Operations, Clinical, Dispensing and Export. Nurses get Operations, Surveillance, Pharmacy and Export. Clinical includes Surveillance. Pharmacy includes Dispensing. Diagnosis ranks require Clinical, stock alerts and reorder ranks require Pharmacy, and department details require Operations. Export needs an eligible section and covers both downloads and print. Super Admins manage staff scopes at GET/PUT `/api/admin/users/:id/analytics-permissions`. Null inherits staff defaults, an explicit list replaces them, and an empty list denies analytics.
 
 Use `rg -n '<route path>' server/src/routes/<area>` to locate a handler. Feature registrars attach to the same router in the order set by `index.js`. Admin applies authentication and the ADMIN role gate before registering its routes. The server-policy router applies its own Super Admin gate.
 
-The admin directory lists archived accounts with `GET /users?archived=true`. Its audited soft archive retains clinical and audit history and blocks self-archive and archiving the last active Super Admin. The advanced health-profile editor reads `GET /users/:id/health-profile` and saves through `PUT /users/:id`. The qualified responder endpoint requires `RESPONDERS_MANAGE`, requires a Super Admin for ADMIN targets, and emits `responder:status_changed`.
+The admin directory lists archived accounts with `GET /users?archived=true`. Its audited soft archive retains clinical and audit history and blocks self-archive and archiving the last active Super Admin. The advanced health-profile editor reads `GET /users/:id/health-profile` and saves through `PUT /users/:id`. The retired flag endpoint requires `RESPONDERS_MANAGE` and returns HTTP 409. Review applications and manage appointments through the [responder qualification workflow](../../../RESPONDER-QUALIFICATIONS.md).
 
 Super Admins can grant `INCIDENT_RECORDS_VIEW` during Limited Admin creation or by editing grants. The incident archive and both PDF routes enforce the grant for administrators. The document PDF route also serves patients their own report. Pending-report reads, report prefill and filing require live responder access followed by `requireClinicalResponder`; the community tier may only acknowledge active incidents. Responder prefill returns the filed report ID so the popup can close when someone has already filed it.
 
@@ -27,7 +25,7 @@ Super Admins can grant `INCIDENT_RECORDS_VIEW` during Limited Admin creation or 
 
 ## Appointment read queries
 
-- Booking and availability compare `date_time` directly to the clinic day's bounds so MySQL can use `idx_app_doctor_datetime`.
+- Booking locks the practitioner and reads the current and preceding hour via `idx_app_doctor_datetime` under READ COMMITTED. Availability reads the requested day. Check-in releases its connection before queue invalidation and events.
 - The roster selects the latest live EMR and prescription by date and ID and returns one row per appointment. Arrival and no-show counts use date ranges backed by `idx_app_status_datetime`.
 - `GET /api/appointments/patient/:patientId/history?limit=25` returns `{ records, nextCursor }`. Pass the returned cursor as `before` with the same limit to load older encounters. The limit accepts 1–50. A request without paging parameters returns the legacy array.
 - History is ordered by encounter date and ID, newest first. The encounter query joins the dental chart for dentists. Vitals, attachment metadata and prescriptions are loaded in one batch query each. The consultation attachment strip uses `?view=attachments` and reads only live attachment metadata.

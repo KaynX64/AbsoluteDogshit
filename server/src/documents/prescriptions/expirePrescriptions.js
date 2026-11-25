@@ -18,7 +18,7 @@ export function expireDuePrescriptions() {
              FROM PRESCRIPTION_ITEMS pi
              WHERE pi.prescription_id = p.prescription_id
            ) < NOW()))
-         ORDER BY p.prescription_id
+         ORDER BY p.prescription_id LIMIT 100
          FOR UPDATE SKIP LOCKED`,
       [today()],
     );
@@ -27,7 +27,7 @@ export function expireDuePrescriptions() {
 
     if (ids.length) {
       const [result] = await connection.query(
-        `UPDATE PRESCRIPTIONS SET status = 'expired'
+        `UPDATE PRESCRIPTIONS FORCE INDEX (PRIMARY) SET status = 'expired'
          WHERE prescription_id IN (?) AND status = 'active' AND deleted_at IS NULL`,
         [ids],
       );

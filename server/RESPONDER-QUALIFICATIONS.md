@@ -29,7 +29,7 @@ See the [qualification API contract](RESPONDER-QUALIFICATION-API.md) for endpoin
 
 ## Deployment and synthetic scenarios
 
-Migration **016** adds seven qualification tables and imports existing flags/staff as draft candidates. It fabricates no approvals. Existing installations begin with enforcement disabled, explicitly preserving legacy delivery during roster preparation. Designate clinic reviewers, complete the operational roster and deploy the updated clients before an authorized administrator selects **Enable reviewed roster**. There is no UI/API switch back to legacy access.
+Migration **017** adds seven qualification tables and imports existing flags/staff as draft candidates. It fabricates no approvals. Existing installations begin with enforcement disabled, explicitly preserving legacy delivery during roster preparation. Designate clinic reviewers, complete the operational roster and deploy the updated clients before an authorized administrator selects **Enable reviewed roster**. There is no UI/API switch back to legacy access.
 
 Fresh-install `schema.sql` includes synthetic development scenarios. For this existing development database, use:
 

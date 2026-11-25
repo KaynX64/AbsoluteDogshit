@@ -6,7 +6,7 @@ Reviewed against this checkout on 2026-11-15. This is an architectural walkthrou
 
 HealthLink is a university campus clinic management system. It connects patients, clinic staff and emergency responders around appointments, clinical records, medicines and emergency incidents. The project guidance identifies Pangasinan State University as its setting.
 
-The repository is named `AbsoluteDogshit`. Branding is currently mixed: the desktop package and most technical guides use **Valetudo HealthLink**, while the mobile app title, its smoke test and the root README heading use **LeoVital HealthLink**. These are names within this codebase, not separate applications.
+The repository is named `AbsoluteDogshit`. The project and desktop console use **Valetudo HealthLink**, and the mobile app uses **LeoVital HealthLink**. Both apps connect to the same clinic API.
 
 ## Who uses it and what they do
 
@@ -54,7 +54,7 @@ The server also schedules appointment reminders, no-show transitions and prescri
 
 ## Records, emergencies and offline behavior
 
-[schema.sql](server/schema.sql) defines 41 base tables, plus a separate migration ledger created by the runner. The groups cover identity/roles, profiles/consent, appointments/queues, encounters/vitals/dental charts, prescriptions/inventory, emergencies/incidents, audit logs and operational policy. The schema script recreates tables; existing installations use migrations.
+[schema.sql](server/schema.sql) defines 42 base tables, plus a separate migration ledger created by the runner. The groups cover identity/roles, profiles/consent, appointments/queues, encounters/vitals/dental charts, prescriptions/inventory, emergency incidents and responder qualifications, audit logs and operational policy. The schema script recreates tables; existing installations use migrations.
 
 SOS captures a location and notifies eligible recipients through realtime and push channels. After reviewed-roster cutover, every responder needs a current clinic-approved appointment; roles and historical flags alone grant no access. [Qualification workflow](server/RESPONDER-QUALIFICATIONS.md). Non-clinical community responders receive reduced payloads without medical details and can acknowledge alerts or open their locations. Dispatch, closure and incident-report workflows require the live clinical responder tier. On Android, an eligible responder can choose On duty, Quiet or Off duty for the installation. The shared mobile roster reconciles open incidents through the API, and responders can refresh it manually while off duty. Closing an alert leads into incident documentation and an official report PDF. [Responder Hub guide](mobile/README.md#responder-hub-on-android)
 
