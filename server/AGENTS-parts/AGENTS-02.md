@@ -23,7 +23,7 @@
 
 - Import the mysql2 pool from `src/db/pool.js`. `src/db/migrate.js` applies versioned upgrades before the listener starts.
 - The [migration rollout guide](../MIGRATION-PLAN.md) covers the migration command, disposable rehearsals and deployment recovery.
-- [schema.sql](../schema.sql) defines 35 uppercase base tables. The migration runner creates `SCHEMA_MIGRATIONS` separately. Migration 016 protects the audit chain through `AUDIT_CHAIN_STATE`.
+- [schema.sql](../schema.sql) defines 42 uppercase base tables. The migration runner creates `SCHEMA_MIGRATIONS` separately. Migration 016 protects the audit chain through `AUDIT_CHAIN_STATE`. Migration 017 adds the seven [responder qualification](../RESPONDER-QUALIFICATIONS.md) tables.
 - Role seed rows (ids 1–8) live at the bottom of `schema.sql`.
 
 ## Env — copy `.env.example` → `.env` (never commit it)

@@ -38,10 +38,10 @@ test('community actions are acknowledgment-only; staff roles retain their permis
   }
   for (const role of CLINICAL_ROLES) {
     for (const flagged of [true, false]) {
-      const tier = resolveResponderTier({ isQualifiedResponder: flagged, roles: ['STUDENT', role] });
-      assert.equal(tier, 'clinical');
+      const tier = resolveResponderTier({ isQualifiedResponder: flagged, appointmentLevel: 'staff', roles: ['STUDENT', role] });
+      assert.equal(tier, flagged ? 'clinical' : null);
       for (const status of ['acknowledged', 'dispatched', 'resolved', 'false_alarm']) {
-        assert.equal(canUpdateIncidentStatus(tier, status), true);
+        assert.equal(canUpdateIncidentStatus(tier, status), flagged);
       }
     }
   }
@@ -66,7 +66,12 @@ test('live route guards deny forbidden actions without transactions or broadcast
   const router = emergencyRoutes(io);
   let roles = ['STUDENT'], flagged = true, active = 1;
   t.mock.method(pool, 'query', async sql => {
-    if (sql.includes('GROUP BY')) return [[{ user_id: 42, is_qualified_responder: flagged, has_clinical_role: roles.includes('NURSE') ? 1 : 0 }]];
+    if (sql.includes('RESPONDER_QUALIFICATION_SETTINGS')) return [[{enforced:1}]];
+    if (sql.includes('RESPONDER_APPOINTMENTS')) {
+      const appointment={appointment_id:1,status:'active',starts_at:new Date(Date.now()-1000),expires_at:new Date(Date.now()+86400000),level:roles.includes('NURSE')?'staff':'community'};
+      if(sql.includes('GROUP BY'))return [[{...appointment,user_id:42,role_codes:roles.join(',')}]];
+      return [flagged || roles.includes('NURSE') ? [appointment]:[]];
+    }
     if (sql.includes('FROM USER_ROLES')) return [roles.map(code => ({ code }))];
     assert.ok(sql.includes('FROM USERS'), 'Only live access queries should reach the pool');
     return [[{ is_active: active, deleted_at: null, is_qualified_responder: flagged }]];
@@ -191,11 +196,12 @@ test('the self capability reflects live access while the alert list still reject
   let flagged = false;
   let role = 'DENTIST';
   // Simulate live responder roles and qualification for the fixture account.
-  t.mock.method(pool, 'query', async (sql, params) => {
-    assert.deepEqual(params, [42]);
-    return sql.includes('is_qualified_responder')
-      ? [[{ is_active: 1, deleted_at: null, is_qualified_responder: flagged }]]
-      : [[{ code: role }]];
+  t.mock.method(pool,'query',async(sql,params)=>{
+    if(sql.includes('RESPONDER_QUALIFICATION_SETTINGS'))return [[{enforced:1}]];
+    assert.deepEqual(params,[42]);
+    if(sql.includes('RESPONDER_APPOINTMENTS'))return [flagged || role==='DOCTOR' ? [{appointment_id:1,status:'active',level:'staff',starts_at:new Date(Date.now()-1000),expires_at:new Date(Date.now()+86400000)}]:[]];
+    if(sql.includes('FROM USER_ROLES'))return [[{code:role}]];
+    return [[{is_active:1,deleted_at:null,is_qualified_responder:flagged}]];
   });
   // Call the eligibility handler and capture its headers and JSON body.
   const check = async (authorized, tier = null) => {
@@ -207,7 +213,7 @@ test('the self capability reflects live access while the alert list still reject
       // Capture the responder capability payload.
       json(value) { body = value; },
     });
-    assert.deepEqual(body, { authorized, tier, isQualifiedResponder: flagged });
+    assert.equal(body.authorized,authorized); assert.equal(body.tier,tier); assert.equal(body.isQualifiedResponder,authorized);
     assert.equal(headers['Cache-Control'], 'no-store');
   };
 
@@ -234,42 +240,16 @@ test('the self capability reflects live access while the alert list still reject
   await check(true, 'clinical');
 });
 
-// ── Tier resolution ────────────────────────────────────────────────────────
-// Verify that a clinical role alone qualifies the account for clinical SOS details.
-test('tier: clinical role wins even without the flag', () => {
-  assert.equal(resolveResponderTier({ isQualifiedResponder: false, roles: ['NURSE'] }), 'clinical');
-  assert.equal(resolveResponderTier({ isQualifiedResponder: false, roles: ['DENTIST'] }), 'clinical');
-});
-
-// Verify that a flagged student is classified as a community responder.
-test('tier: flagged non-clinical account is community', () => {
-  assert.equal(resolveResponderTier({ isQualifiedResponder: true, roles: ['STUDENT'] }), 'community');
-  assert.equal(resolveResponderTier({ isQualifiedResponder: true, roles: ['FACULTY'] }), 'community');
-  assert.equal(resolveResponderTier({ isQualifiedResponder: true, roles: ['NON_TEACHING'] }), 'community');
-});
-
-// Verify that a student without the flag lacks responder access.
-test('tier: unflagged non-clinical account is null (no SOS access)', () => {
-  assert.equal(resolveResponderTier({ isQualifiedResponder: false, roles: ['STUDENT'] }), null);
-  assert.equal(resolveResponderTier({ isQualifiedResponder: false, roles: [] }), null);
-});
-
-// Verify that adding the flag preserves a physician's clinical tier.
-test('tier: flag on a clinical account stays clinical (flag is additive)', () => {
-  assert.equal(resolveResponderTier({ isQualifiedResponder: true, roles: ['DOCTOR'] }), 'clinical');
-});
-
-// Verify that tierFromRow mirrors resolveResponderTier.
-test('tierFromRow mirrors resolveResponderTier', () => {
-  assert.equal(tierFromRow({ isQualifiedResponder: true, hasClinicalRole: false }), 'community');
-  assert.equal(tierFromRow({ isQualifiedResponder: false, hasClinicalRole: true }), 'clinical');
-  assert.equal(tierFromRow({ isQualifiedResponder: false, hasClinicalRole: false }), null);
-});
-
-// Check the distinction between the dentist's medical detail tier and legacy SOS access.
-test('role lists: DENTIST is clinical but not a legacy recipient', () => {
-  assert.ok(CLINICAL_ROLES.includes('DENTIST'));
-  assert.ok(!LEGACY_RESPONDER_ROLES.includes('DENTIST')); // unflagged dentists never received SOS
+test('tier helpers require approval and explicitly granted staff level',()=>{
+ assert.equal(resolveResponderTier({roles:['NURSE']}),null);
+ assert.equal(resolveResponderTier({roles:['ADMIN'],isQualifiedResponder:true}), 'community');
+ assert.equal(resolveResponderTier({roles:['DOCTOR'],isQualifiedResponder:true,appointmentLevel:'staff'}),'clinical');
+ assert.equal(resolveResponderTier({roles:['DOCTOR'],isQualifiedResponder:true,appointmentLevel:'community'}),'community');
+ assert.equal(tierFromRow({hasClinicalRole:true}),null);
+ assert.equal(tierFromRow({isQualifiedResponder:true,hasClinicalRole:true,appointmentLevel:'staff'}),'clinical');
+ assert.ok(CLINICAL_ROLES.includes('DENTIST'));
+ assert.ok(!CLINICAL_ROLES.includes('ADMIN'));
+ assert.ok(!LEGACY_RESPONDER_ROLES.includes('DENTIST'));
 });
 
 // ── Payload redaction ──────────────────────────────────────────────────────

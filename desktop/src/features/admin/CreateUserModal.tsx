@@ -93,11 +93,6 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
   const [callerIsSuper, setCallerIsSuper] = useState(true);
   const [callerPermCodes, setCallerPermCodes] = useState<string[]>([]);
 
-  // Qualified Responder: label at create time (only shown when the creator
-  // may manage it — Super Admin or RESPONDERS_MANAGE holder).
-  const [qualifiedResponder, setQualifiedResponder] = useState(false);
-  const [qrNote, setQrNote] = useState('');
-  const callerCanQr = callerIsSuper || callerPermCodes.includes('RESPONDERS_MANAGE');
 
   const [isSaving, setIsSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ text: string; isError: boolean } | null>(null);
@@ -129,8 +124,6 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
     setPermCatalog(ADMIN_PERMISSION_CATALOG);
     setCallerIsSuper(true);
     setCallerPermCodes([]);
-    setQualifiedResponder(false);
-    setQrNote('');
     setFeedback(null);
     setIsSaving(false);
 
@@ -244,31 +237,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create user account.');
-      let responderWarning = '';
-
-      // Second step: label the new account a Qualified Responder. POST /users
-      // returns the new id; the dedicated endpoint applies the flag. A failure
-      // here is reported separately — the account itself was created fine.
-      const newUserId = data.userId;
-      if (qualifiedResponder && callerCanQr && typeof newUserId === 'number') {
-        try {
-          const qrRes = await fetch(`${API_BASE_URL}/api/admin/users/${newUserId}/qualified-responder`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({
-              is_qualified_responder: true,
-              note: qrNote.trim() || undefined,
-            }),
-          });
-          if (!qrRes.ok) {
-            const qrData = await qrRes.json().catch(() => ({}));
-            responderWarning = `Account created, but the Qualified Responder label failed: ${qrData.error || qrRes.status}`;
-          }
-        } catch (qrErr: any) {
-          responderWarning = `Account created, but the Qualified Responder label failed: ${qrErr.message}`;
-        }
-      }
-      onCreated(responderWarning || data.message || 'Account created.', Boolean(responderWarning));
+      onCreated(data.message || 'Account created.', false);
       onClose();
     } catch (err: any) {
       setFeedback({ text: '' + err.message, isError: true });
@@ -291,12 +260,12 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
   const showStaffFields = ['DOCTOR', 'DENTIST', 'NURSE', 'EMERGENCY_RESPONDER', 'ADMIN'].includes(roleCode);
 
   return (
-    <Dialog label="Create user account" busy={isSaving} onDismiss={onClose}>
+    <Dialog label="Create user account" className="admin-create-user-dialog" busy={isSaving} onDismiss={onClose}>
       <div
-        className="modal-card"
-        style={{ maxWidth: 640, padding: '28px 32px', maxHeight: '90vh', overflowY: 'auto' }}
+        className="modal-card admin-create-user-card"
+        style={{ maxWidth: 640 }}
       >
-        <div className="dialog-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+        <div className="dialog-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 0 }}>
           <div>
             <h2 tabIndex={-1} data-dialog-initial style={{ fontSize: 22, fontWeight: 800, color: T.text, margin: 0, letterSpacing: -0.4 }}>
               Create user account
@@ -314,7 +283,8 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
           ><Icon name="close" size={14} /></button>
         </div>
 
-        <form onSubmit={handleSubmit}>
+        <form className="admin-create-user__form" onSubmit={handleSubmit}>
+          <div className="admin-create-user__body">
           {/* ── Identity ───────────────────────────────────── */}
           <div style={sectionLabel}>Identity & contact</div>
 
@@ -575,88 +545,42 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
             </div>
           )}
 
-          {/* ── Qualified Responder (only when the creator may manage it) ── */}
-          {callerCanQr && (
-            <div style={{
-              marginTop: 20, padding: 16,
-              borderRadius: T.radius.md,
-              background: '#FFF7ED', border: '1px solid #FED7AA',
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <div>
-                  <div style={{ fontSize: 12.5, fontWeight: 800, color: '#C2410C' }}>
-                    <Icon name="emergency" size={14} /> Emergency response
-                  </div>
-                  <p style={{ fontSize: 11.5, color: T.textSub, margin: '4px 0 0', lineHeight: 1.5, maxWidth: 420 }}>
-                    Label this account a Qualified Responder: it will receive Emergency SOS
-                    alarms and act on them, whatever its role is.
-                  </p>
-                </div>
-                <label
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 8,
-                    cursor: 'pointer', fontWeight: 700, fontSize: 12.5, color: T.text,
-                  }}
-                  title="Role-independent SOS label (changeable later from the profile editor)"
-                >
-                  <input
-                    type="checkbox"
-                    checked={qualifiedResponder}
-                    onChange={(e) => setQualifiedResponder(e.target.checked)}
-                    style={{ width: 16, height: 16, accentColor: '#C2410C' }}
-                  />
-                  Qualified Responder
-                </label>
-              </div>
-              {qualifiedResponder && (
-                <div style={{ marginTop: 12 }}>
-                  <label style={fieldLabel}>Note (max 150 chars)</label>
-                  <input
-                    style={inputStyle}
-                    maxLength={150}
-                    placeholder="e.g. First-aid certified, campus volunteer responder"
-                    value={qrNote}
-                    onChange={(e) => setQrNote(e.target.value)}
-                  />
-                </div>
-              )}
-            </div>
-          )}
+          <p style={{ color: T.textSub, fontSize: 12 }}>Responder access requires an application and clinic approval in Responder qualifications.</p>
 
           {/* ── Admin archetype & permissions ──────────────── */}
           {isAdminRole && (
-            <div style={{
+            <div className="admin-permissions-section" style={{
               marginTop: 20,
               padding: 16,
               borderRadius: T.radius.md,
-              background: '#F5F3FF',
-              border: '1px solid #DDD6FE',
+              background: T.tonalLilacBg,
+              border: `1px solid ${T.borderStrong}`,
             }}>
               <div style={{
                 fontSize: 11, fontWeight: 800, letterSpacing: 1.2,
-                color: '#6D28D9', textTransform: 'uppercase', marginBottom: 10,
+                color: T.text, textTransform: 'uppercase', marginBottom: 10,
               }}>
                 Admin archetype & permissions
               </div>
 
-              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
                 <button
                   type="button"
                   onClick={() => setAdminArchetype('super')}
                   disabled={!callerIsSuper}
                   style={{
-                    flex: 1, padding: '9px 12px',
-                    border: `1px solid ${adminArchetype === 'super' ? '#6D28D9' : 'transparent'}`,
+                    flex: '1 1 190px', padding: '9px 12px',
+                    border: `1px solid ${adminArchetype === 'super' ? T.primary : 'transparent'}`,
                     borderRadius: T.radius.pill,
-                    background: adminArchetype === 'super' ? '#FFFFFF' : 'transparent',
-                    color: adminArchetype === 'super' ? '#6D28D9' : T.textSub,
+                    background: adminArchetype === 'super' ? T.surface : 'transparent',
+                    color: adminArchetype === 'super' ? T.primary : T.textSub,
                     fontWeight: adminArchetype === 'super' ? 800 : 600,
                     fontSize: 12, fontFamily: T.font,
                     cursor: !callerIsSuper ? 'not-allowed' : 'pointer',
                     opacity: !callerIsSuper ? 0.55 : 1,
                     boxShadow: adminArchetype === 'super' ? T.shadow.xs : 'none',
                     transition: 'all 120ms ease',
-                    whiteSpace: 'nowrap',
+                    whiteSpace: 'normal',
                   }}
                   title={!callerIsSuper ? 'Only a Super Admin can create another Super Admin' : undefined}
                 >
@@ -666,17 +590,17 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
                   type="button"
                   onClick={() => setAdminArchetype('limited')}
                   style={{
-                    flex: 1, padding: '9px 12px',
-                    border: `1px solid ${adminArchetype === 'limited' ? '#6D28D9' : 'transparent'}`,
+                    flex: '1 1 190px', padding: '9px 12px',
+                    border: `1px solid ${adminArchetype === 'limited' ? T.primary : 'transparent'}`,
                     borderRadius: T.radius.pill,
-                    background: adminArchetype === 'limited' ? '#FFFFFF' : 'transparent',
-                    color: adminArchetype === 'limited' ? '#6D28D9' : T.textSub,
+                    background: adminArchetype === 'limited' ? T.surface : 'transparent',
+                    color: adminArchetype === 'limited' ? T.primary : T.textSub,
                     fontWeight: adminArchetype === 'limited' ? 800 : 600,
                     fontSize: 12, fontFamily: T.font,
                     cursor: 'pointer',
                     boxShadow: adminArchetype === 'limited' ? T.shadow.xs : 'none',
                     transition: 'all 120ms ease',
-                    whiteSpace: 'nowrap',
+                    whiteSpace: 'normal',
                   }}
                 >
                   <Icon name="settings" size={14} /> Limited Admin · choose permissions
@@ -684,14 +608,14 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
               </div>
 
               {adminArchetype === 'super' ? (
-                <p style={{ fontSize: 12, color: '#5B21B6', margin: 0, lineHeight: 1.55 }}>
+                <p style={{ fontSize: 12, color: T.textSub, margin: 0, lineHeight: 1.55 }}>
                   Unrestricted access to every console capability — identical to the
                   seeded administrator account.
                 </p>
               ) : (
                 <>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <span style={{ fontSize: 12, color: '#5B21B6' }}>
+                    <span style={{ fontSize: 12, color: T.textSub }}>
                       This admin will only be able to use the capabilities selected below.
                     </span>
                     <button
@@ -699,7 +623,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
                       onClick={() => setAdminPerms(allSelected ? [] : grantableCodes.map((p) => p.code))}
                       style={{
                         background: 'none', border: 'none', padding: 0,
-                        color: '#6D28D9', fontSize: 11.5, fontWeight: 700,
+                        color: T.primary, fontSize: 11.5, fontWeight: 700,
                         cursor: 'pointer', fontFamily: T.font,
                       }}
                     >
@@ -707,20 +631,20 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
                     </button>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 8 }}>
                     {grantableCodes.map((p) => {
                       const checked = adminPerms.includes(p.code);
                       const beyondCaller = !callerIsSuper && !callerPermCodes.includes(p.code);
                       const disabled = beyondCaller;
                       return (
-                        <label
+                        <label className="admin-permission-card"
                           key={p.code}
                           style={{
                             display: 'flex', alignItems: 'flex-start', gap: 8,
                             padding: '9px 11px',
                             borderRadius: T.radius.sm,
-                            background: checked ? '#EDE9FE' : '#FFFFFF',
-                            border: `1px solid ${checked ? '#C4B5FD' : '#E9E5F8'}`,
+                            background: checked ? T.primaryTint : T.surface,
+                            border: `1px solid ${checked ? T.primary : T.border}`,
                             cursor: disabled ? 'not-allowed' : 'pointer',
                             opacity: disabled ? 0.55 : 1,
                           }}
@@ -730,7 +654,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
                             checked={checked}
                             disabled={disabled}
                             onChange={() => togglePerm(p.code)}
-                            style={{ marginTop: 2, accentColor: '#6D28D9' }}
+                            style={{ marginTop: 2, accentColor: T.primary }}
                           />
                           <span>
                             <span style={{ display: 'block', fontSize: 12, fontWeight: 700, color: T.text }}>
@@ -746,7 +670,7 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
                   </div>
 
                   {!callerIsSuper && (
-                    <div style={{ fontSize: 10.5, color: '#5B21B6', marginTop: 8, fontStyle: 'italic' }}>
+                    <div style={{ fontSize: 10.5, color: T.textSub, marginTop: 8, fontStyle: 'italic' }}>
                       Options beyond your own permissions are locked — admins can never grant
                       capabilities they do not hold themselves.
                     </div>
@@ -768,7 +692,8 @@ export default function CreateUserModal({ isOpen, onClose, onCreated }: CreateUs
             </div>
           )}
 
-          <div className="dialog-footer" style={{ marginTop: 24 }}>
+          </div>
+          <div className="dialog-footer admin-create-user__footer">
             <button type="button" onClick={onClose} style={btnGhost} disabled={isSaving}>
               Cancel
             </button>

@@ -20,8 +20,9 @@ import structuredPrescriptions from './migrations/013-structured-prescriptions.j
 import sosDelivery from './migrations/014-sos-delivery.js';
 import responderHistory from './migrations/015-responder-history.js';
 import auditChainState, { verifyAuditHead } from './migrations/016-audit-chain-state.js';
+import responderQualifications from './migrations/017-responder-qualifications.js';
 
-const migrations = [foundation, clinicalDocuments, responders, appointmentDayIndex, pharmacyActivityIndexes, incidentRecordsPermission, analyticsScopes, staffAnalyticsPermissions, pdfRetry, terminalPermission, replayOutcomes, responderDelivery, structuredPrescriptions, sosDelivery, responderHistory, auditChainState];
+const migrations = [foundation, clinicalDocuments, responders, appointmentDayIndex, pharmacyActivityIndexes, incidentRecordsPermission, analyticsScopes, staffAnalyticsPermissions, pdfRetry, terminalPermission, replayOutcomes, responderDelivery, structuredPrescriptions, sosDelivery, responderHistory, auditChainState, responderQualifications];
 const requiredTables = [
   'USERS', 'ROLES', 'USER_ROLES', 'STAFF_PROFILES', 'HEALTH_PROFILES', 'EMERGENCY_ALERTS',
   'PRESCRIPTIONS', 'PRESCRIPTION_ITEMS', 'INVENTORY_LOGS', 'MEDICAL_CLEARANCES', 'AUDIT_LOGS', 'APPOINTMENTS',
@@ -30,7 +31,7 @@ const requiredTables = [
 // Verify the base schema and ensure the migration ledger exists.
 async function initializeLedger(connection) {
   const [tables] = await connection.query(
-    'SELECT TABLE_NAME, ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (?)',
+    'SELECT UPPER(TABLE_NAME) AS TABLE_NAME, ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND UPPER(TABLE_NAME) IN (?)',
     [[...requiredTables, 'SCHEMA_MIGRATIONS']],
   );
   // Index the inspected database tables by name and storage engine.

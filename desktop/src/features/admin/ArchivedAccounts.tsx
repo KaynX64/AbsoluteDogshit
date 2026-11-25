@@ -21,7 +21,7 @@ export default function ArchivedAccounts({
   filteredArchivedUsers,
 }: ArchivedAccountsProps) {
   return (
-    <div className="admin-bounded-view admin-table-card" style={{
+    <div className="admin-bounded-view admin-table-card admin-accounts" style={{
       background: T.surface,
       border: `1px solid ${T.border}`,
       borderRadius: T.radius.lg,
@@ -51,16 +51,8 @@ export default function ArchivedAccounts({
         </div>
       ) : (
         <>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 12,
-            flexWrap: 'wrap',
-            padding: '14px 16px',
-            borderBottom: `1px solid ${T.border}`,
-          }}>
-            <div style={{ position: 'relative', flex: '1 1 320px', maxWidth: 520 }}>
+          <div className="admin-account-toolbar admin-archived-toolbar">
+            <div className="admin-account-search">
               <span style={{
                 position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)',
                 color: T.textMuted, display: 'grid', placeItems: 'center',
@@ -75,7 +67,8 @@ export default function ArchivedAccounts({
                 onChange={(e) => setArchivedSearchTerm(e.target.value)}
                 style={{
                   ...inputStyle,
-                  paddingLeft: 40,
+                  padding: '7px 12px 7px 36px',
+                  minHeight: 36,
                   borderRadius: T.radius.pill,
                   background: T.surface,
                 }}
@@ -91,7 +84,7 @@ export default function ArchivedAccounts({
             </div>
           ) : (
             <div className="vd-table-wrap admin-scroll-region" role="region" aria-label="Archived account records" tabIndex={0}>
-              <table className="tbl" style={{ minWidth: 760 }}>
+              <table className="tbl admin-accounts-table" style={{ minWidth: 920 }}>
                 <thead>
                   <tr>
                     <th style={{ width: 90 }}>User ID</th>

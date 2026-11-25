@@ -1,3 +1,4 @@
+import { verifyResponderQualifications } from './responder-qualifications.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -9,6 +10,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { installFixtures } from './workflows.mjs';
 import { verifyResponderActions } from './responder-actions.mjs';
 import { verifyResponderHistory } from './responder-history.mjs';
+import { verifyAccountLayout } from './account-layout.mjs';
+import { verifyRoundedSelects } from './rounded-selects.mjs';
 
 // Renderer-only layout regressions: hidden Electron window, synthetic data,
 // isolated profile and blocked network. No clinic account or database is used.
@@ -98,8 +101,15 @@ try {
       }
       if (path.endsWith('/admin/users')) return Response.json(many(id => ({
         id, name: 'Fixture user ' + id, email: 'user' + id + '@example.invalid',
-        role: 'STUDENT', status: 'Active', archived_at: date,
+        role: ['STUDENT', 'DOCTOR', 'DENTIST', 'NURSE', 'FACULTY', 'NON_TEACHING', 'EMERGENCY_RESPONDER', 'ADMIN'][id % 8],
+        status: id % 3 ? 'Active' : 'Suspended', archived_at: date,
+        is_qualified_responder: id % 2 === 0, admin_archetype: id % 8 === 7 ? 'super' : null,
       })));
+      if (path.endsWith('/admin/permissions')) return Response.json({ caller: { is_super: true, codes: [] }, permissions: [
+        'Manage user accounts', 'View audit & PHI logs', 'View system health', 'Data retention governance',
+        'Manage qualified responders', 'View analytics', 'View clinic operations', 'View clinical analytics',
+        'View pharmacy analytics', 'View campus headcount', 'View incident records', 'Export and print analytics', 'Use server Terminal', 'Database Studio',
+      ].map((name, index) => ({ code: 'FIXTURE_PERMISSION_' + index, name, description: 'Synthetic permission description for campus account administration.', sort_order: index })) });
       if (path.endsWith('/admin/phi-access-logs')) return Response.json(many(id => ({
         id, viewer_name: 'Fixture viewer', viewer_role: 'NURSE', patient_name: 'Fixture patient',
         table_affected: 'EMR_RECORDS', accessed_at: date,
@@ -132,10 +142,23 @@ try {
   await wait("document.querySelector('form input')");
   await run('smoke.login()');
   await wait("document.querySelector('#rx-frequency')");
+  if (process.argv.includes('--qualifications-only')) {
+    await verifyResponderQualifications(run,wait,async(width,height)=>{
+      await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+    },async name=>{
+      const capture=await send('Page.captureScreenshot',{format:'png'});
+      await writeFile(join(screenshots,name+(process.argv.includes('--dark')?'-dark':'')+'.png'),Buffer.from(capture.data,'base64'));
+    },async reduced=>{
+      await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:reduced?'reduce':'no-preference'}]});
+    });
+  } else {
+  if (!process.argv.includes('--admin-only')) {
   await verifyResponderActions(run, wait);
   await verifyResponderHistory(run, wait, async name => {
     const capture = await send('Page.captureScreenshot', { format: 'png' });
     await writeFile(join(screenshots, name + (process.argv.includes('--dark') ? '-dark' : '') + '.png'), Buffer.from(capture.data, 'base64'));
+  }, async (width, height) => {
+    await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
   });
   assert.equal(await run("document.querySelector('.doctor-queue-ticket')?.textContent"), 'Q-01', 'active consultations retain their queue ticket');
   await run(`document.documentElement.dataset.titlebar = 'overlay';
@@ -369,6 +392,14 @@ try {
     documentFits: true, workspaceScrolls: true, lastRowVisible: true, rootOverflow: 0,
   }, 'expanded analytics table scrolls inside the console');
 
+  }
+  if (process.argv.includes('--admin-only')) {
+    await run(`(() => { document.documentElement.dataset.titlebar = 'overlay';
+      const title = document.createElement('header'); title.className = 'app-titlebar';
+      document.querySelector('#root').prepend(title); smoke.role('ADMIN'); })()`);
+    await wait("document.querySelector('.tb-role-select').value === 'ADMIN'");
+    await send('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1032, deviceScaleFactor: 1, mobile: false });
+  }
   const checkAdminScroll = async (region, controls) => {
     const scrollRegion = `[aria-label="${region}"]`;
     await wait(`document.querySelector('${scrollRegion}')?.scrollHeight > document.querySelector('${scrollRegion}')?.clientHeight &&
@@ -421,9 +452,17 @@ try {
   await writeFile(join(screenshots, 'database-studio.png'), Buffer.from(databaseImage.data, 'base64'));
 
   await run("smoke.click('Users & roles', '.sb-item')");
-  await checkAdminScroll('Active account records', '.admin-user-filterbar');
-  await run("smoke.click('Archived accounts', '[role=tab]')");
-  await checkAdminScroll('Archived account records', '[aria-label="Search archived accounts"]');
+  await verifyAccountLayout(run, wait, async (width, height) => {
+    await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+  }, async name => {
+    const capture = await send('Page.captureScreenshot', { format: 'png' });
+    await writeFile(join(screenshots, name + (process.argv.includes('--dark') ? '-dark' : '') + '.png'), Buffer.from(capture.data, 'base64'));
+  }, checkAdminScroll);
+  await run("smoke.click('Users & roles', '.sb-item')");
+  await verifyRoundedSelects(run, wait, send, async name => {
+    const capture = await send('Page.captureScreenshot', { format: 'png' });
+    await writeFile(join(screenshots, name + (process.argv.includes('--dark') ? '-dark' : '') + '.png'), Buffer.from(capture.data, 'base64'));
+  });
   await run("smoke.click('Privacy & audit', '.sb-item')");
   await checkAdminScroll('PHI access records', '.vd-subtabs');
   await run("smoke.click('SHA-256 mutation ledger', '[role=tab]')");
@@ -432,6 +471,7 @@ try {
   await checkAdminScroll('Incident report list', '.incident-records input');
   console.log('Database Studio and admin record panes scroll within the workspace.');
   console.log((process.argv.includes('--inspect') ? 'Compact clinic inspection completed. Screenshots: ' : 'Compact clinic layout checks passed. Screenshots: ') + screenshots);
+  }
 } finally {
   socket?.close();
   if (app.exitCode === null) { const exited = once(app, 'exit'); app.kill(); await exited; }

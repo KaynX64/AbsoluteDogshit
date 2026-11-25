@@ -6,23 +6,29 @@
 
 Presentation: `HealthProfileEditor.tsx`, `ActiveAccounts.tsx`, `ArchivedAccounts.tsx`, `AuditPanels.tsx`, `DatabaseStudio.tsx`. The controller owns account edits, permissions, and request state. Terminal navigation follows the live admin grant.
 
+The account editor shows a read-only Qualified Responder badge. Applications and appointments are managed in the shared qualification workspace.
+
+Admin archetype buttons and permission cards use theme-aware surfaces, text and selection colors, matching account creation.
+
+Anchor commit: `a32c1d9`; ranges include working-tree changes. The account workspace uses compact heading/tab chrome and labelled dropdown filters; the shared controller retains ownership of filter state.
+
 The render wrapper at L972 lets the desktop record views share the shell's available height. Database Studio, account lists, audit tables, and the incident list scroll within their own regions.
 
 | # | Lines | Anchor | Entry point |
 |---|---|---|---|
-| 1 | 1-93 | — | Imports and declarations |
-| 2 | 94-194 | export default function | export default function |
-| 3 | 195-227 | const fetchUsers | const fetchUsers |
-| 4 | 228-303 | const fetchMyPermissions | const fetchMyPermissions |
-| 5 | 304-483 | const viewFetch | const viewFetch |
-| 6 | 484-519 | const handleArchiveUser | const handleArchiveUser |
-| 7 | 520-649 | const handleOpenEditModal | const handleOpenEditModal |
-| 8 | 650-806 | const handleSaveUserProfile | const handleSaveUserProfile |
-| 9 | 807-840 | const handleAdminResetPassword | const handleAdminResetPassword |
-| 10 | 841-1065 | const fetchDbTables | const fetchDbTables |
-| 11 | 1066-1097 | <ActiveAccounts | <ActiveAccounts |
-| 12 | 1098-1112 | <ArchivedAccounts | <ArchivedAccounts |
-| 13 | 1113-1377 | <AuditPanels | <AuditPanels |
-| 14 | 1378-1755 | <DatabaseStudio | <DatabaseStudio |
-| 15 | 1756-2056 | <StaffAnalyticsPermissions | <StaffAnalyticsPermissions |
-| 16 | 2057-2347 | <HealthProfileEditor | <HealthProfileEditor |
+| 1 | 1-94 | — | Imports and declarations |
+| 2 | 95-191 | export default function | export default function |
+| 3 | 192-224 | const fetchUsers | const fetchUsers |
+| 4 | 225-300 | const fetchMyPermissions | const fetchMyPermissions |
+| 5 | 301-480 | const viewFetch | const viewFetch |
+| 6 | 481-516 | const handleArchiveUser | const handleArchiveUser |
+| 7 | 517-642 | const handleOpenEditModal | const handleOpenEditModal |
+| 8 | 643-768 | const handleSaveUserProfile | const handleSaveUserProfile |
+| 9 | 769-802 | const handleAdminResetPassword | const handleAdminResetPassword |
+| 10 | 803-1028 | const fetchDbTables | const fetchDbTables |
+| 11 | 1029-1060 | <ActiveAccounts | <ActiveAccounts |
+| 12 | 1061-1075 | <ArchivedAccounts | <ArchivedAccounts |
+| 13 | 1076-1340 | <AuditPanels | <AuditPanels |
+| 14 | 1341-1718 | <DatabaseStudio | <DatabaseStudio |
+| 15 | 1719-1941 | <StaffAnalyticsPermissions | <StaffAnalyticsPermissions |
+| 16 | 1942-2232 | <HealthProfileEditor | <HealthProfileEditor |

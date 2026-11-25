@@ -77,7 +77,7 @@
   gap: clamp(14px, 1.8cqi, 24px);
 }
 
-.app-content:has(.doctor-console) {
+.app-content[data-workspace-kind='console']:has(.doctor-console) {
   padding-block: 14px 12px;
 }
 
@@ -802,7 +802,7 @@
 }
 
 @media (max-height: 800px) {
-  .app-content:has(.doctor-clinic-layout) {
+  .app-content[data-workspace-kind='console']:has(.doctor-clinic-layout) {
     padding-block: 8px;
   }
 
@@ -851,15 +851,15 @@
    Long notes, patient lists and expanded details own their scrolling. Short or
    narrow/zoomed windows retain the accessible flowing layout above. */
 @media screen and (min-width: 1024px) and (min-height: 700px) {
-  .app-main:has(.doctor-clinic-layout) {
+  .app-main[data-workspace-kind='console']:has(.doctor-clinic-layout) {
     overflow: hidden;
   }
 
-  .app-main:has(.doctor-clinic-layout) > :is(.tb, .update-banner) {
+  .app-main[data-workspace-kind='console']:has(.doctor-clinic-layout) > :is(.tb, .update-banner) {
     flex-shrink: 0;
   }
 
-  .app-content:has(.doctor-clinic-layout) {
+  .app-content[data-workspace-kind='console']:has(.doctor-clinic-layout) {
     display: flex;
     flex: 1 1 0;
     min-height: 0;

@@ -123,8 +123,17 @@ test('administrator qualification and archival share a one-connection pool', { s
   const { request } = await mountedApi(t);
   await db.query("INSERT INTO USER_ROLES (user_id, role_id) SELECT 4, role_id FROM ROLES WHERE code = 'ADMIN'");
   const caller = { userId: 1, roles: ['ADMIN'] };
-  const qualify = await request('/admin/users/4/qualified-responder', { ...caller, method: 'PUT', json: { is_qualified_responder: false } });
-  assert.equal(qualify.status, 200);
+  const legacy = await request('/admin/users/4/qualified-responder', { ...caller, method: 'PUT', json: { is_qualified_responder: false } });
+  assert.equal(legacy.status, 409);
+  assert.equal((await legacy.json()).code, 'QUALIFICATION_WORKFLOW_REQUIRED');
+
+  const [[{ appointment_id }]] = await db.query('SELECT appointment_id FROM RESPONDER_APPOINTMENTS WHERE user_id = 4');
+  const revoke = await request('/responder-qualifications/appointments/' + appointment_id + '/end', {
+    ...caller, method: 'POST', json: { status: 'revoked', reason: 'Fixture revocation' },
+  });
+  assert.equal(revoke.status, 200);
+  const [[{ status }]] = await db.query('SELECT status FROM RESPONDER_APPOINTMENTS WHERE appointment_id = ?', [appointment_id]);
+  assert.equal(status, 'revoked');
   const archive = await request('/admin/users/4', { ...caller, method: 'DELETE' });
   assert.equal(archive.status, 200);
 });
@@ -591,6 +600,7 @@ test('queue reads pick the latest live prescription and keep the clinic-day boun
 // Verify that paged offline bootstrap drains both streams and defers changes at the watermark.
 test('paged offline bootstrap drains both streams and defers changes at the watermark', { skip }, async t => {
   const db = await fixture(t);
+  const [[{ count: initialUsers }]] = await db.query('SELECT COUNT(*) AS count FROM USERS');
   // Build distinct patient fixture rows for bootstrap pagination.
   const extraPatients = Array.from({ length: 503 }, (_, index) => [`fixture-${index}@example.test`, 'fixture', 'Sync', 'Patient']);
   await db.query('INSERT INTO USERS (email, password_hash, first_name, last_name) VALUES ?', [extraPatients]);
@@ -615,7 +625,7 @@ test('paged offline bootstrap drains both streams and defers changes at the wate
   assert.equal(second.serverTime, first.serverTime);
   assert.equal(second.nextCursor, null);
   assert.deepEqual(second.emrRecords.map(/* Extract IDs from the second encounter page. */ record => record.emr_id), [501, 502]);
-  assert.equal(new Set([...first.patients, ...second.patients].map(/* Combine IDs from both patient pages for completeness and duplicate checks. */ patient => patient.user_id)).size, 511);
+  assert.equal(new Set([...first.patients, ...second.patients].map(/* Combine IDs from both patient pages for completeness and duplicate checks. */ patient => patient.user_id)).size, initialUsers + 503);
 
   const [[clock]] = await db.query('SELECT UNIX_TIMESTAMP() AS now');
   if (clock.now <= upperTime) await setTimeout(1_050);
@@ -934,6 +944,10 @@ test('a Super Admin can grant and revoke incident archive access while responder
   assert.equal(create.status, 201, created.error);
   const reviewer = { userId: created.userId, roles: ['ADMIN'] };
   const paths = ['/emergency/incident-reports', '/emergency/incident-reports/1/pdf', '/documents/incident-reports/1/pdf'];
+  for (const path of paths) assert.equal((await request(path, reviewer)).status,403,'Archive grants alone do not qualify an operational responder');
+  await db.query("INSERT INTO USER_ROLES (user_id,role_id) SELECT ?,role_id FROM ROLES WHERE code='NURSE'",[created.userId]);
+  const [qualification] = await db.query("INSERT INTO RESPONDER_APPLICATIONS (user_id,status,requested_level,form) VALUES (?,'approved','staff',JSON_OBJECT('synthetic',TRUE))",[created.userId]);
+  await db.query("INSERT INTO RESPONDER_APPOINTMENTS (user_id,application_id,level,approved_by,starts_at,expires_at) VALUES (?,?,'staff',2,UTC_TIMESTAMP(),DATE_ADD(UTC_TIMESTAMP(),INTERVAL 1 YEAR))",[created.userId,qualification.insertId]);
   for (const path of paths) {
     const response = await request(path, reviewer);
     assert.equal(response.status, 200, path);
@@ -951,7 +965,7 @@ test('a Super Admin can grant and revoke incident archive access while responder
     assert.equal((await response.json()).requiredPermission, 'INCIDENT_RECORDS_VIEW');
   }
   const legacyAdmin = await request('/emergency/incident-reports', superAdmin);
-  assert.equal(legacyAdmin.status, 200);
+  assert.equal(legacyAdmin.status, 403);
   await legacyAdmin.json();
   const patientPdf = await request('/documents/incident-reports/1/pdf', { userId: 5, roles: ['STUDENT'] });
   assert.equal(patientPdf.status, 200);
@@ -966,6 +980,8 @@ test('multi-role incident rows stay unique and concurrent responders cannot reve
   const db = await fixture(t);
   await db.query("INSERT IGNORE INTO USER_ROLES (user_id, role_id) SELECT 5, role_id FROM ROLES WHERE code = 'FACULTY'");
   await db.query("UPDATE USERS SET is_qualified_responder = 1 WHERE user_id = 7");
+  const [qualification] = await db.query("INSERT INTO RESPONDER_APPLICATIONS (user_id,status,requested_level,form) VALUES (7,'approved','community',JSON_OBJECT('synthetic',TRUE))");
+  await db.query("INSERT INTO RESPONDER_APPOINTMENTS (user_id,application_id,level,approved_by,starts_at,expires_at) VALUES (7,?,'community',2,UTC_TIMESTAMP(),DATE_ADD(UTC_TIMESTAMP(),INTERVAL 1 YEAR))",[qualification.insertId]);
   await db.query(`INSERT INTO EMERGENCY_ALERTS (alert_id, user_id, location, location_label)
     VALUES (1, 5, ST_GeomFromText('POINT(0 0)', 4326), 'Campus gate')`);
   const { request, emit } = await mountedApi(t);

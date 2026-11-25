@@ -14,6 +14,13 @@ USE `valetudo_healthlink`;
 -- DISABLE FK CHECKS DURING RECREATION
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP TABLE IF EXISTS RESPONDER_QUALIFICATION_NOTICES;
+DROP TABLE IF EXISTS RESPONDER_EVIDENCE;
+DROP TABLE IF EXISTS RESPONDER_QUALIFICATION_EVENTS;
+DROP TABLE IF EXISTS RESPONDER_APPOINTMENTS;
+DROP TABLE IF EXISTS RESPONDER_APPLICATIONS;
+DROP TABLE IF EXISTS RESPONDER_QUALIFICATION_SETTINGS;
+DROP TABLE IF EXISTS RESPONDER_REVIEWERS;
 DROP TABLE IF EXISTS `SCHEMA_MIGRATIONS`;
 DROP TABLE IF EXISTS `LOCAL_SYNC_LOGS`;
 DROP TABLE IF EXISTS `PHI_ACCESS_LOGS`;
@@ -700,6 +707,66 @@ INSERT INTO `ADMIN_PERMISSIONS` (`code`, `name`, `description`, `sort_order`) VA
 ('ANALYTICS_EXPORT', 'Export and print analytics', 'Download or print reports for granted analytics sections.', 56),
 ('DATABASE_MANAGE',   'Database Studio',           'Inspect and maintain raw system records',               60);
 
+-- Responder qualification workflow tables (production upgrades use migration 016).
+CREATE TABLE IF NOT EXISTS RESPONDER_REVIEWERS (
+ user_id BIGINT PRIMARY KEY, designated_by BIGINT NOT NULL, is_active BOOLEAN NOT NULL DEFAULT TRUE,
+ designated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+ FOREIGN KEY (user_id) REFERENCES USERS(user_id), FOREIGN KEY (designated_by) REFERENCES USERS(user_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS RESPONDER_QUALIFICATION_SETTINGS (
+ settings_id TINYINT PRIMARY KEY, enforced BOOLEAN NOT NULL DEFAULT FALSE,
+ enabled_by BIGINT NULL, enabled_at DATETIME(3) NULL,
+ CHECK (settings_id = 1), FOREIGN KEY (enabled_by) REFERENCES USERS(user_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS RESPONDER_APPLICATIONS (
+ application_id BIGINT AUTO_INCREMENT PRIMARY KEY, user_id BIGINT NOT NULL,
+ source ENUM('self','nomination','legacy') NOT NULL DEFAULT 'self',
+ application_type ENUM('initial','renewal') NOT NULL DEFAULT 'initial',
+ status ENUM('draft','submitted','under_review','needs_information','training_required','approved','rejected','withdrawn') NOT NULL DEFAULT 'draft',
+ requested_level ENUM('community','staff') NOT NULL DEFAULT 'community',
+ nominated_by BIGINT NULL, nomination_accepted_at DATETIME(3) NULL, responsibilities_accepted_at DATETIME(3) NULL,
+ form JSON NOT NULL, assessment JSON NULL, decision_reason TEXT NULL, reviewed_by BIGINT NULL,
+ revision INT UNSIGNED NOT NULL DEFAULT 1, fixture_key VARCHAR(100) NULL UNIQUE,
+ open_user_id BIGINT GENERATED ALWAYS AS (CASE WHEN status IN ('draft','submitted','under_review','needs_information','training_required') THEN user_id ELSE NULL END) STORED,
+ created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3), updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+ UNIQUE KEY uq_responder_open_application (open_user_id), INDEX idx_responder_application_user (user_id, application_id),
+ FOREIGN KEY (user_id) REFERENCES USERS(user_id), FOREIGN KEY (nominated_by) REFERENCES USERS(user_id), FOREIGN KEY (reviewed_by) REFERENCES USERS(user_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS RESPONDER_APPOINTMENTS (
+ appointment_id BIGINT AUTO_INCREMENT PRIMARY KEY, user_id BIGINT NOT NULL, application_id BIGINT NOT NULL UNIQUE,
+ level ENUM('community','staff') NOT NULL, status ENUM('active','suspended','expired','revoked') NOT NULL DEFAULT 'active',
+ approved_by BIGINT NOT NULL, starts_at DATETIME(3) NOT NULL, expires_at DATETIME(3) NOT NULL,
+ ended_at DATETIME(3) NULL, end_reason TEXT NULL,
+ current_user_id BIGINT GENERATED ALWAYS AS (CASE WHEN status = 'active' THEN user_id ELSE NULL END) STORED,
+ UNIQUE KEY uq_responder_active_appointment (current_user_id), INDEX idx_responder_appointment_user (user_id, appointment_id),
+ FOREIGN KEY (user_id) REFERENCES USERS(user_id), FOREIGN KEY (application_id) REFERENCES RESPONDER_APPLICATIONS(application_id),
+ FOREIGN KEY (approved_by) REFERENCES USERS(user_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS RESPONDER_QUALIFICATION_EVENTS (
+ event_id BIGINT AUTO_INCREMENT PRIMARY KEY, application_id BIGINT NOT NULL, actor_id BIGINT NULL,
+ action VARCHAR(50) NOT NULL, details JSON NOT NULL, created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+ FOREIGN KEY (application_id) REFERENCES RESPONDER_APPLICATIONS(application_id), FOREIGN KEY (actor_id) REFERENCES USERS(user_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS RESPONDER_EVIDENCE (
+ evidence_id BIGINT AUTO_INCREMENT PRIMARY KEY, application_id BIGINT NOT NULL, uploaded_by BIGINT NOT NULL,
+ file_name VARCHAR(200) NOT NULL, mime_type VARCHAR(80) NOT NULL, file_size INT UNSIGNED NOT NULL, s3_key VARCHAR(250) NOT NULL,
+ created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+ FOREIGN KEY (application_id) REFERENCES RESPONDER_APPLICATIONS(application_id), FOREIGN KEY (uploaded_by) REFERENCES USERS(user_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS RESPONDER_QUALIFICATION_NOTICES (
+ notice_id BIGINT AUTO_INCREMENT PRIMARY KEY, user_id BIGINT NOT NULL, appointment_id BIGINT NULL,
+ notice_key VARCHAR(150) NOT NULL UNIQUE, message VARCHAR(500) NOT NULL,
+ created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+ FOREIGN KEY (user_id) REFERENCES USERS(user_id), FOREIGN KEY (appointment_id) REFERENCES RESPONDER_APPOINTMENTS(appointment_id)
+) ENGINE=InnoDB;
+INSERT INTO RESPONDER_QUALIFICATION_SETTINGS (settings_id) VALUES (1);
+
 -- Default password for all seeded accounts: 'Password123!'
 SET @default_pw = '$2b$10$Y5.xe6H/ZbWi0K/RYcQE2uGPh9hdAn/vKWCit/EMDrpqigeOQ45n.';
 
@@ -781,5 +848,37 @@ INSERT INTO `CONSENT_RECORDS` (`user_id`, `consent_type`, `is_granted`, `ip_addr
 (8, 'PHI_PROCESSING_RA_10173', TRUE, '127.0.0.1');
 
 -- =============================================================================
+
+-- SYNTHETIC DEMO DATA: fresh development installs only. No real credentials.
+INSERT INTO USERS (user_id,email,password_hash,first_name,last_name,is_active) VALUES (12,'rachelle.demo@psu.edu.ph',@default_pw,'Rachelle','Demo',1);
+INSERT INTO USER_ROLES (user_id,role_id) SELECT 12,role_id FROM ROLES WHERE code='STUDENT';
+INSERT INTO STUDENT_PROFILES (user_id,student_no,course,year_level) VALUES (12,'PSU-DEMO-0012','Synthetic demo data',2);
+INSERT INTO RESPONDER_REVIEWERS (user_id,designated_by) VALUES (2,1),(3,1);
+INSERT INTO RESPONDER_APPLICATIONS (user_id,source,status,requested_level,form,assessment,reviewed_by,responsibilities_accepted_at,decision_reason,fixture_key) VALUES (2,'self','approved','staff','{"affiliation":"PSU Lingayen — Synthetic demo data","trainingHistory":"Synthetic demo data: campus first aid/BLS assessment and orientation completed."}','{"identityVerified":true,"affiliationVerified":true,"orientationCompleted":true,"professionalCredentialsVerified":true,"assessor":"Synthetic demo data — designated clinic assessor","assessmentDate":"2026-11-24","method":"Synthetic demo data — supervised campus assessment","notes":"Synthetic demo data; no real external certification or credentials asserted.","result":"passed","competencies":{"sceneSafety":true,"escalation":true,"firstAid":true,"basicLifeSupport":true,"privacy":true,"appUse":true},"requiredCredentialExpiry":null}',3,UTC_TIMESTAMP(3),'Synthetic demo data: clinic-approved appointment.','campus-qualification-demo-v1:2');
+SET @qualification_app=LAST_INSERT_ID();
+INSERT INTO RESPONDER_APPOINTMENTS (user_id,application_id,level,approved_by,starts_at,expires_at) VALUES (2,@qualification_app,'staff',3,UTC_TIMESTAMP(3),DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 1 YEAR));
+INSERT INTO RESPONDER_QUALIFICATION_EVENTS (application_id,actor_id,action,details) VALUES (@qualification_app,3,'SYNTHETIC_DEMO_APPROVED',JSON_OBJECT('synthetic',TRUE,'reason','Synthetic demo data: approved campus appointment'));
+INSERT INTO RESPONDER_APPLICATIONS (user_id,source,status,requested_level,form,assessment,reviewed_by,responsibilities_accepted_at,decision_reason,fixture_key) VALUES (3,'self','approved','staff','{"affiliation":"PSU Lingayen — Synthetic demo data","trainingHistory":"Synthetic demo data: campus first aid/BLS assessment and orientation completed."}','{"identityVerified":true,"affiliationVerified":true,"orientationCompleted":true,"professionalCredentialsVerified":true,"assessor":"Synthetic demo data — designated clinic assessor","assessmentDate":"2026-11-24","method":"Synthetic demo data — supervised campus assessment","notes":"Synthetic demo data; no real external certification or credentials asserted.","result":"passed","competencies":{"sceneSafety":true,"escalation":true,"firstAid":true,"basicLifeSupport":true,"privacy":true,"appUse":true},"requiredCredentialExpiry":null}',2,UTC_TIMESTAMP(3),'Synthetic demo data: clinic-approved appointment.','campus-qualification-demo-v1:3');
+SET @qualification_app=LAST_INSERT_ID();
+INSERT INTO RESPONDER_APPOINTMENTS (user_id,application_id,level,approved_by,starts_at,expires_at) VALUES (3,@qualification_app,'staff',2,UTC_TIMESTAMP(3),DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 1 YEAR));
+INSERT INTO RESPONDER_QUALIFICATION_EVENTS (application_id,actor_id,action,details) VALUES (@qualification_app,2,'SYNTHETIC_DEMO_APPROVED',JSON_OBJECT('synthetic',TRUE,'reason','Synthetic demo data: approved campus appointment'));
+INSERT INTO RESPONDER_APPLICATIONS (user_id,source,status,requested_level,form,assessment,reviewed_by,responsibilities_accepted_at,decision_reason,fixture_key) VALUES (4,'self','approved','staff','{"affiliation":"PSU Lingayen — Synthetic demo data","trainingHistory":"Synthetic demo data: campus first aid/BLS assessment and orientation completed."}','{"identityVerified":true,"affiliationVerified":true,"orientationCompleted":true,"professionalCredentialsVerified":false,"assessor":"Synthetic demo data — designated clinic assessor","assessmentDate":"2026-11-24","method":"Synthetic demo data — supervised campus assessment","notes":"Synthetic demo data; no real external certification or credentials asserted.","result":"passed","competencies":{"sceneSafety":true,"escalation":true,"firstAid":true,"basicLifeSupport":true,"privacy":true,"appUse":true},"requiredCredentialExpiry":null}',2,UTC_TIMESTAMP(3),'Synthetic demo data: clinic-approved appointment.','campus-qualification-demo-v1:4');
+SET @qualification_app=LAST_INSERT_ID();
+INSERT INTO RESPONDER_APPOINTMENTS (user_id,application_id,level,approved_by,starts_at,expires_at) VALUES (4,@qualification_app,'staff',2,UTC_TIMESTAMP(3),DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 1 YEAR));
+INSERT INTO RESPONDER_QUALIFICATION_EVENTS (application_id,actor_id,action,details) VALUES (@qualification_app,2,'SYNTHETIC_DEMO_APPROVED',JSON_OBJECT('synthetic',TRUE,'reason','Synthetic demo data: approved campus appointment'));
+INSERT INTO RESPONDER_APPLICATIONS (user_id,source,status,requested_level,form,assessment,reviewed_by,responsibilities_accepted_at,decision_reason,fixture_key) VALUES (6,'self','approved','staff','{"affiliation":"PSU Lingayen — Synthetic demo data","trainingHistory":"Synthetic demo data: campus first aid/BLS assessment and orientation completed."}','{"identityVerified":true,"affiliationVerified":true,"orientationCompleted":true,"professionalCredentialsVerified":true,"assessor":"Synthetic demo data — designated clinic assessor","assessmentDate":"2026-11-24","method":"Synthetic demo data — supervised campus assessment","notes":"Synthetic demo data; no real external certification or credentials asserted.","result":"passed","competencies":{"sceneSafety":true,"escalation":true,"firstAid":true,"basicLifeSupport":true,"privacy":true,"appUse":true},"requiredCredentialExpiry":null}',2,UTC_TIMESTAMP(3),'Synthetic demo data: clinic-approved appointment.','campus-qualification-demo-v1:6');
+SET @qualification_app=LAST_INSERT_ID();
+INSERT INTO RESPONDER_APPOINTMENTS (user_id,application_id,level,approved_by,starts_at,expires_at) VALUES (6,@qualification_app,'staff',2,UTC_TIMESTAMP(3),DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 1 YEAR));
+INSERT INTO RESPONDER_QUALIFICATION_EVENTS (application_id,actor_id,action,details) VALUES (@qualification_app,2,'SYNTHETIC_DEMO_APPROVED',JSON_OBJECT('synthetic',TRUE,'reason','Synthetic demo data: approved campus appointment'));
+INSERT INTO RESPONDER_APPLICATIONS (user_id,source,status,requested_level,form,assessment,reviewed_by,responsibilities_accepted_at,decision_reason,fixture_key) VALUES (5,'self','approved','community','{"affiliation":"PSU Lingayen — Synthetic demo data","trainingHistory":"Synthetic demo data: campus first aid/BLS assessment and orientation completed."}','{"identityVerified":true,"affiliationVerified":true,"orientationCompleted":true,"professionalCredentialsVerified":false,"assessor":"Synthetic demo data — designated clinic assessor","assessmentDate":"2026-11-24","method":"Synthetic demo data — supervised campus assessment","notes":"Synthetic demo data; no real external certification or credentials asserted.","result":"passed","competencies":{"sceneSafety":true,"escalation":true,"firstAid":true,"basicLifeSupport":true,"privacy":true,"appUse":true},"requiredCredentialExpiry":null}',2,UTC_TIMESTAMP(3),'Synthetic demo data: clinic-approved appointment.','campus-qualification-demo-v1:5');
+SET @qualification_app=LAST_INSERT_ID();
+INSERT INTO RESPONDER_APPOINTMENTS (user_id,application_id,level,approved_by,starts_at,expires_at) VALUES (5,@qualification_app,'community',2,UTC_TIMESTAMP(3),DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 1 YEAR));
+INSERT INTO RESPONDER_QUALIFICATION_EVENTS (application_id,actor_id,action,details) VALUES (@qualification_app,2,'SYNTHETIC_DEMO_APPROVED',JSON_OBJECT('synthetic',TRUE,'reason','Synthetic demo data: approved campus appointment'));
+INSERT INTO RESPONDER_APPLICATIONS (user_id,source,status,requested_level,form,assessment,reviewed_by,responsibilities_accepted_at,decision_reason,fixture_key) VALUES (12,'self','submitted','community','{"affiliation":"PSU Lingayen — Synthetic demo data","trainingHistory":"Synthetic demo data: requesting campus first aid/BLS assessment."}',NULL,NULL,UTC_TIMESTAMP(3),NULL,'campus-qualification-demo-v1:12');
+SET @qualification_app=LAST_INSERT_ID();
+INSERT INTO RESPONDER_QUALIFICATION_EVENTS (application_id,actor_id,action,details) VALUES (@qualification_app,12,'SYNTHETIC_DEMO_SUBMITTED',JSON_OBJECT('synthetic',TRUE,'reason','Synthetic demo data: awaiting clinic review and assessment'));
+UPDATE RESPONDER_QUALIFICATION_SETTINGS SET enforced=1,enabled_by=1,enabled_at=UTC_TIMESTAMP(3) WHERE settings_id=1;
+UPDATE USERS u SET is_qualified_responder=EXISTS(SELECT 1 FROM RESPONDER_APPOINTMENTS p WHERE p.user_id=u.user_id AND p.status='active' AND p.expires_at>UTC_TIMESTAMP(3));
+
 -- END OF SCHEMA
 -- =============================================================================

@@ -60,7 +60,7 @@ export default {
     }
     await ensureIndex(connection, 'INVENTORY_LOGS', 'idx_inv_rx_item', 'prescription_item_id');
     const [links] = await connection.query(`
-      SELECT k.COLUMN_NAME, k.REFERENCED_TABLE_NAME, k.REFERENCED_COLUMN_NAME, r.DELETE_RULE
+      SELECT k.COLUMN_NAME, UPPER(k.REFERENCED_TABLE_NAME) AS REFERENCED_TABLE_NAME, k.REFERENCED_COLUMN_NAME, r.DELETE_RULE
       FROM information_schema.KEY_COLUMN_USAGE k
       JOIN information_schema.REFERENTIAL_CONSTRAINTS r
         ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA

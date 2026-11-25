@@ -17,6 +17,7 @@ Use this index to find the current guide for a task. Confirm behavior against so
 - [Desktop README](desktop/README.md) · [Mobile README](mobile/README.md) — module setup and workflows.
 - [Postman API guide](POSTMAN-API-GUIDE.md) — local setup, authentication, common workflows, and endpoint checks.
 - [Server migration rollout](server/MIGRATION-PLAN.md) · [Server policy](server/src/config/SERVER-POLICY.md).
+- [Responder qualification process](server/RESPONDER-QUALIFICATIONS.md) — applications, clinic assessments, appointment access, rollout and synthetic data.
 - [Structured prescribing API](server/STRUCTURED-PRESCRIBING.md) · [Prescribing rollout and checks](server/PRESCRIBING-ROLLOUT.md).
 - [Responder records](server/RESPONDER-RECORDS.md) — alert history, desktop drafts, read-only mobile reports, permissions and migration 015.
 - [Server route map](server/src/routes/AGENTS.md) · [Server utilities](server/src/utils/AGENTS.md).
