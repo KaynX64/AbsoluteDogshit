@@ -1,11 +1,17 @@
+x-mysql-environment: &mysql-environment
+  MYSQL_ROOT_PASSWORD: rootpassword
+  MYSQL_DATABASE: valetudo_healthlink
+
+x-minio-environment: &minio-environment
+  MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+  MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadminpassword}
+
 services:
   mysql:
     image: mysql:8.0
     container_name: valetudo-mysql
     restart: always
-    environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: valetudo_healthlink
+    environment: *mysql-environment
     ports:
       # SEC-12: bind to loopback only — never expose MySQL on campus LAN/public IPs
       - "127.0.0.1:3307:3306"
@@ -29,13 +35,31 @@ services:
       # SEC-12: bind to loopback only — MinIO API + console stay host-private
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadminpassword
+    environment: *minio-environment
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
 
+  backup:
+    profiles: [backup]
+    build: ./scripts/backup
+    image: valetudo-healthlink-backup:local
+    init: true
+    restart: unless-stopped
+    depends_on:
+      - mysql
+      - minio
+    environment:
+      <<: [*mysql-environment, *minio-environment]
+      S3_BUCKET: ${S3_BUCKET:-valetudo-attachments}
+      S3_REGION: ${S3_REGION:-us-east-1}
+    volumes:
+      - type: bind
+        source: ${BACKUP_DIR:-./backups}
+        target: /backups
+      - backup_state:/backup-state
+
 volumes:
   mysql_data:
   minio_data:
+  backup_state:

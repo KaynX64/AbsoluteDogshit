@@ -7,6 +7,7 @@ import { attachRealtime } from './realtime/socket.js';
 import { startServer } from './bootstrap/startup.js';
 import { closeDependencies } from './bootstrap/dependencies.js';
 import { drainServer } from './bootstrap/shutdown.js';
+import { ensureBackupScheduler } from './bootstrap/backupStartup.js';
 
 import { recordOperation } from './bootstrap/operations.js';
 
@@ -63,7 +64,10 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 try {
   await startup;
-  if (!startupController.signal.aborted) recordOperation('Server ready.');
+  if (!startupController.signal.aborted) {
+    recordOperation('Server ready.');
+    void ensureBackupScheduler(startupController.signal);
+  }
 } catch (error) {
   if (!startupController.signal.aborted || error !== startupController.signal.reason) {
     console.error('[startup] Server initialization failed.', error?.code || error?.name);

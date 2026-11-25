@@ -273,6 +273,23 @@ flutter run --dart-define=API_BASE_URL=https://10.0.2.2:5000
 
 [Mobile release builds and device setup](mobile/README.md)
 
+## Daily MySQL and MinIO backups
+
+The backup service uses the data already in MySQL and MinIO. If the stack uses custom MinIO root credentials, set `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` in the ignored `.env` next to `docker-compose.yml` so MinIO and the backup service use the same credentials.
+
+When the API starts with the default local Compose database and MinIO addresses, it checks for the backup scheduler in the background. If the scheduler is absent or stopped and both storage containers are running, the API starts it. Docker errors appear in the server log while the API stays available. Set `BACKUP_AUTO_START=false` in `server/.env` to manage scheduler startup manually.
+
+To start the scheduler with the stack, run `docker compose --profile backup up -d --build`. If MySQL and MinIO are already running, `docker compose --profile backup up -d --build --no-deps backup` targets the scheduler alone. The first backup is due immediately. After a successful run, the next is due 24 hours after that run started. Docker persists the schedule, so an overdue backup runs after restart. Failed scheduled runs retry after five minutes.
+
+```powershell
+docker compose --profile backup logs --tail 20 backup
+docker compose run --rm --no-deps backup once
+```
+
+The backup contains a transactional dump of the HealthLink database and the current files from the configured MinIO bucket. Each completed run publishes `valetudo-backup.tar.gz` and `SHA256SUMS` under a timestamped folder in the Git-ignored `backups/` directory. The archive contains `mysql.sql`, `minio/`, and `manifest.txt`. Pause the API and other writers throughout a capture when the database and files need to reflect the same quiet period.
+
+Set `BACKUP_DIR` in the Compose environment to choose the host destination. If you customized `S3_BUCKET` or `S3_REGION` in `server/.env`, set the same values in the Compose environment. Completed backups remain until an operator removes them. Store clinic backups on encrypted, access-controlled storage and keep the original `ENCRYPTION_KEY` and `ENCRYPTION_SALT` separately for recovery. [Checksum verification and isolated restore steps](scripts/backup/RESTORE.md)
+
 ## 📡 API endpoints
 
 The REST API is mounted under `/api`. Protected endpoints use a Bearer JWT and enforce the applicable consent, role, grant, and record-access rules.

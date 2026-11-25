@@ -10,6 +10,8 @@
 - `src/realtime/socket.js` attaches Socket.IO to the same server. HTTP and realtime share the origin check. `index.js` exports `io` and mounts API routes before listening.
 - `src/bootstrap/dependencies.js` runs [versioned migrations](../MIGRATION-PLAN.md), loads the persisted [server policy](../src/config/SERVER-POLICY.md), and completes the Redis and MinIO startup checks before `startup.js` opens the listener. Redis and MinIO keep their existing degraded-mode behavior. Workers start after the listener opens. SIGINT and SIGTERM stop scheduling, close Socket.IO and HTTP, and wait for active jobs and requests before closing Redis, S3 and MySQL. Shutdown has a 30-second deadline.
 
+After the API starts, `src/bootstrap/backupStartup.js` asynchronously checks the local Compose backup scheduler. Docker availability never gates API readiness. See the [backup setup](../../README.md#daily-mysql-and-minio-backups).
+
 ## Route map — src/routes/ (mounted under /api in app.js)
 
 | File | Mount | Owns |

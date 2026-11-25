@@ -36,6 +36,8 @@ Root `package.json` only pins shared tooling (concurrently, wait-on, electron). 
 
 ## Command cheat sheet
 
+Use the optional Compose `backup` profile for the daily backup scheduler. See the [backup setup](../README.md#daily-mysql-and-minio-backups).
+
 | Module | Install | Run dev | Build | Test |
 |---|---|---|---|---|
 | server | `npm install` | `npm run dev` (nodemon) | — (`npm start` = run prod) | `node --test tests/<name>.test.js` |

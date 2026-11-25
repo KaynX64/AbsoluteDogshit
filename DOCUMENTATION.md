@@ -14,6 +14,7 @@ Use this index to find the current guide for a task. Confirm behavior against so
 ## Setup and source navigation
 
 - [Project README](README.md) — features, architecture, local setup, API examples, and test commands.
+- [Daily Docker backups](README.md#daily-mysql-and-minio-backups) · [Backup verification and restore rehearsal](scripts/backup/RESTORE.md).
 - [Desktop README](desktop/README.md) · [Mobile README](mobile/README.md) — module setup and workflows.
 - [Postman API guide](POSTMAN-API-GUIDE.md) — local setup, authentication, common workflows, and endpoint checks.
 - [Server migration rollout](server/MIGRATION-PLAN.md) · [Server policy](server/src/config/SERVER-POLICY.md).

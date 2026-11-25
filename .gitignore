@@ -17,6 +17,7 @@ server/node_modules/
 .DS_Store
 
 # Build Outputs
+/backups/
 dist/
 build/
 desktop/dist/
