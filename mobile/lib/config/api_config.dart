@@ -8,7 +8,7 @@ class ApiConfig {
   static String _resolveBaseUrl() {
     const configuredUrl = String.fromEnvironment('API_BASE_URL');
     if (configuredUrl.isEmpty) {
-      return 'https://10.162.151.59:5000';
+      return 'https://192.168.18.116:5000';
     }
 
     final uri = Uri.tryParse(configuredUrl.trim());

@@ -16,7 +16,7 @@ const transporter = configured ? nodemailer.createTransport({
 
 export const isAppointmentSmtpConfigured = () => transporter !== null;
 
-export async function sendAppointmentEmail({ toEmail, ...details }) {
+export async function sendAppointmentEmail({ toEmail, ...details }, { adminTest = false } = {}) {
   if (!transporter) {
     console.log(`[Email Dispatch Simulation] ${details.type}`);
     return false;
@@ -24,10 +24,12 @@ export async function sendAppointmentEmail({ toEmail, ...details }) {
   if (!toEmail) return false;
 
   try {
+    const email = renderAppointmentEmail({ ...details, test: adminTest });
     const message = await transporter.sendMail({
       from: { name: 'LeoVital', address: 'no-reply@psu.edu.ph' },
       to: { address: toEmail, name: '' },
-      ...renderAppointmentEmail(details),
+      ...email,
+      subject: adminTest ? ` ${email.subject}` : email.subject,
     });
     return message.accepted.length === 1;
   } catch (error) {

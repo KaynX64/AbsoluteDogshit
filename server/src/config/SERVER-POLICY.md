@@ -16,7 +16,7 @@ New times apply to upcoming scheduled visits and can make a reminder due on the 
 
 ## Send a test email
 
-Choose a confirmation, reminder, or cancellation sample in **Send a test email**. Select saved addresses from the optional `SMTP_TEST_RECIPIENTS` setting in `server/.env`, enter an address manually, or combine both for up to five recipients. Each address receives a separate message with a `[TEST]` subject and synthetic details. **Accepted by SMTP** reports that the mail server accepted the message for delivery. [SMTP setup](../../../README.md#appointment-email)
+Choose a confirmation, reminder, or cancellation sample in **Send a test email**. Select saved addresses from the optional `SMTP_TEST_RECIPIENTS` setting in `server/.env`, enter an address manually, or combine both for up to five recipients. Each address receives a separate message with the appointment title in the subject. The message body contains synthetic details and a **Test email · Sample appointment** notice. **Accepted by SMTP** reports that the mail server accepted the message for delivery. [SMTP setup](../../../README.md#appointment-email)
 
 `GET /api/admin/server-policy/email-test` returns `{ smtpConfigured, recipients }`. `POST` to the same path accepts `{ template, recipients }`, where `template` is `confirmation`, `reminder`, or `cancellation`, and returns `{ results: [{ address, accepted }] }`. Both endpoints require Super Admin access.
 

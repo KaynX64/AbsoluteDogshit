@@ -50,7 +50,7 @@ async function sendTestEmails() {
         const { accepted } = await transport.sendMail({
           from: { name: 'LeoVital', address: SMTP_USER },
           to: address,
-          subject: '[TEST] LeoVital | SMTP test',
+          subject: 'LeoVital | SMTP test',
           text: 'This is a test of the LeoVital email system. You can ignore this message.',
         });
         if (accepted.includes(address)) acceptedCount++;

@@ -84,5 +84,5 @@ export function renderAppointmentEmail({ type, patientName, dateTime, test = fal
     </td></tr>
   </table>
 </body></html>`;
-  return { subject: `${test ? '[TEST] ' : ''}LeoVital | ${template.subject}`, text, html };
+  return { subject: `LeoVital | ${template.subject}`, text, html };
 }

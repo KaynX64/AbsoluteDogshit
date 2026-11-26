@@ -69,8 +69,8 @@ router.post('/email-test', async (req, res) => {
   const results = await Promise.all(addresses.map(async address => ({
     address,
     accepted: await sendAppointmentEmail({
-      toEmail: address, type: template, patientName: 'Sample Patient', dateTime: '2027-06-15 09:30:00', test: true,
-    }),
+      toEmail: address, type: template, patientName: 'Sample Patient', dateTime: '2027-06-15 09:30:00',
+    }, { adminTest: true }),
   })));
   res.json({ results });
 });

@@ -311,7 +311,7 @@ The REST API is mounted under `/api`. Protected endpoints use a Bearer JWT and e
 
 LeoVital sends booking confirmations, reminders, and cancellation notices to the email address on the patient’s account. Configure SMTP with `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS` in the ignored `server/.env`. SMTP and Firebase use separate credentials.
 
-Super Admins can set reminder timing under **Admin Console → Server Policy → Appointment reminders**. Use **Send a test email** to send a sample template to a typed address or an address saved in the optional comma-separated `SMTP_TEST_RECIPIENTS` setting. [Reminder and test email guide](server/src/config/SERVER-POLICY.md#appointment-reminders)
+Super Admins can set reminder timing under **Admin Console → Server Policy → Appointment reminders**. Use **Send a test email** to send a sample template to a typed address or an address saved in the optional comma-separated `SMTP_TEST_RECIPIENTS` setting. Sample emails use the appointment title in the subject and identify themselves as test emails in the message body. [Reminder and test email guide](server/src/config/SERVER-POLICY.md#appointment-reminders)
 
 ## 🧪 Testing
 
@@ -325,7 +325,7 @@ Run each command from its module directory.
 
 ### Manual SMTP test
 
-With SMTP and `SMTP_TEST_RECIPIENTS` set in `server/.env`, run `node tests/smtp.manual.js` from `server/` to check the configuration without connecting. Run `node tests/smtp.manual.js --send` to send one plain test message per saved address and see how many the SMTP server accepted.
+With SMTP and `SMTP_TEST_RECIPIENTS` set in `server/.env`, run `node tests/smtp.manual.js` from `server/` to check the configuration without connecting. Run `node tests/smtp.manual.js --send` to send one plain test message per saved address with the subject `LeoVital | SMTP test` and see how many the SMTP server accepted.
 
 ### Synthetic clinic data
 

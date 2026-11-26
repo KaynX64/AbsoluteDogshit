@@ -35,6 +35,14 @@ Use the deployment’s actual API origin and a certificate chain the app trusts.
 
 Do not commit Firebase service-account or `google-services.json` credentials. Platform folders are generated; edit only the exceptions listed in [AGENTS.md](./AGENTS.md).
 
+### Android build setup
+
+The Android build uses Android Gradle Plugin 9.3.1 and Kotlin 2.4.20 from `android/settings.gradle.kts` with the Gradle 9.5.0 wrapper. AGP 9.3 includes an SDK parser that supports SDK XML version 4. The build enables AGP's built-in Kotlin support. The `audioplayers_android` JUnit plugin still requires the legacy Android Gradle DSL.
+
+Use `flutter doctor -v` to see which Android SDK and JDK Flutter uses. Keep **Android SDK Command-line Tools (latest)** current in Android Studio's **SDK Manager → SDK Tools**, and make sure Android Studio and Flutter use the same SDK directory. Verify the setup with `flutter build apk --debug`. [Android SDK Manager guide](https://developer.android.com/tools/sdkmanager)
+
+Firebase Messaging 16.7.1 removes the deprecated `FlutterShellArgs` calls in Android background messaging. The plugin still uses Firebase's deprecated registration-token APIs, which can produce a Java compiler note. Flutter may also flag Firebase Core's conditional `kotlin-android` declaration during its scan of Gradle files. AGP 9 with built-in Kotlin skips that declaration at build time. [FlutterFire Android build script](https://github.com/firebase/flutterfire/blob/firebase_core-v4.15.2/packages/firebase_core/firebase_core/android/build.gradle) · [Firebase Android SDK release notes](https://firebase.google.com/support/release-notes/android)
+
 ## Responsiveness and session data
 
 Appointments and Documents reuse fresh data and retain their tab preferences, booking draft and scroll positions while you move around the portal. Available times are checked again when you open Appointments and confirm a booking. Pull down to refresh a list immediately. This memory is cleared when your session ends; it does not make clinical documents available offline.

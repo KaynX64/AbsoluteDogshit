@@ -17,6 +17,7 @@ const createTransport = mock.method(nodemailer, 'createTransport', options => {
   return { sendMail: message => deliver(message) };
 });
 const { default: policyRoutes } = await import('../src/routes/admin/serverPolicy.js');
+const { registerBookingCreation } = await import('../src/routes/appointments/booking/create.js');
 const { registerBookingCancellation } = await import('../src/routes/appointments/booking/cancellation.js');
 const { pool } = await import('../src/db/pool.js');
 createTransport.mock.restore();
@@ -86,11 +87,52 @@ test('admin test combines unique saved and manual recipients, labels the sample 
   assert.deepEqual(sent.map(message => message.to.address), ['saved@example.invalid', 'manual@example.invalid']);
   for (const message of sent) {
     assert.equal(message.from.name, 'LeoVital');
-    assert.equal(message.subject, '[TEST] LeoVital | Appointment cancelled');
+    assert.equal(message.subject, 'LeoVital | Appointment cancelled');
     assert.match(message.html, /Test email · Sample appointment/);
     assert.match(message.text, /Hi Sample Patient/);
     assert.match(message.text, /Your appointment was cancelled/);
   }
+});
+
+test('booking sends an unprefixed patient confirmation even when the request includes a test flag', async t => {
+  const sent = [];
+  const address = 'patient@example.invalid';
+  deliver = async message => {
+    sent.push(message);
+    return { accepted: [address] };
+  };
+  const connection = {
+    async beginTransaction() {},
+    async commit() {},
+    async rollback() {},
+    release() {},
+    async query(sql) {
+      if (sql.includes('FROM SERVER_POLICY')) return [[{ revision: 0, overrides: {} }]];
+      if (sql.includes('SELECT user_id FROM USERS')) return [[{ user_id: 2 }]];
+      if (sql.includes('SELECT r.code')) return [[{ code: 'DOCTOR' }]];
+      if (sql.includes('FROM APPOINTMENTS')) return [[]];
+      if (sql.includes('INSERT INTO APPOINTMENTS')) return [{ insertId: 21 }];
+      if (sql.includes('SELECT last_entry_hash')) return [[{ last_entry_hash: '0'.repeat(64) }]];
+      if (sql.includes('INSERT INTO AUDIT_LOGS')) return [{ insertId: 1 }];
+      return [{}];
+    },
+  };
+  t.mock.method(pool, 'getConnection', async () => connection);
+  t.mock.method(pool, 'query', async () => [[{ email: address, first_name: 'Sample', last_name: 'Patient' }]]);
+  const router = express.Router();
+  registerBookingCreation(router);
+  const result = response();
+  await handler(router, 'post', '/')({
+    body: { doctor_user_id: 2, date_time: '2099-06-15 08:00:00', appointment_type: 'General consultation', test: true },
+    user: { user_id: 5 }, ip: '127.0.0.1',
+  }, result);
+  await setImmediate();
+
+  assert.equal(result.statusCode, 201);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].to.address, address);
+  assert.equal(sent[0].subject, 'LeoVital | Appointment confirmed');
+  assert.doesNotMatch(sent[0].text, /Test email · Sample appointment/);
 });
 
 test('cancellation sends after commit and release, skips repeats and leaves SMTP failures out of the response', async t => {
