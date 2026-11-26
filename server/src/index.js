@@ -66,7 +66,7 @@ try {
   await startup;
   if (!startupController.signal.aborted) {
     recordOperation('Server ready.');
-    void ensureBackupScheduler(startupController.signal);
+    void ensureBackupScheduler(startupController.signal, { showStatus: process.env.npm_lifecycle_event === 'dev' });
   }
 } catch (error) {
   if (!startupController.signal.aborted || error !== startupController.signal.reason) {

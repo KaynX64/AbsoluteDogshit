@@ -279,6 +279,8 @@ The backup service uses the data already in MySQL and MinIO. If the stack uses c
 
 When the API starts with the default local Compose database and MinIO addresses, it checks for the backup scheduler in the background. If the scheduler is absent or stopped and both storage containers are running, the API starts it. Docker errors appear in the server log while the API stays available. Set `BACKUP_AUTO_START=false` in `server/.env` to manage scheduler startup manually.
 
+The server's `npm run dev` terminal shows the next scheduled backup and live progress for scheduled backups and one-off Compose runs. Look for `[backup]` lines for the MySQL export, MinIO copy, archive verification, and the outcome. The terminal follows backups even if you manage scheduler startup manually.
+
 To start the scheduler with the stack, run `docker compose --profile backup up -d --build`. If MySQL and MinIO are already running, `docker compose --profile backup up -d --build --no-deps backup` targets the scheduler alone. The first backup is due immediately. After a successful run, the next is due 24 hours after that run started. Docker persists the schedule, so an overdue backup runs after restart. Failed scheduled runs retry after five minutes.
 
 ```powershell
