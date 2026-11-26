@@ -1,6 +1,7 @@
 import { loginRoles } from '../loginRoles.js';
 
-// Bind the verified Google account once, while holding the local account row lock.
+// Find an eligible HealthLink account by verified email and link its Google subject on first sign-in.
+// Lock the account row so concurrent sign-ins cannot overwrite the identity link.
 export async function bindGoogleAccount(connection, { email, subject }) {
   const [[user]] = await connection.query(
     `SELECT user_id, email, first_name, last_name, is_active, deleted_at,

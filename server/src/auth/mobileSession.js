@@ -2,6 +2,7 @@ import { pool } from '../db/pool.js';
 import { resolveResponderAccess } from '../emergency/responderAccess.js';
 import { loginRoles } from './loginRoles.js';
 
+// Return current roles and responder eligibility for an authenticated mobile session before app routing.
 export async function mobileSession(req, res) {
   res.set('Cache-Control', 'no-store');
   const { user_id, auth_method } = req.user;

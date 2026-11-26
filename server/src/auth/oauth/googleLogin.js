@@ -3,6 +3,7 @@ import { completeLogin } from '../login.js';
 import { bindGoogleAccount } from './googleAccount.js';
 import { googleAudience, verifyGoogleIdentity } from './googleIdentity.js';
 
+// Exchange a verified PSU Google ID token for a HealthLink session after linking the local account.
 export async function loginMobileGoogle(req, res) {
   const audience = googleAudience();
   if (!audience) return res.status(503).json({ error: 'PSU Google sign-in is unavailable. Contact the clinic administrator.' });
@@ -20,6 +21,7 @@ export async function loginMobileGoogle(req, res) {
   }
   if (!identity) return res.status(403).json({ error: 'Sign in with your official @psu.edu.ph Google Workspace account.' });
 
+  // Return the same response for an ineligible account and a conflicting Google subject.
   const denied = () => res.status(403).json({ error: 'No eligible HealthLink account is linked to this PSU sign-in. Contact the campus infirmary.' });
   try {
     const account = await inTransaction(connection => bindGoogleAccount(connection, identity), { retries: 1 });

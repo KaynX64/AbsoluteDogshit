@@ -132,6 +132,7 @@ export function loginUser(req, res) {
   return loginWithPassword(req, res, false);
 }
 
+// Send opted-in mobile demo sign-ins through the shared password check for seeded accounts.
 export function loginMobileDemo(req, res) {
   if (!mobileDemoLoginEnabled()) {
     return res.status(403).json({ error: 'Demo sign-in is disabled. Use your PSU Google account.' });
@@ -139,6 +140,7 @@ export function loginMobileDemo(req, res) {
   return loginWithPassword(req, res, true);
 }
 
+// Check the password for the selected sign-in route using a dummy hash for ineligible accounts.
 async function loginWithPassword(req, res, demoOnly) {
   const { email, password } = req.body ?? {};
 
@@ -171,7 +173,8 @@ async function loginWithPassword(req, res, demoOnly) {
   }
 }
 
-// Issue the same HealthLink session after any successful identity check.
+// Issue the HealthLink JWT and account data after Google or password verification.
+// Google sign-in supplies the roles read in the account-linking transaction.
 export async function completeLogin(req, res, user, authMethod, verifiedRoles) {
   if (user.deleted_at !== null) {
     return res.status(403).json({

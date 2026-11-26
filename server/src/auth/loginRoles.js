@@ -1,3 +1,4 @@
+// Load assigned role codes. Google account linking holds shared locks on the role rows until commit.
 export async function loginRoles(connection, userId, lock = false) {
   const [roles] = await connection.query(
     `SELECT r.code

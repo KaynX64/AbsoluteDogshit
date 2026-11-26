@@ -12,9 +12,12 @@ class MobileSignIn {
 
   static Future<void>? _initialization;
 
+  /// Accepts saved Google sessions and demo sessions in opted-in debug builds.
   static bool acceptsSavedSession(Object? method) =>
       method == 'mobile_google' || (allowDemo && method == 'mobile_demo');
 
+  /// Opens the account picker and returns the Google ID token for HealthLink.
+  /// Returns null when the user cancels.
   static Future<String?> googleIdToken() async {
     if (kIsWeb ||
         (defaultTargetPlatform != TargetPlatform.android &&
@@ -25,6 +28,7 @@ class MobileSignIn {
       throw StateError('PSU Google sign-in is unavailable in this build.');
     }
 
+    // Share initialization across attempts and let the next attempt retry after a failure.
     final google = GoogleSignIn.instance;
     _initialization ??= google.initialize(
       clientId:

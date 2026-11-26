@@ -41,6 +41,8 @@ class _SplashScreenState extends State<SplashScreen> {
     _checkSavedSession();
   }
 
+  // Restore a saved mobile session after checking the account and live roles with the API.
+  // Keep the saved credentials available for retry when validation is unavailable.
   Future<void> _checkSavedSession() async {
     setState(() {
       _isChecking = true;
@@ -110,6 +112,7 @@ class _SplashScreenState extends State<SplashScreen> {
     _routeUser(cachedUser);
   }
 
+  // Send the saved HealthLink JWT to the mobile session endpoint with a bounded wait.
   Future<http.Response?> _validateSession(String token) async {
     try {
       return await (widget.client ?? ApiConfig.client)
@@ -123,6 +126,7 @@ class _SplashScreenState extends State<SplashScreen> {
     }
   }
 
+  // Validate the response fields that identify the saved account and drive role routing.
   Map<String, dynamic>? _decodeSession(http.Response? response) {
     if (response?.statusCode != 200) return null;
     try {
@@ -142,6 +146,7 @@ class _SplashScreenState extends State<SplashScreen> {
     }
   }
 
+  // Clear a rejected or invalid saved session and return to the sign-in prompt.
   Future<void> _discardSavedSession() async {
     try {
       await _storage.delete(key: 'jwt_token');

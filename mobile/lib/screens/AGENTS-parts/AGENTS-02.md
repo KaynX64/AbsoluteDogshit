@@ -35,7 +35,7 @@
 - After storing the session, bind its account theme through `AccountThemeScope` before navigation. Never carry the previous account's theme into a new sign-in.
 
 ### splash_screen.dart
-- `_checkSavedSession` discards sessions from the old password flow, then checks `/api/profile/me` while restoring the account theme from cache. It routes by role after validation, retains an eligible saved session on a network failure, and treats `PRIVACY_CONSENT_REQUIRED` as a valid session. A successful profile response also seeds the patient portal's initial profile.
+- `_checkSavedSession` checks eligible saved sessions against `GET /api/auth/mobile/session` before restoring the account theme and routing by live role. The endpoint works before privacy consent. A rejected or mismatched session is cleared, and a validation outage preserves the saved session for retry.
 - Refresh the dedicated theme endpoint after accepting the session. Cached login profile theme fields may be older than the device's last successful preference save. Reset theme state on authentication rejection.
 
 ## Rules

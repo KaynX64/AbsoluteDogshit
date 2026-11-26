@@ -39,6 +39,7 @@ class _LoginScreenState extends State<LoginScreen> {
   static const Color textSub = Color(0xFF5A635B);
   static const Color borderColor = Color(0xFFD6DFD5);
 
+  // Exchange a Google ID token or demo credentials for the HealthLink session used by the app.
   Future<void> _handleLogin({required bool demo}) async {
     if (_isLoading) return;
     setState(() {
