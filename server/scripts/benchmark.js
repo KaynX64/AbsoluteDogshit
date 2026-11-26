@@ -218,7 +218,7 @@ function operations(clinicDate) {
 }
 
 function bearer(userId, role) {
-  return jwt.sign({ user_id: userId, roles: [role] }, fixtureJwt, { expiresIn: '10m' });
+  return jwt.sign({ purpose: 'HEALTHLINK_SESSION', auth_method: 'desktop_password', user_id: userId, roles: [role] }, fixtureJwt, { expiresIn: '10m' });
 }
 
 // Spread the original write mix across the paced run and fill intervening slots with reads.

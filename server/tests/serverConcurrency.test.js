@@ -80,7 +80,7 @@ async function mountedApi(t) {
 
   // Send an authenticated request to the mounted fixture API.
   const request = (path, { userId = 2, roles = ['DOCTOR'], method = 'GET', json, token, headers = {} } = {}) => {
-    token ??= jwt.sign({ user_id: userId, roles }, process.env.JWT_SECRET, { expiresIn: '5m' });
+    token ??= jwt.sign({ purpose: 'HEALTHLINK_SESSION', auth_method: 'desktop_password', user_id: userId, roles }, process.env.JWT_SECRET, { expiresIn: '5m' });
     return fetch('http://127.0.0.1:' + server.address().port + '/api' + path, {
       method,
       signal: AbortSignal.timeout(7_000),
@@ -577,7 +577,7 @@ test('Terminal grants can be assigned at account creation and revoked during the
   });
   const account = await response.json();
   assert.equal(response.status, 201, account.error);
-  const reviewer = { token: jwt.sign({ user_id: account.userId, roles: ['ADMIN'] }, process.env.JWT_SECRET, { expiresIn: '5m' }) };
+  const reviewer = { token: jwt.sign({ purpose: 'HEALTHLINK_SESSION', auth_method: 'desktop_password', user_id: account.userId, roles: ['ADMIN'] }, process.env.JWT_SECRET, { expiresIn: '5m' }) };
   const path = '/admin/operations';
   assert.equal((await request(path, reviewer)).status, 200);
   assert.equal((await request(path + '/restart', { ...reviewer, method: 'POST' })).status, 403);
@@ -783,7 +783,7 @@ test('new scoped analytics grants are effective and revocable without a new sess
   });
   const account = await response.json();
   assert.equal(response.status, 201, account.error);
-  const reviewer = { token: jwt.sign({ user_id: account.userId, roles: ['ADMIN'] }, process.env.JWT_SECRET, { expiresIn: '5m' }) };
+  const reviewer = { token: jwt.sign({ purpose: 'HEALTHLINK_SESSION', auth_method: 'desktop_password', user_id: account.userId, roles: ['ADMIN'] }, process.env.JWT_SECRET, { expiresIn: '5m' }) };
   const summary = await (await request('/analytics/summary', reviewer)).json();
   assert.deepEqual(summary.scopes, ['ANALYTICS_CLINICAL', 'ANALYTICS_SURVEILLANCE']);
   assert.ok(summary.clinical);
@@ -812,7 +812,7 @@ test('new scoped analytics grants are effective and revocable without a new sess
   assert.equal(csv.status, 200);
   assert.doesNotMatch(await csv.text(), /DIAGNOSES|HEADCOUNT/);
 
-  const doctorToken = jwt.sign({ user_id: 2, roles: ['DOCTOR'] }, process.env.JWT_SECRET, { expiresIn: '5m' });
+  const doctorToken = jwt.sign({ purpose: 'HEALTHLINK_SESSION', auth_method: 'desktop_password', user_id: 2, roles: ['DOCTOR'] }, process.env.JWT_SECRET, { expiresIn: '5m' });
   const roleUpdate = await request('/admin/users/2/role', { ...superAdmin, method: 'PATCH', json: { role_code: 'NURSE' } });
   assert.equal(roleUpdate.status, 200, await roleUpdate.text());
   const changed = await (await request('/analytics/summary', { token: doctorToken })).json();
@@ -825,7 +825,7 @@ test('Super Admins can customize, disable and reset staff analytics for existing
   const db = await fixture(t);
   const { request } = await mountedApi(t);
   const superAdmin = { userId: 1, roles: ['ADMIN'] };
-  const nurseToken = jwt.sign({ user_id: 3, roles: ['NURSE'] }, process.env.JWT_SECRET, { expiresIn: '5m' });
+  const nurseToken = jwt.sign({ purpose: 'HEALTHLINK_SESSION', auth_method: 'desktop_password', user_id: 3, roles: ['NURSE'] }, process.env.JWT_SECRET, { expiresIn: '5m' });
   const nurse = { token: nurseToken };
   const path = '/admin/users/3/analytics-permissions';
   // Save an analytics override as the fixture Super Admin.

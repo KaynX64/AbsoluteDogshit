@@ -57,7 +57,7 @@ flutter pub get
 flutter run
 ```
 
-Set `lib/config/api_config.dart` to the API host reachable from the target device. Use the server’s LAN address for a physical Android phone or `10.0.2.2` for the Android emulator. Firebase needs git-ignored `mobile/android/app/google-services.json` and `server/serviceAccountKey.json`; Android builds require the client configuration, and live push delivery requires the server credential. The self-signed-certificate override is debug-build only.
+Set `lib/config/api_config.dart` to the API host reachable from the target device. Use the server’s LAN address for a physical Android phone or `10.0.2.2` for the Android emulator. Firebase needs git-ignored `mobile/android/app/google-services.json` and `server/serviceAccountKey.json`; Android builds require the client configuration, and live push delivery requires the server credential. Debug builds can trust an explicit local CA. Configure its public certificate and a matching API hostname using the [mobile TLS setup](../mobile/README.md#configure-and-run).
 
 ---
 

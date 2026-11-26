@@ -1,7 +1,7 @@
 // mobile/lib/screens/consultation_scheduler_screen.dart
 import 'dart:convert';
 import 'dart:async';
-
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import '../services/mobile_session_data.dart';
 import '../services/connectivity_service.dart';
 import '../widgets/lazy_card_columns.dart';

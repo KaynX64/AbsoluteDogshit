@@ -91,7 +91,7 @@ try {
   server.listen(0, host);
   await once(server, 'listening');
   const request = async (route, { user = 1, role = 'ADMIN', method = 'GET', data } = {}) => {
-    const token = jwt.sign({ user_id: user, roles: [role] }, secret, { expiresIn: '5m' });
+    const token = jwt.sign({ purpose: 'HEALTHLINK_SESSION', auth_method: 'desktop_password', user_id: user, roles: [role] }, secret, { expiresIn: '5m' });
     const response = await fetch(`http://${host}:${server.address().port}/api${route}`, {
       method, headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
       body: data ? JSON.stringify(data) : undefined, signal: AbortSignal.timeout(10_000),

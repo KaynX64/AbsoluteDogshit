@@ -30,7 +30,7 @@ After the API starts, `src/bootstrap/backupStartup.js` asynchronously checks the
 | `interactions.js` | `/api/interactions` | drug-interaction warnings |
 | `signature.js` | `/api/signature` | signature enrollment / verification |
 
-`app.js` wires the rate-limited `POST /api/auth/login`, `POST /api/auth/mobile/google`, and `POST /api/auth/mobile/demo` routes, along with `POST /api/auth/logout` and `PUT /api/auth/change-password`. `GET /api/ping` is the desktop liveness probe and needs neither authentication nor the database. `public/verify.html` is the same-origin QR landing page.
+`app.js` wires the rate-limited `POST /api/auth/login`, `POST /api/auth/mobile/google`, and `POST /api/auth/mobile/demo` routes, along with pre-consent `GET /api/auth/mobile/session`, `POST /api/auth/logout` and `PUT /api/auth/change-password`. `GET /api/ping` is the desktop liveness probe and needs neither authentication nor the database. `public/verify.html` is the same-origin QR landing page.
 
 `PUT /api/auth/change-password` accepts an optional `installation_id` or legacy `fcm_token`. Logout accepts the same device identifiers. The password update, removal of that account's matching device registration, and audit entry commit together. On success the server disconnects the calling session's sockets.
 

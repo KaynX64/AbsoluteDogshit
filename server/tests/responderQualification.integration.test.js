@@ -45,7 +45,7 @@ test('qualification lifecycle, concurrent decisions, privacy, renewal and develo
     }));
     server = app.listen(0, '127.0.0.1');
     await once(server, 'listening');
-    const request = (userId, path, method = 'GET', body) => fetch(`http://127.0.0.1:${server.address().port}/qualifications${path}`, { method, headers: { Authorization: 'Bearer ' + jwt.sign({ user_id: userId, roles: ['ADMIN'] }, JWT_SECRET), ...(body instanceof FormData ? {} : { 'Content-Type': 'application/json' }) }, body: body == null ? undefined : body instanceof FormData ? body : JSON.stringify(body) });
+    const request = (userId, path, method = 'GET', body) => fetch(`http://127.0.0.1:${server.address().port}/qualifications${path}`, { method, headers: { Authorization: 'Bearer ' + jwt.sign({ purpose: 'HEALTHLINK_SESSION', auth_method: 'desktop_password', user_id: userId, roles: ['ADMIN'] }, JWT_SECRET), ...(body instanceof FormData ? {} : { 'Content-Type': 'application/json' }) }, body: body == null ? undefined : body instanceof FormData ? body : JSON.stringify(body) });
     assert.equal((await request(12, '/reviewers')).status, 403, 'A stale ADMIN JWT cannot grant oversight');
     assert.equal((await request(12, '/me')).status, 200);
     assert.equal((await resolveResponderAccess(5)).tier, 'community');

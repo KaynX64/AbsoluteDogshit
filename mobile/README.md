@@ -28,11 +28,11 @@ flutter run --no-pub --dart-define=API_BASE_URL=https://127.0.0.1:5000
 
 ## PSU Google sign-in
 
-The mobile app requires a verified `@psu.edu.ph` Google Workspace account with an active HealthLink record and an assigned role. Create the HealthLink record in desktop **User Management** with the person's primary PSU email. The first successful Google sign-in binds the existing record to the Google account ID. Subsequent sign-ins require both that same ID and the matching current email. Deploy the [server and migration 019](../server/MIGRATION-PLAN.md#fresh-and-existing-databases) first. Mobile users will sign in again after updating.
+The mobile app requires a verified `@psu.edu.ph` Google Workspace account with an active HealthLink record and an assigned role. Create the HealthLink record in desktop **User Management** with the person's primary PSU email. The first successful Google sign-in binds the existing record to the Google account ID. Subsequent sign-ins require both that same ID and the matching current email. Deploy the [server and migrations through 020](../server/MIGRATION-PLAN.md#fresh-and-existing-databases) first. Mobile users will sign in again after updating. At the next launch the app checks its saved session with the API before opening the portal. If the API is unavailable, Retry keeps the saved credentials.
 
 1. In the deployment's Google Cloud project, register a **Web application** OAuth client, then set its client ID as `GOOGLE_OAUTH_CLIENT_ID` in `server/.env`. Restart the API after saving the value. Use the campus-approved Workspace account and consent configuration. [Google OAuth client setup](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid)
 2. Register an **Android** OAuth client in the same project for `com.psu.valetudo.mobile` and each signing certificate's SHA-1 fingerprint. Use the certificate that will sign the installed app. [Flutter Android integration](https://pub.dev/packages/google_sign_in_android#integration)
-3. Pass the same web client ID when building or running Flutter. For iOS, also register an iOS client for the Runner bundle ID, pass `GOOGLE_IOS_CLIENT_ID`, and add the iOS client's reversed ID as a URL scheme in `ios/Runner/Info.plist`. [Flutter iOS integration](https://pub.dev/packages/google_sign_in_ios#ios-integration)
+3. Pass the same web client ID when building or running Flutter. For iOS, also register an iOS client for the Runner bundle ID, pass `GOOGLE_IOS_CLIENT_ID`, and set the Runner build setting `GOOGLE_REVERSED_CLIENT_ID` to that iOS client’s reversed ID for each configuration. [Flutter iOS integration](https://pub.dev/packages/google_sign_in_ios#ios-integration)
 
 ```powershell
 flutter build apk --release --dart-define=API_BASE_URL=https://clinic-api.example.org --dart-define=GOOGLE_OAUTH_CLIENT_ID=YOUR_WEB_CLIENT_ID.apps.googleusercontent.com
@@ -53,7 +53,7 @@ flutter test
 flutter build apk --release --dart-define=API_BASE_URL=https://clinic-api.example.org --dart-define=GOOGLE_OAUTH_CLIENT_ID=YOUR_WEB_CLIENT_ID.apps.googleusercontent.com
 ```
 
-Use the deployment’s actual API origin and a certificate chain the app trusts. The self-signed `localhost` certificate used for local development requires a debug build when connecting to it by LAN IP. See [AGENTS.md](./AGENTS.md) for TLS and Firebase setup.
+Use the deployment’s actual API origin and a certificate chain the app trusts. For debug builds using a private CA, supply `--dart-define=LOCAL_DEV_CA_BASE64=…` with the base64 of the public CA certificate (PEM for Android, a single DER certificate for iOS). The server certificate must include the hostname or IP used by the phone in its subject alternative names. For Android release packaging, set `ANDROID_KEYSTORE_PATH` (absolute path), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD` in the build environment. See [AGENTS.md](./AGENTS.md) for TLS and Firebase setup.
 
 Do not commit Firebase service-account or `google-services.json` credentials. Platform folders are generated; edit only the exceptions listed in [AGENTS.md](./AGENTS.md).
 

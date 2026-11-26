@@ -5,6 +5,10 @@ export function mobileDemoLoginEnabled(env = process.env) {
     LOOPBACK_DB_HOSTS.has(env.DB_HOST || '127.0.0.1');
 }
 
+export const SESSION_PURPOSE = 'HEALTHLINK_SESSION';
+
 export function sessionAuthenticationAllowed(user) {
-  return (user.auth_method !== 'mobile_demo' && user.auth_method !== 'desktop_demo') || mobileDemoLoginEnabled();
+  if (user?.purpose !== SESSION_PURPOSE) return false;
+  if (user.auth_method === 'mobile_demo' || user.auth_method === 'desktop_demo') return mobileDemoLoginEnabled();
+  return user.auth_method === 'mobile_google' || user.auth_method === 'desktop_password';
 }
