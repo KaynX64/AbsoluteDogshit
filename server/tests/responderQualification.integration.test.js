@@ -159,8 +159,8 @@ test('qualification lifecycle, concurrent decisions, privacy, renewal and develo
     await db.query('UPDATE USERS SET is_qualified_responder=1 WHERE user_id=5');
     // Leave version 016 in place to simulate upgrading an existing Stage1 database.
     const [[auditMigration]] = await db.query('SELECT * FROM SCHEMA_MIGRATIONS WHERE version = 16');
-    await db.query('DELETE FROM SCHEMA_MIGRATIONS WHERE version = 17');
-    assert.equal(await runMigrations(db), 1);
+    await db.query('DELETE FROM SCHEMA_MIGRATIONS WHERE version >= 17');
+    assert.equal(await runMigrations(db), 2);
     const [ledger] = await db.query('SELECT * FROM SCHEMA_MIGRATIONS WHERE version >= 16 ORDER BY version');
     assert.deepEqual(ledger[0], auditMigration);
     assert.equal(ledger[1].version, 17);

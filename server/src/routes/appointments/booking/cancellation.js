@@ -4,6 +4,7 @@ import { pool } from '../../../db/pool.js';
 import { authenticateToken } from '../../../auth/middleware.js';
 import { logAudit } from '../../../utils/auditLogger.js';
 import { invalidateDailyQueue } from '../../../appointments/dailyQueueCache.js';
+import { sendBookedPatientEmail } from '../../../appointments/patientEmail.js';
 
 // Mount the appointment cancellation endpoint.
 export function registerBookingCancellation(router, io) {
@@ -14,11 +15,13 @@ export function registerBookingCancellation(router, io) {
     const userId = req.user.user_id;
 
     const connection = await pool.getConnection();
+    let cancelled;
     try {
       await connection.beginTransaction();
 
       const [appRows] = await connection.query(
-        'SELECT * FROM APPOINTMENTS WHERE appointment_id = ? AND deleted_at IS NULL FOR UPDATE',
+        `SELECT patient_user_id, doctor_user_id, status, CAST(date_time AS CHAR) AS clinic_date_time
+         FROM APPOINTMENTS WHERE appointment_id = ? AND deleted_at IS NULL FOR UPDATE`,
         [appointmentId]
       );
 
@@ -57,6 +60,11 @@ export function registerBookingCancellation(router, io) {
         });
       }
 
+      if (app.status === 'cancelled') {
+        await connection.commit();
+        return res.json({ message: 'Appointment cancelled successfully.' });
+      }
+
       await connection.query(
         "UPDATE APPOINTMENTS SET status = 'cancelled', cancelled_reason = ? WHERE appointment_id = ?",
         [cancelled_reason || 'Cancelled by user', appointmentId]
@@ -78,20 +86,21 @@ export function registerBookingCancellation(router, io) {
       });
 
       await connection.commit();
-      await invalidateDailyQueue();
-
-      if (io) {
-        io.emit('appointment:cancelled', { appointment_id: appointmentId });
-        io.emit('queue:updated');
-      }
-
-      res.json({ message: 'Appointment cancelled successfully.' });
+      cancelled = app;
     } catch (error) {
       await connection.rollback();
       console.error('[Appointments] Cancel error:', error);
       res.status(400).json({ error: error.message || 'Failed to cancel appointment.' });
     } finally {
       connection.release();
+    }
+
+    if (cancelled) {
+      await invalidateDailyQueue();
+      io?.emit('appointment:cancelled', { appointment_id: appointmentId });
+      io?.emit('queue:updated');
+      res.json({ message: 'Appointment cancelled successfully.' });
+      void sendBookedPatientEmail(cancelled.patient_user_id, cancelled.clinic_date_time, 'cancellation');
     }
   });
 }

@@ -15,7 +15,7 @@
 | ../appointments/encounterText.js | required encounter text and optional blanks for online finalization and offline replay |
 | ../analytics/analyticsStats.js | analytics aggregation (tested) |
 | passwordPolicy.js | password rules |
-| mailer.js | nodemailer (SMTP_* env) |
+| mailer.js | Shared SMTP transport for patient and Admin Console test email. [Appointment templates](../appointments/emailTemplates.js) and [policy guide](../config/SERVER-POLICY.md#appointment-reminders). |
 | fcmNotifier.js · fcmCredential.js | FCM push and scoped Google Auth JWT credential. The backend reads the configured service-account file, with simulation mode when it is absent. |
 | ../appointments/noShow.js | Locks eligible appointments, skips locked rows, and commits the no-show transition. `../workers/noShowWorker.js` broadcasts after commit. |
 | ../appointments/queueTickets.js | Reserves daily ticket numbers per counter inside the intake transaction. The first reservation starts after any existing tickets. |

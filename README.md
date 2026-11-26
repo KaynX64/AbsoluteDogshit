@@ -7,7 +7,7 @@
 
 [![Electron](https://img.shields.io/badge/Electron-Staff_Console-254D3C?style=flat-square&logo=electron&logoColor=white)](desktop/README.md)
 [![Flutter](https://img.shields.io/badge/Flutter-Mobile_App-02569B?style=flat-square&logo=flutter&logoColor=white)](mobile/README.md)
-[![Node.js](https://img.shields.io/badge/Node.js-API-339933?style=flat-square&logo=nodedotjs&logoColor=white)](BACKEND-STUDY-GUIDE.md)
+[![Node.js](https://img.shields.io/badge/Node.js-API-339933?style=flat-square&logo=nodedotjs&logoColor=white)](server/AGENTS.md)
 [![License](https://img.shields.io/badge/License-GPL_v2.0-5C695E?style=flat-square)](LICENSE)
 
 [✨ Features](#-key-features) · [🏗️ Architecture](#-architecture) · [🚀 Getting started](#-getting-started) · [📡 API](#-api-endpoints) · [🧪 Testing](#-testing)
@@ -44,7 +44,7 @@ flowchart LR
     API --> Notify["SMTP and Firebase"]
 ```
 
-The API applies clinical rules and access checks. It stores records in MySQL and files in MinIO or S3. Redis supports caching and session controls. [Backend study guide](BACKEND-STUDY-GUIDE.md)
+The API applies clinical rules and access checks. It stores records in MySQL and files in MinIO or S3. Redis supports caching and session controls. [Codebase overview](CODEBASE-OVERVIEW.md)
 
 ## 📂 Repository Structure
 
@@ -247,7 +247,7 @@ npm install
 npm run dev
 ```
 
-The API defaults to `https://localhost:5000`. `GET /api/ping` should return `ok: true`. [Postman and certificate setup](POSTMAN-API-GUIDE.md)
+The API defaults to `https://localhost:5000`. `GET /api/ping` should return `ok: true`. [Development certificate setup](AGENTS-parts/AGENTS-01.md#bootstrap-a-dev-machine-order-matters)
 
 ### 🖥️ 2. Run the desktop console
 
@@ -305,7 +305,13 @@ The REST API is mounted under `/api`. Protected endpoints use a Bearer JWT and e
 | POST | `/api/emergency/sos/requests` | Submit a location-based SOS with a retry identifier. |
 | GET | `/api/analytics/summary` | Read analytics within the caller's scopes. |
 
-[Postman requests and expected responses](POSTMAN-API-GUIDE.md) · [Server route map](server/src/routes/AGENTS.md)
+[Server route map](server/src/routes/AGENTS.md)
+
+## Appointment email
+
+LeoVital sends booking confirmations, reminders, and cancellation notices to the email address on the patient’s account. Configure SMTP with `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS` in the ignored `server/.env`. SMTP and Firebase use separate credentials.
+
+Super Admins can set reminder timing under **Admin Console → Server Policy → Appointment reminders**. Use **Send a test email** to send a sample template to a typed address or an address saved in the optional comma-separated `SMTP_TEST_RECIPIENTS` setting. [Reminder and test email guide](server/src/config/SERVER-POLICY.md#appointment-reminders)
 
 ## 🧪 Testing
 
@@ -317,13 +323,17 @@ Run each command from its module directory.
 | Desktop | `npm test` |
 | Mobile | `flutter test` |
 
+### Manual SMTP test
+
+With SMTP and `SMTP_TEST_RECIPIENTS` set in `server/.env`, run `node tests/smtp.manual.js` from `server/` to check the configuration without connecting. Run `node tests/smtp.manual.js --send` to send one plain test message per saved address and see how many the SMTP server accepted.
+
 ### Synthetic clinic data
 
 Run `npm run seed:clinic -- --development-fixture` from `server/` after provisioning the local development database with `schema.sql` and configuring `.env`. The fixture adds six patients across student, faculty, and non-teaching roles, appointments, two tickets for the seed day, medical and dental history, and inventory with low stock and near-expiry and expired lots. Repeat runs skip the fixture so changes made during testing are preserved.
 
 Sign in as `clinic-avery@example.invalid` for a waiting patient or `clinic-blair@example.invalid` for a dental consultation in progress. Both use the demo password documented in [schema.sql](server/schema.sql). Use the existing demo doctor, dentist, or nurse account to see the corresponding staff views. Bookings and inventory dates are relative to the database date when you first run the fixture.
 
-[MySQL-backed tests](BACKEND-STUDY-GUIDE.md#7-study-exercises) · [Packaged desktop checks](desktop/README.md#verification) · [Responder qualification fixture](server/RESPONDER-QUALIFICATIONS.md#deployment-and-synthetic-scenarios)
+[MySQL-backed tests](server/MIGRATION-PLAN.md#rehearsal-and-recovery) · [Packaged desktop checks](desktop/README.md#verification) · [Responder qualification fixture](server/RESPONDER-QUALIFICATIONS.md#deployment-and-synthetic-scenarios)
 
 ## 🔒 Privacy and security
 

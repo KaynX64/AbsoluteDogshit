@@ -19,6 +19,7 @@ Object.assign(process.env, {
   ENCRYPTION_SALT: 'fixture-encryption-salt',
   S3_ACCESS_KEY: 'fixture-access',
   S3_SECRET_KEY: 'fixture-secret',
+  SMTP_HOST: '',
   CORS_ALLOWED_ORIGINS: '',
   MIXED_LOAD_CONTROLS: 'true',
 });
@@ -621,6 +622,14 @@ test('the mounted server policy checks the live Super Admin grant', async t => {
   assert.equal(superAdmin.status, 200);
   assert.equal(superAdmin.headers.get('cache-control'), 'no-store');
   assert.ok(Number.isInteger((await superAdmin.json()).version));
+  const emailTest = route + '/email-test';
+  assert.equal((await request(emailTest)).status, 401);
+  for (const method of ['GET', 'POST']) assert.equal((await request(emailTest, { roles: ['ADMIN'], method })).status, 403);
+  const configuration = await request(emailTest, { roles: ['ADMIN'], userId: 22 });
+  assert.equal((await configuration.json()).smtpConfigured, false);
+  const unavailable = await request(emailTest, { roles: ['ADMIN'], userId: 22, method: 'POST',
+    json: { template: 'reminder', recipients: ['mailbox@example.invalid'] } });
+  assert.equal(unavailable.status, 503);
 });
 
 // Verify that the mounted history route retains role checks and paging validation.

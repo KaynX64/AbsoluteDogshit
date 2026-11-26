@@ -28,7 +28,7 @@
 
 `schema.sql` is a **full drop-and-recreate script**: `CREATE DATABASE IF NOT EXISTS valetudo_healthlink`, `USE`, `SET FOREIGN_KEY_CHECKS = 0`, a list of `DROP TABLE IF EXISTS` statements, then `CREATE TABLE` statements. The database uses `utf8mb4` / `utf8mb4_unicode_ci`.
 
-The baseline defines 33 tables. The migration runner creates `SCHEMA_MIGRATIONS` separately. Use the versioned migration command for existing databases. [Migration rollout](../server/MIGRATION-PLAN.md)
+The current baseline defines 42 tables. The migration runner creates `SCHEMA_MIGRATIONS` separately. The table below summarizes selected domains. Use the versioned migration command for existing databases. [Migration rollout](../server/MIGRATION-PLAN.md)
 
 | Domain | Tables |
 | --- | --- |

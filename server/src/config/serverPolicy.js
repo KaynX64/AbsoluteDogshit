@@ -16,6 +16,17 @@ const integer = (key, label, section, initial, min, max) => ({
 // Build the override key for a physician appointment type's capacity.
 const doctorCapacityKey = (name) => `doctorCapacity:${name}`;
 
+export const defaultReminderLeadMinutes = 24 * 60;
+const reminderMinutes = {
+  key: 'appointmentReminderLeadMinutes', label: 'Email reminders before the visit', section: 'Appointment reminders',
+  type: 'minute-list', initial: Object.freeze([defaultReminderLeadMinutes]), min: 15, max: 7 * 24 * 60, maxItems: 5,
+};
+
+function validMinuteList(value, { min, max, maxItems }) {
+  return Array.isArray(value) && value.length >= 1 && value.length <= maxItems &&
+    new Set(value).size === value.length && value.every(minutes => Number.isSafeInteger(minutes) && minutes >= min && minutes <= max);
+}
+
 const fields = [
   ...rateLimits.flatMap(/* Define the attempt limit and time window fields for each rate-limited operation. */ ([key, label, limit, cap]) => [
     integer(`${key}MaxAttempts`, `${label} attempts`, 'Limits', limit.maxAttempts, 1, cap),
@@ -31,6 +42,7 @@ const fields = [
   ...APPOINTMENT_RULES.DOCTOR.appointmentTypes.map(/* Define the allowed hourly capacity field for a physician appointment type. */ ({ name, hourlyCapacity }) =>
     integer(doctorCapacityKey(name), `${name} per hour`, 'Appointment rules', hourlyCapacity, 1, 60)),
   { key: 'doctorRecoveryBuffer', label: 'Reserve the next hour when a medical type reaches capacity', section: 'Appointment rules', initial: APPOINTMENT_RULES.DOCTOR.cascadeNextHour, type: 'boolean' },
+  reminderMinutes,
 ];
 
 export const serverPolicyFields = fields.map(/* Expose editable field metadata while keeping defaults in their own setting map. */ ({ initial, ...field }) => field);
@@ -51,12 +63,15 @@ export function validatePolicyOverrides(input) {
     const value = input[field.key];
     const valid = field.type === 'integer' ? Number.isSafeInteger(value) && value >= field.min && value <= field.max
       : field.type === 'time' ? typeof value === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)
+      : field.type === 'minute-list' ? validMinuteList(value, field)
       : typeof value === 'boolean';
     if (!valid) {
       errors[field.key] = field.type === 'integer' ? `Enter a whole number from ${field.min} to ${field.max}.`
-        : field.type === 'time' ? 'Enter a time in HH:MM format.' : 'Choose enabled or disabled.';
+        : field.type === 'time' ? 'Enter a time in HH:MM format.'
+        : field.type === 'minute-list' ? 'Enter one to five distinct whole-minute values from 15 to 10,080.'
+        : 'Choose enabled or disabled.';
     } else {
-      values[field.key] = value;
+      values[field.key] = field.type === 'minute-list' ? [...value].sort((a, b) => b - a) : value;
     }
   }
   if (Object.keys(errors).length) return { values, errors };

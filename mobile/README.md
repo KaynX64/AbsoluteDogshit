@@ -47,6 +47,8 @@ Choose your doctor or dentist, visit purpose, date and an available time, then a
 
 If availability refreshes during review, select a time again and review the updated details. If a slot is taken before submission completes, the app shows the server's message and refreshes available times. A successful booking shows the confirmation and a shortcut to **My appointments**.
 
+When the clinic has email delivery configured, LeoVital sends a confirmation to the address on your account and can send reminders before the visit. To cancel an upcoming booking, open **My appointments** and choose **Cancel appointment**. LeoVital sends a cancellation notice after the booking is cancelled.
+
 The review follows the account's appearance settings, scrolls for long notes and enlarged text, and keeps its actions accessible on small screens. Run `flutter test test/appointment_booking_review_test.dart` for the booking review, dismissal, submission, availability refresh and theme/text-size checks.
 
 ## Account settings

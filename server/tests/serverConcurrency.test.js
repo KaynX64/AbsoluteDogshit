@@ -141,8 +141,8 @@ test('administrator qualification and archival share a one-connection pool', { s
 test('no-show batch updates other appointments while an eligible row is locked', { skip }, async t => {
   const db = await fixture(t);
   const { markDueAppointmentsNoShow } = await import('../src/appointments/noShow.js');
-  await db.query('INSERT INTO APPOINTMENTS (patient_user_id, doctor_user_id, date_time, appointment_type) VALUES ?',
-    [Array.from({ length: 100 }, () => [5, 2, new Date(Date.now() - 2 * 3600_000), 'Medical'])]);
+  await db.query('INSERT INTO APPOINTMENTS (patient_user_id, doctor_user_id, date_time, appointment_type) VALUES ' +
+    Array(100).fill("(5, 2, NOW() - INTERVAL 2 HOUR, 'Medical')").join(','));
   const blocker = await db.getConnection();
   try {
     await blocker.beginTransaction();
@@ -329,15 +329,19 @@ test('concurrent reminder workers accept an appointment email once', { skip }, a
   await db.query(`INSERT INTO APPOINTMENTS (appointment_id, patient_user_id, doctor_user_id, date_time, appointment_type)
     VALUES (1, 1, 2, NOW() + INTERVAL 1 HOUR, 'Medical'), (2, 1, 2, NOW() + INTERVAL 1 HOUR, 'Medical')`);
   await db.query('UPDATE APPOINTMENTS SET deleted_at = NOW() WHERE appointment_id = 2');
-  // Stub the console while capturing simulated reminder deliveries.
-  const log = t.mock.method(console, 'log', () => {});
-  const io = { emit: t.mock.fn() };
-  await Promise.all([sendDueAppointmentReminders(io), sendDueAppointmentReminders(io)]);
-  await sendDueAppointmentReminders(io);
-  assert.equal(log.mock.calls.filter(/* Select the simulated email deliveries for the concurrency assertion. */ call => call.arguments[0] === '[Email Dispatch Simulation] reminder').length, 1);
-  assert.deepEqual(io.emit.mock.calls.map(/* Extract realtime event names emitted when reminders are delivered. */ call => call.arguments[0]), ['appointment:reminder:1']);
-  const [rows] = await db.query('SELECT reminder_sent FROM APPOINTMENTS ORDER BY appointment_id');
-  assert.deepEqual(rows.map(/* Extract the persisted reminder flags to confirm delivery was recorded. */ row => row.reminder_sent), [1, 0]);
+  const emit = t.mock.fn();
+  const io = { to: t.mock.fn(() => ({ emit })) };
+  const delivery = { sendEmail: t.mock.fn(async () => true), sendPush: t.mock.fn(async () => {}) };
+  await Promise.all([sendDueAppointmentReminders(io, delivery), sendDueAppointmentReminders(io, delivery)]);
+  await sendDueAppointmentReminders(io, delivery);
+  assert.equal(delivery.sendEmail.mock.callCount(), 1);
+  assert.equal(delivery.sendPush.mock.callCount(), 1);
+  assert.deepEqual(io.to.mock.calls[0].arguments, ['user:1']);
+  assert.equal(emit.mock.calls[0].arguments[0], 'appointment:reminder:1');
+  const [rows] = await db.query('SELECT reminder_sent, last_reminder_lead_minutes FROM APPOINTMENTS ORDER BY appointment_id');
+  assert.deepEqual(rows, [
+    { reminder_sent: 1, last_reminder_lead_minutes: 1440 }, { reminder_sent: 0, last_reminder_lead_minutes: null },
+  ]);
 });
 
 // Verify that reminder runs cap each batch and drain the remaining appointments on the next run.
@@ -345,15 +349,81 @@ test('reminder runs cap each batch and drain the remaining appointments on the n
   const db = await fixture(t);
   // Load the reminder worker without external push credentials for the batch test.
   const { sendDueAppointmentReminders } = await withoutFirebaseCredentials(t, () => import('../src/workers/appointmentReminderWorker.js'));
-  // Stub the console to capture email dispatch counts across batches.
-  const log = t.mock.method(console, 'log', () => {});
+  const delivery = { sendEmail: t.mock.fn(async () => true), sendPush: async () => {} };
   await db.query(`INSERT INTO APPOINTMENTS (patient_user_id, doctor_user_id, date_time, appointment_type)
     VALUES ` + Array(51).fill("(1, 2, NOW() + INTERVAL 1 HOUR, 'Medical')").join(','));
-  const first = await sendDueAppointmentReminders();
+  const first = await sendDueAppointmentReminders(undefined, delivery);
   assert.deepEqual(first.metrics, { attempted: 50, delivered: 50 });
-  const second = await sendDueAppointmentReminders();
+  const second = await sendDueAppointmentReminders(undefined, delivery);
   assert.deepEqual(second.metrics, { attempted: 1, delivered: 1 });
-  assert.equal(log.mock.calls.filter(/* Count simulated reminder email calls across the two passes. */ call => call.arguments[0] === '[Email Dispatch Simulation] reminder').length, 51);
+  assert.equal(delivery.sendEmail.mock.callCount(), 51);
+});
+
+test('reminders catch up at the most recent due lead time and only retry or advance pending delivery', { skip }, async t => {
+  const db = await fixture(t);
+  const { sendDueAppointmentReminders } = await withoutFirebaseCredentials(t, () => import('../src/workers/appointmentReminderWorker.js'));
+  await db.query(`INSERT INTO APPOINTMENTS (appointment_id, patient_user_id, doctor_user_id, date_time, appointment_type, reminder_sent, status)
+    VALUES (1, 5, 2, NOW() + INTERVAL 3 HOUR, 'Medical', 0, 'scheduled'),
+           (2, 7, 2, NOW() + INTERVAL 1 HOUR, 'Medical', 0, 'scheduled'),
+           (3, 8, 2, NOW() + INTERVAL 1 HOUR, 'Medical', 1, 'scheduled'),
+           (4, 5, 2, NOW() + INTERVAL 1 HOUR, 'Medical', 0, 'cancelled'),
+           (5, 5, 2, NOW() - INTERVAL 1 MINUTE, 'Medical', 0, 'scheduled')`);
+  const save = leadMinutes => db.query('UPDATE SERVER_POLICY SET revision = revision + 1, overrides = ? WHERE policy_id = 1',
+    [JSON.stringify({ appointmentReminderLeadMinutes: leadMinutes })]);
+  await save([1440, 120]);
+  let failFirst = true;
+  const sendEmail = t.mock.fn(async () => {
+    if (!failFirst) return true;
+    failFirst = false;
+    return false;
+  });
+  const sendPush = t.mock.fn(async () => {});
+  const emit = t.mock.fn();
+  const io = { to: t.mock.fn(() => ({ emit })) };
+  const run = () => sendDueAppointmentReminders(io, { sendEmail, sendPush });
+  const leadTimes = async () => (await db.query('SELECT last_reminder_lead_minutes FROM APPOINTMENTS ORDER BY appointment_id'))[0]
+    .map(row => row.last_reminder_lead_minutes);
+
+  assert.deepEqual((await run()).metrics, { attempted: 3, delivered: 2 });
+  assert.deepEqual((await run()).metrics, { attempted: 1, delivered: 1 });
+  assert.deepEqual(await leadTimes(), [1440, 120, 120, null, null]);
+  assert.deepEqual(sendPush.mock.calls.map(call => call.arguments[0]).sort(), [5, 7]);
+
+  // Advance the first visit into the shorter window and add an already-due offset
+  // longer than reminders previously delivered to the other two patients.
+  await db.query('UPDATE APPOINTMENTS SET date_time = NOW() + INTERVAL 70 MINUTE WHERE appointment_id = 1');
+  await save([2880, 180, 120]);
+  assert.deepEqual((await run()).metrics, { attempted: 1, delivered: 1 });
+  assert.deepEqual((await run()).metrics, { attempted: 0, delivered: 0 });
+  assert.deepEqual(await leadTimes(), [120, 120, 120, null, null]);
+  assert.equal(sendPush.mock.callCount(), 2);
+  assert.equal(emit.mock.callCount(), 2);
+});
+
+test('Super Admins can preview, save and reset reminder policy with revision checks', { skip }, async t => {
+  const db = await fixture(t);
+  const { request } = await mountedApi(t);
+  const path = '/admin/server-policy';
+  const field = 'appointmentReminderLeadMinutes';
+  const admin = { userId: 1, roles: ['ADMIN'] };
+  const configured = { version: 0, overrides: { [field]: [120, 1440] } };
+  const send = (method, suffix, json) => request(path + suffix, { ...admin, method, json });
+  const invalid = await send('POST', '/preview', { version: 0, overrides: { [field]: [15, 15] } });
+  assert.equal(invalid.status, 400);
+  assert.ok((await invalid.json()).fields[field]);
+  assert.equal((await send('POST', '/preview', configured)).status, 200);
+  const saved = await send('PUT', '', configured);
+  assert.equal(saved.status, 200);
+  assert.deepEqual((await saved.json()).values[field], [1440, 120]);
+  assert.deepEqual((await (await send('GET', '')).json()).values[field], [1440, 120]);
+  assert.equal((await send('POST', '/preview', configured)).status, 409);
+  assert.equal((await send('PUT', '', configured)).status, 409);
+  const reset = await send('PUT', '', { version: 1, overrides: {} });
+  assert.equal(reset.status, 200);
+  assert.deepEqual((await reset.json()).values[field], [1440]);
+  const [[row]] = await db.query('SELECT revision, overrides FROM SERVER_POLICY WHERE policy_id = 1');
+  assert.equal(row.revision, 2);
+  assert.deepEqual(row.overrides, {});
 });
 
 // Verify that replay commits a mixed batch and concurrent duplicates reuse the recorded outcome.

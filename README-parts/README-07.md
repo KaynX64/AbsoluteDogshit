@@ -72,7 +72,7 @@ Set `lib/config/api_config.dart` to the API host reachable from the target devic
 | MySQL | `DB_HOST`, `DB_PORT=3307`, `DB_USER`, `DB_PASSWORD`, `DB_NAME=valetudo_healthlink` | `server/src/db/pool.js` refuses to start without a DB password. |
 | Redis | `REDIS_HOST`, `REDIS_PORT=6379`, `REDIS_PASSWORD` | Cache, JWT denylist, rate limits and QR nonces. |
 | MinIO / S3 | `S3_ENDPOINT=http://127.0.0.1:9000`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET=valetudo-attachments` | Path-style access; bucket created on startup if missing. |
-| Mail, push, maps | `SMTP_HOST`, `SMTP_PORT=587`, `SMTP_USER`, `SMTP_PASS`, Firebase service account, optional `GOOGLE_MAPS_API_KEY` | Reminders, SOS push and reverse geocoding. |
+| Mail, push, maps | `SMTP_HOST`, `SMTP_PORT=587`, `SMTP_USER`, `SMTP_PASS`, optional `SMTP_TEST_RECIPIENTS`, Firebase service account, optional `GOOGLE_MAPS_API_KEY` | Appointment email, saved test recipients, push notifications and reverse geocoding. [Appointment email setup](../README.md#appointment-email) |
 | Throttles | `LOGIN_RATE_LIMIT_MAX/WINDOW`, `SOS_RATE_LIMIT_MAX/WINDOW`, `BOOKING_RATE_LIMIT_MAX/WINDOW`, `VERIFY_RATE_LIMIT_*` | Defaults per 60 seconds are 5 login, 10 SOS, 10 booking and 30 verification attempts. [Limit defaults](../server/src/config/limits.js) |
 
 See the [cross-module configuration guide](../AGENTS-parts/AGENTS-02.md#read-before-touching-cross-module-config) for client and deployment settings.

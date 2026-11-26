@@ -50,7 +50,9 @@ flowchart LR
 5. The server generates prescription/clearance PDFs and stores them in object storage. Patients can retrieve authorized documents; QR links support verification. Failed PDF generation has a background recovery path.
 6. Socket.IO events refresh queues, appointments, prescriptions and emergency views. Sensitive notifications use authorized recipient rooms.
 
-The server also schedules appointment reminders, no-show transitions and prescription expiry. Its startup applies versioned migrations before listening, and its shutdown drains requests and jobs.
+LeoVital sends appointment confirmations, reminders, and cancellation notices through the server’s SMTP transport. Super Admins manage reminder timing and send sample emails from Server Policy. [Appointment email setup](README.md#appointment-email)
+
+The server also schedules no-show transitions and prescription expiry. Its startup applies versioned migrations before listening, and its shutdown drains requests and jobs.
 
 ## Records, emergencies and offline behavior
 

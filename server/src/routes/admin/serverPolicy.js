@@ -5,6 +5,8 @@ import { pool } from '../../db/pool.js';
 import { resolveAdminPermissions } from '../../middleware/rbac.js';
 import { getServerPolicy, makeServerPolicy, serverPolicyDefaults, serverPolicyFields, validatePolicyOverrides } from '../../config/serverPolicy.js';
 import { readServerPolicy, saveServerPolicy } from '../../utils/serverPolicyStore.js';
+import { appointmentEmailTypes } from '../../appointments/emailTemplates.js';
+import { isAppointmentSmtpConfigured, sendAppointmentEmail } from '../../utils/mailer.js';
 
 const router = express.Router();
 
@@ -42,6 +44,36 @@ const stalePolicy = (res) => res.status(409).json({ error: 'The policy has chang
 
 // Return the active server policy to the editor.
 router.get('/', (req, res) => res.json(response(getServerPolicy())));
+
+// Use literal mailbox addresses, rather than Nodemailer's address-list syntax.
+const isMailbox = address => typeof address === 'string' && address.length <= 254 &&
+  /^[A-Z0-9_+%-]+(?:\.[A-Z0-9_+%-]+)*@[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?)+$/i.test(address);
+const uniqueMailboxes = addresses => [...new Set(addresses.map(address => address.trim().toLowerCase()))];
+
+router.get('/email-test', (req, res) => {
+  const configured = (process.env.SMTP_TEST_RECIPIENTS ?? '').split(',').map(address => address.trim());
+  res.json({ smtpConfigured: isAppointmentSmtpConfigured(), recipients: uniqueMailboxes(configured.filter(isMailbox)) });
+});
+
+router.post('/email-test', async (req, res) => {
+  const { template, recipients } = req.body ?? {};
+  if (!appointmentEmailTypes.includes(template)) return res.status(400).json({ error: 'Choose an appointment email template.' });
+  if (!Array.isArray(recipients) || recipients.length < 1 ||
+      !recipients.every(address => typeof address === 'string' && isMailbox(address.trim()))) {
+    return res.status(400).json({ error: 'Enter valid email addresses for the test.' });
+  }
+  const addresses = uniqueMailboxes(recipients);
+  if (addresses.length > 5) return res.status(400).json({ error: 'Select up to five different recipients.' });
+  if (!isAppointmentSmtpConfigured()) return res.status(503).json({ error: 'SMTP is unavailable. Check the server email configuration.' });
+
+  const results = await Promise.all(addresses.map(async address => ({
+    address,
+    accepted: await sendAppointmentEmail({
+      toEmail: address, type: template, patientName: 'Sample Patient', dateTime: '2027-06-15 09:30:00', test: true,
+    }),
+  })));
+  res.json({ results });
+});
 
 // Validate and preview proposed overrides against the current revision.
 router.post('/preview', validateUpdate, async (req, res) => {

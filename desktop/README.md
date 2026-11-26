@@ -50,6 +50,8 @@ Choose **Sign out** in the sidebar and confirm to end your session.
 
 Super Admins can grant **Use server Terminal** when creating or editing a Limited Admin. The grant enables server events and built-in diagnostics. Restart Server is available to Super Admins.
 
+In **Admin Console → Server Policy**, Super Admins can set when appointment reminders are sent and send a sample **Confirmation**, **Reminder**, or **Cancellation** email. Tests can use saved addresses, a manually entered address, or both. **Accepted by SMTP** means the mail server accepted the message for delivery. The `npm run test:layout -- --admin-only` command checks the reminder preview and test email panel with synthetic fixtures. [Server Policy guide](../server/src/config/SERVER-POLICY.md#appointment-reminders)
+
 Student, Faculty and Non-Teaching account creation includes optional sex, date of birth and emergency contact details.
 
 Database Studio, account lists, Privacy & audit, and Incident Records keep their controls visible at desktop window sizes. Scroll within a table, the System tables list, or the incident list to see more records. Database Studio's pagination stays below the table.

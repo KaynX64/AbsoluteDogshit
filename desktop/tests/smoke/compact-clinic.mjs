@@ -400,6 +400,30 @@ try {
     await wait("document.querySelector('.tb-role-select').value === 'ADMIN'");
     await send('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1032, deviceScaleFactor: 1, mobile: false });
   }
+  await wait("[...document.querySelectorAll('.sb-item')].some(item => item.textContent.includes('Server Policy'))");
+  await run("smoke.click('Server Policy', '.sb-item')");
+  const emailForm = 'form[aria-labelledby="appointment-email-test-heading"]';
+  await wait(`document.querySelector(${JSON.stringify(`${emailForm} input[type=checkbox]`)}) && document.getElementById('appointment-reminder-0')`);
+  await run("smoke.click('Add reminder')");
+  await wait("document.getElementById('appointment-reminder-1')");
+  await run("smoke.fill(document.getElementById('appointment-reminder-1'), '120'); smoke.click('Preview changes')");
+  await wait("document.querySelector('[aria-label=\"Policy change preview\"]')?.textContent.includes('24 hours, 2 hours')");
+  assert.deepEqual(await run(`JSON.parse(smoke.calls.findLast(([path]) => path.endsWith('/server-policy/preview'))[2]).overrides`),
+    { appointmentReminderLeadMinutes: [1440, 120] });
+  await run(`(() => {
+    const form = document.querySelector(${JSON.stringify(emailForm)});
+    smoke.fill(form.querySelector('select'), 'reminder');
+    form.querySelector('input[type=checkbox]').click();
+    smoke.fill(form.querySelector('input[type=email]'), 'manual@example.invalid');
+  })()`);
+  await run(`smoke.click('Send test email', ${JSON.stringify(`${emailForm} button`)})`);
+  await wait('smoke.state.finishEmailTest');
+  assert.equal(await run(`document.querySelector(${JSON.stringify(`${emailForm} button`)}).disabled`), true);
+  assert.deepEqual(await run(`JSON.parse(smoke.calls.findLast(([path, method]) => path.endsWith('/email-test') && method === 'POST')[2])`),
+    { template: 'reminder', recipients: ['saved@example.invalid', 'manual@example.invalid'] });
+  await run('smoke.state.finishEmailTest()');
+  await wait("document.querySelector('[aria-label=\"Test email results\"]')?.textContent.includes('Send failed')");
+  assert.match(await run("document.querySelector('[aria-label=\"Test email results\"]').textContent"), /Accepted by SMTP.*saved@example\.invalid.*Send failed.*manual@example\.invalid/);
   const checkAdminScroll = async (region, controls) => {
     const scrollRegion = `[aria-label="${region}"]`;
     await wait(`document.querySelector('${scrollRegion}')?.scrollHeight > document.querySelector('${scrollRegion}')?.clientHeight &&

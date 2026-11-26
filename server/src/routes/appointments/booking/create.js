@@ -7,7 +7,7 @@ import { authenticateToken } from '../../../auth/middleware.js';
 import { requirePrivacyConsent } from '../../../middleware/consent.js';
 import { logAudit } from '../../../utils/auditLogger.js';
 import { redis, isRedisActive } from '../../../utils/redisClient.js';
-import { sendAppointmentEmail } from '../../../utils/mailer.js';
+import { sendBookedPatientEmail } from '../../../appointments/patientEmail.js';
 import {
   addHourBlock,
   availabilityForHour,
@@ -54,34 +54,6 @@ async function bookingRateLimit(req, res, next) {
   } catch (err) {
     console.error('[Booking Rate Limit Error]:', err.message);
     next();
-  }
-}
-
-// Load the booked appointment details and send the patient a confirmation email.
-async function sendBookingConfirmation(patientUserId, doctorUserId, dateTime, appointmentType) {
-  try {
-    const [[details]] = await pool.query(
-      `SELECT u.email AS patient_email, u.first_name AS patient_first_name, u.last_name AS patient_last_name,
-              doc.first_name AS doc_first_name, doc.last_name AS doc_last_name,
-              COALESCE(sp.specialty, 'Campus Doctor') AS doc_specialty
-       FROM USERS u, USERS doc
-       LEFT JOIN STAFF_PROFILES sp ON doc.user_id = sp.user_id
-       WHERE u.user_id = ? AND doc.user_id = ?`,
-      [patientUserId, doctorUserId]
-    );
-    if (!details) return;
-
-    await sendAppointmentEmail({
-      toEmail: details.patient_email,
-      patientName: `${details.patient_first_name} ${details.patient_last_name}`,
-      doctorName: `${details.doc_first_name} ${details.doc_last_name}`,
-      specialty: details.doc_specialty,
-      dateTime,
-      purpose: appointmentType,
-      type: 'confirmation',
-    });
-  } catch (error) {
-    console.error('[Booking Confirmation Error]:', error.code || error.name);
   }
 }
 
@@ -199,6 +171,6 @@ export function registerBookingCreation(router, io) {
       message: 'Consultation scheduled successfully.',
       appointmentId,
     });
-    void sendBookingConfirmation(patientUserId, doctor_user_id, date_time, appointment_type);
+    void sendBookedPatientEmail(patientUserId, date_time, 'confirmation');
   });
 }

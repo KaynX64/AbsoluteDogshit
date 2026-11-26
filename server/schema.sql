@@ -272,6 +272,7 @@ CREATE TABLE `APPOINTMENTS` (
   `notes` TEXT NULL,
   `version` INT NOT NULL DEFAULT 1,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
+  `last_reminder_lead_minutes` SMALLINT NULL,
   INDEX `idx_app_doctor_datetime` (`doctor_user_id`, `date_time`),
   INDEX `idx_app_patient_datetime` (`patient_user_id`, `date_time`),
   INDEX `idx_app_reminder` (`status`, `reminder_sent`, `date_time`),

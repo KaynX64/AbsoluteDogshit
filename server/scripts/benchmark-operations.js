@@ -56,7 +56,7 @@ const readMock = mock.method(fs, 'readFileSync', (name, ...args) => name === fak
   : originalRead(name, ...args));
 const deliveredBatch = message => ({ successCount: message.tokens.length, failureCount: 0, responses: message.tokens.map(() => ({ success: true })) });
 let push = deliveredBatch;
-let sendMail = () => {};
+let sendMail = async message => ({ accepted: [message.to.address] });
 mock.module('firebase-admin/app', { exports: { initializeApp: options => ({ options }) } });
 mock.module('firebase-admin/messaging', { exports: { getMessaging: () => ({ sendEachForMulticast: message => push(message) }) } });
 mock.method(nodemailer, 'createTransport', () => ({ sendMail: message => sendMail(message) }));
@@ -294,10 +294,11 @@ async function verifyReminders() {
   await pool.query('INSERT INTO APPOINTMENTS (patient_user_id, doctor_user_id, date_time, appointment_type) VALUES ?',
     [Array.from({ length: 51 }, () => [5, 2, date, 'General consultation'])]);
   let attempted = 0;
-  sendMail = async () => {
+  sendMail = async message => {
     attempted++;
     await delay(20);
     if (attempted === 1) throw Object.assign(new Error('Synthetic mail failure'), { code: 'ETIMEDOUT' });
+    return { accepted: [message.to.address] };
   };
   const started = performance.now();
   const runs = await Promise.all([sendDueAppointmentReminders(), sendDueAppointmentReminders()]);

@@ -76,7 +76,20 @@ export function installFixtures({ themeMode = 'dark' } = {}) {
     if (path.endsWith('/admin/db/tables/USERS')) return Response.json({
       tableName: 'USERS', columns: [], rows: [], totalRows: 0, totalPages: 1, page: 1,
     });
-    if (path.endsWith('/admin/server-policy')) return Response.json({ version: 1, values: {}, defaults: {}, overrides: {}, fields: [] });
+    if (path.endsWith('/admin/server-policy')) {
+      const values = { appointmentReminderLeadMinutes: [1440] };
+      const fields = [{ key: 'appointmentReminderLeadMinutes', label: 'Email reminders before the visit',
+        type: 'minute-list', section: 'Appointment reminders', min: 15, max: 10080, maxItems: 5 }];
+      return Response.json({ version: 1, values, defaults: values, overrides: {}, fields });
+    }
+    if (path.endsWith('/admin/server-policy/preview')) return Response.json({ outsideSchedule: 0, earlierNoShows: 0 });
+    if (path.endsWith('/admin/server-policy/email-test')) {
+      if (method === 'GET') return Response.json({ smtpConfigured: true, recipients: ['saved@example.invalid'] });
+      return new Promise(resolve => {
+        state.finishEmailTest = () => resolve(Response.json({ results: JSON.parse(options.body).recipients
+          .map(address => ({ address, accepted: address === 'saved@example.invalid' })) }));
+      });
+    }
     if (path.endsWith('/admin/operations')) return Response.json({
       instanceId: 'fixture-server', restartAuthorized: state.showIncidentRecords, restartAvailable: false, events: [],
     });

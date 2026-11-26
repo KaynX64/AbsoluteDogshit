@@ -5,7 +5,6 @@ Use this index to find the current guide for a task. Confirm behavior against so
 ## Architecture and development
 
 - [Codebase overview](CODEBASE-OVERVIEW.md) — system, workflows and architecture.
-- [Backend study guide](BACKEND-STUDY-GUIDE.md) — server lifecycle, API access, storage, workflow traces, and exercises.
 - [Project agent guidance](AGENTS.md) — cross-module setup, security invariants and documentation rules.
 - [Server guidance](server/AGENTS.md) — routes, services, authorization, migrations and tests.
 - [Desktop guidance](desktop/AGENTS.md) — Electron, renderer, offline storage and interaction conventions.
@@ -16,8 +15,8 @@ Use this index to find the current guide for a task. Confirm behavior against so
 - [Project README](README.md) — features, architecture, local setup, API examples, and test commands.
 - [Daily Docker backups](README.md#daily-mysql-and-minio-backups) · [Backup verification and restore rehearsal](scripts/backup/RESTORE.md).
 - [Desktop README](desktop/README.md) · [Mobile README](mobile/README.md) — module setup and workflows.
-- [Postman API guide](POSTMAN-API-GUIDE.md) — local setup, authentication, common workflows, and endpoint checks.
 - [Server migration rollout](server/MIGRATION-PLAN.md) · [Server policy](server/src/config/SERVER-POLICY.md).
+- [Appointment email setup](README.md#appointment-email) · [Reminder timing and Admin Console test emails](server/src/config/SERVER-POLICY.md#appointment-reminders).
 - [Responder qualification process](server/RESPONDER-QUALIFICATIONS.md) — applications, clinic assessments, appointment access, rollout and synthetic data.
 - [Structured prescribing API](server/STRUCTURED-PRESCRIBING.md) · [Prescribing rollout and checks](server/PRESCRIBING-ROLLOUT.md).
 - [Responder records](server/RESPONDER-RECORDS.md) — alert history, desktop drafts, read-only mobile reports, permissions and migration 015.

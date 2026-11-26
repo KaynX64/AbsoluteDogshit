@@ -1,16 +1,36 @@
 import { useEffect, useRef, useState } from 'react';
 import { API_BASE_URL } from '../../config/api';
 import { T, btnGhost, btnPrimary, calloutDanger, calloutInfo, calloutSuccess, inputStyle } from '../../theme';
+import AppointmentEmailTestPanel from './AppointmentEmailTestPanel';
 
-type Value = string | number | boolean;
+type Value = string | number | boolean | number[];
+type DraftValue = Value | string[];
 type Values = Record<string, Value>;
-type Field = { key: string; label: string; section: string; type: 'integer' | 'time' | 'boolean'; min?: number; max?: number };
+type Field =
+  { key: string; label: string; section: string } & (
+    { type: 'integer'; min: number; max: number } |
+    { type: 'minute-list'; min: number; max: number; maxItems: number } |
+    { type: 'time' | 'boolean' }
+  );
 type Policy = { version: number; values: Values; defaults: Values; overrides: Values; fields: Field[] };
 type Update = { version: number; overrides: Values };
 type Preview = { outsideSchedule: number; earlierNoShows: number; update: Update };
 
 const endpoint = `${API_BASE_URL}/api/admin/server-policy`;
-const labelFor = (value: Value) => typeof value === 'boolean' ? (value ? 'Enabled' : 'Disabled') : value;
+const reminderKey = 'appointmentReminderLeadMinutes';
+const sameValue = (left: Value, right: Value) => Array.isArray(left)
+  ? Array.isArray(right) && left.length === right.length && left.every((minutes, index) => minutes === right[index])
+  : left === right;
+
+function formatMinutes(minutes: number) {
+  const hours = Math.floor(minutes / 60);
+  const remaining = minutes % 60;
+  return [hours && `${hours} ${hours === 1 ? 'hour' : 'hours'}`, remaining && `${remaining} ${remaining === 1 ? 'minute' : 'minutes'}`]
+    .filter(Boolean).join(' ');
+}
+
+const labelFor = (value: Value) => Array.isArray(value) ? value.map(formatMinutes).join(', ')
+  : typeof value === 'boolean' ? (value ? 'Enabled' : 'Disabled') : value;
 
 async function request(path: string, method: string, signal: AbortSignal, update?: Update) {
   const res = await fetch(endpoint + path, {
@@ -28,7 +48,7 @@ async function request(path: string, method: string, signal: AbortSignal, update
 
 export default function ServerPolicyPanel() {
   const [policy, setPolicy] = useState<Policy | null>(null);
-  const [draft, setDraft] = useState<Values>({});
+  const [draft, setDraft] = useState<Record<string, DraftValue>>({});
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(true);
   const [message, setMessage] = useState('');
@@ -80,7 +100,7 @@ export default function ServerPolicyPanel() {
     }
   }
 
-  const edit = (key: string, value: Value) => {
+  const edit = (key: string, value: DraftValue) => {
     setDraft((current) => ({ ...current, [key]: value }));
     setPreview(null);
     setSaved(false);
@@ -92,15 +112,24 @@ export default function ServerPolicyPanel() {
     if (!policy || busy || stale) return;
     const overrides: Values = {};
     const errors: Record<string, string> = {};
-    for (const { key, type, min, max } of policy.fields) {
+    for (const field of policy.fields) {
+      const { key, type } = field;
       const raw = draft[key];
-      const value = type === 'integer' ? (/^\d+$/.test(String(raw)) ? Number(raw) : NaN) : raw;
-      if (value === policy.defaults[key]) continue;
-      if (type === 'integer' && (!Number.isSafeInteger(value) || Number(value) < min! || Number(value) > max!)) {
-        errors[key] = `Enter a whole number from ${min} to ${max}.`;
-      } else {
-        overrides[key] = value;
+      if (type === 'minute-list') {
+        const entries = Array.isArray(raw) ? raw : [];
+        const minutes = entries.map(entry => /^\d+$/.test(String(entry)) ? Number(entry) : NaN).sort((a, b) => b - a);
+        if (minutes.length < 1 || minutes.length > field.maxItems || new Set(minutes).size !== minutes.length ||
+            minutes.some(value => !Number.isSafeInteger(value) || value < field.min || value > field.max)) {
+          errors[key] = `Enter one to ${field.maxItems} distinct whole-minute values from ${field.min} to ${field.max.toLocaleString()}.`;
+        } else if (!sameValue(minutes, policy.defaults[key])) overrides[key] = minutes;
+        continue;
       }
+      if (Array.isArray(raw)) continue;
+      const value = type === 'integer' ? (/^\d+$/.test(String(raw)) ? Number(raw) : NaN) : raw;
+      if (sameValue(value, policy.defaults[key])) continue;
+      if (type === 'integer' && (!Number.isSafeInteger(value) || Number(value) < field.min || Number(value) > field.max)) {
+        errors[key] = `Enter a whole number from ${field.min} to ${field.max}.`;
+      } else overrides[key] = value;
     }
     if (Object.keys(errors).length) {
       setFieldErrors(errors);
@@ -116,7 +145,9 @@ export default function ServerPolicyPanel() {
     </div>
   );
 
-  return (
+  const reminderField = policy.fields.find(field => field.key === reminderKey && field.type === 'minute-list');
+  const reminderValues = draft[reminderKey];
+  return (<>
     <form onSubmit={(event) => { event.preventDefault(); review(); }} noValidate>
       <p style={calloutInfo()}>
         Effective version {policy.version}. Saved overrides take effect on the server immediately. Existing rate-limit windows keep their expiry.
@@ -151,6 +182,30 @@ export default function ServerPolicyPanel() {
           {section === 'Appointment rules' && <p style={{ color: T.textSub }}>Capacity is measured in 60-minute blocks. Existing appointments count toward new capacity.</p>}
         </fieldset>
       ))}
+      {reminderField?.type === 'minute-list' && Array.isArray(reminderValues) && (
+        <fieldset disabled={busy || stale} style={{ border: `1px solid ${T.border}`, borderRadius: T.radius.md, margin: '0 0 16px', padding: 16 }}>
+          <legend style={{ fontWeight: 700, color: T.text }}>Appointment reminders</legend>
+          <p style={{ marginTop: 0 }}>{reminderField.label} (minutes)</p>
+          {reminderValues.map((entry, index) => (
+            <div key={index} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <label htmlFor={`appointment-reminder-${index}`}>Reminder {index + 1}</label>
+              <input id={`appointment-reminder-${index}`} type="text" inputMode="numeric" value={entry}
+                style={{ ...inputStyle, width: 105 }} aria-invalid={Boolean(fieldErrors[reminderKey])}
+                aria-describedby="appointment-reminder-help" onChange={event => edit(reminderKey,
+                  reminderValues.map((value, position) => position === index ? event.target.value : String(value)))} />
+              {/^[1-9]\d{0,4}$/.test(String(entry)) && <small>{formatMinutes(Number(entry))} before</small>}
+              <button type="button" style={btnGhost} disabled={reminderValues.length === 1}
+                aria-label={`Remove reminder ${index + 1}`}
+                onClick={() => edit(reminderKey, reminderValues.filter((_, position) => position !== index).map(String))}>Remove</button>
+            </div>
+          ))}
+          <button type="button" style={btnGhost} disabled={reminderValues.length >= reminderField.maxItems}
+            onClick={() => edit(reminderKey, [...reminderValues.map(String), ''])}>Add reminder</button>
+          <small id="appointment-reminder-help" style={{ display: 'block', marginTop: 8, color: fieldErrors[reminderKey] ? T.danger : T.textSub }}>
+            {fieldErrors[reminderKey] || `Effective ${labelFor(policy.values[reminderKey])} · Baseline ${labelFor(policy.defaults[reminderKey])}. The server checks every 15 minutes.`}
+          </small>
+        </fieldset>
+      )}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
         <button type="submit" style={btnPrimary} disabled={busy || stale}>Preview changes</button>
         <button type="button" style={btnGhost} disabled={busy || stale} onClick={() => { setDraft(policy.defaults); setPreview(null); setSaved(false); setMessage(''); setFieldErrors({}); }}>Use baseline values</button>
@@ -160,14 +215,17 @@ export default function ServerPolicyPanel() {
         <section style={calloutInfo()} aria-label="Policy change preview">
           <h3>Review policy changes</h3>
           <ul>
-            {policy.fields.filter(({ key }) => (preview.update.overrides[key] ?? policy.defaults[key]) !== policy.values[key])
+            {policy.fields.filter(({ key }) => !sameValue(preview.update.overrides[key] ?? policy.defaults[key], policy.values[key]))
               .map(({ key, label }) => <li key={key}>{label}: {labelFor(policy.values[key])} → {labelFor(preview.update.overrides[key] ?? policy.defaults[key])}</li>)}
           </ul>
           <p>{preview.outsideSchedule} future appointments are outside the proposed schedule and will keep their bookings.</p>
           <p>{preview.earlierNoShows} scheduled appointments may become eligible for earlier no-show processing.</p>
+          {reminderField && !sameValue(preview.update.overrides[reminderKey] ?? policy.defaults[reminderKey], policy.values[reminderKey]) &&
+            <p>New reminder times apply to upcoming appointments and can make a reminder due on the next check.</p>}
           <button type="button" style={btnPrimary} onClick={() => void runRequest('PUT', preview.update)}>Apply server policy</button>
         </section>
       )}
     </form>
-  );
+    <AppointmentEmailTestPanel />
+  </>);
 }

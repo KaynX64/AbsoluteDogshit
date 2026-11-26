@@ -17,6 +17,17 @@ test('policy allows sparse typed overrides and rejects unsupported or unsafe inp
   assert.ok(validatePolicyOverrides({ slotMinutes: 7 }).errors.slotMinutes);
 });
 
+test('reminder policy defaults to 24 hours and normalizes only valid lead-time lists', () => {
+  const field = 'appointmentReminderLeadMinutes';
+  assert.deepEqual(makeServerPolicy(0, {}).values[field], [1440]);
+  assert.deepEqual(validatePolicyOverrides({ [field]: [15, 1440, 10080, 120] }), {
+    values: { [field]: [10080, 1440, 120, 15] }, errors: {},
+  });
+  for (const value of [120, [], [14], [10081], [120.5], ['120'], [120, 120], [15, 16, 17, 18, 19, 20]]) {
+    assert.ok(validatePolicyOverrides({ [field]: value }).errors[field]);
+  }
+});
+
 // Verify that saved policy updates limit and appointment readers, and stale activation cannot supersede it.
 test('saved policy updates limit and appointment readers, and stale activation cannot supersede it', () => {
   const previous = getServerPolicy();
