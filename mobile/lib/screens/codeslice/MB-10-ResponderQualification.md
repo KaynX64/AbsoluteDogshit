@@ -9,7 +9,7 @@ Own applications, nomination acceptance, private evidence, feedback, renewal and
 
 | # | Lines | Anchor | Description |
 |---|---|---|---|
-| 1 | 1-23 | `class ResponderQualificationScreen` | class ResponderQualificationScreen |
+| 1 | 1-23 | `class ResponderQualificationScreen` | material_ui imports and qualification screen widget |
 | 2 | 24-53 | `class _ResponderQualificationScreenState` | class _ResponderQualificationScreenState |
 | 3 | 54-59 | `void initState` | void initState |
 | 4 | 60-76 | `Future<void> _initialize` | Future<void> _initialize |

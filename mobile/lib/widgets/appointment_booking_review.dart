@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// A scrollable summary of the exact details that will be sent on confirmation.
 class AppointmentBookingReview extends StatelessWidget {

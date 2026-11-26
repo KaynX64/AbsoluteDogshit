@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../services/emergency_alert_service.dart';
 import '../widgets/responder_style.dart';

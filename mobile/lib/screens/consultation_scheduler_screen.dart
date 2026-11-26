@@ -6,12 +6,11 @@ import '../services/mobile_session_data.dart';
 import '../services/connectivity_service.dart';
 import '../widgets/lazy_card_columns.dart';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:http/http.dart' as http;
 
 import '../theme/app_palette.dart';
 
-import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 

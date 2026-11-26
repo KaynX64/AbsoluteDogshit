@@ -9,7 +9,7 @@ The compact strip has its own minimal presentation. ActiveIncidentCard owns the 
 
 | # | Lines | Anchor | Description |
 |---|-------|--------|-------------|
-| 1 | 1-116 | `class ActiveIncidentBanner` | Compact status/location strip, detail shortcut and optional mute |
+| 1 | 1-116 | `class ActiveIncidentBanner` | material_ui imports, compact status/location strip, detail shortcut and optional mute |
 | 2 | 117-147 | `class ResponderHubButton` | Workspace shortcut on the health pass and profile cards |
 | 3 | 148-321 | `class ResponderHub extends` | Duty controls, siren test, refresh, main alert cards and staff report entry |
 | 4 | 322-341 | `Future<void> showResponderIncident` | Themed incident detail sheet entry point |

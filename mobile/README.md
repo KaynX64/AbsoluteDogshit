@@ -2,6 +2,8 @@
 
 Flutter app for patients and emergency responders. Module-specific architecture, platform, and security guidance lives in [AGENTS.md](./AGENTS.md); repository-wide setup is in the root [AGENTS.md](../AGENTS.md).
 
+The app and its widget tests use Flutter's standalone `material_ui` package. `flutter pub get` installs it with the other mobile dependencies. [Flutter migration guide](https://docs.flutter.dev/release/breaking-changes/material-ui-and-cupertino-ui)
+
 ## Configure and run
 
 Start the API and run Flutter from `mobile/`. For a physical Android phone, put it on the same network as the API host and pass the host’s LAN IP. Replace the example IP with the IPv4 address shown by `ipconfig` on the Windows API host. The standard Android emulator uses `10.0.2.2` to reach the development host.

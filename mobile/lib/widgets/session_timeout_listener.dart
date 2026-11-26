@@ -1,7 +1,7 @@
 // mobile/lib/widgets/session_timeout_listener.dart
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../theme/app_palette.dart';
 import '../theme/account_theme_controller.dart';

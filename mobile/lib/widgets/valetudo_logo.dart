@@ -1,5 +1,5 @@
 // mobile/lib/widgets/valetudo_logo.dart
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Reusable Valetudo brand mark (lion + medical cross + heart).
 ///

@@ -1,5 +1,5 @@
 // mobile/lib/utils/responsive.dart
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 
 /// Responsive scaling helper.
 ///

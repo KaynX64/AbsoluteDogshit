@@ -2,6 +2,8 @@
 
 Flutter (Dart SDK ^3.13.3). Key packages: `http`, `flutter_secure_storage` (token storage), `socket_io_client` (v2 — matches server Socket.IO v4), `qr_flutter`, `geolocator`, `flutter_local_notifications`, `firebase_core` + `firebase_messaging` (FCM push), `connectivity_plus`, `audioplayers`, `url_launcher`, `open_filex`, `path_provider`.
 
+Import `package:material_ui/material_ui.dart` for Material widgets and themes in app code and widget tests. Layout helpers that only use Flutter's core widgets can import `package:flutter/widgets.dart`.
+
 ## API host
 
 `lib/config/api_config.dart` is the host authority for REST and Socket.IO. Pass `--dart-define=API_BASE_URL=…` with a reachable HTTPS origin at build or launch time. Without an override, the app uses the checked-in LAN address. Rebuild when changing the origin. See the [mobile setup guide](README.md#configure-and-run) for phone and emulator commands.

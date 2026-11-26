@@ -10,7 +10,7 @@ Mobile screens slice map · [index](../CODESLICE.md) · check from repo root: `p
 
 | # | Lines | Anchor | Description |
 |---|-------|--------|-------------|
-| 1 | 1-12 | — | Imports for Flutter, HTTP, secure storage, and account services |
+| 1 | 1-12 | — | Imports for material_ui, HTTP, secure storage, and account services |
 | 2 | 13-22 | ChangePasswordScreen | Screen constructor and optional fixture dependencies |
 | 3 | 23-56 | _formKey | Form state and lifecycle of the focus nodes and controllers |
 | 4 | 57-73 | _validateNewPassword | Required value, outer whitespace, length and character groups |

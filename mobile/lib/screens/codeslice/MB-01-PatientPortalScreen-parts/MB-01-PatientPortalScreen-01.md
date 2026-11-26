@@ -12,7 +12,7 @@ Mobile screens slice map · [index](../../CODESLICE.md) · check from repo root:
 
 | # | Lines | Anchor | Description |
 |---|-------|--------|-------------|
-| 1 | 1-34 | — | imports: secure storage, qr_flutter, geolocator, socket_io_client, url_launcher, screens/services |
+| 1 | 1-34 | — | Imports for material_ui, secure storage, QR, geolocation, socket, URL launcher, screens and services |
 | 2 | 35-65 | _PatientIdentity | _PatientIdentity value class: roleWord, identifier, affiliation; _joinNonEmpty helper |
 | 3 | 66-136 | _PatientIdentity.fromProfile | factory mapping primary_role (FACULTY, DOCTOR, NURSE, STUDENT...) to role/ID/affiliation strings |
 | 4 | 137-145 | roleWithIdentifier | getters roleWithIdentifier and fullSubtitle for health pass and profile header |

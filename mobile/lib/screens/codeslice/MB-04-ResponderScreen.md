@@ -7,6 +7,6 @@ Mobile slice map · [index](../CODESLICE.md)
 
 | # | Lines | Anchor | Description |
 |---|-------|--------|-------------|
-| 1 | 1-22 | `class ResponderScreen` | Dedicated responder route using the shared roster |
+| 1 | 1-22 | `class ResponderScreen` | material_ui imports and dedicated responder route using the shared roster |
 | 2 | 23-50 | `_signOutInProgress` | Confirmation, installation release and login navigation |
 | 3 | 51-88 | `Widget build` | App header, account actions and shared Alerts/History/Reports workspace |

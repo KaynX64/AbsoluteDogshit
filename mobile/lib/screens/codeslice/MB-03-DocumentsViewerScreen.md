@@ -14,7 +14,7 @@ palette: primaryGreen, softSage, textMain, textSub, borderColor
 
 | # | Lines | Anchor | Description |
 |---|-------|--------|-------------|
-| 1 | 1-27 | — | imports: dart:convert/io, http, path_provider, qr_flutter, url_launcher, open_filex, ApiConfig, Rs |
+| 1 | 1-27 | — | Imports for material_ui, HTTP, paths, QR, file opening, API config and responsive layout |
 | 2 | 28-76 | DocumentsViewerScreen | screen state: selected sub-tab, list/grid mode, document data/loading, PDF guard, palette |
 | 3 | 77-111 | initState | Restore session tab/layout state and load the selected category on demand |
 | 4 | 112-124 | _fetchPrescriptions | Load prescription data through the shared document fetch and error state |

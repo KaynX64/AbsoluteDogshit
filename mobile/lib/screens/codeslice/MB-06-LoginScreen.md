@@ -11,7 +11,7 @@ Mobile screens slice map · [index](../CODESLICE.md) · working tree · check fr
 
 | # | Lines | Anchor | Description |
 |---|-------|--------|-------------|
-| 1 | 1-18 | — | Imports and dependencies |
+| 1 | 1-18 | — | Imports for material_ui, secure storage, HTTP, and sign-in services |
 | 2 | 19-27 | LoginScreen | LoginScreen StatefulWidget with optional session notice |
 | 3 | 28-41 | _emailController | Controllers, secure storage, and sign-in flags |
 | 4 | 42-89 | api/auth/mobile | Google token or demo credentials, response timeout and session storage |

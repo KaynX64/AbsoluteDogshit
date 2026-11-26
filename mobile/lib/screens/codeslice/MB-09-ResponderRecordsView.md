@@ -9,7 +9,7 @@ Mounted by ResponderWorkspace and IncidentReportsScreen. GET-only history/report
 
 | # | Lines | Anchor | Description |
 |---|-------|--------|-------------|
-| 1 | 1-50 | `class ResponderRecordsView` | Imports, read-only record state and bounded view cache |
+| 1 | 1-50 | `class ResponderRecordsView` | material_ui imports, read-only record state and bounded view cache |
 | 2 | 51-148 | `void initState()` | Lifecycle, visible-destination refresh, permissions and cancellation |
 | 3 | 149-235 | `Future<void> _load(` | Paged GET reads, cached snapshots, filters and stale-response guards |
 | 4 | 236-260 | `Future<void> _choosePeriod(` | Philippine date filter and formatting helpers |

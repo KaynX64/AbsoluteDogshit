@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Lazy independent columns with the same round-robin assignment as Row/Column.
 /// Each column scrolls in the shared viewport and retains natural card heights.
