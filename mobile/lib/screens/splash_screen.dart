@@ -28,6 +28,7 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen> {
   final _storage = const FlutterSecureStorage();
   bool _isChecking = true;
+  bool _retry = false;
 
   static const Color primaryGreen = Color(0xFF284E3A);
   static const Color textMain = Color(0xFF191C1A);
@@ -41,6 +42,10 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _checkSavedSession() async {
+    setState(() {
+      _isChecking = true;
+      _retry = false;
+    });
     final String? token;
     final String? userData;
     try {
@@ -74,44 +79,42 @@ class _SplashScreenState extends State<SplashScreen> {
 
     if (!mounted) return;
     final themes = AccountThemeScope.of(context);
-    final validation = _validateSession(token);
-    await themes.bindAccount(cachedUser, token, fromCache: true);
-    final response = await validation;
+    final response = await _validateSession(token);
     if (!mounted) return;
-
-    final profile = _decodeProfileResponse(response);
-    if (response?.statusCode == 401 ||
-        (response?.statusCode == 403 &&
-            profile?['error'] != 'PRIVACY_CONSENT_REQUIRED')) {
+    if (response?.statusCode == 401 || response?.statusCode == 403) {
       themes.reset();
       await _discardSavedSession();
       return;
     }
-
-    final initialProfile =
-        response?.statusCode == 200 && profile?['user'] is Map ? profile : null;
-    final liveUser = initialProfile?['user'] as Map?;
-    if (liveUser != null) {
-      final liveFlag = liveUser['is_qualified_responder'] == true;
-      if (cachedUser['is_qualified_responder'] != liveFlag) {
-        cachedUser['is_qualified_responder'] = liveFlag;
-        try {
-          await _storage.write(key: 'user_data', value: jsonEncode(cachedUser));
-        } catch (_) {}
-      }
+    final live = _decodeSession(response);
+    if (live == null) {
+      setState(() {
+        _isChecking = false;
+        _retry = true;
+      });
+      return;
     }
+    if (live['user_id'] != cachedUser['user_id'] ||
+        live['auth_method'] != cachedUser['auth_method'] ||
+        !MobileSignIn.acceptsSavedSession(live['auth_method'])) {
+      themes.reset();
+      await _discardSavedSession();
+      return;
+    }
+    cachedUser['roles'] = live['roles'];
+    cachedUser['is_qualified_responder'] = live['is_qualified_responder'];
+    await themes.bindAccount(cachedUser, token, fromCache: true);
     if (!mounted) return;
-
     EmergencyAlertService().beginSession(token, cachedUser['user_id']);
     unawaited(themes.refresh());
-    _routeUser(cachedUser, initialProfile);
+    _routeUser(cachedUser);
   }
 
   Future<http.Response?> _validateSession(String token) async {
     try {
       return await (widget.client ?? ApiConfig.client)
           .get(
-            Uri.parse('${ApiConfig.baseUrl}/api/profile/me'),
+            Uri.parse('${ApiConfig.baseUrl}/api/auth/mobile/session'),
             headers: {'Authorization': 'Bearer $token'},
           )
           .timeout(const Duration(seconds: 4));
@@ -120,13 +123,20 @@ class _SplashScreenState extends State<SplashScreen> {
     }
   }
 
-  Map<String, dynamic>? _decodeProfileResponse(http.Response? response) {
-    if (response == null ||
-        (response.statusCode != 200 && response.statusCode != 403)) {
-      return null;
-    }
+  Map<String, dynamic>? _decodeSession(http.Response? response) {
+    if (response?.statusCode != 200) return null;
     try {
-      return jsonDecode(response.body) as Map<String, dynamic>;
+      final data = jsonDecode(response!.body);
+      if (data is! Map<String, dynamic> ||
+          data['user_id'] is! int ||
+          data['auth_method'] is! String ||
+          data['roles'] is! List ||
+          (data['roles'] as List).isEmpty ||
+          !(data['roles'] as List).every((role) => role is String) ||
+          data['is_qualified_responder'] is! bool) {
+        return null;
+      }
+      return data;
     } catch (_) {
       return null;
     }
@@ -142,10 +152,7 @@ class _SplashScreenState extends State<SplashScreen> {
     if (mounted) setState(() => _isChecking = false);
   }
 
-  void _routeUser(
-    Map<String, dynamic> user,
-    Map<String, dynamic>? initialProfile,
-  ) {
+  void _routeUser(Map<String, dynamic> user) {
     if (!mounted) return;
     final List<dynamic> roles = user['roles'] ?? [];
 
@@ -157,10 +164,7 @@ class _SplashScreenState extends State<SplashScreen> {
     } else {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(
-          builder: (_) =>
-              PatientPortalScreen(user: user, initialProfile: initialProfile),
-        ),
+        MaterialPageRoute(builder: (_) => PatientPortalScreen(user: user)),
       );
     }
   }
@@ -265,7 +269,9 @@ class _SplashScreenState extends State<SplashScreen> {
                               SizedBox(height: rs.h(18)),
 
                               Text(
-                                'Your campus care, connected.',
+                                _retry
+                                    ? 'Could not verify your session. Check your connection and try again.'
+                                    : 'Your campus care, connected.',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   fontSize: rs.sp(14.5),
@@ -286,7 +292,11 @@ class _SplashScreenState extends State<SplashScreen> {
                                     elevation: 0,
                                     shape: const StadiumBorder(),
                                   ),
-                                  onPressed: _isChecking ? null : _goToLogin,
+                                  onPressed: _isChecking
+                                      ? null
+                                      : (_retry
+                                            ? _checkSavedSession
+                                            : _goToLogin),
                                   child: _isChecking
                                       ? const SizedBox(
                                           width: 22,
@@ -302,7 +312,9 @@ class _SplashScreenState extends State<SplashScreen> {
                                           children: [
                                             Flexible(
                                               child: Text(
-                                                "Let's get started",
+                                                _retry
+                                                    ? "Retry"
+                                                    : "Let's get started",
                                                 textAlign: TextAlign.center,
                                                 maxLines: 2,
                                                 overflow: TextOverflow.ellipsis,

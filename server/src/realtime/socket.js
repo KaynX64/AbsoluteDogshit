@@ -40,7 +40,7 @@ export function attachRealtime(server, { isHttps, isOriginAllowed }) {
         return next(new Error('Invalid or expired WebSocket authentication token.'));
       }
       if (!sessionAuthenticationAllowed(user)) {
-        return next(new Error('Demo sign-in is disabled.'));
+        return next(new Error('Session is no longer valid. Please sign in again.'));
       }
 
       // Check Redis token revocation blacklist

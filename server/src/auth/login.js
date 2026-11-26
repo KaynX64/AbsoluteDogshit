@@ -12,7 +12,8 @@ import { getServerPolicy } from '../config/serverPolicy.js';
 import crypto from 'crypto';
 import { resolveAdminPermissions } from '../middleware/rbac.js';
 import { THEME_MODES, THEME_PRESETS } from '../config/themePreferences.js';
-import { mobileDemoLoginEnabled } from './loginPolicy.js';
+import { loginRoles } from './loginRoles.js';
+import { SESSION_PURPOSE, mobileDemoLoginEnabled } from './loginPolicy.js';
 
 const DESKTOP_ROLES = new Set(['NURSE', 'DOCTOR', 'DENTIST', 'ADMIN', 'EMERGENCY_RESPONDER']);
 
@@ -171,7 +172,7 @@ async function loginWithPassword(req, res, demoOnly) {
 }
 
 // Issue the same HealthLink session after any successful identity check.
-export async function completeLogin(req, res, user, authMethod) {
+export async function completeLogin(req, res, user, authMethod, verifiedRoles) {
   if (user.deleted_at !== null) {
     return res.status(403).json({
       error: 'Account record is archived. Please contact the campus administrator.',
@@ -185,16 +186,7 @@ export async function completeLogin(req, res, user, authMethod) {
   }
 
   // 2. Fetch user's assigned roles
-  const [roles] = await pool.query(
-    `SELECT r.code, r.name
-     FROM ROLES r
-     INNER JOIN USER_ROLES ur ON r.role_id = ur.role_id
-     WHERE ur.user_id = ?`,
-    [user.user_id]
-  );
-
-  // Extract role codes for the session token and login response.
-  const roleCodes = roles.map((r) => r.code);
+  const roleCodes = verifiedRoles ?? await loginRoles(pool, user.user_id);
 
   if (roleCodes.length === 0) {
     return res.status(403).json({
@@ -208,7 +200,6 @@ export async function completeLogin(req, res, user, authMethod) {
 
   // ── Admin archetype permissions (additive — ADMIN accounts only) ──────
   // Non-admin roles get `permissions: null` and are completely unaffected.
-  // A failure here must never block a login: fall back to full access.
   let adminPermissions = null;
   if (roleCodes.includes('ADMIN')) {
     try {
@@ -220,7 +211,7 @@ export async function completeLogin(req, res, user, authMethod) {
       };
     } catch (permErr) {
       console.error('[Login Permission Warning]:', permErr.message);
-      adminPermissions = { archetype: 'super', is_super: true, permissions: ['SUPER_ADMIN'] };
+      return res.status(503).json({ error: 'Account permissions temporarily unavailable. Try again.' });
     }
   }
 
@@ -232,6 +223,7 @@ export async function completeLogin(req, res, user, authMethod) {
       email: user.email,
       roles: roleCodes,
       auth_method: authMethod,
+      purpose: SESSION_PURPOSE,
       jti,
     },
     JWT_SECRET,

@@ -71,9 +71,11 @@ void main() {
             '{"user_id":12,"roles":["STUDENT"],"auth_method":"mobile_google"}',
       });
       final response = Completer<http.Response>();
+      var attempts = 0;
       final client = MockClient((request) {
-        expect(request.url.path, '/api/profile/me');
+        expect(request.url.path, '/api/auth/mobile/session');
         expect(request.headers['Authorization'], 'Bearer saved-session');
+        if (attempts++ == 0) return Future.value(http.Response('', 503));
         return response.future;
       });
       final controller = AccountThemeController(
@@ -89,7 +91,11 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(controller.isBound, isTrue);
+      expect(controller.isBound, isFalse);
+      await tester.pumpAndSettle();
+      expect(await storage.read(key: 'jwt_token'), 'saved-session');
+      await tester.tap(find.text('Retry'));
+      await tester.pump();
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
       expect(find.text("Let's get started"), findsNothing);
 

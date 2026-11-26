@@ -1,5 +1,6 @@
 // mobile/lib/main.dart
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -12,25 +13,16 @@ import 'theme/account_theme_controller.dart';
 import 'theme/app_palette.dart';
 import 'widgets/responder_hub.dart';
 
-/// Allows self-signed TLS certificates in debug builds.
-class DevHttpOverrides extends HttpOverrides {
-  @override
-  HttpClient createHttpClient(SecurityContext? context) {
-    return super.createHttpClient(context)
-      ..badCertificateCallback = (X509Certificate cert, String host, int port) {
-        return kDebugMode; // Never allow invalid certificates in release builds
-      };
-  }
-}
-
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() {
   final binding = WidgetsFlutterBinding.ensureInitialized();
 
-  // Security Enforcement: Restrict self-signed TLS override strictly to debug mode
-  if (kDebugMode) {
-    HttpOverrides.global = DevHttpOverrides();
+  const localCa = String.fromEnvironment('LOCAL_DEV_CA_BASE64');
+  if (kDebugMode && localCa.isNotEmpty) {
+    SecurityContext.defaultContext.setTrustedCertificatesBytes(
+      base64Decode(localCa),
+    );
   }
 
   runApp(const ValetudoMobileApp());

@@ -29,7 +29,7 @@ export function authenticateToken(req, res, next) {
   jwt.verify(token, JWT_SECRET, async (err, user) => {
     if (err) return res.status(403).json({ error: 'Token expired or invalid.' });
     if (!sessionAuthenticationAllowed(user)) {
-      return res.status(401).json({ error: 'TOKEN_REVOKED', message: 'Demo sign-in is disabled.' });
+      return res.status(401).json({ error: 'TOKEN_REVOKED', message: 'Session is no longer valid. Please sign in again.' });
     }
 
     // Check Redis revocation blocklist

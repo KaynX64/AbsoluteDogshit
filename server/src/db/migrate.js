@@ -24,7 +24,9 @@ import responderQualifications from './migrations/017-responder-qualifications.j
 import appointmentReminderLeadTime from './migrations/018-appointment-reminder-lead-time.js';
 import mobileGoogleSignIn from './migrations/019-mobile-google-sign-in.js';
 
-const migrations = [foundation, clinicalDocuments, responders, appointmentDayIndex, pharmacyActivityIndexes, incidentRecordsPermission, analyticsScopes, staffAnalyticsPermissions, pdfRetry, terminalPermission, replayOutcomes, responderDelivery, structuredPrescriptions, sosDelivery, responderHistory, auditChainState, responderQualifications, appointmentReminderLeadTime, mobileGoogleSignIn];
+import reviewDemoAccounts from './migrations/020-review-demo-accounts.js';
+
+const migrations = [foundation, clinicalDocuments, responders, appointmentDayIndex, pharmacyActivityIndexes, incidentRecordsPermission, analyticsScopes, staffAnalyticsPermissions, pdfRetry, terminalPermission, replayOutcomes, responderDelivery, structuredPrescriptions, sosDelivery, responderHistory, auditChainState, responderQualifications, appointmentReminderLeadTime, mobileGoogleSignIn, reviewDemoAccounts];
 const requiredTables = [
   'USERS', 'ROLES', 'USER_ROLES', 'STAFF_PROFILES', 'HEALTH_PROFILES', 'EMERGENCY_ALERTS',
   'PRESCRIPTIONS', 'PRESCRIPTION_ITEMS', 'INVENTORY_LOGS', 'MEDICAL_CLEARANCES', 'AUDIT_LOGS', 'APPOINTMENTS',

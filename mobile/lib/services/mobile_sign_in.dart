@@ -33,7 +33,13 @@ class MobileSignIn {
           : null,
       serverClientId: _serverClientId,
     );
-    await _initialization;
+    final attempt = _initialization;
+    try {
+      await attempt;
+    } catch (_) {
+      if (identical(attempt, _initialization)) _initialization = null;
+      rethrow;
+    }
     try {
       final account = await google.authenticate();
       return account.authentication.idToken ??

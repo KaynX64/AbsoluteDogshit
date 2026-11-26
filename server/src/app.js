@@ -3,7 +3,8 @@
 import express from 'express';
 import cors from 'cors';
 import { loginMobileDemo, loginUser, loginRateLimit } from './auth/login.js';
-import { loginMobileGoogle } from './auth/googleLogin.js';
+import { loginMobileGoogle } from './auth/oauth/googleLogin.js';
+import { mobileSession } from './auth/mobileSession.js';
 import { authenticateToken } from './auth/middleware.js';
 import { changePassword } from './auth/password.js';
 import { logoutUser } from './auth/logout.js';
@@ -119,6 +120,7 @@ export function createApp({ isOriginAllowed = createOriginCheck() } = {}) {
 export function mountApiRoutes(app, io, { restart, readAnalyticsSnapshot } = {}) {
   app.post('/api/auth/login', loginRateLimit, loginUser);
   app.post('/api/auth/mobile/google', loginRateLimit, loginMobileGoogle);
+  app.get('/api/auth/mobile/session', authenticateToken, mobileSession);
   app.post('/api/auth/mobile/demo', loginRateLimit, loginMobileDemo);
   // Pass the logout request and realtime server to the session handler.
   app.post('/api/auth/logout', authenticateToken, (req, res) => logoutUser(req, res, io));

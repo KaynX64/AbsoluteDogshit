@@ -68,7 +68,7 @@ after(async () => {
 // Make an HTTP request to the test API with an optional signed session and JSON body.
 const request = (path, { roles, userId = 21, method = 'GET', headers = {}, json, signal } = {}) => {
   if (roles) {
-    const token = jwt.sign({ user_id: userId, roles }, process.env.JWT_SECRET, { expiresIn: '5m' });
+    const token = jwt.sign({ purpose: 'HEALTHLINK_SESSION', auth_method: 'desktop_password', user_id: userId, roles }, process.env.JWT_SECRET, { expiresIn: '5m' });
     headers = { ...headers, authorization: 'Bearer ' + token };
   }
   const body = json === undefined ? undefined : JSON.stringify(json);
@@ -105,13 +105,16 @@ test('mobile Google login verifies the token audience and workspace before linki
     assert.equal((await signIn(token)).status, 403);
   }
 
-  const { bindGoogleAccount, verifiedPsuIdentity } = await import('../src/auth/googleLogin.js');
+  const { bindGoogleAccount } = await import('../src/auth/oauth/googleAccount.js');
+  const { verifiedPsuIdentity } = await import('../src/auth/oauth/googleIdentity.js');
   const identity = verifiedPsuIdentity(valid);
   assert.deepEqual(identity, { email: 'psu.user@psu.edu.ph', subject: 'psu-google-user' });
   let user;
   let bindings = 0;
+  let roleRows = [];
   const connection = {
     async query(sql, params) {
+      if (sql.includes('FROM ROLES')) return [roleRows];
       if (sql.includes('FROM USERS WHERE email')) {
         assert.deepEqual(params, [identity.email]);
         return [[user].filter(Boolean)];
@@ -144,16 +147,29 @@ test('mobile Google login verifies the token audience and workspace before linki
     return [[]];
   });
   user = normal;
+  assert.equal((await signIn('workspace')).status, 403);
+  assert.equal(bindings, 0);
+  roleRows = [{ code: 'STUDENT' }];
   const response = await signIn('workspace');
   assert.equal(response.status, 200);
   const session = await response.json();
   assert.equal(session.auth_method, 'mobile_google');
   const decoded = jwt.verify(session.token, process.env.JWT_SECRET);
+  assert.equal(decoded.purpose, 'HEALTHLINK_SESSION');
   assert.equal(decoded.user_id, 21);
   assert.deepEqual(decoded.roles, ['STUDENT']);
   assert.equal(decoded.auth_method, 'mobile_google');
   assert.equal((await signIn('workspace')).status, 200);
   assert.equal(bindings, 1);
+
+  roleRows = [{ code: 'ADMIN' }];
+  pool.query.mock.mockImplementation(async sql => {
+    assert.match(sql, /FROM ADMIN_PERMISSIONS/);
+    throw new Error('Fixture permission lookup unavailable');
+  });
+  const unavailable = await signIn('workspace');
+  assert.equal(unavailable.status, 503);
+  assert.equal((await unavailable.json()).token, undefined);
 });
 
 test('mobile demo login and desktop passwords cannot sign in regular patient accounts', async t => {
@@ -193,6 +209,43 @@ test('mobile demo login and desktop passwords cannot sign in regular patient acc
   process.env.ALLOW_MOBILE_DEMO_LOGIN = 'false';
   const disabled = await request('/api/profile/me', { headers: { authorization: `Bearer ${token}` } });
   assert.equal(disabled.status, 401);
+});
+
+test('Socket.IO rejects legacy sessions, unknown methods and attachment tokens', { timeout: 5000 }, async t => {
+  const { createServer } = await import('node:http');
+  const { attachRealtime } = await import('../src/realtime/socket.js');
+  const server = createServer();
+  const io = attachRealtime(server, { isOriginAllowed: () => true });
+  t.after(() => new Promise(resolve => io.close(resolve)));
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const endpoint = 'http://127.0.0.1:' + server.address().port + '/socket.io/?EIO=4&transport=polling';
+  for (const claims of [{}, { purpose: 'EMR_ATTACHMENT_DOWNLOAD' }, { purpose: 'HEALTHLINK_SESSION', auth_method: 'unknown' }]) {
+    const opening = await (await fetch(endpoint)).text();
+    const session = endpoint + '&sid=' + JSON.parse(opening.slice(1)).sid;
+    const token = jwt.sign({ user_id: 21, ...claims }, process.env.JWT_SECRET);
+    await fetch(session, { method: 'POST', body: '40' + JSON.stringify({ token }) });
+    assert.match(await (await fetch(session)).text(), /^44.*Session is no longer valid/);
+  }
+});
+
+test('mobile session requires a primary mobile token and returns live roles before consent', async t => {
+  t.mock.method(pool, 'query', async sql => {
+    if (sql.includes('SELECT is_active, deleted_at')) return [[{ is_active: 1 }]];
+    if (sql.includes('FROM ROLES')) return [[{ code: 'FACULTY' }]];
+    assert.match(sql, /^SELECT is_active,deleted_at,is_qualified_responder/);
+    return [[]];
+  });
+  const get = claims => request('/api/auth/mobile/session', { headers: {
+    authorization: 'Bearer ' + jwt.sign({ user_id: 21, ...claims }, process.env.JWT_SECRET),
+  } });
+  for (const claims of [{}, { purpose: 'EMR_ATTACHMENT_DOWNLOAD' }, { purpose: 'HEALTHLINK_SESSION', auth_method: 'unknown' }]) {
+    assert.equal((await get(claims)).status, 401);
+  }
+  assert.equal((await get({ purpose: 'HEALTHLINK_SESSION', auth_method: 'desktop_password' })).status, 403);
+  const response = await get({ purpose: 'HEALTHLINK_SESSION', auth_method: 'mobile_google', roles: ['STUDENT'] });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { user_id: 21, auth_method: 'mobile_google', roles: ['FACULTY'], is_qualified_responder: false });
 });
 
 // Verify that account appearance reads only the authenticated user and shares desktop preference writes.
@@ -495,7 +548,7 @@ test('analytics report permissions map staff and Super Admin roles independently
   const common = ['ANALYTICS_OPERATIONS', 'ANALYTICS_EXPORT', 'ANALYTICS_SURVEILLANCE', 'ANALYTICS_DISPENSING'];
   const clinical = [...common, 'ANALYTICS_CLINICAL'];
   const all = [...clinical, 'ANALYTICS_PHARMACY', 'ANALYTICS_HEADCOUNT'];
-  const token = jwt.sign({ user_id: 21, roles: ['ADMIN'] }, process.env.JWT_SECRET, { expiresIn: '5m' });
+  const token = jwt.sign({ purpose: 'HEALTHLINK_SESSION', auth_method: 'desktop_password', user_id: 21, roles: ['ADMIN'] }, process.env.JWT_SECRET, { expiresIn: '5m' });
   const session = { headers: { authorization: 'Bearer ' + token } };
   for (const [roles, expected] of [
     [['DOCTOR'], clinical],
