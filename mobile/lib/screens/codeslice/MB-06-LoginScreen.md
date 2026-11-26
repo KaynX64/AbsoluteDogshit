@@ -3,26 +3,24 @@
 Mobile screens slice map · [index](../CODESLICE.md) · working tree · check from repo root: `python3 scripts/verify_codeslice.py mobile/lib/screens/codeslice .`
 
 ## MB-06 · mobile/lib/screens/login_screen.dart
-**LOC:** 495 · **Role:** Login form: POST /api/auth/login, persists jwt_token + user_data, routes EMERGENCY_RESPONDER to ResponderScreen else PatientPortalScreen
-**Mounted by:** splash_screen.dart (L117, no stored session); logout paths of both role screens, the session timeout listener, and ChangePasswordScreen
-**API surface:** POST /api/auth/login (email/password)
+**LOC:** 447 · **Role:** Mobile Google and development demo sign-in, secure session persistence and role routing
+**Mounted by:** splash_screen.dart when no stored session remains, logout paths of both role screens, the session timeout listener, and ChangePasswordScreen
+**API surface:** POST /api/auth/mobile/google (Google ID token), POST /api/auth/mobile/demo (seeded credentials)
 **Realtime:** starts the authenticated alert session after sign-in
-**State / key fields:** _emailController/_passwordController (L28-29), _storage (L30), _isLoading (L32), _obscurePassword (L33), _rememberMe (L34), _errorMessage (L35), palette consts (L38-40)
+**State / key fields:** Demo text controllers, secure storage, loading and password visibility flags, and sign-in errors
 
 | # | Lines | Anchor | Description |
 |---|-------|--------|-------------|
-| 1 | 1-17 | — | Imports and dependencies |
-| 2 | 18-26 | LoginScreen | LoginScreen StatefulWidget with optional session notice |
-| 3 | 27-41 | _emailController | Controllers, secure storage, loading/obscure/remember flags, _errorMessage |
-| 4 | 42-81 | api/auth/login | POST with response timeout, session storage and alert startup |
-| 5 | 82-117 | EMERGENCY_RESPONDER | Role routing and sign-in error messages for network, TLS and invalid responses |
-| 6 | 118-155 | _pillInputDecoration | Dispose controllers and define the pill-style InputDecoration |
-| 7 | 156-207 | HEALTHLINK | Scaffold, tablet width cap and brand row |
-| 8 | 208-226 | widget.sessionNotice | Accessible sign-in notice after password change or session expiry |
-| 9 | 227-247 | Welcome back. | Headline and sign-in introduction |
-| 10 | 248-280 | University email | University email field |
-| 11 | 281-321 | Enter your password | Password field with visibility toggle |
-| 12 | 322-375 | Forgot password? | Remember me and password reset guidance |
-| 13 | 376-410 | Tip: Ensure | Error banner and PSU infirmary account tip |
-| 14 | 411-459 | Sign in to portal | Submit button and loading spinner |
-| 15 | 460-495 | A little care goes a long way. | Community footer and closing layout |
+| 1 | 1-18 | — | Imports and dependencies |
+| 2 | 19-27 | LoginScreen | LoginScreen StatefulWidget with optional session notice |
+| 3 | 28-41 | _emailController | Controllers, secure storage, and sign-in flags |
+| 4 | 42-89 | api/auth/mobile | Google token or demo credentials, response timeout and session storage |
+| 5 | 90-122 | EMERGENCY_RESPONDER | Role routing and sign-in errors |
+| 6 | 123-160 | _pillInputDecoration | Controller cleanup and demo InputDecoration |
+| 7 | 161-212 | HEALTHLINK | Scaffold, tablet width cap and brand row |
+| 8 | 213-225 | widget.sessionNotice | Sign-in notice after password change or session expiry |
+| 9 | 226-254 | Welcome back. | Headline and PSU Google sign-in introduction |
+| 10 | 255-324 | Demo email | Debug-only seeded account fields and submit button |
+| 11 | 325-360 | Error banner | Sign-in error and infirmary contact guidance |
+| 12 | 361-413 | Sign in with Google | Google sign-in button and loading spinner |
+| 13 | 414-447 | A little care goes a long way. | Community footer and closing layout |

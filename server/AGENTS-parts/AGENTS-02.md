@@ -2,7 +2,8 @@
 
 ## Auth model — src/auth/
 
-- `login.js` owns login rate limiting, the bcrypt timing equalizer, role lookup, and the 24-hour JWT with `user_id`, `email`, `roles`, and `jti`.
+- `login.js` owns login rate limiting, the bcrypt timing equalizer, role lookup, and the 24-hour JWT with `user_id`, `email`, `roles`, `auth_method`, and `jti`. Password sign-in uses desktop staff roles or the dedicated local demo route.
+- `googleLogin.js` verifies Google ID tokens for the configured audience, requires the verified email and hosted domain to match `psu.edu.ph`, and binds the immutable Google subject to an active, existing account. `loginPolicy.js` gates demo passwords to opted-in development against a loopback DB host. [Mobile setup](../../mobile/README.md#psu-google-sign-in)
 - `middleware.js` authenticates HTTP requests. It shares the Redis denylist key and active-account query in `session.js` with Socket.IO. HTTP authentication stops when the response closes during either lookup. `logout.js` and `password.js` write revocations using the same key.
 - `attachmentTokens.js` issues short-lived, attachment-bound, single-use download tokens and checks for replays.
 

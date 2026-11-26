@@ -2,7 +2,8 @@
 
 import express from 'express';
 import cors from 'cors';
-import { loginUser, loginRateLimit } from './auth/login.js';
+import { loginMobileDemo, loginUser, loginRateLimit } from './auth/login.js';
+import { loginMobileGoogle } from './auth/googleLogin.js';
 import { authenticateToken } from './auth/middleware.js';
 import { changePassword } from './auth/password.js';
 import { logoutUser } from './auth/logout.js';
@@ -117,6 +118,8 @@ export function createApp({ isOriginAllowed = createOriginCheck() } = {}) {
 // Mount authentication, liveness, and feature routes on the app.
 export function mountApiRoutes(app, io, { restart, readAnalyticsSnapshot } = {}) {
   app.post('/api/auth/login', loginRateLimit, loginUser);
+  app.post('/api/auth/mobile/google', loginRateLimit, loginMobileGoogle);
+  app.post('/api/auth/mobile/demo', loginRateLimit, loginMobileDemo);
   // Pass the logout request and realtime server to the session handler.
   app.post('/api/auth/logout', authenticateToken, (req, res) => logoutUser(req, res, io));
   // Pass the password change and realtime server to the credential handler.

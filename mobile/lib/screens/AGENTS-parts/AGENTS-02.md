@@ -30,12 +30,12 @@
 
 ### login_screen.dart
 - [Slice map](../codeslice/MB-06-LoginScreen.md).
-- `_handleLogin` persists the JWT and user, binds the account theme and starts the shared alert session. Device registration runs asynchronously.
+- `_handleLogin` exchanges the Google ID token for a server session. Debug builds with the demo flag can submit seeded credentials to the separate demo route. It persists the JWT, user and server sign-in method, binds the account theme and starts the shared alert session. Device registration runs asynchronously.
 - Sign-in bounds the wait for the API response and distinguishes unreachable servers, TLS failures and responses it cannot parse.
 - After storing the session, bind its account theme through `AccountThemeScope` before navigation. Never carry the previous account's theme into a new sign-in.
 
 ### splash_screen.dart
-- `_checkSavedSession` checks `/api/profile/me` while restoring the account theme from cache. It routes by role after validation, retains the saved session on a network failure, and treats `PRIVACY_CONSENT_REQUIRED` as a valid session. A successful profile response also seeds the patient portal's initial profile.
+- `_checkSavedSession` discards sessions from the old password flow, then checks `/api/profile/me` while restoring the account theme from cache. It routes by role after validation, retains an eligible saved session on a network failure, and treats `PRIVACY_CONSENT_REQUIRED` as a valid session. A successful profile response also seeds the patient portal's initial profile.
 - Refresh the dedicated theme endpoint after accepting the session. Cached login profile theme fields may be older than the device's last successful preference save. Reset theme state on authentication rejection.
 
 ## Rules

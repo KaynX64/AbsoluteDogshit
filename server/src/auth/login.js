@@ -12,6 +12,9 @@ import { getServerPolicy } from '../config/serverPolicy.js';
 import crypto from 'crypto';
 import { resolveAdminPermissions } from '../middleware/rbac.js';
 import { THEME_MODES, THEME_PRESETS } from '../config/themePreferences.js';
+import { mobileDemoLoginEnabled } from './loginPolicy.js';
+
+const DESKTOP_ROLES = new Set(['NURSE', 'DOCTOR', 'DENTIST', 'ADMIN', 'EMERGENCY_RESPONDER']);
 
 // S-09: Pre-computed dummy hash to prevent user-enumeration timing attacks.
 // bcrypt.compare against this hash takes the same ~100ms as a real check,
@@ -124,151 +127,154 @@ async function clearLoginAttempts(ip) {
 // ─────────────────────────────────────────────────────────────────────────
 // LOGIN
 // ─────────────────────────────────────────────────────────────────────────
-// Verify credentials, load the account's roles, and issue the session token.
-export async function loginUser(req, res) {
-  const { email, password } = req.body;
+export function loginUser(req, res) {
+  return loginWithPassword(req, res, false);
+}
 
-  if (!email || !password) {
+export function loginMobileDemo(req, res) {
+  if (!mobileDemoLoginEnabled()) {
+    return res.status(403).json({ error: 'Demo sign-in is disabled. Use your PSU Google account.' });
+  }
+  return loginWithPassword(req, res, true);
+}
+
+async function loginWithPassword(req, res, demoOnly) {
+  const { email, password } = req.body ?? {};
+
+  if (typeof email !== 'string' || !email.trim() || typeof password !== 'string' || !password) {
     return res.status(400).json({ error: 'Email and password are required.' });
   }
 
-  const normalizedEmail = String(email).trim().toLowerCase();
+  const normalizedEmail = email.trim().toLowerCase();
 
   try {
-    // 1. Fetch user by email (regardless of active status to perform post-auth checks)
     const [users] = await pool.query(
-      'SELECT * FROM USERS WHERE LOWER(email) = ?',
+      `SELECT user_id, email, first_name, last_name, password_hash, is_demo_account,
+              is_active, deleted_at, theme_mode, theme_preset FROM USERS WHERE email = ?`,
       [normalizedEmail]
     );
 
-    // =========================================================================
-    // PHASE 1: PRE-AUTHENTICATION (Zero Information Leakage)
-    // =========================================================================
-
-    // Scenario A: Email does not exist
-    if (users.length === 0) {
-      // Run dummy compare so response time is identical to a real password check
-      await bcrypt.compare(password, DUMMY_HASH);
-      return res.status(401).json({ error: 'Institutional email or password does not exist.' });
-    }
-
-    const user = users[0];
-
-    // Scenario B: Password incorrect
-    const isMatch = await bcrypt.compare(password, user.password_hash);
-
-    if (!isMatch) {
+    const [user] = users;
+    const canUsePassword = user?.email.toLowerCase() === normalizedEmail &&
+      (user.is_demo_account ? mobileDemoLoginEnabled() : !demoOnly);
+    const isMatch = await bcrypt.compare(password, canUsePassword ? user.password_hash : DUMMY_HASH);
+    if (!canUsePassword || !isMatch) {
       return res.status(401).json({ error: 'Incorrect institutional email or password.' });
     }
 
-    // =========================================================================
-    // PHASE 2: POST-AUTHENTICATION (User proved identity, safe to give status)
-    // =========================================================================
-
-    // Scenario C: Account archived/soft-deleted
-    if (user.deleted_at !== null) {
-      return res.status(403).json({
-        error: 'Account record is archived. Please contact the campus administrator.',
-      });
-    }
-
-    // Scenario D: Account suspended/deactivated
-    if (!Boolean(user.is_active)) {
-      return res.status(403).json({
-        error: 'Account suspended. Please visit the campus infirmary to reactivate access.',
-      });
-    }
-
-    // 2. Fetch user's assigned roles
-    const [roles] = await pool.query(
-      `SELECT r.code, r.name
-       FROM ROLES r
-       INNER JOIN USER_ROLES ur ON r.role_id = ur.role_id
-       WHERE ur.user_id = ?`,
-      [user.user_id]
-    );
-
-    // Extract role codes for the session token and login response.
-    const roleCodes = roles.map((r) => r.code);
-
-    // Scenario E: Valid account, but no role linked
-    if (roleCodes.length === 0) {
-      return res.status(403).json({
-        error: 'No active role assigned to this account. Please contact PSU IT Administrator.',
-      });
-    }
-
-    // ── Admin archetype permissions (additive — ADMIN accounts only) ──────
-    // Non-admin roles get `permissions: null` and are completely unaffected.
-    // A failure here must never block a login: fall back to full access.
-    let adminPermissions = null;
-    if (roleCodes.includes('ADMIN')) {
-      try {
-        const state = await resolveAdminPermissions(user.user_id);
-        adminPermissions = {
-          archetype: state.isSuper ? 'super' : 'limited',
-          is_super: state.isSuper,
-          permissions: state.codes,
-        };
-      } catch (permErr) {
-        console.error('[Login Permission Warning]:', permErr.message);
-        adminPermissions = { archetype: 'super', is_super: true, permissions: ['SUPER_ADMIN'] };
-      }
-    }
-
-    // 3. Issue JWT Token (Valid 24 hours) with unique JTI for Redis revocation tracking
-    const jti = crypto.randomUUID();
-    const token = jwt.sign(
-      {
-        user_id: user.user_id,
-        email: user.email,
-        roles: roleCodes,
-        jti,
-      },
-      JWT_SECRET,
-      { expiresIn: '24h' }
-    );
-
-    // 4. Record to R.A. 10173 Immutable Audit Ledger
-    try {
-      await inTransaction(connection => logAudit(connection, {
-        userId: user.user_id,
-        action: 'LOGIN',
-        table: 'AUTH_SESSIONS',
-        recordId: user.user_id,
-        oldValue: null,
-        newValue: { email: user.email, roles: roleCodes },
-        ipAddress: req.ip,
-      }));
-    } catch (auditErr) {
-      console.error('[Auth Audit Warning]:', auditErr.message);
-    }
-
-    // Successful login — reset the rate-limit counter for this IP
-    await clearLoginAttempts(req.ip || req.socket?.remoteAddress || 'unknown');
-
-    return res.json({
-      message: 'Login successful',
-      token,
-      user: {
-        user_id: user.user_id,
-        email: user.email,
-        first_name: user.first_name,
-        last_name: user.last_name,
-        roles: roleCodes,
-        permissions: adminPermissions,
-        // UI hint ONLY — never used for authorization. SOS access is always
-        // resolved live from the database (the 24h JWT would go stale).
-        is_qualified_responder: (await resolveResponderAccess(user.user_id)).isQualifiedResponder,
-        // Per-account UI theme (Stage 7). Clamped against the whitelist so
-        // a manually-edited DB row can never push an invalid value to
-        // clients — unknown/NULL falls back to the defaults (light/brand).
-        theme_mode: THEME_MODES.has(user.theme_mode) ? user.theme_mode : 'light',
-        theme_preset: THEME_PRESETS.has(user.theme_preset) ? user.theme_preset : 'brand',
-      },
-    });
+    const authMethod = demoOnly ? 'mobile_demo' : (user.is_demo_account ? 'desktop_demo' : 'desktop_password');
+    return await completeLogin(req, res, user, authMethod);
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('[Password Login Error]:', error.code || error.name);
     return res.status(500).json({ error: 'Internal server error.' });
   }
+}
+
+// Issue the same HealthLink session after any successful identity check.
+export async function completeLogin(req, res, user, authMethod) {
+  if (user.deleted_at !== null) {
+    return res.status(403).json({
+      error: 'Account record is archived. Please contact the campus administrator.',
+    });
+  }
+
+  if (!Boolean(user.is_active)) {
+    return res.status(403).json({
+      error: 'Account suspended. Please visit the campus infirmary to reactivate access.',
+    });
+  }
+
+  // 2. Fetch user's assigned roles
+  const [roles] = await pool.query(
+    `SELECT r.code, r.name
+     FROM ROLES r
+     INNER JOIN USER_ROLES ur ON r.role_id = ur.role_id
+     WHERE ur.user_id = ?`,
+    [user.user_id]
+  );
+
+  // Extract role codes for the session token and login response.
+  const roleCodes = roles.map((r) => r.code);
+
+  if (roleCodes.length === 0) {
+    return res.status(403).json({
+      error: 'No active role assigned to this account. Please contact PSU IT Administrator.',
+    });
+  }
+
+  if (authMethod.startsWith('desktop_') && !roleCodes.some(role => DESKTOP_ROLES.has(role))) {
+    return res.status(403).json({ error: 'Use your PSU Google account to sign in on mobile.' });
+  }
+
+  // ── Admin archetype permissions (additive — ADMIN accounts only) ──────
+  // Non-admin roles get `permissions: null` and are completely unaffected.
+  // A failure here must never block a login: fall back to full access.
+  let adminPermissions = null;
+  if (roleCodes.includes('ADMIN')) {
+    try {
+      const state = await resolveAdminPermissions(user.user_id);
+      adminPermissions = {
+        archetype: state.isSuper ? 'super' : 'limited',
+        is_super: state.isSuper,
+        permissions: state.codes,
+      };
+    } catch (permErr) {
+      console.error('[Login Permission Warning]:', permErr.message);
+      adminPermissions = { archetype: 'super', is_super: true, permissions: ['SUPER_ADMIN'] };
+    }
+  }
+
+  // 3. Issue JWT Token (Valid 24 hours) with unique JTI for Redis revocation tracking
+  const jti = crypto.randomUUID();
+  const token = jwt.sign(
+    {
+      user_id: user.user_id,
+      email: user.email,
+      roles: roleCodes,
+      auth_method: authMethod,
+      jti,
+    },
+    JWT_SECRET,
+    { expiresIn: '24h' }
+  );
+
+  // 4. Record to R.A. 10173 Immutable Audit Ledger
+  try {
+    await inTransaction(connection => logAudit(connection, {
+      userId: user.user_id,
+      action: 'LOGIN',
+      table: 'AUTH_SESSIONS',
+      recordId: user.user_id,
+      oldValue: null,
+      newValue: { email: user.email, roles: roleCodes, auth_method: authMethod },
+      ipAddress: req.ip,
+    }));
+  } catch (auditErr) {
+    console.error('[Auth Audit Warning]:', auditErr.message);
+  }
+
+  // Successful login — reset the rate-limit counter for this IP
+  await clearLoginAttempts(req.ip || req.socket?.remoteAddress || 'unknown');
+
+  return res.json({
+    message: 'Login successful',
+    token,
+    auth_method: authMethod,
+    user: {
+      user_id: user.user_id,
+      email: user.email,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      roles: roleCodes,
+      permissions: adminPermissions,
+      // UI hint ONLY — never used for authorization. SOS access is always
+      // resolved live from the database (the 24h JWT would go stale).
+      is_qualified_responder: (await resolveResponderAccess(user.user_id)).isQualifiedResponder,
+      // Per-account UI theme (Stage 7). Clamped against the whitelist so
+      // a manually-edited DB row can never push an invalid value to
+      // clients — unknown/NULL falls back to the defaults (light/brand).
+      theme_mode: THEME_MODES.has(user.theme_mode) ? user.theme_mode : 'light',
+      theme_preset: THEME_PRESETS.has(user.theme_preset) ? user.theme_preset : 'brand',
+    },
+  });
 }

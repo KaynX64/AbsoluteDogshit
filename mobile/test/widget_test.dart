@@ -25,6 +25,40 @@ void main() {
     await tester.tap(find.text("Let's get started"));
     await tester.pumpAndSettle();
     expect(find.byType(LoginScreen), findsOneWidget);
+    expect(find.text('Sign in with Google'), findsOneWidget);
+    const demoEnabled = bool.fromEnvironment('ALLOW_MOBILE_DEMO_LOGIN');
+    expect(
+      find.byType(TextFormField),
+      demoEnabled ? findsNWidgets(2) : findsNothing,
+    );
+    expect(
+      find.text('Sign in with demo account'),
+      demoEnabled ? findsOneWidget : findsNothing,
+    );
+  });
+
+  testWidgets('Clears a session saved by the old password flow', (
+    tester,
+  ) async {
+    const storage = FlutterSecureStorage();
+    FlutterSecureStorage.setMockInitialValues({
+      'jwt_token': 'old-password-session',
+      'user_data': '{"user_id":12,"roles":["STUDENT"]}',
+      'account_theme_12': 'saved-theme',
+    });
+    final client = MockClient((request) async {
+      throw StateError(
+        'Legacy sessions should clear before fetching a profile',
+      );
+    });
+    await tester.pumpWidget(
+      ValetudoMobileApp(home: SplashScreen(client: client)),
+    );
+    await tester.pumpAndSettle();
+    expect(await storage.read(key: 'jwt_token'), isNull);
+    expect(await storage.read(key: 'user_data'), isNull);
+    expect(await storage.read(key: 'account_theme_12'), 'saved-theme');
+    expect(find.text("Let's get started"), findsOneWidget);
   });
 
   testWidgets(
@@ -33,7 +67,8 @@ void main() {
       const storage = FlutterSecureStorage();
       FlutterSecureStorage.setMockInitialValues({
         'jwt_token': 'saved-session',
-        'user_data': '{"user_id":12,"roles":["STUDENT"]}',
+        'user_data':
+            '{"user_id":12,"roles":["STUDENT"],"auth_method":"mobile_google"}',
       });
       final response = Completer<http.Response>();
       final client = MockClient((request) {

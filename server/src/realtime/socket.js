@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '../utils/secrets.js';
 import { redis, isRedisActive } from '../utils/redisClient.js';
 import { isSessionAccountActive, sessionBlocklistKey } from '../auth/session.js';
+import { sessionAuthenticationAllowed } from '../auth/loginPolicy.js';
 
 // Attach Socket.IO to the HTTP server and register authentication and connection handlers.
 export function attachRealtime(server, { isHttps, isOriginAllowed }) {
@@ -37,6 +38,9 @@ export function attachRealtime(server, { isHttps, isOriginAllowed }) {
     jwt.verify(token, JWT_SECRET, async (err, user) => {
       if (err || !user) {
         return next(new Error('Invalid or expired WebSocket authentication token.'));
+      }
+      if (!sessionAuthenticationAllowed(user)) {
+        return next(new Error('Demo sign-in is disabled.'));
       }
 
       // Check Redis token revocation blacklist

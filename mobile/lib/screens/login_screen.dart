@@ -13,6 +13,7 @@ import '../utils/responsive.dart';
 import 'patient_portal_screen.dart';
 import 'responder_screen.dart';
 import '../services/emergency_alert_service.dart';
+import '../services/mobile_sign_in.dart';
 import '../theme/account_theme_controller.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -31,7 +32,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _isLoading = false;
   bool _obscurePassword = true;
-  bool _rememberMe = true;
   String _errorMessage = '';
 
   // Brand palette
@@ -39,21 +39,29 @@ class _LoginScreenState extends State<LoginScreen> {
   static const Color textSub = Color(0xFF5A635B);
   static const Color borderColor = Color(0xFFD6DFD5);
 
-  Future<void> _handleLogin() async {
+  Future<void> _handleLogin({required bool demo}) async {
+    if (_isLoading) return;
     setState(() {
       _isLoading = true;
       _errorMessage = '';
     });
 
     try {
+      final idToken = demo ? null : await MobileSignIn.googleIdToken();
+      if (!mounted || (!demo && idToken == null)) return;
+      final endpoint = demo ? 'demo' : 'google';
       final res = await ApiConfig.client
           .post(
-            Uri.parse('${ApiConfig.baseUrl}/api/auth/login'),
+            Uri.parse('${ApiConfig.baseUrl}/api/auth/mobile/$endpoint'),
             headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'email': _emailController.text.trim(),
-              'password': _passwordController.text.trim(),
-            }),
+            body: jsonEncode(
+              demo
+                  ? {
+                      'email': _emailController.text.trim(),
+                      'password': _passwordController.text,
+                    }
+                  : {'idToken': idToken},
+            ),
           )
           .timeout(const Duration(seconds: 15));
       if (!mounted) return;
@@ -61,37 +69,33 @@ class _LoginScreenState extends State<LoginScreen> {
       final data = jsonDecode(res.body);
 
       if (res.statusCode == 200) {
-        // Save BOTH token and user profile into secure storage
-        await Future.wait([
-          _storage.write(key: 'jwt_token', value: data['token']),
-          _storage.write(key: 'user_data', value: jsonEncode(data['user'])),
-        ]);
+        final user = Map<String, dynamic>.from(data['user']);
+        final token = data['token'] as String;
+        final expectedMethod = demo ? 'mobile_demo' : 'mobile_google';
+        if (data['auth_method'] != expectedMethod) {
+          throw const FormatException('Unexpected sign-in method');
+        }
+        user['auth_method'] = expectedMethod;
+        // Store the token last so an interrupted write cannot restore a partial session.
+        await _storage.delete(key: 'jwt_token');
+        await _storage.write(key: 'user_data', value: jsonEncode(user));
+        await _storage.write(key: 'jwt_token', value: token);
         if (!mounted) return;
-        await AccountThemeScope.of(context).bindAccount(
-          Map<String, dynamic>.from(data['user']),
-          data['token'] as String,
-        );
+        await AccountThemeScope.of(context).bindAccount(user, token);
 
         if (!mounted) return;
-        EmergencyAlertService().beginSession(
-          data['token'],
-          data['user']['user_id'],
-        );
-        final List<dynamic> roles = data['user']['roles'] ?? [];
+        EmergencyAlertService().beginSession(token, user['user_id']);
+        final List<dynamic> roles = user['roles'] ?? [];
 
         if (roles.contains('EMERGENCY_RESPONDER')) {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(
-              builder: (_) => ResponderScreen(user: data['user']),
-            ),
+            MaterialPageRoute(builder: (_) => ResponderScreen(user: user)),
           );
         } else {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(
-              builder: (_) => PatientPortalScreen(user: data['user']),
-            ),
+            MaterialPageRoute(builder: (_) => PatientPortalScreen(user: user)),
           );
         }
       } else {
@@ -104,6 +108,7 @@ class _LoginScreenState extends State<LoginScreen> {
             TlsException() => 'Could not establish a secure connection. Check the server certificate or contact the clinic administrator.',
             TimeoutException() || http.ClientException() => 'Could not reach the clinic server. Check your network and try again.',
             FormatException() => 'The clinic server returned an unexpected response. Please try again.',
+            StateError(:final message) => message,
             _ => 'Could not sign in. Please try again.',
           };
         });
@@ -239,7 +244,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   SizedBox(height: rs.h(6)),
                   Text(
-                    'A little care starts here. Sign in to your patient portal.',
+                    'Sign in with your official @psu.edu.ph Google account.',
                     style: TextStyle(
                       fontSize: rs.sp(14),
                       color: textSub,
@@ -248,129 +253,74 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   SizedBox(height: rs.h(32)),
 
-                  // ── Email ────────────────────────────────────────
-                  Text(
-                    'University email',
-                    style: TextStyle(
-                      fontSize: rs.sp(13),
-                      fontWeight: FontWeight.w700,
-                      color: const Color(0xFF191C1A),
+                  if (MobileSignIn.allowDemo) ...[
+                    // ── Email ────────────────────────────────────────
+                    Text(
+                      'Demo email',
+                      style: TextStyle(
+                        fontSize: rs.sp(13),
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFF191C1A),
+                      ),
                     ),
-                  ),
-                  SizedBox(height: rs.h(8)),
-                  TextFormField(
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    style: TextStyle(
-                      fontSize: rs.sp(14),
-                      color: const Color(0xFF191C1A),
+                    SizedBox(height: rs.h(8)),
+                    TextFormField(
+                      controller: _emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      style: TextStyle(
+                        fontSize: rs.sp(14),
+                        color: const Color(0xFF191C1A),
+                      ),
+                      decoration: _pillInputDecoration(
+                        rs: rs,
+                        hint: 'Enter the demo email',
+                      ),
                     ),
-                    decoration: _pillInputDecoration(
-                      rs: rs,
-                      hint: 'you@psu.edu.ph',
-                    ),
-                  ),
-                  SizedBox(height: rs.h(20)),
+                    SizedBox(height: rs.h(20)),
 
-                  // ── Password ─────────────────────────────────────
-                  Text(
-                    'Password',
-                    style: TextStyle(
-                      fontSize: rs.sp(13),
-                      fontWeight: FontWeight.w700,
-                      color: const Color(0xFF191C1A),
+                    // ── Password ─────────────────────────────────────
+                    Text(
+                      'Password',
+                      style: TextStyle(
+                        fontSize: rs.sp(13),
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFF191C1A),
+                      ),
                     ),
-                  ),
-                  SizedBox(height: rs.h(8)),
-                  TextFormField(
-                    controller: _passwordController,
-                    obscureText: _obscurePassword,
-                    style: TextStyle(
-                      fontSize: rs.sp(14),
-                      color: const Color(0xFF191C1A),
-                    ),
-                    decoration: _pillInputDecoration(
-                      rs: rs,
-                      hint: 'Enter your password',
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _obscurePassword
-                              ? Icons.visibility_outlined
-                              : Icons.visibility_off_outlined,
-                          size: rs.w(20),
-                          color: textSub,
-                        ),
-                        onPressed: () => setState(
-                          () => _obscurePassword = !_obscurePassword,
+                    SizedBox(height: rs.h(8)),
+                    TextFormField(
+                      controller: _passwordController,
+                      obscureText: _obscurePassword,
+                      style: TextStyle(
+                        fontSize: rs.sp(14),
+                        color: const Color(0xFF191C1A),
+                      ),
+                      decoration: _pillInputDecoration(
+                        rs: rs,
+                        hint: 'Enter your password',
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _obscurePassword
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                            size: rs.w(20),
+                            color: textSub,
+                          ),
+                          onPressed: () => setState(
+                            () => _obscurePassword = !_obscurePassword,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  SizedBox(height: rs.h(14)),
+                    SizedBox(height: rs.h(14)),
 
-                  // ── Remember me / forgot password ───────────────
-                  OverflowBar(
-                    alignment: MainAxisAlignment.spaceBetween,
-                    spacing: 8,
-                    overflowAlignment: OverflowBarAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(
-                            height: rs.h(24),
-                            width: rs.w(24),
-                            child: Checkbox(
-                              value: _rememberMe,
-                              activeColor: primaryGreen,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(rs.r(4)),
-                              ),
-                              onChanged: (val) =>
-                                  setState(() => _rememberMe = val ?? true),
-                            ),
-                          ),
-                          SizedBox(width: rs.w(8)),
-                          Flexible(
-                            child: Text(
-                              'Remember me',
-                              style: TextStyle(
-                                fontSize: rs.sp(13),
-                                color: textSub,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      TextButton(
-                        onPressed: () => showDialog<void>(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            title: const Text('Reset your password'),
-                            content: const Text(
-                              'Contact your campus clinic administrator to request a password reset.',
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context),
-                                child: const Text('Done'),
-                              ),
-                            ],
-                          ),
-                        ),
-                        style: TextButton.styleFrom(padding: EdgeInsets.zero),
-                        child: Text(
-                          'Forgot password?',
-                          style: TextStyle(
-                            fontSize: rs.sp(13),
-                            color: primaryGreen,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                    OutlinedButton(
+                      onPressed: _isLoading
+                          ? null
+                          : () => _handleLogin(demo: true),
+                      child: const Text('Sign in with demo account'),
+                    ),
+                  ],
 
                   // ── Error banner ────────────────────────────────
                   if (_errorMessage.isNotEmpty) ...[
@@ -398,7 +348,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     Padding(
                       padding: EdgeInsets.symmetric(horizontal: rs.w(4)),
                       child: Text(
-                        'Tip: Ensure you are using your official @psu.edu.ph email address. If you need an account created, visit the PSU Lingayen Infirmary.',
+                        'For help with your HealthLink account, contact the PSU Lingayen Infirmary.',
                         style: TextStyle(
                           color: const Color(0xFF5A635B),
                           fontSize: rs.sp(11.5),
@@ -419,7 +369,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         shape: const StadiumBorder(),
                         minimumSize: Size(48, rs.h(52).clamp(48.0, 58.0)),
                       ),
-                      onPressed: _isLoading ? null : _handleLogin,
+                      onPressed: _isLoading
+                          ? null
+                          : () => _handleLogin(demo: false),
                       child: _isLoading
                           ? const SizedBox(
                               width: 20,
@@ -438,7 +390,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       vertical: 10,
                                     ),
                                     child: Text(
-                                      'Sign in to portal',
+                                      'Sign in with Google',
                                       textAlign: TextAlign.center,
                                       style: TextStyle(
                                         fontSize: rs.sp(15),

@@ -11,6 +11,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { inflateSync } from 'node:zlib';
 import ExcelJS from 'exceljs';
+import { OAuth2Client } from 'google-auth-library';
 
 Object.assign(process.env, {
   DB_PASSWORD: 'fixture-password',
@@ -22,6 +23,7 @@ Object.assign(process.env, {
   SMTP_HOST: '',
   CORS_ALLOWED_ORIGINS: '',
   MIXED_LOAD_CONTROLS: 'true',
+  LOGIN_RATE_LIMIT_MAX: '30',
 });
 
 const keyPath = fileURLToPath(new URL('../serviceAccountKey.json', import.meta.url));
@@ -73,6 +75,125 @@ const request = (path, { roles, userId = 21, method = 'GET', headers = {}, json,
   if (body !== undefined) headers = { ...headers, 'content-type': 'application/json' };
   return fetch(baseUrl + path, { method, headers, body, signal });
 };
+
+test('mobile Google login verifies the token audience and workspace before linking an existing account', async t => {
+  const audience = 'healthlink.apps.googleusercontent.com';
+  const originalAudience = process.env.GOOGLE_OAUTH_CLIENT_ID;
+  t.after(() => {
+    if (originalAudience === undefined) delete process.env.GOOGLE_OAUTH_CLIENT_ID;
+    else process.env.GOOGLE_OAUTH_CLIENT_ID = originalAudience;
+  });
+  delete process.env.GOOGLE_OAUTH_CLIENT_ID;
+  const signIn = idToken => request('/api/auth/mobile/google', { method: 'POST', json: { idToken } });
+  assert.equal((await signIn('signed-token')).status, 503);
+  process.env.GOOGLE_OAUTH_CLIENT_ID = audience;
+  const valid = { hd: 'psu.edu.ph', email_verified: true, email: 'Psu.User@PSU.EDU.PH', sub: 'psu-google-user' };
+  const claimsByToken = {
+    'personal': { ...valid, hd: undefined, email: 'person@gmail.com' },
+    'non-workspace': { ...valid, hd: undefined },
+    'unverified': { ...valid, email_verified: false },
+    'look-alike': { ...valid, email: 'psu.user@psu.edu.ph.example.org' },
+    'workspace': valid,
+  };
+  t.mock.method(OAuth2Client.prototype, 'verifyIdToken', async ({ idToken, audience: received }) => {
+    assert.equal(received, audience);
+    if (!Object.hasOwn(claimsByToken, idToken)) throw new Error('Invalid token signature');
+    return { getPayload: () => claimsByToken[idToken] };
+  });
+  assert.equal((await signIn('forged')).status, 401);
+  for (const token of ['personal', 'non-workspace', 'unverified', 'look-alike']) {
+    assert.equal((await signIn(token)).status, 403);
+  }
+
+  const { bindGoogleAccount, verifiedPsuIdentity } = await import('../src/auth/googleLogin.js');
+  const identity = verifiedPsuIdentity(valid);
+  assert.deepEqual(identity, { email: 'psu.user@psu.edu.ph', subject: 'psu-google-user' });
+  let user;
+  let bindings = 0;
+  const connection = {
+    async query(sql, params) {
+      if (sql.includes('FROM USERS WHERE email')) {
+        assert.deepEqual(params, [identity.email]);
+        return [[user].filter(Boolean)];
+      }
+      if (sql.startsWith('UPDATE USERS SET google_subject')) {
+        assert.deepEqual(params, [identity.subject, 21]);
+        user = { ...user, google_subject: identity.subject };
+        bindings += 1;
+        return [{ affectedRows: 1 }];
+      }
+      if (sql.startsWith('SET SESSION') || sql.includes('FOR SHARE')) return [];
+      if (sql.includes('SELECT last_entry_hash')) return [[{ last_entry_hash: '0'.repeat(64) }]];
+      if (sql.includes('INSERT INTO AUDIT_LOGS')) return [{ insertId: 1 }];
+      assert.match(sql, /^UPDATE AUDIT_CHAIN_STATE/);
+      return [{ affectedRows: 1 }];
+    },
+    async beginTransaction() {}, async commit() {}, async rollback() {}, release() {}, destroy() {},
+  };
+  assert.equal(await bindGoogleAccount(connection, identity), null);
+  const normal = { user_id: 21, email: identity.email, google_subject: null, is_active: 1, deleted_at: null };
+  for (const change of [{ is_demo_account: 1 }, { is_active: 0 }, { deleted_at: new Date() }, { google_subject: 'other' }, { email: 'psu.usér@psu.edu.ph' }]) {
+    user = { ...normal, ...change };
+    assert.equal(await bindGoogleAccount(connection, identity), null);
+  }
+  assert.equal(bindings, 0);
+  t.mock.method(pool, 'getConnection', async () => connection);
+  t.mock.method(pool, 'query', async sql => {
+    if (sql.includes('FROM ROLES')) return [[{ code: 'STUDENT' }]];
+    assert.match(sql, /^SELECT is_active,deleted_at,is_qualified_responder/);
+    return [[]];
+  });
+  user = normal;
+  const response = await signIn('workspace');
+  assert.equal(response.status, 200);
+  const session = await response.json();
+  assert.equal(session.auth_method, 'mobile_google');
+  const decoded = jwt.verify(session.token, process.env.JWT_SECRET);
+  assert.equal(decoded.user_id, 21);
+  assert.deepEqual(decoded.roles, ['STUDENT']);
+  assert.equal(decoded.auth_method, 'mobile_google');
+  assert.equal((await signIn('workspace')).status, 200);
+  assert.equal(bindings, 1);
+});
+
+test('mobile demo login and desktop passwords cannot sign in regular patient accounts', async t => {
+  const keys = ['NODE_ENV', 'ALLOW_MOBILE_DEMO_LOGIN', 'DB_HOST'];
+  const original = keys.map(key => process.env[key]);
+  t.after(() => keys.forEach((key, i) => {
+    if (original[i] === undefined) delete process.env[key];
+    else process.env[key] = original[i];
+  }));
+  const { mobileDemoLoginEnabled } = await import('../src/auth/loginPolicy.js');
+  Object.assign(process.env, { NODE_ENV: 'production', ALLOW_MOBILE_DEMO_LOGIN: 'true', DB_HOST: '127.0.0.1' });
+  const password = 'Fixture password';
+  const email = 'patient@psu.edu.ph';
+  const signIn = path => request(path, { method: 'POST', json: { email, password } });
+  assert.equal((await signIn('/api/auth/mobile/demo')).status, 403);
+  process.env.NODE_ENV = 'development';
+  assert.equal(mobileDemoLoginEnabled({ ...process.env, DB_HOST: 'shared-mysql' }), false);
+  const user = { user_id: 21, email, password_hash: await bcrypt.hash(password, 4), is_active: 1, deleted_at: null, is_demo_account: 0 };
+  t.mock.method(pool, 'query', async sql => {
+    if (sql.startsWith('SELECT is_active,deleted_at,is_qualified_responder')) return [[]];
+    return sql.includes('FROM USERS') ? [[user]] : [[{ code: 'STUDENT' }]];
+  });
+  assert.equal((await signIn('/api/auth/mobile/demo')).status, 401);
+  assert.equal((await signIn('/api/auth/login')).status, 403);
+  user.is_demo_account = 1;
+  t.mock.method(pool, 'getConnection', async () => ({
+    async beginTransaction() {}, async commit() {}, async rollback() {}, release() {},
+    async query(sql) {
+      if (sql.includes('SELECT last_entry_hash')) return [[{ last_entry_hash: '0'.repeat(64) }]];
+      return [{ insertId: 1 }];
+    },
+  }));
+  const demo = await signIn('/api/auth/mobile/demo');
+  assert.equal(demo.status, 200);
+  const { token } = await demo.json();
+  assert.equal(jwt.verify(token, process.env.JWT_SECRET).auth_method, 'mobile_demo');
+  process.env.ALLOW_MOBILE_DEMO_LOGIN = 'false';
+  const disabled = await request('/api/profile/me', { headers: { authorization: `Bearer ${token}` } });
+  assert.equal(disabled.status, 401);
+});
 
 // Verify that account appearance reads only the authenticated user and shares desktop preference writes.
 test('account appearance reads only the authenticated user and shares desktop preference writes', async t => {

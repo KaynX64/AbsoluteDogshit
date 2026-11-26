@@ -36,7 +36,7 @@ const formulary = [
 
 async function insertPatient(db, patient, passwordHash, encrypt) {
   const [{ insertId: id }] = await db.execute(
-    'INSERT INTO USERS (email, password_hash, first_name, last_name) VALUES (?, ?, ?, ?)',
+    'INSERT INTO USERS (email, password_hash, first_name, last_name, is_demo_account) VALUES (?, ?, ?, ?, TRUE)',
     [patient.email, passwordHash, patient.name, 'Synthetic Clinic Demo'],
   );
   const [{ affectedRows }] = await db.execute(

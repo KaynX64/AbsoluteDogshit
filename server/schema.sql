@@ -77,6 +77,8 @@ CREATE TABLE `USERS` (
   `user_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `email` VARCHAR(255) NOT NULL UNIQUE,
   `password_hash` VARCHAR(255) NOT NULL,
+  `google_subject` VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  `is_demo_account` TINYINT(1) NOT NULL DEFAULT 0,
   `first_name` VARCHAR(100) NOT NULL,
   `last_name` VARCHAR(100) NOT NULL,
   `phone` VARCHAR(20) NULL,
@@ -97,7 +99,8 @@ CREATE TABLE `USERS` (
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  KEY `idx_users_qualified_responder` (`is_qualified_responder`)
+  KEY `idx_users_qualified_responder` (`is_qualified_responder`),
+  UNIQUE KEY `uq_users_google_subject` (`google_subject`)
 ) ENGINE=InnoDB;
 
 -- 2. ROLES
@@ -852,6 +855,7 @@ INSERT INTO `CONSENT_RECORDS` (`user_id`, `consent_type`, `is_granted`, `ip_addr
 
 -- SYNTHETIC DEMO DATA: fresh development installs only. No real credentials.
 INSERT INTO USERS (user_id,email,password_hash,first_name,last_name,is_active) VALUES (12,'rachelle.demo@psu.edu.ph',@default_pw,'Rachelle','Demo',1);
+UPDATE USERS SET is_demo_account = TRUE WHERE user_id IN (1, 2, 3, 4, 5, 6, 7, 8, 12);
 INSERT INTO USER_ROLES (user_id,role_id) SELECT 12,role_id FROM ROLES WHERE code='STUDENT';
 INSERT INTO STUDENT_PROFILES (user_id,student_no,course,year_level) VALUES (12,'PSU-DEMO-0012','Synthetic demo data',2);
 INSERT INTO RESPONDER_REVIEWERS (user_id,designated_by) VALUES (2,1),(3,1);

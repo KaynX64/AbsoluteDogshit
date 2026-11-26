@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '../utils/secrets.js';
 import { redis, isRedisActive } from '../utils/redisClient.js';
 import { isSessionAccountActive, sessionBlocklistKey } from './session.js';
+import { sessionAuthenticationAllowed } from './loginPolicy.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // TOKEN MIDDLEWARE
@@ -27,6 +28,9 @@ export function authenticateToken(req, res, next) {
   // Check the verified session for revocation and attach the active user to the request.
   jwt.verify(token, JWT_SECRET, async (err, user) => {
     if (err) return res.status(403).json({ error: 'Token expired or invalid.' });
+    if (!sessionAuthenticationAllowed(user)) {
+      return res.status(401).json({ error: 'TOKEN_REVOKED', message: 'Demo sign-in is disabled.' });
+    }
 
     // Check Redis revocation blocklist
     if (isRedisActive()) {

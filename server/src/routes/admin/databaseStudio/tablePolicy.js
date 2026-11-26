@@ -42,9 +42,9 @@ export const ENCRYPTED_COLUMNS = {
   DENTAL_CHARTS: ['chart_data'],
 };
 
-// Columns that must hold a bcrypt hash and are never displayed in DB Studio.
+// Account credentials and federation identifiers are masked in Database Studio.
 export const SECRET_COLUMNS = {
-  USERS: ['password_hash'],
+  USERS: ['password_hash', 'google_subject'],
 };
 
 // How to find "whose record is this?" for PHI read-logging when browsing a table.
@@ -186,6 +186,10 @@ export function protectValues(table, values) {
   for (const [col, val] of Object.entries(values)) {
     if (isSecretCol(table, col)) {
       if (val === REDACTED) continue;
+      if (col === 'google_subject') {
+        if (val === null) continue;
+        throw fail('Google accounts are linked during verified sign-in.');
+      }
       if (typeof val !== 'string' || !BCRYPT_RE.test(val)) {
         throw fail(`${table}.${col} only accepts a bcrypt hash. Use User Management to reset passwords.`);
       }

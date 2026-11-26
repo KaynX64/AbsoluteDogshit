@@ -20,6 +20,8 @@ The repository is named `AbsoluteDogshit`. The project and desktop console use *
 
 Accounts can have multiple roles. Admin grants and analytics scopes further restrict access. UI navigation reflects access, while the server enforces it.
 
+Mobile sign-in verifies a PSU Google Workspace identity against an existing HealthLink account. Desktop staff sign in with a HealthLink password. Seeded accounts have a password option on an opted-in development server. [Mobile sign-in setup](mobile/README.md#psu-google-sign-in)
+
 ## How the system is built
 
 This monorepo has three separately installed applications, with no npm workspaces or root run scripts. Architecturally, the backend is a modular monolith: one API process with feature routers and domain services sharing MySQL.

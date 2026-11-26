@@ -24,11 +24,31 @@ adb reverse tcp:5000 tcp:5000
 flutter run --no-pub --dart-define=API_BASE_URL=https://127.0.0.1:5000
 ```
 
+## PSU Google sign-in
+
+The mobile app requires a verified `@psu.edu.ph` Google Workspace account with an active HealthLink record and an assigned role. Create the HealthLink record in desktop **User Management** with the person's primary PSU email. The first successful Google sign-in binds the existing record to the Google account ID. Subsequent sign-ins require both that same ID and the matching current email. Deploy the [server and migration 019](../server/MIGRATION-PLAN.md#fresh-and-existing-databases) first. Mobile users will sign in again after updating.
+
+1. In the deployment's Google Cloud project, register a **Web application** OAuth client, then set its client ID as `GOOGLE_OAUTH_CLIENT_ID` in `server/.env`. Restart the API after saving the value. Use the campus-approved Workspace account and consent configuration. [Google OAuth client setup](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid)
+2. Register an **Android** OAuth client in the same project for `com.psu.valetudo.mobile` and each signing certificate's SHA-1 fingerprint. Use the certificate that will sign the installed app. [Flutter Android integration](https://pub.dev/packages/google_sign_in_android#integration)
+3. Pass the same web client ID when building or running Flutter. For iOS, also register an iOS client for the Runner bundle ID, pass `GOOGLE_IOS_CLIENT_ID`, and add the iOS client's reversed ID as a URL scheme in `ios/Runner/Info.plist`. [Flutter iOS integration](https://pub.dev/packages/google_sign_in_ios#ios-integration)
+
+```powershell
+flutter build apk --release --dart-define=API_BASE_URL=https://clinic-api.example.org --dart-define=GOOGLE_OAUTH_CLIENT_ID=YOUR_WEB_CLIENT_ID.apps.googleusercontent.com
+```
+
+### Local demo accounts
+
+For a synthetic development database on a loopback DB host, set `NODE_ENV=development` and `ALLOW_MOBILE_DEMO_LOGIN=true` in `server/.env`, then restart the API. Open a debug build and enter a seeded email and password under **Sign in with demo account**. The server checks the database's demo flag. Release builds use PSU Google sign-in.
+
+```powershell
+flutter run --dart-define=API_BASE_URL=https://10.0.2.2:5000 --dart-define=ALLOW_MOBILE_DEMO_LOGIN=true
+```
+
 ## Build and test
 
 ```powershell
 flutter test
-flutter build apk --release --dart-define=API_BASE_URL=https://clinic-api.example.org
+flutter build apk --release --dart-define=API_BASE_URL=https://clinic-api.example.org --dart-define=GOOGLE_OAUTH_CLIENT_ID=YOUR_WEB_CLIENT_ID.apps.googleusercontent.com
 ```
 
 Use the deployment’s actual API origin and a certificate chain the app trusts. The self-signed `localhost` certificate used for local development requires a debug build when connecting to it by LAN IP. See [AGENTS.md](./AGENTS.md) for TLS and Firebase setup.
@@ -67,7 +87,7 @@ To end your session, choose **Sign out of portal** in the patient Profile tab or
 
 Under **Appearance**, choose **Light** or **Dark**, then a named **LeoVital**, **Blossom**, or **Sunrise** palette shown as two overlapping color circles, matching desktop. The drawer and app update immediately, including when switching modes while the drawer stays open. The drawer shows account-save status and offers **Retry saving** when needed. Choices scroll on small screens or with enlarged text.
 
-**Change password** opens the existing password form. Back returns to the drawer. Use your current password and confirm the new one; after a successful change, sign in again with the new password.
+**Change password** opens the existing HealthLink password form for the account's local credentials. Back returns to the drawer. Use your current HealthLink password and confirm the new one. After a successful change, sign in again with your PSU Google account or with the new demo password in a debug build.
 
 Appearance saves to the signed-in account using the same preferences as desktop. Pending saves remain cached for that account and retry when connectivity returns or the app resumes. Saved selections survive restarts. Sign-in uses the default appearance, and the app checks for desktop changes on resume or reconnect.
 

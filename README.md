@@ -297,7 +297,9 @@ The REST API is mounted under `/api`. Protected endpoints use a Bearer JWT and e
 | Method | Endpoint | Use |
 | --- | --- | --- |
 | GET | `/api/ping` | Check whether the listener is reachable. |
-| POST | `/api/auth/login` | Sign in and receive a session token. |
+| POST | `/api/auth/login` | Sign in with a password and an assigned desktop staff role. |
+| POST | `/api/auth/mobile/google` | Exchange a verified PSU Google ID token for a HealthLink session. |
+| POST | `/api/auth/mobile/demo` | Sign in as a seeded account on an opted-in local development server. |
 | GET | `/api/appointments/slots` | Read a practitioner's availability for a clinic date. |
 | POST | `/api/appointments` | Book a consultation. |
 | POST | `/api/appointments/:id/checkin` | Check in a booked patient. |

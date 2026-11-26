@@ -13,6 +13,7 @@ import 'login_screen.dart';
 import 'patient_portal_screen.dart';
 import 'responder_screen.dart';
 import '../services/emergency_alert_service.dart';
+import '../services/mobile_sign_in.dart';
 import '../theme/account_theme_controller.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -59,6 +60,10 @@ class _SplashScreenState extends State<SplashScreen> {
     final Map<String, dynamic> cachedUser;
     try {
       cachedUser = jsonDecode(userData) as Map<String, dynamic>;
+      if (!MobileSignIn.acceptsSavedSession(cachedUser['auth_method'])) {
+        await _discardSavedSession();
+        return;
+      }
       if (cachedUser['roles'] is! List && cachedUser['roles'] != null) {
         throw const FormatException('Invalid cached roles');
       }
@@ -129,7 +134,8 @@ class _SplashScreenState extends State<SplashScreen> {
 
   Future<void> _discardSavedSession() async {
     try {
-      await _storage.deleteAll();
+      await _storage.delete(key: 'jwt_token');
+      await _storage.delete(key: 'user_data');
     } catch (_) {
       debugPrint('Saved session could not be cleared.');
     }
