@@ -121,7 +121,7 @@ export function mountApiRoutes(app, io, { restart, readAnalyticsSnapshot } = {})
   app.post('/api/auth/login', loginRateLimit, loginUser);
   app.post('/api/auth/mobile/google', loginRateLimit, loginMobileGoogle);
   app.get('/api/auth/mobile/session', authenticateToken, mobileSession);
-  app.post('/api/auth/mobile/demo', loginRateLimit, loginMobileDemo);
+  app.post('/api/auth/mobile/synthetics', loginRateLimit, loginMobileDemo);
   // Pass the logout request and realtime server to the session handler.
   app.post('/api/auth/logout', authenticateToken, (req, res) => logoutUser(req, res, io));
   // Pass the password change and realtime server to the credential handler.

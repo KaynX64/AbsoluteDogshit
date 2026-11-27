@@ -172,7 +172,7 @@ test('mobile Google login verifies the token audience and workspace before linki
   assert.equal((await unavailable.json()).token, undefined);
 });
 
-test('mobile demo login and desktop passwords cannot sign in regular patient accounts', async t => {
+test('mobile synthetics sign-in accepts seeded users only on an opted-in development server', async t => {
   const keys = ['NODE_ENV', 'ALLOW_MOBILE_DEMO_LOGIN', 'DB_HOST'];
   const original = keys.map(key => process.env[key]);
   t.after(() => keys.forEach((key, i) => {
@@ -182,17 +182,19 @@ test('mobile demo login and desktop passwords cannot sign in regular patient acc
   const { mobileDemoLoginEnabled } = await import('../src/auth/loginPolicy.js');
   Object.assign(process.env, { NODE_ENV: 'production', ALLOW_MOBILE_DEMO_LOGIN: 'true', DB_HOST: '127.0.0.1' });
   const password = 'Fixture password';
-  const email = 'patient@psu.edu.ph';
+  const email = 'student@psu.edu.ph';
   const signIn = path => request(path, { method: 'POST', json: { email, password } });
-  assert.equal((await signIn('/api/auth/mobile/demo')).status, 403);
+  const syntheticsPath = '/api/auth/mobile/synthetics';
+  assert.equal((await signIn(syntheticsPath)).status, 403);
   process.env.NODE_ENV = 'development';
+  assert.equal((await signIn('/api/auth/mobile/demo')).status, 404);
   assert.equal(mobileDemoLoginEnabled({ ...process.env, DB_HOST: 'shared-mysql' }), false);
   const user = { user_id: 21, email, password_hash: await bcrypt.hash(password, 4), is_active: 1, deleted_at: null, is_demo_account: 0 };
   t.mock.method(pool, 'query', async sql => {
     if (sql.startsWith('SELECT is_active,deleted_at,is_qualified_responder')) return [[]];
     return sql.includes('FROM USERS') ? [[user]] : [[{ code: 'STUDENT' }]];
   });
-  assert.equal((await signIn('/api/auth/mobile/demo')).status, 401);
+  assert.equal((await signIn(syntheticsPath)).status, 401);
   assert.equal((await signIn('/api/auth/login')).status, 403);
   user.is_demo_account = 1;
   t.mock.method(pool, 'getConnection', async () => ({
@@ -202,11 +204,13 @@ test('mobile demo login and desktop passwords cannot sign in regular patient acc
       return [{ insertId: 1 }];
     },
   }));
-  const demo = await signIn('/api/auth/mobile/demo');
+  const demo = await signIn(syntheticsPath);
   assert.equal(demo.status, 200);
-  const { token } = await demo.json();
+  const { token, auth_method } = await demo.json();
+  assert.equal(auth_method, 'mobile_demo');
   assert.equal(jwt.verify(token, process.env.JWT_SECRET).auth_method, 'mobile_demo');
   process.env.ALLOW_MOBILE_DEMO_LOGIN = 'false';
+  assert.equal((await signIn(syntheticsPath)).status, 403);
   const disabled = await request('/api/profile/me', { headers: { authorization: `Bearer ${token}` } });
   assert.equal(disabled.status, 401);
 });

@@ -7,4 +7,4 @@ Server guidance is split across the parts below to keep documentation files mana
 - [`AGENTS-parts/AGENTS-01.md`](AGENTS-parts/AGENTS-01.md) — Startup, route composition, authorization and Terminal operations.
 - [`AGENTS-parts/AGENTS-02.md`](AGENTS-parts/AGENTS-02.md) — Authentication, domain services, replay storage, migrations, configuration and tests.
 
-Quick references: [Feature routes](src/routes/AGENTS.md) · [Shared helpers](src/utils/AGENTS.md) · [Migration rollout](MIGRATION-PLAN.md).
+Quick references: [Feature routes](src/routes/AGENTS.md) · [Shared helpers](src/utils/AGENTS.md) · [Migration rollout](docs/migrations/MIGRATION-PLAN.md).

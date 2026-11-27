@@ -6,7 +6,7 @@
 
 **LOC:** 2 · **Anchor commit:** working tree · **Role:** Stable import entry for structured prescribing.
 
-`StructuredPrescriptionGenerator.tsx` owns the memory draft, capabilities, review and exact-request retries. `MedicationEditor.tsx` owns active medicine fields; `StructuredPrescriptionReview.tsx` owns review and acknowledgements. `prescribingTypes.ts` provides client types/validation. `structured-prescribing.css` contains compact layout and component scrolling. See the [API contract](../../../server/STRUCTURED-PRESCRIBING.md).
+`StructuredPrescriptionGenerator.tsx` owns the memory draft, capabilities, review and exact-request retries. `MedicationEditor.tsx` owns active medicine fields; `StructuredPrescriptionReview.tsx` owns review and acknowledgements. `prescribingTypes.ts` provides client types/validation. `structured-prescribing.css` contains compact layout and component scrolling. See the [API contract](../../../server/docs/workflows/STRUCTURED-PRESCRIBING.md).
 
 | # | Lines | Anchor | Entry point |
 |---|---|---|---|

@@ -1,6 +1,6 @@
 # Structured prescribing rollout and checks
 
-See the [API contract](STRUCTURED-PRESCRIBING.md) and [migration procedure](MIGRATION-PLAN.md). The flag defaults to off. Do not enable it until the updated readers and clinician workflow have been reviewed.
+See the [API contract](STRUCTURED-PRESCRIBING.md) and [migration procedure](../migrations/MIGRATION-PLAN.md). The flag defaults to off. Do not enable it until the updated readers and clinician workflow have been reviewed.
 
 ## Deployment order
 

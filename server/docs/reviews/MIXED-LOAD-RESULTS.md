@@ -28,7 +28,7 @@ In the 64-client HTTPS overload run, all 40 SOS submissions committed and reache
 
 ## Verification and rollout
 
-The full disposable MySQL and Redis suite passed 210 tests with no skips. These are local results with simulated external delivery. Rehearse the audit cutover and run the same benchmarks in staging before enabling load controls in production. [Migration and rollback instructions](MIGRATION-PLAN.md).
+The full disposable MySQL and Redis suite passed 210 tests with no skips. These are local results with simulated external delivery. Rehearse the audit cutover and run the same benchmarks in staging before enabling load controls in production. [Migration and rollback instructions](../migrations/MIGRATION-PLAN.md).
 
 Use the baseline report's environment setup. From `server/`, run the burst command with Redis benchmarking disabled, then enable Redis and TLS for the paced and overload commands.
 

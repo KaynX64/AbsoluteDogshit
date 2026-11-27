@@ -262,6 +262,7 @@ void main() {
         find.textContaining('We couldn’t confirm the change'),
         findsOneWidget,
       );
+      expect(find.textContaining('took too long to respond'), findsOneWidget);
       expect(submit, findsOneWidget);
       expect(calls, 1);
       expect(await storage.read(key: 'jwt_token'), 'session');

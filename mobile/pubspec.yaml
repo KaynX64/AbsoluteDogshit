@@ -82,6 +82,7 @@ flutter:
 
   assets:
     - assets/emr_sound.ogg
+    - assets/google_sign_in_logo.png
     - assets/valetudo_logo.png
 
   # An image asset can refer to one or more resolution-specific "variants", see

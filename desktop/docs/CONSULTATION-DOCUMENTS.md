@@ -2,7 +2,7 @@
 
 [Desktop workflows](../README.md)
 
-Prescribing supports multiple medicines with clinic/external fulfillment per item, a retained session draft and explicit review before issue. Server support must be enabled; see [prescribing rollout and checks](../../server/PRESCRIBING-ROLLOUT.md).
+Prescribing supports multiple medicines with clinic/external fulfillment per item, a retained session draft and explicit review before issue. Server support must be enabled; see [prescribing rollout and checks](../../server/docs/workflows/PRESCRIBING-ROLLOUT.md).
 
 In **History → Documents**, review prescriptions and clearances you issued for the selected consultation, including recorded directions and remarks. Completed records remain read-only. Use **View / print PDF** to open the server-generated document in the existing preview, or **Download PDF** to save it. Details remain readable when PDF generation is pending.
 

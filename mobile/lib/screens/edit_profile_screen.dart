@@ -1,10 +1,13 @@
 // mobile/lib/screens/edit_profile_screen.dart
+import 'dart:async';
 import 'dart:convert';
-import 'package:material_ui/material_ui.dart';
-import '../theme/app_palette.dart';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:http/http.dart' as http;
+import 'package:material_ui/material_ui.dart';
+
 import '../config/api_config.dart';
+import '../services/clinic_api_errors.dart';
+import '../theme/app_palette.dart';
 import '../utils/responsive.dart';
 
 class EditProfileScreen extends StatefulWidget {
@@ -61,8 +64,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isSaving = true);
-    final token = await _storage.read(key: 'jwt_token');
-
     final payload = {
       'phone': _phoneController.text.trim(),
       'emergency_contact_name': _emContactNameController.text.trim(),
@@ -70,17 +71,25 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     };
 
     try {
-      final res = await http.put(
-        Uri.parse('${ApiConfig.baseUrl}/api/profile/me'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(payload),
-      );
+      final token = await _storage.read(key: 'jwt_token');
+      if (!mounted) return;
+      if (token == null || token.isEmpty) {
+        _showError('Your session is no longer valid. Sign in again.');
+        return;
+      }
+      final res = await ApiConfig.client
+          .put(
+            Uri.parse('${ApiConfig.baseUrl}/api/profile/me'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode(payload),
+          )
+          .timeout(const Duration(seconds: 15));
 
+      if (!mounted) return;
       if (res.statusCode == 200) {
-        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('Contact details updated successfully!'),
@@ -89,11 +98,23 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         );
         Navigator.pop(context, true);
       } else {
-        final err = jsonDecode(res.body)['error'] ?? 'Update failed.';
-        _showError(err);
+        _showError(
+          clinicClientError(res) ??
+              clinicStatusMessage(
+                res.statusCode,
+                operation: 'update your contact details',
+              ),
+        );
       }
-    } catch (e) {
-      _showError('Network error: $e');
+    } catch (error) {
+      if (mounted) {
+        _showError(
+          clinicFailureMessage(
+            error,
+            operation: 'confirm your contact details update',
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }

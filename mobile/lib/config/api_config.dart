@@ -1,5 +1,9 @@
 import 'package:http/http.dart' as http;
 
+class ApiConfigurationError extends StateError {
+  ApiConfigurationError() : super('API_BASE_URL must be an HTTPS origin.');
+}
+
 class ApiConfig {
   static final http.Client client = http.Client();
 
@@ -19,7 +23,7 @@ class ApiConfig {
         (uri.path.isNotEmpty && uri.path != '/') ||
         uri.hasQuery ||
         uri.hasFragment) {
-      throw StateError('API_BASE_URL must be an HTTPS origin.');
+      throw ApiConfigurationError();
     }
     return uri.origin;
   }

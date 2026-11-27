@@ -1,6 +1,6 @@
 # HealthLink — codebase review
 
-Reviewed on 2026-11-15. See [the overview](CODEBASE-OVERVIEW.md) for architecture and workflows. This assessment is based on targeted source inspection and the checks below.
+Reviewed on 2026-11-15. See [the overview](../architecture/CODEBASE-OVERVIEW.md) for architecture and workflows. This assessment is based on targeted source inspection and the checks below.
 
 ## Assessment and next priorities
 
@@ -15,7 +15,7 @@ The main maintenance priorities are:
 - **Verification gaps:** server tests include API contracts and optional disposable-MySQL concurrency/migration coverage; desktop tests cover native boundaries and offline storage. Mobile now tests account-theme persistence, isolation, offline recovery, refresh races, contrast and settings navigation alongside its app smoke test. Full device, deployment and database testing remains separate from this walkthrough.
 - **Tracked key material:** `server/server/certs/key.pem` is tracked outside the documented runtime certificate directory. Its use was not established in this review. Establish ownership and deployment history before deciding cleanup or rotation.
 
-Use [the server structure review](server/STRUCTURE-REVIEW.md) for backend ownership decisions and [documentation maintenance rules](AGENTS-parts/AGENTS-02.md#documentation-maintenance--part-of-every-change) for future changes.
+Use [the server structure review](../../server/docs/reviews/STRUCTURE-REVIEW.md) for backend ownership decisions and [documentation maintenance rules](../agent-guidance/AGENTS-02.md#documentation-maintenance--part-of-every-change) for future changes.
 
 ## Checks performed
 

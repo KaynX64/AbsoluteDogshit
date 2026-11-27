@@ -8,7 +8,7 @@
 - `src/app.js` builds Express middleware in order: CORS allow-list, JSON parsing, security headers. Its `mountApiRoutes(app, io, { restart })` function attaches the API and passes the optional restart callback to Admin.
 - `src/server.js` attaches Express to the HTTP(S) transport. TLS uses `server/certs/{cert,key}.pem` and exits on missing certs unless `ALLOW_INSECURE_HTTP=true`.
 - `src/realtime/socket.js` attaches Socket.IO to the same server. HTTP and realtime share the origin check. `index.js` exports `io` and mounts API routes before listening.
-- `src/bootstrap/dependencies.js` runs [versioned migrations](../MIGRATION-PLAN.md), loads the persisted [server policy](../src/config/SERVER-POLICY.md), and completes the Redis and MinIO startup checks before `startup.js` opens the listener. Redis and MinIO keep their existing degraded-mode behavior. Workers start after the listener opens. SIGINT and SIGTERM stop scheduling, close Socket.IO and HTTP, and wait for active jobs and requests before closing Redis, S3 and MySQL. Shutdown has a 30-second deadline.
+- `src/bootstrap/dependencies.js` runs [versioned migrations](../docs/migrations/MIGRATION-PLAN.md), loads the persisted [server policy](../src/config/SERVER-POLICY.md), and completes the Redis and MinIO startup checks before `startup.js` opens the listener. Redis and MinIO keep their existing degraded-mode behavior. Workers start after the listener opens. SIGINT and SIGTERM stop scheduling, close Socket.IO and HTTP, and wait for active jobs and requests before closing Redis, S3 and MySQL. Shutdown has a 30-second deadline.
 
 After the API starts, `src/bootstrap/backupStartup.js` asynchronously checks the local Compose backup scheduler. In `npm run dev`, `src/bootstrap/backupStatus.js` follows backup container output for scheduled and one-off runs until the API shuts down. Docker availability never gates API readiness. See the [backup setup](../../README.md#daily-mysql-and-minio-backups).
 
@@ -20,8 +20,8 @@ After the API starts, `src/bootstrap/backupStartup.js` asynchronously checks the
 | `profile/index.js` | `/api/profile` | self-profile, clinical health profile, theme and device tokens |
 | `healthPass.js` | `/api/health-pass` | medical clearances & QR health passes |
 | `appointments/index.js` | `/api/appointments` | booking, queue, intake, consultations and patient history. Emits `appointment:*` and `queue:updated`. |
-| `responderQualifications.js` | `/api/responder-qualifications` | Applicant drafts/evidence, clinic reviews, reviewer designation, appointments and rollout. [Contract](../RESPONDER-QUALIFICATIONS.md). |
-| `emergency/index.js` | `/api/emergency` | SOS lifecycle, live qualified/legacy responder audience, tiered per-user realtime/FCM delivery, staff-only searchable history and report worklists. Community responders may only acknowledge. Closing is atomic; report filing and draft cleanup share a transaction. Desktop-only author drafts are encrypted and revision-guarded. Targeted desktop resolution prompts, PDF storage/recovery and archive permissions remain. [Responder records](../RESPONDER-RECORDS.md). |
+| `responderQualifications.js` | `/api/responder-qualifications` | Applicant drafts/evidence, clinic reviews, reviewer designation, appointments and rollout. [Contract](../docs/workflows/RESPONDER-QUALIFICATIONS.md). |
+| `emergency/index.js` | `/api/emergency` | SOS lifecycle, live qualified/legacy responder audience, tiered per-user realtime/FCM delivery, staff-only searchable history and report worklists. Community responders may only acknowledge. Closing is atomic; report filing and draft cleanup share a transaction. Desktop-only author drafts are encrypted and revision-guarded. Targeted desktop resolution prompts, PDF storage/recovery and archive permissions remain. [Responder records](../docs/workflows/RESPONDER-RECORDS.md). |
 | `inventory/index.js` | `/api/inventory` | medicines, batches, inventory logs |
 | `documents/index.js` | `/api/documents` | EMR docs, PDFs, attachments, signed one-time download tokens and public `GET /verify/:qrToken`. |
 | `admin/index.js` | `/api/admin` | accounts and health profiles, audited soft archive, granular permissions, qualified responder management, audit, telemetry, connected sessions, Database Studio, Server Policy and Terminal. |
@@ -30,7 +30,7 @@ After the API starts, `src/bootstrap/backupStartup.js` asynchronously checks the
 | `interactions.js` | `/api/interactions` | drug-interaction warnings |
 | `signature.js` | `/api/signature` | signature enrollment / verification |
 
-`app.js` wires the rate-limited `POST /api/auth/login`, `POST /api/auth/mobile/google`, and `POST /api/auth/mobile/demo` routes, along with pre-consent `GET /api/auth/mobile/session`, `POST /api/auth/logout` and `PUT /api/auth/change-password`. `GET /api/ping` is the desktop liveness probe and needs neither authentication nor the database. `public/verify.html` is the same-origin QR landing page.
+`app.js` wires the rate-limited `POST /api/auth/login`, `POST /api/auth/mobile/google`, and `POST /api/auth/mobile/synthetics` routes, along with pre-consent `GET /api/auth/mobile/session`, `POST /api/auth/logout` and `PUT /api/auth/change-password`. `GET /api/ping` is the desktop liveness probe and needs neither authentication nor the database. `public/verify.html` is the same-origin QR landing page.
 
 `PUT /api/auth/change-password` accepts an optional `installation_id` or legacy `fcm_token`. Logout accepts the same device identifiers. The password update, removal of that account's matching device registration, and audit entry commit together. On success the server disconnects the calling session's sockets.
 

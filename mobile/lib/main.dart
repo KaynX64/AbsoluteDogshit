@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'screens/splash_screen.dart';
@@ -15,15 +16,10 @@ import 'widgets/responder_hub.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-void main() {
+Future<void> main() async {
   final binding = WidgetsFlutterBinding.ensureInitialized();
 
-  const localCa = String.fromEnvironment('LOCAL_DEV_CA_BASE64');
-  if (kDebugMode && localCa.isNotEmpty) {
-    SecurityContext.defaultContext.setTrustedCertificatesBytes(
-      base64Decode(localCa),
-    );
-  }
+  if (kDebugMode) await _configureLocalDevelopmentTrust();
 
   runApp(const ValetudoMobileApp());
   unawaited(
@@ -35,6 +31,32 @@ void main() {
         ConnectivityService().initialize(),
       ]);
     }),
+  );
+}
+
+Future<void> _configureLocalDevelopmentTrust() async {
+  const localCa = String.fromEnvironment('LOCAL_DEV_CA_BASE64');
+  if (localCa.isNotEmpty) {
+    SecurityContext.defaultContext.setTrustedCertificatesBytes(
+      base64Decode(localCa),
+    );
+    return;
+  }
+
+  if (kIsWeb || !Platform.isAndroid) return;
+
+  final ByteData certificate;
+  try {
+    certificate = await rootBundle.load('healthlink/android-dev-ca.pem');
+  } on FlutterError {
+    // A checkout without the development CA uses the normal trust store.
+    return;
+  }
+  SecurityContext.defaultContext.setTrustedCertificatesBytes(
+    certificate.buffer.asUint8List(
+      certificate.offsetInBytes,
+      certificate.lengthInBytes,
+    ),
   );
 }
 

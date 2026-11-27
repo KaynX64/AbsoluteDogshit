@@ -1,7 +1,9 @@
 // mobile/lib/screens/consultation_scheduler_screen.dart
 import 'dart:convert';
 import 'dart:async';
-import 'package:flutter/rendering.dart' show ScrollCacheExtent;
+
+import 'package:flutter/rendering.dart' as rendering show ScrollCacheExtent;
+
 import '../services/mobile_session_data.dart';
 import '../services/connectivity_service.dart';
 import '../widgets/lazy_card_columns.dart';
@@ -15,6 +17,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
 import '../config/api_config.dart';
+import '../services/clinic_api_errors.dart';
 import '../utils/responsive.dart';
 import '../services/emergency_alert_service.dart';
 import '../widgets/appointment_booking_review.dart';
@@ -41,7 +44,7 @@ class _ConsultationSchedulerScreenState
   late bool _online;
   Timer? _historyRefresh;
   int _historyRequest = 0;
-  bool _historyFailed = false;
+  String? _historyError;
 
   io.Socket? _socket;
 
@@ -506,9 +509,9 @@ class _ConsultationSchedulerScreenState
     );
     if (cached is List) _doctors = cached;
     setState(() => _loadingDoctors = _doctors.isEmpty);
-    final token = await _storage.read(key: 'jwt_token');
-    if (!mounted || !_data.isCurrent(_generation)) return;
     try {
+      final token = await _storage.read(key: 'jwt_token');
+      if (!mounted || !_data.isCurrent(_generation)) return;
       final data = await _data.get(
         '/api/appointments/doctors',
         token,
@@ -527,8 +530,13 @@ class _ConsultationSchedulerScreenState
         });
         if (_selectedDoctorId != null) _fetchAvailableSlots();
       }
-    } catch (e) {
-      _showToast('Failed to load doctors: $e', isError: true);
+    } catch (error) {
+      if (mounted && _data.isCurrent(_generation)) {
+        _showToast(
+          'Care team could not load. ${clinicFailureMessage(error, operation: 'load the care team')}',
+          isError: true,
+        );
+      }
     } finally {
       if (mounted) setState(() => _loadingDoctors = false);
     }
@@ -546,11 +554,16 @@ class _ConsultationSchedulerScreenState
       _slots = [];
     });
 
-    final token = await _storage.read(key: 'jwt_token');
     final formattedDate =
         "${selectedDate.year}-${selectedDate.month.toString().padLeft(2, '0')}-${selectedDate.day.toString().padLeft(2, '0')}";
 
     try {
+      final token = await _storage.read(key: 'jwt_token');
+      if (!mounted ||
+          request != _slotsRequest ||
+          !_data.isCurrent(_generation)) {
+        return;
+      }
       final data = await _data.get(
         '/api/appointments/slots?doctorId=$doctorId&date=$formattedDate',
         token,
@@ -588,10 +601,13 @@ class _ConsultationSchedulerScreenState
         }
         _restoredSlot = null;
       });
-    } catch (e) {
-      if (mounted && request == _slotsRequest) {
+    } catch (error) {
+      if (mounted && request == _slotsRequest && _data.isCurrent(_generation)) {
         setState(() => _currentPurposes = []);
-        _showToast('Failed to load slots: $e', isError: true);
+        _showToast(
+          'Available times could not load. ${clinicFailureMessage(error, operation: 'load available times')}',
+          isError: true,
+        );
       }
     } finally {
       if (mounted && request == _slotsRequest) {
@@ -610,14 +626,14 @@ class _ConsultationSchedulerScreenState
     if (cached is List) {
       setState(() {
         _myAppointments = cached;
-        _historyFailed = false;
+        _historyError = null;
         _loadingHistory = false;
       });
       return;
     }
     setState(() {
       _loadingHistory = true;
-      _historyFailed = false;
+      _historyError = null;
     });
     try {
       final token = await _storage.read(key: 'jwt_token');
@@ -631,8 +647,15 @@ class _ConsultationSchedulerScreenState
       if (current()) {
         setState(() => _myAppointments = data as List<dynamic>);
       }
-    } catch (_) {
-      if (current()) setState(() => _historyFailed = true);
+    } catch (error) {
+      if (current()) {
+        setState(
+          () => _historyError = clinicFailureMessage(
+            error,
+            operation: 'load your appointments',
+          ),
+        );
+      }
     } finally {
       if (current()) setState(() => _loadingHistory = false);
     }
@@ -738,7 +761,6 @@ class _ConsultationSchedulerScreenState
       );
 
       if (!mounted) return;
-      final data = jsonDecode(res.body);
       if (res.statusCode == 201) {
         _data.invalidateAppointments();
         _notesController.clear();
@@ -820,11 +842,21 @@ class _ConsultationSchedulerScreenState
         }
       } else {
         if (!mounted) return;
-        _showToast(data['error'] ?? 'Booking failed', isError: true);
+        _showToast(
+          clinicClientError(res) ??
+              clinicStatusMessage(
+                res.statusCode,
+                operation: 'book your appointment',
+              ),
+          isError: true,
+        );
         if (res.statusCode == 409) await _fetchAvailableSlots();
       }
-    } catch (e) {
-      _showToast('Network error: $e', isError: true);
+    } catch (error) {
+      _showToast(
+        '${clinicFailureMessage(error, operation: 'confirm your booking')} Check My appointments before booking again.',
+        isError: true,
+      );
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
@@ -911,11 +943,20 @@ class _ConsultationSchedulerScreenState
         _fetchMyAppointments();
         _fetchAvailableSlots();
       } else {
-        final err = jsonDecode(res.body)['error'] ?? 'Cancellation failed';
-        _showToast(err, isError: true);
+        _showToast(
+          clinicClientError(res) ??
+              clinicStatusMessage(
+                res.statusCode,
+                operation: 'cancel your appointment',
+              ),
+          isError: true,
+        );
       }
-    } catch (e) {
-      _showToast('Error: $e', isError: true);
+    } catch (error) {
+      _showToast(
+        '${clinicFailureMessage(error, operation: 'confirm the cancellation')} Check My appointments before trying to cancel again.',
+        isError: true,
+      );
     }
   }
 
@@ -1123,9 +1164,9 @@ class _ConsultationSchedulerScreenState
               alignment: Alignment.centerRight,
               child: _buildHistoryLayoutSelector(rs),
             ),
-            if (_historyFailed)
+            if (_historyError case final message?)
               ListTile(
-                title: const Text('Could not load appointments.'),
+                title: Text(message),
                 trailing: TextButton(
                   onPressed: _fetchMyAppointments,
                   child: const Text('Retry'),
@@ -1222,7 +1263,7 @@ class _ConsultationSchedulerScreenState
       child: ListView(
         key: const PageStorageKey('booking'),
         padding: EdgeInsets.symmetric(horizontal: rs.w(20), vertical: rs.h(8)),
-        scrollCacheExtent: const ScrollCacheExtent.pixels(300),
+        scrollCacheExtent: const rendering.ScrollCacheExtent.pixels(300),
         addAutomaticKeepAlives: false,
         addRepaintBoundaries: true,
         addSemanticIndexes: false,
@@ -1620,7 +1661,7 @@ class _ConsultationSchedulerScreenState
         scrollDirection: Axis.horizontal,
         itemExtent: extent,
         itemCount: _upcomingWeekdays.length,
-        scrollCacheExtent: const ScrollCacheExtent.pixels(200),
+        scrollCacheExtent: const rendering.ScrollCacheExtent.pixels(200),
         addAutomaticKeepAlives: false,
         addRepaintBoundaries: true,
         itemBuilder: (context, index) {
@@ -1828,7 +1869,7 @@ class _ConsultationSchedulerScreenState
     }
 
     if (_myAppointments.isEmpty) {
-      if (_historyFailed) return const SizedBox.shrink();
+      if (_historyError != null) return const SizedBox.shrink();
       return RefreshIndicator(
         color: primaryGreen,
         onRefresh: _fetchMyAppointments,

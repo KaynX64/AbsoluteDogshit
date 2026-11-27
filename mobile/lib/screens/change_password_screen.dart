@@ -6,6 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/api_config.dart';
+import '../services/clinic_api_errors.dart';
 import '../services/emergency_alert_service.dart';
 import '../theme/account_theme_controller.dart';
 import 'login_screen.dart';
@@ -163,12 +164,23 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
             () => _message = 'Too many attempts. Wait a moment and try again.',
           );
         default:
-          _showUnconfirmed();
+          _showUnconfirmed(
+            clinicStatusMessage(
+              response.statusCode,
+              operation: 'update your password',
+            ),
+          );
       }
-    } catch (_) {
-      if (mounted) _showUnconfirmed();
+    } catch (error) {
+      if (mounted) {
+        _showUnconfirmed(
+          clinicFailureMessage(error, operation: 'update your password'),
+        );
+      }
     } finally {
-      if (widget.deviceToken == null) EmergencyAlertService().resumeRegistration();
+      if (widget.deviceToken == null) {
+        EmergencyAlertService().resumeRegistration();
+      }
       if (mounted) setState(() => _saving = false);
     }
   }
@@ -205,11 +217,12 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     }
   }
 
-  void _showUnconfirmed() {
+  void _showUnconfirmed([String? reason]) {
     setState(() {
       _message =
           'We couldn’t confirm the change. If your current password no '
-          'longer works, try signing in with the new one.';
+          'longer works, try signing in with the new one.'
+          '${reason == null ? '' : '\n\n$reason'}';
     });
   }
 

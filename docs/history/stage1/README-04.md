@@ -4,15 +4,15 @@
 
 `server/src/index.js` composes Express, HTTPS and Socket.IO. Startup applies versioned migrations, loads server policy, and checks Redis and MinIO before listening. The listener then starts the appointment reminder, no-show, prescription expiry, and PDF backfill jobs. SIGINT and SIGTERM drain active requests and jobs before closing shared dependencies. Redis is cache-aside with in-memory rate-limit fallbacks, and MinIO provides path-style S3 storage.
 
-`server/src/routes/emergency/sos.js` owns SOS creation and dispatch. The responder access service resolves the current audience, and device delivery selects the Android notification channel or retains the legacy path. [Server route map](../server/src/routes/AGENTS.md)
+`server/src/routes/emergency/sos.js` owns SOS creation and dispatch. The responder access service resolves the current audience, and device delivery selects the Android notification channel or retains the legacy path. [Server route map](../../../server/src/routes/AGENTS.md)
 
 ### Desktop
 
-`desktop/electron/main.cjs` composes the window, certificate policy, updater and IPC registration. The preload exposes `window.electronAPI` through `contextBridge`. The renderer starts loading the shared staff console bundle while sign-in is idle and waits for it before opening the staff workspace. `src/platform/offline/` coordinates the encrypted cache and mutation queue through Electron IPC. Rebuild the renderer after editing `app-config.json` to retarget packaged REST and Socket.IO requests. [Desktop architecture guide](../desktop/AGENTS.md)
+`desktop/electron/main.cjs` composes the window, certificate policy, updater and IPC registration. The preload exposes `window.electronAPI` through `contextBridge`. The renderer starts loading the shared staff console bundle while sign-in is idle and waits for it before opening the staff workspace. `src/platform/offline/` coordinates the encrypted cache and mutation queue through Electron IPC. Rebuild the renderer after editing `app-config.json` to retarget packaged REST and Socket.IO requests. [Desktop architecture guide](../../../desktop/AGENTS.md)
 
 ### Mobile
 
-`mobile/lib/main.dart` renders the app before starting Firebase, Android notification setup and connectivity monitoring. An authenticated alert session handles responder eligibility, realtime delivery and incident refresh after sign-in or saved-session validation. Set the source-configured API host for the device or emulator. [Mobile setup](../mobile/README.md#configure-and-run)
+`mobile/lib/main.dart` renders the app before starting Firebase, Android notification setup and connectivity monitoring. An authenticated alert session handles responder eligibility, realtime delivery and incident refresh after sign-in or saved-session validation. Set the source-configured API host for the device or emulator. [Mobile setup](../../../mobile/README.md#configure-and-run)
 
 ### Core flows
 
@@ -28,7 +28,7 @@
 
 `schema.sql` is a **full drop-and-recreate script**: `CREATE DATABASE IF NOT EXISTS valetudo_healthlink`, `USE`, `SET FOREIGN_KEY_CHECKS = 0`, a list of `DROP TABLE IF EXISTS` statements, then `CREATE TABLE` statements. The database uses `utf8mb4` / `utf8mb4_unicode_ci`.
 
-The current baseline defines 42 tables. The migration runner creates `SCHEMA_MIGRATIONS` separately. The table below summarizes selected domains. Use the versioned migration command for existing databases. [Migration rollout](../server/MIGRATION-PLAN.md)
+The current baseline defines 42 tables. The migration runner creates `SCHEMA_MIGRATIONS` separately. The table below summarizes selected domains. Use the versioned migration command for existing databases. [Migration rollout](../../../server/docs/migrations/MIGRATION-PLAN.md)
 
 | Domain | Tables |
 | --- | --- |

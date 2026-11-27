@@ -24,11 +24,11 @@
 
 ### Clinical and administrative workflows
 
-- Scheduling with clinic-hour rules, 15-minute slots, lunch exclusion, capacity-limited shared-hour doctor bookings, exclusive-hour dentist bookings and recovery buffers. Mobile patients [review their appointment](../mobile/README.md#booking-an-appointment) before confirming it.
+- Scheduling with clinic-hour rules, 15-minute slots, lunch exclusion, capacity-limited shared-hour doctor bookings, exclusive-hour dentist bookings and recovery buffers. Mobile patients [review their appointment](../../../mobile/README.md#booking-an-appointment) before confirming it.
 - EMR records, vital signs, dental charts, EMR attachments, medical clearances, queueing, analytics and Excel export.
 - E-prescriptions with FEFO batch deduction, outside-formulary free-text items, drug-interaction warnings, prescription expiry, prescribed-quantity validation, signature enrollment, PDF generation and versioned/soft-deleted documents.
 - Medicine batches and inventory logs, with **expired / low stock / expiring within 30 days** states and a dashboard summary consumed by `NurseConsole.tsx`.
 - Admin user/role management with safety checks and granular permissions; admin health-profile editor encrypts/decrypts sensitive fields.
 - Dynamic QR Health Pass with a dedicated HMAC secret, short validity, Redis single-use nonce claiming. Staff verify these passes through authenticated intake. Generated clinical documents have separate public QR verification links.
-- Desktop offline workflows use an encrypted SQLite cache and mutation queue for supported clinical work. Changes replay on reconnect. [Desktop offline storage](../desktop/README.md#offline-storage)
+- Desktop offline workflows use an encrypted SQLite cache and mutation queue for supported clinical work. Changes replay on reconnect. [Desktop offline storage](../../../desktop/README.md#offline-storage)
 - Background reminders over SMTP, FCM and Socket.IO.

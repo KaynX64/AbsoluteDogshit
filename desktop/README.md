@@ -98,7 +98,7 @@ Non-clinical Qualified Responders can acknowledge an incident, view its limited 
 
 `npm run test:layout` also checks community/staff SOS buttons, live permission changes, denied closure and acknowledgment across the banner, dispatch console and nurse SOS band using synthetic fixtures in a hidden window.
 
-Response staff can open **Alert history** and **Incident reports** from the sidebar. **Needs report** includes all unfinished work, **My drafts** resumes private desktop autosaves, and **Filed** is read-only with PDFs. **Save and return** preserves deferred work; over-24-hour items are highlighted. Draft conflicts preserve local text. Install server migration **015** before updated clients. [Workflow, permissions and API guide](../server/RESPONDER-RECORDS.md).
+Response staff can open **Alert history** and **Incident reports** from the sidebar. **Needs report** includes all unfinished work, **My drafts** resumes private desktop autosaves, and **Filed** is read-only with PDFs. **Save and return** preserves deferred work; over-24-hour items are highlighted. Draft conflicts preserve local text. Install server migration **015** before updated clients. [Workflow, permissions and API guide](../server/docs/workflows/RESPONDER-RECORDS.md).
 
 Returning to the app refreshes responder records in the background without clearing the visible table. Filter changes still load a new result set, and revoked permissions clear protected records. Empty SOS banners take no space above the page heading.
 
@@ -110,6 +110,6 @@ Report tabs prepare their default lists in the background and reuse recently loa
 
 ## Responder qualifications
 
-Use the sidebar to apply or renew your own appointment. Designated clinic nurses/doctors can review applications, record campus assessments and approve other people. Administrators with RESPONDERS_MANAGE inspect the full process, nominate accounts, designate reviewers and suspend/revoke appointments. Account badges are read-only. Qualification is separate from duty mode and does not imply an external certificate. [Workflow, permissions and rollout](../server/RESPONDER-QUALIFICATIONS.md).
+Use the sidebar to apply or renew your own appointment. Designated clinic nurses/doctors can review applications, record campus assessments and approve other people. Administrators with RESPONDERS_MANAGE inspect the full process, nominate accounts, designate reviewers and suspend/revoke appointments. Account badges are read-only. Qualification is separate from duty mode and does not imply an external certificate. [Workflow, permissions and rollout](../server/docs/workflows/RESPONDER-QUALIFICATIONS.md).
 
 The application list and form scroll separately at desktop sizes, with save/review actions kept visible. Search and status filters help find loaded applications. Nominations and reviewer management open in a separate dialog. Refresh keeps the current application and unsaved text visible, including after failed requests. Each local view remembers its selection while open. Save your draft before leaving the qualifications workspace. [Layout, buffering and verification](docs/RESPONDER-QUALIFICATIONS-UI.md).

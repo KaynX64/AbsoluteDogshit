@@ -5,7 +5,7 @@
 ## DT-11 · desktop/src/features/emergency/IncidentReportModal.tsx
 **LOC:** 14 · **Anchor commit:** working tree
 
-The shell mounts one dialog. `IncidentReportContext.tsx` owns live prompts and counts. `ReportEditor.tsx` and `useReportDraft.ts` own prefill, private autosaves, conflicts, guarded dismissal and filing. [Workflow and API](../../../server/RESPONDER-RECORDS.md).
+The shell mounts one dialog. `IncidentReportContext.tsx` owns live prompts and counts. `ReportEditor.tsx` and `useReportDraft.ts` own prefill, private autosaves, conflicts, guarded dismissal and filing. [Workflow and API](../../../server/docs/workflows/RESPONDER-RECORDS.md).
 
 | # | Lines | Anchor | Description |
 |---|-------|--------|-------------|

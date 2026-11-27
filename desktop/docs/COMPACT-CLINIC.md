@@ -4,7 +4,7 @@ Doctor/Dentist consultation sections use a compact layout at desktop widths of a
 
 `npm run test:layout` opens a hidden Electron window with synthetic data and an isolated profile. It checks 1920×1080, 1366×768, 1280×720 and 1024×720 layouts, long text, independent patient-list scrolling, Dentist chart containment and the narrow-window fallback. It also checks Health analytics and confirms that Database Studio, Accounts, Privacy & audit, and Incident Records keep their controls visible while their record lists scroll. Reference screenshots are written to the ignored `dist/compact-clinic-checks/` directory. Fixtures supply the records and account responses.
 
-The prescribing check covers fixed, PRN/custom, manual/container, catalog and 20-item states. The medicine strip scrolls horizontally; one editor stays visible with a pinned review action. Review scrolls its content separately from its actions. Returning retains the draft. An uncertain issuance retains its exact body/UUID and holds editing until a retry resolves the outcome. See [prescribing rollout](../../server/PRESCRIBING-ROLLOUT.md).
+The prescribing check covers fixed, PRN/custom, manual/container, catalog and 20-item states. The medicine strip scrolls horizontally; one editor stays visible with a pinned review action. Review scrolls its content separately from its actions. Returning retains the draft. An uncertain issuance retains its exact body/UUID and holds editing until a retry resolves the outcome. See [prescribing rollout](../../server/docs/workflows/PRESCRIBING-ROLLOUT.md).
 
 ## Run the layout checks
 

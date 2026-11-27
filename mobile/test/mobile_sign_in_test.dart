@@ -7,9 +7,11 @@ class _GooglePicker extends GoogleSignInPlatform {
   int starts = 0;
   int picks = 0;
   int signOuts = 0;
+  InitParameters? initParameters;
 
   @override
   Future<void> init(InitParameters params) async {
+    initParameters = params;
     if (++starts == 1) throw StateError('Temporary initialization failure');
   }
 
@@ -48,11 +50,12 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     });
     await expectLater(MobileSignIn.googleIdToken(), throwsStateError);
-    if (const String.fromEnvironment('GOOGLE_OAUTH_CLIENT_ID').isEmpty) {
-      expect(picker.starts, 0);
-      return;
-    }
     expect(await MobileSignIn.googleIdToken(), isNull);
+    const webClientId = String.fromEnvironment('GOOGLE_OAUTH_CLIENT_ID');
+    expect(
+      picker.initParameters!.serverClientId,
+      webClientId.isEmpty ? isNull : webClientId,
+    );
     expect(await MobileSignIn.googleIdToken(), 'token-2');
     expect(await MobileSignIn.googleIdToken(), 'token-3');
     expect(picker.starts, 2);

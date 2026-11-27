@@ -23,6 +23,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:open_filex/open_filex.dart';
 
 import '../config/api_config.dart';
+import '../services/clinic_api_errors.dart';
 import '../utils/responsive.dart';
 
 class DocumentsViewerScreen extends StatefulWidget {
@@ -51,7 +52,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen>
 
   final _records = <_DocumentTab, List<dynamic>>{};
   final _pending = <_DocumentTab, Object>{};
-  final _failed = <_DocumentTab>{};
+  final _errors = <_DocumentTab, String>{};
   List<dynamic> get _prescriptions =>
       _records[_DocumentTab.prescriptions] ?? [];
   List<dynamic> get _clearances => _records[_DocumentTab.clearances] ?? [];
@@ -134,12 +135,12 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen>
         identical(_pending[tab], request);
     setState(() {
       _pending[tab] = request;
-      _failed.remove(tab);
+      _errors.remove(tab);
     });
     try {
       final token = await _storage.read(key: 'jwt_token');
       if (!current()) return;
-      if (token == null) throw StateError('Session unavailable');
+      if (token == null) throw const ClinicApiException(401);
       final value = await _data.get(
         tab.path,
         token,
@@ -150,8 +151,15 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen>
         setState(() => _records[tab] = value as List<dynamic>);
         _previewChanges.value++;
       }
-    } catch (_) {
-      if (current()) setState(() => _failed.add(tab));
+    } catch (error) {
+      if (current()) {
+        setState(
+          () => _errors[tab] = clinicFailureMessage(
+            error,
+            operation: 'load these documents',
+          ),
+        );
+      }
     } finally {
       if (current()) setState(() => _pending.remove(tab));
     }
@@ -262,11 +270,15 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen>
           ),
         );
       }
-    } catch (e) {
-      if (mounted) {
+    } catch (error) {
+      if (mounted && _data.isCurrent(_generation)) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Download failed: $e'),
+            content: Text(switch (error) {
+              DocumentDownloadException(:final message) => message,
+              FileSystemException() => 'The PDF could not be saved on this device. Check available storage and try again.',
+              _ => clinicFailureMessage(error, operation: 'download the PDF'),
+            }),
             backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
           ),
         );
@@ -1051,10 +1063,10 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen>
               ),
             ),
 
-            if (_failed.contains(_tab))
+            if (_errors[_tab] case final message?)
               ListTile(
                 leading: const Icon(Icons.error_outline),
-                title: const Text('Could not load these documents.'),
+                title: Text(message),
                 trailing: TextButton(
                   onPressed: () => _fetch(_tab),
                   child: const Text('Retry'),
@@ -1401,7 +1413,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen>
       return Center(child: CircularProgressIndicator(color: primaryGreen));
     }
     if (_prescriptions.isEmpty &&
-        _failed.contains(_DocumentTab.prescriptions)) {
+        _errors.containsKey(_DocumentTab.prescriptions)) {
       return const SizedBox.shrink();
     }
 
@@ -1621,7 +1633,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen>
         _pending.containsKey(_DocumentTab.clearances)) {
       return Center(child: CircularProgressIndicator(color: primaryGreen));
     }
-    if (_clearances.isEmpty && _failed.contains(_DocumentTab.clearances)) {
+    if (_clearances.isEmpty && _errors.containsKey(_DocumentTab.clearances)) {
       return const SizedBox.shrink();
     }
 
@@ -1830,7 +1842,7 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen>
       return Center(child: CircularProgressIndicator(color: primaryGreen));
     }
     if (_diagnosticAttachments.isEmpty &&
-        _failed.contains(_DocumentTab.attachments)) {
+        _errors.containsKey(_DocumentTab.attachments)) {
       return const SizedBox.shrink();
     }
 
@@ -2114,7 +2126,8 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen>
     // Keep the session JWT out of URLs; the download token is short-lived.
     try {
       final token = await _storage.read(key: 'jwt_token');
-      if (!mounted || !_data.isCurrent(_generation) || token == null) return;
+      if (!mounted || !_data.isCurrent(_generation)) return;
+      if (token == null) throw const ClinicApiException(401);
       final res = await _client
           .post(
             Uri.parse('$downloadUrl-token'),
@@ -2127,41 +2140,35 @@ class _DocumentsViewerScreenState extends State<DocumentsViewerScreen>
       if (!mounted || !_data.isCurrent(_generation)) return;
 
       if (res.statusCode != 200) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Could not open file. Please try again.'),
-              backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
-            ),
-          );
-        }
-        return;
+        throw ClinicApiException(res.statusCode);
       }
 
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       final dlToken = data['downloadToken'] as String?;
       if (dlToken == null || dlToken.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Could not open file. Please try again.'),
-              backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
-            ),
-          );
-        }
-        return;
+        throw const FormatException('Missing download token');
       }
 
       final opened = await launchUrl(
         Uri.parse('$downloadUrl?dlToken=$dlToken'),
         mode: LaunchMode.externalApplication,
       );
-      if (!opened) throw StateError('No file handler');
-    } catch (_) {
+      if (opened || !mounted || !_data.isCurrent(_generation)) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+            'Your device has no app that can open this file link.',
+          ),
+          backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
+        ),
+      );
+    } catch (error) {
       if (mounted && _data.isCurrent(_generation)) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Could not open file. Please try again.'),
+            content: Text(
+              clinicFailureMessage(error, operation: 'open this file'),
+            ),
             backgroundColor: AppPalette.of(context).background(0xFF7A2E26),
           ),
         );

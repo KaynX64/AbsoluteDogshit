@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/api_config.dart';
+import 'clinic_api_errors.dart';
 
 /// Bounded, memory-only data for one authenticated session. Never persists PHI.
 class MobileSessionData with WidgetsBindingObserver {
@@ -125,7 +126,7 @@ class MobileSessionData with WidgetsBindingObserver {
             )
             .timeout(const Duration(seconds: 10));
         if (response.statusCode != 200) {
-          throw StateError('Request failed (${response.statusCode}).');
+          throw ClinicApiException(response.statusCode);
         }
         final value = jsonDecode(response.body);
         if (cacheable &&

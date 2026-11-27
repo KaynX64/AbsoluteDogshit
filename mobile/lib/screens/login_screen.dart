@@ -1,7 +1,6 @@
 // mobile/lib/screens/login_screen.dart
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show TlsException;
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -12,25 +11,44 @@ import '../widgets/valetudo_logo.dart';
 import '../utils/responsive.dart';
 import 'patient_portal_screen.dart';
 import 'responder_screen.dart';
+import '../services/clinic_api_errors.dart';
 import '../services/emergency_alert_service.dart';
 import '../services/mobile_sign_in.dart';
 import '../theme/account_theme_controller.dart';
 
+enum _SignInMethod {
+  password('synthetics', 'mobile_demo'),
+  google('google', 'mobile_google');
+
+  const _SignInMethod(this.endpoint, this.sessionMethod);
+
+  final String endpoint;
+  final String sessionMethod;
+}
+
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key, this.sessionNotice});
+  const LoginScreen({
+    super.key,
+    this.sessionNotice,
+    this.client,
+    this.googleIdToken = MobileSignIn.googleIdToken,
+  });
 
   final String? sessionNotice;
+  final http.Client? client;
+  final Future<String?> Function() googleIdToken;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  final _passwordForm = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _storage = const FlutterSecureStorage();
 
-  bool _isLoading = false;
+  _SignInMethod? _pendingMethod;
   bool _obscurePassword = true;
   String _errorMessage = '';
 
@@ -39,86 +57,132 @@ class _LoginScreenState extends State<LoginScreen> {
   static const Color textSub = Color(0xFF5A635B);
   static const Color borderColor = Color(0xFFD6DFD5);
 
-  // Exchange a Google ID token or demo credentials for the HealthLink session used by the app.
-  Future<void> _handleLogin({required bool demo}) async {
-    if (_isLoading) return;
+  void _submitPassword() {
+    if (_pendingMethod != null) return;
+    if (!_passwordForm.currentState!.validate()) {
+      setState(() => _errorMessage = '');
+      return;
+    }
+    _handleLogin(
+      _SignInMethod.password,
+      credentials: {
+        'email': _emailController.text.trim(),
+        'password': _passwordController.text,
+      },
+    );
+  }
+
+  // Exchange the selected credentials for a HealthLink session.
+  Future<void> _handleLogin(
+    _SignInMethod method, {
+    Map<String, String>? credentials,
+  }) async {
+    if (_pendingMethod != null) return;
+    FocusScope.of(context).unfocus();
     setState(() {
-      _isLoading = true;
+      _pendingMethod = method;
       _errorMessage = '';
     });
 
+    var savingSession = false;
     try {
-      final idToken = demo ? null : await MobileSignIn.googleIdToken();
-      if (!mounted || (!demo && idToken == null)) return;
-      final endpoint = demo ? 'demo' : 'google';
-      final res = await ApiConfig.client
+      String? idToken;
+      if (method == _SignInMethod.google) {
+        try {
+          idToken = await widget.googleIdToken();
+        } catch (error) {
+          if (mounted) {
+            setState(() => _errorMessage = MobileSignIn.failureMessage(error));
+          }
+          return;
+        }
+        if (!mounted || idToken == null) return;
+      }
+      final res = await (widget.client ?? ApiConfig.client)
           .post(
-            Uri.parse('${ApiConfig.baseUrl}/api/auth/mobile/$endpoint'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode(
-              demo
-                  ? {
-                      'email': _emailController.text.trim(),
-                      'password': _passwordController.text,
-                    }
-                  : {'idToken': idToken},
+            Uri.parse(
+              '${ApiConfig.baseUrl}/api/auth/mobile/${method.endpoint}',
             ),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(credentials ?? {'idToken': idToken}),
           )
           .timeout(const Duration(seconds: 15));
       if (!mounted) return;
 
+      if (res.statusCode != 200) {
+        setState(() => _errorMessage = _rejectedSignIn(res, method));
+        return;
+      }
+
       final data = jsonDecode(res.body);
+      if (data is! Map<String, dynamic> ||
+          data['user'] is! Map<String, dynamic> ||
+          data['token'] is! String ||
+          (data['token'] as String).isEmpty ||
+          data['auth_method'] != method.sessionMethod) {
+        throw const FormatException('Invalid sign-in response');
+      }
+      final user = data['user'] as Map<String, dynamic>;
+      final token = data['token'] as String;
+      final roles = user['roles'];
+      if (user['user_id'] is! int ||
+          roles is! List ||
+          roles.isEmpty ||
+          !roles.every((role) => role is String)) {
+        throw const FormatException('Invalid signed-in account');
+      }
 
-      if (res.statusCode == 200) {
-        final user = Map<String, dynamic>.from(data['user']);
-        final token = data['token'] as String;
-        final expectedMethod = demo ? 'mobile_demo' : 'mobile_google';
-        if (data['auth_method'] != expectedMethod) {
-          throw const FormatException('Unexpected sign-in method');
-        }
-        user['auth_method'] = expectedMethod;
-        // Store the token last so an interrupted write cannot restore a partial session.
-        await _storage.delete(key: 'jwt_token');
-        await _storage.write(key: 'user_data', value: jsonEncode(user));
-        await _storage.write(key: 'jwt_token', value: token);
-        if (!mounted) return;
-        await AccountThemeScope.of(context).bindAccount(user, token);
+      user['auth_method'] = method.sessionMethod;
+      savingSession = true;
+      // Store the token last so an interrupted write cannot restore a partial session.
+      await _storage.delete(key: 'jwt_token');
+      await _storage.write(key: 'user_data', value: jsonEncode(user));
+      await _storage.write(key: 'jwt_token', value: token);
+      if (!mounted) return;
+      await AccountThemeScope.of(context).bindAccount(user, token);
 
-        if (!mounted) return;
-        EmergencyAlertService().beginSession(token, user['user_id']);
-        final List<dynamic> roles = user['roles'] ?? [];
-
-        if (roles.contains('EMERGENCY_RESPONDER')) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => ResponderScreen(user: user)),
-          );
-        } else {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => PatientPortalScreen(user: user)),
-          );
-        }
+      if (!mounted) return;
+      EmergencyAlertService().beginSession(token, user['user_id']);
+      if (roles.contains('EMERGENCY_RESPONDER')) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => ResponderScreen(user: user)),
+        );
       } else {
-        setState(() => _errorMessage = data['error'] ?? 'Login failed');
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => PatientPortalScreen(user: user)),
+        );
       }
     } catch (error) {
       if (mounted) {
         setState(() {
-          _errorMessage = switch (error) {
-            TlsException() => 'Could not establish a secure connection. Check the server certificate or contact the clinic administrator.',
-            TimeoutException() || http.ClientException() => 'Could not reach the clinic server. Check your network and try again.',
-            FormatException() => 'The clinic server returned an unexpected response. Please try again.',
-            StateError(:final message) => message,
-            _ => 'Could not sign in. Please try again.',
-          };
+          _errorMessage = savingSession
+              ? 'Sign-in was accepted, but the app could not set up your session on this device. Restart the app and try again.'
+              : clinicFailureMessage(error, operation: 'sign in');
         });
       }
     } finally {
       if (mounted) {
-        setState(() => _isLoading = false);
+        setState(() => _pendingMethod = null);
       }
     }
+  }
+
+  String _rejectedSignIn(http.Response response, _SignInMethod method) {
+    final status = response.statusCode;
+    if (status == 404) {
+      return 'The clinic server does not offer this sign-in method (HTTP 404). Contact the clinic administrator.';
+    }
+    if (clinicClientError(response) case final message?) return message;
+    return switch (status) {
+      401 when method == _SignInMethod.password =>
+        'The email or password was rejected. Check both and try again.',
+      401 => 'The clinic server could not verify your Google sign-in. Try selecting your PSU account again.',
+      403 => 'The clinic server denied this sign-in. Contact the clinic to check your account access.',
+      503 when method == _SignInMethod.google => 'The clinic server could not complete Google sign-in (HTTP 503). Try again later or contact the clinic.',
+      _ => clinicStatusMessage(status, operation: 'sign in'),
+    };
   }
 
   @override
@@ -130,13 +194,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
   InputDecoration _pillInputDecoration({
     required Rs rs,
-    required String hint,
+    required String label,
     Widget? suffixIcon,
   }) {
     final radius = BorderRadius.circular(rs.r(22));
     return InputDecoration(
-      hintText: hint,
-      hintStyle: TextStyle(color: const Color(0xFF94A396), fontSize: rs.sp(14)),
+      labelText: label,
       filled: true,
       fillColor: Colors.white,
       contentPadding: EdgeInsets.symmetric(
@@ -159,6 +222,17 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  Widget _signInProgress(String label) {
+    return SizedBox.square(
+      dimension: 20,
+      child: CircularProgressIndicator(
+        strokeWidth: 2,
+        color: primaryGreen,
+        semanticsLabel: label,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final rs = Rs.of(context);
@@ -166,6 +240,7 @@ class _LoginScreenState extends State<LoginScreen> {
     // On tablets, keep the form column readable instead of stretching
     // edge-to-edge. On phones it fills the full width minus padding.
     final contentMaxWidth = rs.isTablet ? 460.0 : double.infinity;
+    final buttonSize = Size(48, rs.h(52).clamp(48.0, 58.0));
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7F9F6),
@@ -186,28 +261,30 @@ class _LoginScreenState extends State<LoginScreen> {
                     children: [
                       ValetudoLogo(size: rs.w(36).clamp(30.0, 44.0)),
                       SizedBox(width: rs.w(10)),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'LeoVital',
-                            style: TextStyle(
-                              fontSize: rs.sp(17),
-                              fontWeight: FontWeight.w900,
-                              color: const Color(0xFF191C1A),
-                              height: 1.1,
+                      Flexible(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'LeoVital',
+                              style: TextStyle(
+                                fontSize: rs.sp(17),
+                                fontWeight: FontWeight.w900,
+                                color: const Color(0xFF191C1A),
+                                height: 1.1,
+                              ),
                             ),
-                          ),
-                          Text(
-                            'HEALTHLINK',
-                            style: TextStyle(
-                              fontSize: rs.sp(8.5),
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 2.2,
-                              color: const Color(0xFF4D6053),
+                            Text(
+                              'HEALTHLINK',
+                              style: TextStyle(
+                                fontSize: rs.sp(8.5),
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 2.2,
+                                color: const Color(0xFF4D6053),
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -223,17 +300,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   ],
                   SizedBox(height: rs.h(32)),
 
-                  // ── Headline ─────────────────────────────────────
-                  Text(
-                    'YOUR CAMPUS CARE, CONNECTED',
-                    style: TextStyle(
-                      fontSize: rs.sp(10.5),
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.8,
-                      color: textSub,
-                    ),
-                  ),
-                  SizedBox(height: rs.h(8)),
                   Text(
                     'Welcome back.',
                     style: TextStyle(
@@ -245,7 +311,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   SizedBox(height: rs.h(6)),
                   Text(
-                    'Sign in with your official @psu.edu.ph Google account.',
+                    'Use your email and password or your PSU Google account.',
                     style: TextStyle(
                       fontSize: rs.sp(14),
                       color: textSub,
@@ -254,74 +320,121 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   SizedBox(height: rs.h(32)),
 
-                  if (MobileSignIn.allowDemo) ...[
-                    // ── Email ────────────────────────────────────────
-                    Text(
-                      'Demo email',
-                      style: TextStyle(
-                        fontSize: rs.sp(13),
-                        fontWeight: FontWeight.w700,
-                        color: const Color(0xFF191C1A),
-                      ),
-                    ),
-                    SizedBox(height: rs.h(8)),
-                    TextFormField(
-                      controller: _emailController,
-                      keyboardType: TextInputType.emailAddress,
-                      style: TextStyle(
-                        fontSize: rs.sp(14),
-                        color: const Color(0xFF191C1A),
-                      ),
-                      decoration: _pillInputDecoration(
-                        rs: rs,
-                        hint: 'Enter the demo email',
-                      ),
-                    ),
-                    SizedBox(height: rs.h(20)),
-
-                    // ── Password ─────────────────────────────────────
-                    Text(
-                      'Password',
-                      style: TextStyle(
-                        fontSize: rs.sp(13),
-                        fontWeight: FontWeight.w700,
-                        color: const Color(0xFF191C1A),
-                      ),
-                    ),
-                    SizedBox(height: rs.h(8)),
-                    TextFormField(
-                      controller: _passwordController,
-                      obscureText: _obscurePassword,
-                      style: TextStyle(
-                        fontSize: rs.sp(14),
-                        color: const Color(0xFF191C1A),
-                      ),
-                      decoration: _pillInputDecoration(
-                        rs: rs,
-                        hint: 'Enter your password',
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            _obscurePassword
-                                ? Icons.visibility_outlined
-                                : Icons.visibility_off_outlined,
-                            size: rs.w(20),
-                            color: textSub,
-                          ),
-                          onPressed: () => setState(
-                            () => _obscurePassword = !_obscurePassword,
+                  Form(
+                    key: _passwordForm,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        TextFormField(
+                          controller: _emailController,
+                          keyboardType: TextInputType.emailAddress,
+                          textInputAction: TextInputAction.next,
+                          autocorrect: false,
+                          validator: (value) => (value ?? '').trim().isEmpty
+                              ? 'Enter your email.'
+                              : null,
+                          decoration: _pillInputDecoration(
+                            rs: rs,
+                            label: 'Email',
                           ),
                         ),
+                        SizedBox(height: rs.h(16)),
+                        TextFormField(
+                          controller: _passwordController,
+                          obscureText: _obscurePassword,
+                          textInputAction: TextInputAction.done,
+                          autocorrect: false,
+                          enableSuggestions: false,
+                          onFieldSubmitted: (_) => _submitPassword(),
+                          validator: (value) => (value ?? '').isEmpty
+                              ? 'Enter your password.'
+                              : null,
+                          decoration: _pillInputDecoration(
+                            rs: rs,
+                            label: 'Password',
+                            suffixIcon: IconButton(
+                              tooltip: _obscurePassword
+                                  ? 'Show password'
+                                  : 'Hide password',
+                              icon: Icon(
+                                _obscurePassword
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined,
+                                color: textSub,
+                              ),
+                              onPressed: () => setState(
+                                () => _obscurePassword = !_obscurePassword,
+                              ),
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: rs.h(20)),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: primaryGreen,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: const StadiumBorder(),
+                            minimumSize: buttonSize,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 10,
+                            ),
+                          ),
+                          onPressed: _pendingMethod == null
+                              ? _submitPassword
+                              : null,
+                          child: _pendingMethod == _SignInMethod.password
+                              ? _signInProgress('Signing in')
+                              : const Text(
+                                  'Sign in',
+                                  textAlign: TextAlign.center,
+                                ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: rs.h(12)),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        disabledBackgroundColor: Colors.white,
+                        foregroundColor: const Color(0xFF1F1F1F),
+                        side: const BorderSide(color: Color(0xFF747775)),
+                        shape: const StadiumBorder(),
+                        minimumSize: buttonSize,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
                       ),
+                      onPressed: _pendingMethod == null
+                          ? () => _handleLogin(_SignInMethod.google)
+                          : null,
+                      child: _pendingMethod == _SignInMethod.google
+                          ? _signInProgress('Signing in with Google')
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Image.asset(
+                                  'assets/google_sign_in_logo.png',
+                                  width: 20,
+                                  height: 20,
+                                  excludeFromSemantics: true,
+                                ),
+                                const SizedBox(width: 10),
+                                const Flexible(
+                                  child: Text(
+                                    'Sign in with Google',
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                              ],
+                            ),
                     ),
-                    SizedBox(height: rs.h(14)),
-
-                    OutlinedButton(
-                      onPressed: _isLoading
-                          ? null
-                          : () => _handleLogin(demo: true),
-                      child: const Text('Sign in with demo account'),
-                    ),
-                  ],
+                  ),
 
                   // ── Error banner ────────────────────────────────
                   if (_errorMessage.isNotEmpty) ...[
@@ -337,11 +450,14 @@ class _LoginScreenState extends State<LoginScreen> {
                         borderRadius: BorderRadius.circular(rs.r(12)),
                         border: Border.all(color: const Color(0xFFF8B4B4)),
                       ),
-                      child: Text(
-                        _errorMessage,
-                        style: TextStyle(
-                          color: const Color(0xFF9B1C1C),
-                          fontSize: rs.sp(12.5),
+                      child: Semantics(
+                        liveRegion: true,
+                        child: Text(
+                          _errorMessage,
+                          style: TextStyle(
+                            color: const Color(0xFF9B1C1C),
+                            fontSize: rs.sp(12.5),
+                          ),
                         ),
                       ),
                     ),
@@ -357,85 +473,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                   ],
-                  SizedBox(height: rs.h(24)),
-
-                  // ── Sign in button ──────────────────────────────
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: primaryGreen,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: const StadiumBorder(),
-                        minimumSize: Size(48, rs.h(52).clamp(48.0, 58.0)),
-                      ),
-                      onPressed: _isLoading
-                          ? null
-                          : () => _handleLogin(demo: false),
-                      child: _isLoading
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Flexible(
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 10,
-                                    ),
-                                    child: Text(
-                                      'Sign in with Google',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        fontSize: rs.sp(15),
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                SizedBox(width: rs.w(8)),
-                                const Icon(
-                                  Icons.arrow_forward_rounded,
-                                  size: 18,
-                                ),
-                              ],
-                            ),
-                    ),
-                  ),
-
-                  SizedBox(height: rs.h(48)),
-
-                  // ── Community footer ────────────────────────────
-                  Center(
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.verified_user_outlined,
-                          size: rs.w(16),
-                          color: textSub,
-                        ),
-                        SizedBox(width: rs.w(6)),
-                        Flexible(
-                          child: Text(
-                            'A little care goes a long way.',
-                            style: TextStyle(
-                              fontSize: rs.sp(12),
-                              color: textSub,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                   SizedBox(height: rs.h(12)),
                 ],
               ),

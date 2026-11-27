@@ -21,7 +21,7 @@ Root `package.json` only pins shared tooling (concurrently, wait-on, electron). 
 - Session JWTs last 24 hours and carry `roles[]` and `jti`. HTTP and Socket.IO check active account status. Redis supplies the session denylist when available.
 - Roles (seeded in `server/schema.sql`): `STUDENT`, `FACULTY`, `NON_TEACHING`, `NURSE`, `DOCTOR`, `DENTIST`, `EMERGENCY_RESPONDER`, `ADMIN`. A user may hold several.
 - Realtime events (server → clients): `emergency:new_alert`, `emergency:status_change`, `emergency:incident_report_required`, `emergency:incident_reported`, `responder:status_changed`, `queue:updated`, `appointment:booked`, `appointment:cancelled`, `appointment:status_changed`, `prescription:status_changed`. Every authenticated socket joins its own `user:<id>` room for targeted delivery. `appointment:booked` is a global refresh signal with an empty object payload. The incident-report popup uses a per-desktop-window room so only the window that resolved an alert opens it. `join:responders` from old mobile builds is only acknowledged.
-- Qualified Responder: clinic-reviewed applications and time-limited appointments govern SOS access after explicit roster cutover. ADMIN alone is not response staff. Community responders acknowledge reduced alerts; staff appointments additionally require a live clinical/emergency staff role. RESPONDERS_MANAGE grants oversight, reviewer designation and suspension/revocation, never clinic approval. Legacy delivery remains only during the staged migration. [Qualification workflow](../server/RESPONDER-QUALIFICATIONS.md)
+- Qualified Responder: clinic-reviewed applications and time-limited appointments govern SOS access after explicit roster cutover. ADMIN alone is not response staff. Community responders acknowledge reduced alerts; staff appointments additionally require a live clinical/emergency staff role. RESPONDERS_MANAGE grants oversight, reviewer designation and suspension/revocation, never clinic approval. Legacy delivery remains only during the staged migration. [Qualification workflow](../../server/docs/workflows/RESPONDER-QUALIFICATIONS.md)
 
 ## Bootstrap a dev machine (order matters)
 
@@ -29,14 +29,14 @@ Root `package.json` only pins shared tooling (concurrently, wait-on, electron). 
 2. Copy `server/.env.example` to `server/.env`. Set `ENCRYPTION_KEY`, `JWT_SECRET` and `ENCRYPTION_SALT`. Match database, Redis and S3 credentials to the local services. Use the Compose defaults only for local development.
 3. Create `server/certs/`, then generate the certificate and key used by the API and Electron development:
    `openssl req -x509 -newkey rsa:2048 -nodes -days 365 -keyout server/certs/key.pem -out server/certs/cert.pem -subj "/CN=valetudo" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"` — append `,IP:<LAN-IP>` to the SAN list when other devices must reach the API.
-4. Provision a new, empty database with `server/schema.sql`. The script drops and recreates tables, so use `npm run migrate` from `server/` for an existing installation. See the [migration rollout guide](../server/MIGRATION-PLAN.md).
+4. Provision a new, empty database with `server/schema.sql`. The script drops and recreates tables, so use `npm run migrate` from `server/` for an existing installation. See the [migration rollout guide](../../server/docs/migrations/MIGRATION-PLAN.md).
 5. From `server/`, run `npm install`, then `npm run dev`. Startup applies pending migrations before the API listens.
 6. From `desktop/`, set `apiBaseUrl` in `app-config.json`, run `npm install`, then `npm run dev`.
-7. For mobile, pass the reachable HTTPS API origin using `--dart-define=API_BASE_URL=…`. Configure [PSU Google sign-in](../mobile/README.md#psu-google-sign-in) or enable the local demo option for synthetic accounts.
+7. From `mobile/`, run `flutter run` when the default API origin is reachable from the device. Pass `--dart-define=API_BASE_URL=…` for a different origin. Configure [PSU Google sign-in](../../mobile/README.md#psu-google-sign-in) or enable the local demo option for synthetic accounts.
 
 ## Command cheat sheet
 
-Use the optional Compose `backup` profile for the daily backup scheduler. See the [backup setup](../README.md#daily-mysql-and-minio-backups).
+Use the optional Compose `backup` profile for the daily backup scheduler. See the [backup setup](../../README.md#daily-mysql-and-minio-backups).
 
 | Module | Install | Run dev | Build | Test |
 |---|---|---|---|---|

@@ -3,7 +3,7 @@
 ### Emergency SOS and incident reporting
 
 - Mobile SOS with GPS coordinates, optional Google Maps reverse geocoding, Redis-backed throttle (`ratelimit:sos:<user-or-ip>`), FCM push and Socket.IO events targeted to eligible recipients.
-- Responder access helpers provide tiered redaction, audience selection and role labels. The Android Responder Hub uses a shared active-incident roster and per-installation duty modes. [Responder Hub guide](../mobile/README.md#responder-hub-on-android)
+- Responder access helpers provide tiered redaction, audience selection and role labels. The Android Responder Hub uses a shared active-incident roster and per-installation duty modes. [Responder Hub guide](../../../mobile/README.md#responder-hub-on-android)
 - Resolving an SOS can require an incident report. The workflow uses `INCIDENT_REPORTS`, pending/specific report endpoints, `IncidentReportModal.tsx`, `IncidentRecords.tsx`, PDF rendering/storage via MinIO keys, and Socket.IO events `emergency:incident_report_required` and `emergency:incident_reported`.
 - Realtime events emitted server → clients include `emergency:new_alert`, `emergency:status_change`, `emergency:incident_report_required`, `emergency:incident_reported`, `responder:status_changed`, `queue:updated`, `appointment:booked`, `appointment:cancelled`, `appointment:status_changed`, and `prescription:status_changed`. Every authenticated socket joins its own `user:<id>` room for targeted delivery. The global `appointment:booked` signal carries an empty object and prompts clients to refresh through the API.
 

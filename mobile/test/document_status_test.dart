@@ -74,7 +74,10 @@ void main() {
           ++requests == 1 ? http.Response('{}', 500) : http.Response('[]', 200),
     );
     await open(tester, client);
-    expect(find.text('Could not load these documents.'), findsOneWidget);
+    expect(
+      find.textContaining('clinic server encountered an error (HTTP 500)'),
+      findsOneWidget,
+    );
     expect(find.text('No digital prescriptions on record.'), findsNothing);
     await tester.tap(find.text('Retry'));
     await tester.pumpAndSettle();

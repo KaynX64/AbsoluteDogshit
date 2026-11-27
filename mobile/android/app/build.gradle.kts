@@ -1,9 +1,41 @@
+import org.gradle.api.file.ConfigurableFileCollection
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.FileSystemOperations
+import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.TaskAction
+import javax.inject.Inject
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
     id("com.google.gms.google-services")
     
+}
+
+abstract class BundleLocalDevCa : DefaultTask() {
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val certificate: ConfigurableFileCollection
+
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    @get:Inject
+    abstract val fileSystem: FileSystemOperations
+
+    @TaskAction
+    fun bundle() {
+        fileSystem.sync {
+            into(outputDirectory)
+            from(certificate) {
+                into("flutter_assets/healthlink")
+            }
+        }
+    }
 }
 
 android {
@@ -40,6 +72,17 @@ android {
         release {
             signingConfig = signingConfigs.getByName("release")
         }
+    }
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("debug")) { variant ->
+        val bundleLocalDevCa = tasks.register<BundleLocalDevCa>("bundleLocalDevCa${variant.name}") {
+            certificate.from(fileTree("../../../server/certs") {
+                include("android-dev-ca.pem")
+            })
+        }
+        variant.sources.assets?.addGeneratedSourceDirectory(bundleLocalDevCa, BundleLocalDevCa::outputDirectory)
     }
 }
 

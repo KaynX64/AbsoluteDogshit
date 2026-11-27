@@ -12,6 +12,7 @@ import '../utils/responsive.dart';
 import 'login_screen.dart';
 import 'patient_portal_screen.dart';
 import 'responder_screen.dart';
+import '../services/clinic_api_errors.dart';
 import '../services/emergency_alert_service.dart';
 import '../services/mobile_sign_in.dart';
 import '../theme/account_theme_controller.dart';
@@ -28,7 +29,7 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen> {
   final _storage = const FlutterSecureStorage();
   bool _isChecking = true;
-  bool _retry = false;
+  String? _validationError;
 
   static const Color primaryGreen = Color(0xFF284E3A);
   static const Color textMain = Color(0xFF191C1A);
@@ -46,7 +47,7 @@ class _SplashScreenState extends State<SplashScreen> {
   Future<void> _checkSavedSession() async {
     setState(() {
       _isChecking = true;
-      _retry = false;
+      _validationError = null;
     });
     final String? token;
     final String? userData;
@@ -81,18 +82,27 @@ class _SplashScreenState extends State<SplashScreen> {
 
     if (!mounted) return;
     final themes = AccountThemeScope.of(context);
-    final response = await _validateSession(token);
-    if (!mounted) return;
-    if (response?.statusCode == 401 || response?.statusCode == 403) {
-      themes.reset();
-      await _discardSavedSession();
-      return;
-    }
-    final live = _decodeSession(response);
-    if (live == null) {
+    final Map<String, dynamic> live;
+    try {
+      final response = await _validateSession(token);
+      if (!mounted) return;
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        themes.reset();
+        await _discardSavedSession();
+        return;
+      }
+      if (response.statusCode != 200) {
+        throw ClinicApiException(response.statusCode);
+      }
+      live = _decodeSession(response);
+    } catch (error) {
+      if (!mounted) return;
       setState(() {
         _isChecking = false;
-        _retry = true;
+        _validationError = clinicFailureMessage(
+          error,
+          operation: 'verify your saved session',
+        );
       });
       return;
     }
@@ -113,37 +123,28 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   // Send the saved HealthLink JWT to the mobile session endpoint with a bounded wait.
-  Future<http.Response?> _validateSession(String token) async {
-    try {
-      return await (widget.client ?? ApiConfig.client)
-          .get(
-            Uri.parse('${ApiConfig.baseUrl}/api/auth/mobile/session'),
-            headers: {'Authorization': 'Bearer $token'},
-          )
-          .timeout(const Duration(seconds: 4));
-    } catch (_) {
-      return null;
-    }
+  Future<http.Response> _validateSession(String token) async {
+    return (widget.client ?? ApiConfig.client)
+        .get(
+          Uri.parse('${ApiConfig.baseUrl}/api/auth/mobile/session'),
+          headers: {'Authorization': 'Bearer $token'},
+        )
+        .timeout(const Duration(seconds: 4));
   }
 
   // Validate the response fields that identify the saved account and drive role routing.
-  Map<String, dynamic>? _decodeSession(http.Response? response) {
-    if (response?.statusCode != 200) return null;
-    try {
-      final data = jsonDecode(response!.body);
-      if (data is! Map<String, dynamic> ||
-          data['user_id'] is! int ||
-          data['auth_method'] is! String ||
-          data['roles'] is! List ||
-          (data['roles'] as List).isEmpty ||
-          !(data['roles'] as List).every((role) => role is String) ||
-          data['is_qualified_responder'] is! bool) {
-        return null;
-      }
-      return data;
-    } catch (_) {
-      return null;
+  Map<String, dynamic> _decodeSession(http.Response response) {
+    final data = jsonDecode(response.body);
+    if (data is! Map<String, dynamic> ||
+        data['user_id'] is! int ||
+        data['auth_method'] is! String ||
+        data['roles'] is! List ||
+        (data['roles'] as List).isEmpty ||
+        !(data['roles'] as List).every((role) => role is String) ||
+        data['is_qualified_responder'] is! bool) {
+      throw const FormatException('Invalid saved-session response');
     }
+    return data;
   }
 
   // Clear a rejected or invalid saved session and return to the sign-in prompt.
@@ -274,9 +275,8 @@ class _SplashScreenState extends State<SplashScreen> {
                               SizedBox(height: rs.h(18)),
 
                               Text(
-                                _retry
-                                    ? 'Could not verify your session. Check your connection and try again.'
-                                    : 'Your campus care, connected.',
+                                _validationError ??
+                                    'Your campus care, connected.',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   fontSize: rs.sp(14.5),
@@ -299,7 +299,7 @@ class _SplashScreenState extends State<SplashScreen> {
                                   ),
                                   onPressed: _isChecking
                                       ? null
-                                      : (_retry
+                                      : (_validationError != null
                                             ? _checkSavedSession
                                             : _goToLogin),
                                   child: _isChecking
@@ -317,7 +317,7 @@ class _SplashScreenState extends State<SplashScreen> {
                                           children: [
                                             Flexible(
                                               child: Text(
-                                                _retry
+                                                _validationError != null
                                                     ? "Retry"
                                                     : "Let's get started",
                                                 textAlign: TextAlign.center,

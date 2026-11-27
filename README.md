@@ -1,7 +1,7 @@
 <div align="center">
-<img src="desktop/src/assets/valetudo_logo.png" alt="Valetudo HealthLink logo" width="112">
+<img src="desktop/src/assets/valetudo_logo.png" alt="LeoVital HealthLink logo" width="112">
 
-# 🩺 Valetudo HealthLink
+# 🩺 LeoVital HealthLink
 
 **Campus clinic management for Pangasinan State University**
 
@@ -18,7 +18,7 @@
 
 ## 📖 Overview
 
-**Valetudo HealthLink** connects students and employees with clinic staff and emergency responders. Patients and responders use the **LeoVital HealthLink** Flutter app. Staff use the Electron console for care and administration.
+**LeoVital HealthLink** connects students and employees with clinic staff and emergency responders. Patients and responders use the **LeoVital HealthLink** Flutter app. Staff use the Electron console for care and administration.
 
 ## ✨ Key features
 
@@ -36,7 +36,7 @@
 ```mermaid
 flowchart LR
     Mobile["LeoVital mobile app"] -->|"HTTPS and Socket.IO"| API["Express API :5000"]
-    Desktop["Valetudo staff console"] -->|"HTTPS and Socket.IO"| API
+    Desktop["LeoVital staff console"] -->|"HTTPS and Socket.IO"| API
     Desktop --- Local[("Encrypted SQLite")]
     API --> SQL[("MySQL")]
     API --> Cache[("Redis")]
@@ -44,15 +44,14 @@ flowchart LR
     API --> Notify["SMTP and Firebase"]
 ```
 
-The API applies clinical rules and access checks. It stores records in MySQL and files in MinIO or S3. Redis supports caching and session controls. [Codebase overview](CODEBASE-OVERVIEW.md)
+The API applies clinical rules and access checks. It stores records in MySQL and files in MinIO or S3. Redis supports caching and session controls. [Codebase overview](docs/architecture/CODEBASE-OVERVIEW.md)
 
 ## 📂 Repository Structure
 
-All Git-tracked folders and subfolders are shown below, along with selected files.
+Selected folders and entry points are shown below.
 
 ```text
-Valetudo/                                       # Project repository
-├── AGENTS-parts/                               # Project development guidance
+LeoVital/                                       # Project repository
 ├── desktop/                                    # Electron clinic staff console
 │   ├── AGENTS-parts/                           # Staff console development guidance
 │   ├── docs/                                   # Console layout, workflows, and source maps
@@ -87,6 +86,11 @@ Valetudo/                                       # Project repository
 │   ├── tests/                                  # Desktop unit and integration tests
 │   │   └── smoke/                              # Packaged app and workflow smoke checks
 │   └── app-config.json                         # API origin for the desktop build
+├── docs/                                       # Project documentation index and guides
+│   ├── agent-guidance/                         # Cross-module guidance and OAuth preflight
+│   ├── architecture/                           # Codebase overview
+│   └── history/                                # Reviews and Stage1 documentation
+│       └── stage1/                             # Historical README parts
 ├── mobile/                                     # Flutter patient and responder app
 │   ├── android/                                # Android platform project and Gradle setup
 │   │   ├── app/                                # Android application module and build settings
@@ -96,7 +100,7 @@ Valetudo/                                       # Project repository
 │   │   │       │   ├── kotlin/                 # Kotlin source root
 │   │   │       │   │   └── com/                # Start of the reverse-domain package path
 │   │   │       │   │       └── psu/            # PSU namespace
-│   │   │       │   │           └── valetudo/   # Valetudo namespace
+│   │   │       │   │           └── valetudo/   # Android package namespace
 │   │   │       │   │               └── mobile/  # Android MainActivity
 │   │   │       │   └── res/                    # Android launcher, splash, sound, and theme resources
 │   │   │       │       ├── drawable/           # Default splash and launch drawables
@@ -115,6 +119,7 @@ Valetudo/                                       # Project repository
 │   │   └── gradle/                             # Gradle wrapper configuration
 │   │       └── wrapper/                        # Pinned Gradle distribution settings
 │   ├── assets/                                 # Flutter logo and emergency alert audio
+│   ├── docs/                                   # Mobile performance and profiling
 │   ├── ios/                                    # iOS platform project
 │   │   ├── Flutter/                            # Flutter iOS build configuration
 │   │   ├── Runner/                             # iOS app host and resources
@@ -166,11 +171,14 @@ Valetudo/                                       # Project repository
 │       ├── flutter/                            # Flutter Windows build and plugin wiring
 │       └── runner/                             # Native Windows application host
 │           └── resources/                      # Windows executable icon
-├── README-parts/                               # Historical Stage1 documentation
 ├── scripts/                                    # Repository verification utilities
 ├── server/                                     # Express API and Socket.IO server
 │   ├── .postman/                               # Postman workspace resource registration
 │   ├── AGENTS-parts/                           # Backend development and operations guidance
+│   ├── docs/                                   # Backend reference guides
+│   │   ├── migrations/                         # Migration plans and catalog
+│   │   ├── reviews/                            # Backend reviews and performance results
+│   │   └── workflows/                          # Clinical and responder workflows
 │   ├── postman/                                # Postman workspace files
 │   │   └── globals/                            # Workspace-level Postman globals
 │   ├── public/                                 # Public QR document verification page
@@ -222,8 +230,9 @@ Valetudo/                                       # Project repository
 │   ├── tests/                                  # API and domain tests
 │   │   └── fixtures/                           # Shared prescribing test data
 │   └── schema.sql                              # Fresh MySQL schema
+├── AGENTS.md                                   # Agent guidance entry point
 ├── docker-compose.yml                          # Local MySQL, Redis, and MinIO
-└── DOCUMENTATION.md                            # Project guides and references
+└── README.md                                   # Project setup and overview
 ```
 
 ## 🚀 Getting started
@@ -239,7 +248,7 @@ docker compose up -d
 if (-not (Test-Path server/.env)) { Copy-Item server/.env.example server/.env }
 ```
 
-Configure `server/.env` and generate the TLS certificate. Use `server/schema.sql` for an empty database and `npm run migrate` from `server/` for an existing one. [Server bootstrap](AGENTS-parts/AGENTS-01.md#bootstrap-a-dev-machine-order-matters) · [Migrations](server/MIGRATION-PLAN.md)
+Configure `server/.env` and generate the TLS certificate. Use `server/schema.sql` for an empty database and `npm run migrate` from `server/` for an existing one. [Server bootstrap](docs/agent-guidance/AGENTS-01.md#bootstrap-a-dev-machine-order-matters) · [Migrations](server/docs/migrations/MIGRATION-PLAN.md)
 
 ```powershell
 Set-Location server
@@ -247,7 +256,7 @@ npm install
 npm run dev
 ```
 
-The API defaults to `https://localhost:5000`. `GET /api/ping` should return `ok: true`. [Development certificate setup](AGENTS-parts/AGENTS-01.md#bootstrap-a-dev-machine-order-matters)
+The API defaults to `https://localhost:5000`. `GET /api/ping` should return `ok: true`. [Development certificate setup](docs/agent-guidance/AGENTS-01.md#bootstrap-a-dev-machine-order-matters)
 
 ### 🖥️ 2. Run the desktop console
 
@@ -263,7 +272,7 @@ Use `npm run dist` from `desktop/` to build the Windows installer with the confi
 
 ### 📱 3. Run the mobile app
 
-For Android, add your test Firebase project's `google-services.json` to `mobile/android/app/` before building. From the repository root, run Flutter against the Android emulator. For a physical phone, use the API host's LAN address and a certificate covering that address. [Firebase setup](mobile/AGENTS.md#firebase)
+For Android, add your test Firebase project's `google-services.json` to `mobile/android/app/` before building. A phone on the same network can use `flutter run` with the default LAN address and the [local development CA](mobile/README.md#configure-and-run). For the standard Android emulator, pass its API address as shown below. [Firebase setup](mobile/AGENTS.md#firebase)
 
 ```powershell
 Set-Location mobile
@@ -271,7 +280,7 @@ flutter pub get
 flutter run --dart-define=API_BASE_URL=https://10.0.2.2:5000
 ```
 
-[Mobile release builds and device setup](mobile/README.md)
+[Mobile release builds and device setup](mobile/README.md) · [Mobile OAuth preflight](docs/agent-guidance/MOBILE-OAUTH-PREFLIGHT.md)
 
 ## Daily MySQL and MinIO backups
 
@@ -301,7 +310,7 @@ The REST API is mounted under `/api`. Protected endpoints use a Bearer JWT and e
 | GET | `/api/ping` | Check whether the listener is reachable. |
 | POST | `/api/auth/login` | Sign in with a password and an assigned desktop staff role. |
 | POST | `/api/auth/mobile/google` | Exchange a verified PSU Google ID token for a HealthLink session. |
-| POST | `/api/auth/mobile/demo` | Sign in as a seeded account on an opted-in local development server. |
+| POST | `/api/auth/mobile/synthetics` | Sign in as a seeded account on an opted-in local development server. |
 | GET | `/api/appointments/slots` | Read a practitioner's availability for a clinic date. |
 | POST | `/api/appointments` | Book a consultation. |
 | POST | `/api/appointments/:id/checkin` | Check in a booked patient. |
@@ -337,14 +346,14 @@ Run `npm run seed:clinic -- --development-fixture` from `server/` after provisio
 
 Sign in as `clinic-avery@example.invalid` for a waiting patient or `clinic-blair@example.invalid` for a dental consultation in progress. Both use the demo password documented in [schema.sql](server/schema.sql). Use the existing demo doctor, dentist, or nurse account to see the corresponding staff views. Bookings and inventory dates are relative to the database date when you first run the fixture.
 
-[MySQL-backed tests](server/MIGRATION-PLAN.md#rehearsal-and-recovery) · [Packaged desktop checks](desktop/README.md#verification) · [Responder qualification fixture](server/RESPONDER-QUALIFICATIONS.md#deployment-and-synthetic-scenarios)
+[MySQL-backed tests](server/docs/migrations/MIGRATION-PLAN.md#rehearsal-and-recovery) · [Packaged desktop checks](desktop/README.md#verification) · [Responder qualification fixture](server/docs/workflows/RESPONDER-QUALIFICATIONS.md#deployment-and-synthetic-scenarios)
 
 ## 🔒 Privacy and security
 
-The API uses HTTPS by default and enforces session, role, and consent checks. Selected clinical fields and the desktop offline database are encrypted. Keep secrets and patient data out of version control. [Project security guidance](AGENTS-parts/AGENTS-02.md#security-invariants)
+The API uses HTTPS by default and enforces session, role, and consent checks. Selected clinical fields and the desktop offline database are encrypted. Keep secrets and patient data out of version control. [Project security guidance](docs/agent-guidance/AGENTS-02.md#security-invariants)
 
 ## 📄 License
 
-Valetudo HealthLink is licensed under the [GNU General Public License v2.0](LICENSE).
+LeoVital HealthLink is licensed under the [GNU General Public License v2.0](LICENSE).
 
-[Documentation index](DOCUMENTATION.md) · [Codebase overview](CODEBASE-OVERVIEW.md) · [Historical Stage1 README](README-parts/README-01.md)
+[Documentation index](docs/README.md) · [Codebase overview](docs/architecture/CODEBASE-OVERVIEW.md) · [Historical Stage1 README](docs/history/stage1/README-01.md)

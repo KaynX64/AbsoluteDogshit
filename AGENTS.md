@@ -1,12 +1,13 @@
-<!-- This index points to the authoritative project guidance in AGENTS-parts/. Edit the relevant part, not this summary. -->
+<!-- The authoritative project guidance lives in docs/agent-guidance/. Edit the relevant part there. -->
 
 # AGENTS.md — Valetudo HealthLink — split index
 
-The project guidance is split across the parts below to keep documentation files manageable. Read the relevant part before changing a module; these parts are authoritative.
+Read the relevant authoritative guide before changing a module.
 
-- [`AGENTS-parts/AGENTS-01.md`](AGENTS-parts/AGENTS-01.md) — Architecture, development setup and commands.
-- [`AGENTS-parts/AGENTS-02.md`](AGENTS-parts/AGENTS-02.md) — Cross-module configuration, security and source navigation.
+- [Architecture, development setup and commands](docs/agent-guidance/AGENTS-01.md)
+- [Cross-module configuration, security and source navigation](docs/agent-guidance/AGENTS-02.md)
+- [Mobile OAuth preflight](docs/agent-guidance/MOBILE-OAUTH-PREFLIGHT.md) — Run before diagnosing PSU Google sign-in or changing its configuration.
 
 Module guides: [Server](server/AGENTS.md) · [Desktop](desktop/AGENTS.md) · [Mobile](mobile/AGENTS.md).
 
-[Documentation index](DOCUMENTATION.md) · [Codebase overview](CODEBASE-OVERVIEW.md).
+[Documentation index](docs/README.md) · [Codebase overview](docs/architecture/CODEBASE-OVERVIEW.md).

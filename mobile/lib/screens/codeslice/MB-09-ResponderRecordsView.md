@@ -5,7 +5,7 @@
 ## MB-09 · mobile/lib/screens/responder_records_view.dart
 **LOC:** 532 - **Anchor commit:** working tree
 
-Mounted by ResponderWorkspace and IncidentReportsScreen. GET-only history/report APIs and bounded memory snapshots. Shared ResponderStyle, ResponderRecordFilters and ResponderRecordCard own presentation. ResponderRecordDetail loads timeline, narrative and PDF on demand. [Workflow](../../../../server/RESPONDER-RECORDS.md).
+Mounted by ResponderWorkspace and IncidentReportsScreen. GET-only history/report APIs and bounded memory snapshots. Shared ResponderStyle, ResponderRecordFilters and ResponderRecordCard own presentation. ResponderRecordDetail loads timeline, narrative and PDF on demand. [Workflow](../../../../server/docs/workflows/RESPONDER-RECORDS.md).
 
 | # | Lines | Anchor | Description |
 |---|-------|--------|-------------|

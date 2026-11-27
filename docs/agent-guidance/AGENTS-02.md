@@ -3,7 +3,8 @@
 ## Read before touching cross-module config
 
 - **Desktop API URL is build-time.** Vite bundles `apiBaseUrl` from `desktop/app-config.json` into renderer REST and Socket.IO requests. Electron main also reads the packaged config for certificate checks. To retarget the packaged renderer, edit the config and run `npm run dist` again.
-- Mobile REST and Socket.IO use the HTTPS origin selected by `--dart-define=API_BASE_URL=…` in `mobile/lib/config/api_config.dart`. For local Android development, use the LAN IP for a phone or `10.0.2.2` for the standard Android emulator.
+- Mobile REST and Socket.IO use the default HTTPS origin in `mobile/lib/config/api_config.dart` unless the build supplies `--dart-define=API_BASE_URL=…`. For local Android development, use the LAN IP for a phone or `10.0.2.2` for the standard Android emulator.
+- For PSU Google sign-in, run the [OAuth preflight](MOBILE-OAUTH-PREFLIGHT.md) before proposing configuration or code changes.
 - Server CORS is an allow-list (SEC-10): defaults cover the Vite dev origins + the packaged `file://` build (origin `null`); extend via `CORS_ALLOWED_ORIGINS` env. Requests without an `Origin` header pass the origin check and still face the route's authentication and authorization checks.
 - `PUBLIC_API_BASE_URL` (server `.env`) is the URL baked into generated PDFs/QR codes — it must be reachable from whatever device scans them.
 
@@ -22,18 +23,18 @@ Confirm current behavior from the implementation and tests. If the ignored `audi
 
 ## Token-efficiency rules
 
-- Skip lockfiles, dependencies and generated output during source navigation. Inspect a specific file when it is needed to diagnose installation, packaging or platform configuration. Use Git commands for history. The [mobile guide](../mobile/AGENTS.md) lists platform files routinely maintained by hand.
-- Use the [desktop slice index](../desktop/docs/CODESLICE.md) and [mobile slice index](../mobile/lib/screens/CODESLICE.md) to locate sections of large files. Prefer symbol searches with `rg -n` when line numbers drift. After a mapped source edit, update its slice map and run `python scripts/verify_codeslice.py desktop/docs/codeslice mobile/lib/screens/codeslice .` from the repository root.
+- Skip lockfiles, dependencies and generated output during source navigation. Inspect a specific file when it is needed to diagnose installation, packaging or platform configuration. Use Git commands for history. The [mobile guide](../../mobile/AGENTS.md) lists platform files routinely maintained by hand.
+- Use the [desktop slice index](../../desktop/docs/CODESLICE.md) and [mobile slice index](../../mobile/lib/screens/CODESLICE.md) to locate sections of large files. Prefer symbol searches with `rg -n` when line numbers drift. After a mapped source edit, update its slice map and run `python scripts/verify_codeslice.py desktop/docs/codeslice mobile/lib/screens/codeslice .` from the repository root.
 - **Large files — search, don't read whole.** `rg` the symbol, then read a ±40-line window:
   `DoctorConsole.tsx` · `AdminConsole.tsx` · `InventoryManager.tsx` · `NurseConsole.tsx` · `QrIntakeScanner.tsx` (paths in the desktop slice index) · `mobile/lib/screens/patient_portal_screen.dart`.
-- Task routing: auth/session ⇒ `server/src/auth/`; API endpoints ⇒ [server route map](../server/src/routes/AGENTS.md); desktop UI ⇒ `desktop/src/features/`; Electron window, TLS and updates ⇒ `desktop/electron/window.cjs`, `certificatePolicy.cjs` and `updates.cjs`; offline queue ⇒ [desktop storage guide](../desktop/AGENTS-parts/AGENTS-02.md#offline-storage) and [server route map](../server/src/routes/AGENTS.md); mobile screen ⇒ `mobile/lib/screens/`; infra/env ⇒ `server/.env.example` + `docker-compose.yml`.
+- Task routing: auth/session ⇒ `server/src/auth/`; API endpoints ⇒ [server route map](../../server/src/routes/AGENTS.md); desktop UI ⇒ `desktop/src/features/`; Electron window, TLS and updates ⇒ `desktop/electron/window.cjs`, `certificatePolicy.cjs` and `updates.cjs`; offline queue ⇒ [desktop storage guide](../../desktop/AGENTS-parts/AGENTS-02.md#offline-storage) and [server route map](../../server/src/routes/AGENTS.md); mobile screen ⇒ `mobile/lib/screens/`; infra/env ⇒ `server/.env.example` + `docker-compose.yml`.
 - Conventions: `server/` is ESM-only (`"type":"module"` — never `require`); Electron main is CJS (`.cjs`); renderer is TypeScript; mobile is Dart; MySQL table names are UPPERCASE.
 
 ## Documentation maintenance — part of every change
 
-- Start broad analysis with the [codebase overview](../CODEBASE-OVERVIEW.md), then read the relevant module guide. Use indexes and symbol searches to keep source reads focused; verify behavior against code and tests.
+- Start broad analysis with the [codebase overview](../architecture/CODEBASE-OVERVIEW.md), then read the relevant module guide. Use indexes and symbol searches to keep source reads focused; verify behavior against code and tests.
 - Update affected Markdown in the same change when behavior, routes, ownership, configuration, setup commands, security assumptions or verification steps change. Documentation is part of completion, not a deferred task.
-- Edit the authoritative `AGENTS-parts/` file when an `AGENTS.md` is a split index. Keep indexes short and fix their links when moving or adding guidance. Preserve the existing 7 KB per-file convention by splitting long guidance at meaningful section boundaries.
+- Edit the authoritative part linked from an `AGENTS.md` index. Keep indexes short and fix their links when moving or adding guidance. Preserve the existing 7 KB per-file convention by splitting long guidance at meaningful section boundaries.
 - Keep developer navigation and invariants in the nearest applicable `AGENTS.md`; keep user-facing setup and workflows in the relevant README. Update the overview only when the system-level explanation changes. Link to an existing authority instead of copying detailed rules across files.
 - After changing mapped source, update its code-slice map and run the verifier listed above. For documentation-only edits, check affected paths, links and commands; do not shift slice ranges when source is unchanged.
 - Describe current behavior separately from historical notes or proposed work. Report what was actually inspected or tested and disclose skipped checks. Do not turn source inspection into a claim of legal compliance or deployment readiness.

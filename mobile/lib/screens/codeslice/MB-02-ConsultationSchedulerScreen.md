@@ -3,7 +3,7 @@
 Mobile screens slice map · [index](../CODESLICE.md) · check from repo root: `python3 scripts/verify_codeslice.py mobile/lib/screens/codeslice .`
 
 ## MB-02 · mobile/lib/screens/consultation_scheduler_screen.dart
-**LOC:** 2286 · **Anchor commit:** working tree · **Role:** Appointment booking and cancellation screen (Book a consultation + My appointments tabs) with live slot sync and content-sized list/grid history layouts.
+**LOC:** 2327 · **Anchor commit:** working tree · **Role:** Appointment booking and cancellation screen (Book a consultation + My appointments tabs) with live slot sync and content-sized list/grid history layouts.
 **Mounted by:** PatientPortalScreen, patient_portal_screen.dart (portal tab 2 of 5)
 **API surface:** GET /api/appointments/doctors; GET /api/appointments/slots?doctorId&date; GET /api/appointments/my; POST /api/appointments; PATCH /api/appointments/{id}/cancel
 **Socket events:** on appointment:booked, on appointment:cancelled — both refetch slots; no emits
@@ -16,36 +16,36 @@ palette: primaryGreen, softSage, textMain, textSub, borderColor, disabledSlotBg/
 
 | # | Lines | Anchor | Description |
 |---|-------|--------|-------------|
-| 1 | 1-17 | — | imports: dart:convert, material_ui, secure storage, socket_io_client, ApiConfig, Rs, EmergencyAlertService |
-| 2 | 18-47 | _ConsultationSchedulerScreenState | widget class + State header; fields _storage, _activeSubTab, _socket, _doctors, _selectedDoctorId |
-| 3 | 48-81 | _getNextValidWeekday | month consts, _getNextValidWeekday, _selectedDate, _monthNotifier, _upcomingWeekdays, _dateItemExtent |
-| 4 | 82-114 | _slotsRequest | Slot selections, active request counter, server-provided purposes and booking form state. |
-| 5 | 115-152 | initState | Initialize date navigation, reuse practitioners and load history on selection, and connect the slot socket. |
-| 6 | 153-213 | didChangeAppLifecycleState | didChangeDependencies recomputes _dateItemExtent; dispose tears down controllers/socket; resume refetch |
-| 7 | 214-257 | _initSlotSocket | socket.io connect (JWT auth, websocket+polling); on appointment:booked / appointment:cancelled refetch slots |
-| 8 | 258-274 | _onDateScroll | carousel scroll listener updates _monthNotifier month label from itemExtent offsets (no setState) |
-| 9 | 275-296 | _generateWeekdaysList | builds _upcomingWeekdays (60 Mon-Fri dates); snaps weekend _selectedDate to first weekday |
-| 10 | 297-337 | _formatSlotDisplay | helpers: _isSameDay, _formatSlotDisplay 24h to AM/PM, _isMorning, _formatSlotRange group time bounds |
-| 11 | 338-424 | _buildSlotGroupHeader | slot UI helpers: _buildSlotGroupHeader AM/PM header row, _buildSectionBreak dotted divider |
-| 12 | 425-499 | _buildSlotWrap | responsive slot chip Wrap; tap sets _selectedSlotTime; unavailable slots disabled |
-| 13 | 500-535 | _fetchDoctors | Reuse fresh doctors and preserve the saved practitioner. Load availability from the server. |
-| 14 | 536-602 | _fetchAvailableSlots | Load slots and appointment types from the API; omit the four unavailable noon slots. Discard stale responses and clear old slot selections. |
-| 15 | 603-639 | _fetchMyAppointments | GET /api/appointments/my; fills _myAppointments for the history tab |
-| 16 | 640-831 | _submitBooking | Review care team, purpose, date/time and notes before POST; preserve drafts on dismissal, reject stale reviews, prevent duplicate dialogs/submissions and refresh after a conflict. |
-| 17 | 832-920 | _cancelAppointment | reason confirm dialog then PATCH /api/appointments/{id}/cancel with cancelled_reason; refetches |
-| 18 | 921-970 | _pickDate | showDatePicker (weekdays only, 90-day window); syncs date, month label, carousel scroll |
-| 19 | 971-997 | _showToast | _formatDateTime pretty-prints datetimes; _showToast SnackBar (green or error red) |
-| 20 | 998-1022 | build | width-capped Column of _buildHeader plus booking or history tab by _activeSubTab |
-| 21 | 1023-1141 | _buildHeader | hero title and segmented tabs; conditionally shows history layout control |
-| 22 | 1142-1213 | _buildHistoryLayoutSelector | accessible List/Grid toggle for My appointments |
-| 23 | 1214-1340 | _buildBookingTab | booking tab: numbered sections, notes TextField, Review appointment button |
-| 24 | 1341-1449 | _buildDoctorList | doctor cards: initials avatar, name, specialty; tap selects doctor and refetches slots |
-| 25 | 1450-1551 | _buildPurposeChips | distinct purpose icons and responsive booking cards with animated selected state |
-| 26 | 1552-1605 | _buildDateHeader | Choose a date row; ValueListenableBuilder month label, arrow opens _pickDate |
-| 27 | 1606-1698 | _buildDateCarousel | horizontal weekday carousel with weekday labels on every date; tap selects date, fetches slots |
-| 28 | 1699-1762 | _buildSlotGrid | slot grid: loading spinner, empty state, Morning and Afternoon groups via _isMorning split |
-| 29 | 1763-1824 | _buildInfoCard | visit-prep card: _CheckItem reminders, infirmary location and weekday hours |
-| 30 | 1825-2073 | _buildHistoryTab | appointments loading/empty states, default detailed list, optional content-sized responsive columns |
-| 31 | 2074-2218 | _buildAppointmentGridCard | content-sized appointment details, status, date, doctor, location, notes and cancellation |
-| 32 | 2219-2254 | _buildSectionHeader | numbered section header (badge + title) used by booking tab |
-| 33 | 2255-2286 | _CheckItem | _CheckItem StatelessWidget: check icon + text row |
+| 1 | 1-22 | — | imports: dart:convert, Flutter rendering (ScrollCacheExtent), material_ui, secure storage, socket_io_client, ApiConfig, Rs, EmergencyAlertService |
+| 2 | 23-51 | _ConsultationSchedulerScreenState | widget class + State header; fields _storage, _activeSubTab, _socket, _doctors, _selectedDoctorId |
+| 3 | 52-85 | _getNextValidWeekday | month consts, _getNextValidWeekday, _selectedDate, _monthNotifier, _upcomingWeekdays, _dateItemExtent |
+| 4 | 86-118 | _slotsRequest | Slot selections, active request counter, server-provided purposes and booking form state. |
+| 5 | 119-156 | initState | Initialize date navigation, reuse practitioners and load history on selection, and connect the slot socket. |
+| 6 | 157-217 | didChangeAppLifecycleState | didChangeDependencies recomputes _dateItemExtent; dispose tears down controllers/socket; resume refetch |
+| 7 | 218-261 | _initSlotSocket | socket.io connect (JWT auth, websocket+polling); on appointment:booked / appointment:cancelled refetch slots |
+| 8 | 262-278 | _onDateScroll | carousel scroll listener updates _monthNotifier month label from itemExtent offsets (no setState) |
+| 9 | 279-300 | _generateWeekdaysList | builds _upcomingWeekdays (60 Mon-Fri dates); snaps weekend _selectedDate to first weekday |
+| 10 | 301-341 | _formatSlotDisplay | helpers: _isSameDay, _formatSlotDisplay 24h to AM/PM, _isMorning, _formatSlotRange group time bounds |
+| 11 | 342-428 | _buildSlotGroupHeader | slot UI helpers: _buildSlotGroupHeader AM/PM header row, _buildSectionBreak dotted divider |
+| 12 | 429-503 | _buildSlotWrap | responsive slot chip Wrap; tap sets _selectedSlotTime; unavailable slots disabled |
+| 13 | 504-544 | _fetchDoctors | Reuse fresh doctors, preserve the saved practitioner and explain load failures. |
+| 14 | 545-619 | _fetchAvailableSlots | Load slots and appointment types, discard stale responses and explain availability failures. |
+| 15 | 620-663 | _fetchMyAppointments | Load appointment history and keep a retryable error message. |
+| 16 | 664-864 | _submitBooking | Review selections before POST, preserve drafts, reject stale reviews and explain booking failures. |
+| 17 | 865-962 | _cancelAppointment | Confirm the reason, send the cancellation and explain failed or unconfirmed requests. |
+| 18 | 963-1012 | _pickDate | showDatePicker (weekdays only, 90-day window); syncs date, month label, carousel scroll |
+| 19 | 1013-1040 | _showToast | _formatDateTime pretty-prints datetimes; _showToast SnackBar (green or error red) |
+| 20 | 1041-1063 | build | width-capped Column of _buildHeader plus booking or history tab by _activeSubTab |
+| 21 | 1064-1182 | _buildHeader | hero title and segmented tabs; conditionally shows history layout control |
+| 22 | 1183-1254 | _buildHistoryLayoutSelector | accessible List/Grid toggle for My appointments |
+| 23 | 1255-1381 | _buildBookingTab | booking tab: numbered sections, notes TextField, Review appointment button |
+| 24 | 1382-1490 | _buildDoctorList | doctor cards: initials avatar, name, specialty; tap selects doctor and refetches slots |
+| 25 | 1491-1592 | _buildPurposeChips | distinct purpose icons and responsive booking cards with animated selected state |
+| 26 | 1593-1646 | _buildDateHeader | Choose a date row; ValueListenableBuilder month label, arrow opens _pickDate |
+| 27 | 1647-1739 | _buildDateCarousel | horizontal weekday carousel with weekday labels on every date; tap selects date, fetches slots |
+| 28 | 1740-1803 | _buildSlotGrid | slot grid: loading spinner, empty state, Morning and Afternoon groups via _isMorning split |
+| 29 | 1804-1865 | _buildInfoCard | visit-prep card: _CheckItem reminders, infirmary location and weekday hours |
+| 30 | 1866-2114 | _buildHistoryTab | appointments loading/empty states, default detailed list, optional content-sized responsive columns |
+| 31 | 2115-2259 | _buildAppointmentGridCard | content-sized appointment details, status, date, doctor, location, notes and cancellation |
+| 32 | 2260-2295 | _buildSectionHeader | numbered section header (badge + title) used by booking tab |
+| 33 | 2296-2327 | _CheckItem | _CheckItem StatelessWidget: check icon + text row |

@@ -2,7 +2,7 @@
 
 ## 5. File Structure
 
-Abridged repository tree with project-owned source and guides.
+Abridged historical repository tree. See the [current layout](../../../README.md#-repository-structure) for current paths.
 
 ```
 AbsoluteDogshit/
@@ -82,12 +82,12 @@ AbsoluteDogshit/
         └── widgets/              # account settings, booking review, Responder Hub and shared UI
 ```
 
-Use the [desktop README](../desktop/README.md) and [mobile README](../mobile/README.md) for setup and workflows.
+Use the [desktop README](../../../desktop/README.md) and [mobile README](../../../mobile/README.md) for setup and workflows.
 
 ### Code-slice maps
 
-- [Desktop slice index](../desktop/docs/CODESLICE.md) covers DT-01 through DT-13.
-- [Mobile slice index](../mobile/lib/screens/CODESLICE.md) covers MB-01 through MB-08.
+- [Desktop slice index](../../../desktop/docs/CODESLICE.md) covers DT-01 through DT-13.
+- [Mobile slice index](../../../mobile/lib/screens/CODESLICE.md) covers MB-01 through MB-08.
 
 Update the affected ranges and run the [slice verifier](README-08.md#verify-code-slice-documentation) after editing a mapped file.
 

@@ -3,7 +3,7 @@
 Mobile screens slice map · [index](../CODESLICE.md) · check from repo root: `python3 scripts/verify_codeslice.py mobile/lib/screens/codeslice .`
 
 ## MB-03 · mobile/lib/screens/documents_viewer_screen.dart
-**LOC:** 2198 · **Anchor commit:** working tree · **Role:** Documents viewer: prescriptions, medical clearances, lab/imaging attachments with QR seals, PDF download, and content-sized grid layouts.
+**LOC:** 2205 · **Anchor commit:** working tree · **Role:** Documents viewer: prescriptions, medical clearances, lab/imaging attachments with QR seals, PDF download, and content-sized grid layouts.
 **Mounted by:** PatientPortalScreen, patient_portal_screen.dart (portal tab 4 of 5)
 **API surface:** GET /api/documents/prescriptions/my; GET /api/documents/clearances/my; GET /api/documents/attachments/my; GET /api/documents/{kind}/{id}/pdf; POST /api/documents/attachments/{id}/download-token; GET /api/documents/attachments/{id}/download?dlToken (via launchUrl); prescription and clearance QR seals encode /api/documents/verify/{qrToken}
 **Socket events:** none
@@ -14,23 +14,23 @@ palette: primaryGreen, softSage, textMain, textSub, borderColor
 
 | # | Lines | Anchor | Description |
 |---|-------|--------|-------------|
-| 1 | 1-27 | — | Imports for material_ui, HTTP, paths, QR, file opening, API config and responsive layout |
-| 2 | 28-76 | DocumentsViewerScreen | screen state: selected sub-tab, list/grid mode, document data/loading, PDF guard, palette |
-| 3 | 77-111 | initState | Restore session tab/layout state and load the selected category on demand |
-| 4 | 112-124 | _fetchPrescriptions | Load prescription data through the shared document fetch and error state |
-| 5 | 125-125 | _fetchClearances | Refresh clearance data and its server-reported status |
-| 6 | 126-184 | _fetchDiagnostics | Diagnostic list fetch wrapper |
-| 7 | 185-213 | _formatDate | Shared document fetch and status helpers, followed by date presentation |
-| 8 | 214-282 | _downloadAndOpenPdf | GET /api/documents/{kind}/{id}/pdf; streams to a partial file using path_provider and opens the completed PDF with OpenFilex; _downloadingId guard |
-| 9 | 283-676 | _showPrescriptionDocumentModal | prescription modal: QR verify URL, PSU letterhead, medication details, seal, signed PDF |
-| 10 | 677-974 | _showClearanceCertificateModal | clearance modal: QR verify URL, PSU letterhead, clearance body, seal, signed PDF |
-| 11 | 975-1077 | build | header copy, 3 document sub-tabs, selected-list body |
-| 12 | 1078-1113 | _buildSubTabButton | segmented Prescriptions/Clearances/Lab & Imaging tab selector |
-| 13 | 1114-1185 | _buildLayoutSelector | compact accessible List/Grid layout selector |
-| 14 | 1186-1397 | _buildDocumentGrid | lazy independent two/three-column sliver lists preserving natural card heights and refresh |
-| 15 | 1398-1617 | _buildPrescriptionsList | prescription loading/empty states, list cards, optional lazy content-sized grid |
-| 16 | 1618-1825 | _buildClearancesList | clearance loading/empty states, list cards, optional lazy content-sized grid |
-| 17 | 1826-1999 | _buildDiagnosticsList | diagnostics loading/empty states, list cards, optional lazy content-sized grid |
-| 18 | 2000-2111 | _buildDiagnosticGridCard | compact file card sized to its text and open action |
-| 19 | 2112-2168 | _openDiagnosticDocument | POST single-use download-token then launchUrl external app |
-| 20 | 2169-2198 | _buildSampleDisclaimer | R.A. 10173 records disclaimer footer card |
+| 1 | 1-28 | — | Imports for material_ui, HTTP, paths, QR, file opening, API config and responsive layout |
+| 2 | 29-77 | DocumentsViewerScreen | screen state: selected sub-tab, list/grid mode, document data/loading, PDF guard, palette |
+| 3 | 78-112 | initState | Restore session tab/layout state and load the selected category on demand |
+| 4 | 113-125 | _fetchPrescriptions | Load prescription data through the shared document fetch and error state |
+| 5 | 126-126 | _fetchClearances | Refresh clearance data and its server-reported status |
+| 6 | 127-192 | _fetchDiagnostics | Diagnostic fetch wrapper, shared document fetch with retry messages and status helpers. |
+| 7 | 193-221 | _formatDate | Date presentation helpers. |
+| 8 | 222-294 | _downloadAndOpenPdf | Stream the PDF to a partial file, then open it. Report download and storage failures. |
+| 9 | 295-688 | _showPrescriptionDocumentModal | prescription modal: QR verify URL, PSU letterhead, medication details, seal, signed PDF |
+| 10 | 689-986 | _showClearanceCertificateModal | clearance modal: QR verify URL, PSU letterhead, clearance body, seal, signed PDF |
+| 11 | 987-1089 | build | Header, document sub-tabs, list and grid controls and per-category retry messages. |
+| 12 | 1090-1125 | _buildSubTabButton | segmented Prescriptions/Clearances/Lab & Imaging tab selector |
+| 13 | 1126-1197 | _buildLayoutSelector | compact accessible List/Grid layout selector |
+| 14 | 1198-1409 | _buildDocumentGrid | lazy independent two/three-column sliver lists preserving natural card heights and refresh |
+| 15 | 1410-1630 | _buildPrescriptionsList | prescription loading/empty states, list cards, optional lazy content-sized grid |
+| 16 | 1631-1838 | _buildClearancesList | clearance loading/empty states, list cards, optional lazy content-sized grid |
+| 17 | 1839-2012 | _buildDiagnosticsList | diagnostics loading/empty states, list cards, optional lazy content-sized grid |
+| 18 | 2013-2124 | _buildDiagnosticGridCard | compact file card sized to its text and open action |
+| 19 | 2125-2178 | _openDiagnosticDocument | Request a single-use download token and open the attachment link, with separate failure messages. |
+| 20 | 2179-2205 | _buildSampleDisclaimer | R.A. 10173 records disclaimer footer card |

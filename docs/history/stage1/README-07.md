@@ -27,11 +27,11 @@ npm install
 cp .env.example .env
 ```
 
-Fill in `.env`, provision or migrate the database, and generate the API certificate and key before running `npm run dev` or `npm start` from `server/`. Follow the [TLS bootstrap instructions](../AGENTS-parts/AGENTS-01.md#bootstrap-a-dev-machine-order-matters).
+Fill in `.env`, provision or migrate the database, and generate the API certificate and key before running `npm run dev` or `npm start` from `server/`. Follow the [TLS bootstrap instructions](../../agent-guidance/AGENTS-01.md#bootstrap-a-dev-machine-order-matters).
 
 - The API serves HTTPS on `PORT` (default `5000`); clients use `https://<host>:5000/api/...` and Socket.IO/WSS on the same port.
 - Make `DB_USER`/`DB_PASSWORD` match the Compose MySQL instance. `docker-compose.yml` sets `MYSQL_ROOT_PASSWORD=rootpassword`; `.env.example` defaults to `DB_NAME=valetudo_healthlink`, `DB_PORT=3307` and `DB_USER=valetudo_app`. Create that user or point `DB_USER` at `root`.
-- Provision fresh databases with `schema.sql`, which drops and recreates tables. Upgrade existing databases with `npm run migrate` from `server/`. Startup also applies any pending versions before listening. [Migration rollout guide](../server/MIGRATION-PLAN.md)
+- Provision fresh databases with `schema.sql`, which drops and recreates tables. Upgrade existing databases with `npm run migrate` from `server/`. Startup also applies any pending versions before listening. [Migration rollout guide](../../../server/docs/migrations/MIGRATION-PLAN.md)
 - TLS material belongs in git-ignored `server/certs/`.
 
 ### 3. Run the desktop console
@@ -57,7 +57,7 @@ flutter pub get
 flutter run
 ```
 
-Set `lib/config/api_config.dart` to the API host reachable from the target device. Use the server’s LAN address for a physical Android phone or `10.0.2.2` for the Android emulator. Firebase needs git-ignored `mobile/android/app/google-services.json` and `server/serviceAccountKey.json`; Android builds require the client configuration, and live push delivery requires the server credential. Debug builds can trust an explicit local CA. Configure its public certificate and a matching API hostname using the [mobile TLS setup](../mobile/README.md#configure-and-run).
+Set `lib/config/api_config.dart` to the API host reachable from the target device. Use the server’s LAN address for a physical Android phone or `10.0.2.2` for the Android emulator. Firebase needs git-ignored `mobile/android/app/google-services.json` and `server/serviceAccountKey.json`; Android builds require the client configuration, and live push delivery requires the server credential. Debug builds can trust an explicit local CA. Configure its public certificate and a matching API hostname using the [mobile TLS setup](../../../mobile/README.md#configure-and-run).
 
 ---
 
@@ -72,10 +72,10 @@ Set `lib/config/api_config.dart` to the API host reachable from the target devic
 | MySQL | `DB_HOST`, `DB_PORT=3307`, `DB_USER`, `DB_PASSWORD`, `DB_NAME=valetudo_healthlink` | `server/src/db/pool.js` refuses to start without a DB password. |
 | Redis | `REDIS_HOST`, `REDIS_PORT=6379`, `REDIS_PASSWORD` | Cache, JWT denylist, rate limits and QR nonces. |
 | MinIO / S3 | `S3_ENDPOINT=http://127.0.0.1:9000`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET=valetudo-attachments` | Path-style access; bucket created on startup if missing. |
-| Mail, push, maps | `SMTP_HOST`, `SMTP_PORT=587`, `SMTP_USER`, `SMTP_PASS`, optional `SMTP_TEST_RECIPIENTS`, Firebase service account, optional `GOOGLE_MAPS_API_KEY` | Appointment email, saved test recipients, push notifications and reverse geocoding. [Appointment email setup](../README.md#appointment-email) |
-| Throttles | `LOGIN_RATE_LIMIT_MAX/WINDOW`, `SOS_RATE_LIMIT_MAX/WINDOW`, `BOOKING_RATE_LIMIT_MAX/WINDOW`, `VERIFY_RATE_LIMIT_*` | Defaults per 60 seconds are 5 login, 10 SOS, 10 booking and 30 verification attempts. [Limit defaults](../server/src/config/limits.js) |
+| Mail, push, maps | `SMTP_HOST`, `SMTP_PORT=587`, `SMTP_USER`, `SMTP_PASS`, optional `SMTP_TEST_RECIPIENTS`, Firebase service account, optional `GOOGLE_MAPS_API_KEY` | Appointment email, saved test recipients, push notifications and reverse geocoding. [Appointment email setup](../../../README.md#appointment-email) |
+| Throttles | `LOGIN_RATE_LIMIT_MAX/WINDOW`, `SOS_RATE_LIMIT_MAX/WINDOW`, `BOOKING_RATE_LIMIT_MAX/WINDOW`, `VERIFY_RATE_LIMIT_*` | Defaults per 60 seconds are 5 login, 10 SOS, 10 booking and 30 verification attempts. [Limit defaults](../../../server/src/config/limits.js) |
 
-See the [cross-module configuration guide](../AGENTS-parts/AGENTS-02.md#read-before-touching-cross-module-config) for client and deployment settings.
+See the [cross-module configuration guide](../../agent-guidance/AGENTS-02.md#read-before-touching-cross-module-config) for client and deployment settings.
 
 - `desktop/app-config.json` sets the packaged renderer API URL at build time. Electron main reads the packaged file for certificate checks.
 - `mobile/lib/config/api_config.dart` contains a **hardcoded** API host.
